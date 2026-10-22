@@ -1,3 +1,4 @@
+param([switch]$XiaomiHome)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Set-Location $PSScriptRoot
@@ -104,10 +105,20 @@ try {
     }
     Run-Docker -DockerArgs @('compose', 'version')
 
-    # An alternate local port is supported without editing the Compose file.
-    if (-not $env:HABAB_HOME_PORT) { $env:HABAB_HOME_PORT = '8123' }
+    # Preserve a previously selected local port when the launcher is rerun.
+    if (-not $env:HABAB_HOME_PORT) {
+        $savedEnvironment = Join-Path $PSScriptRoot '.env.opencode-windows'
+        if (Test-Path -LiteralPath $savedEnvironment) {
+            $savedPort = Get-Content -LiteralPath $savedEnvironment |
+                Where-Object { $_ -match '^HABAB_HOME_PORT=[0-9]+$' } |
+                Select-Object -Last 1
+            if ($savedPort) { $env:HABAB_HOME_PORT = $savedPort.Split('=')[1] }
+        }
+        if (-not $env:HABAB_HOME_PORT) { $env:HABAB_HOME_PORT = '8123' }
+    }
     $portNumber = 0
     if (-not [int]::TryParse($env:HABAB_HOME_PORT, [ref]$portNumber) -or $portNumber -lt 1024 -or $portNumber -gt 65535) { throw 'HABAB_HOME_PORT must be a number between 1024 and 65535.' }
+    if ($XiaomiHome -and $portNumber -ne 8123) { throw 'Xiaomi Home OAuth is registered for homeassistant.local:8123. Run start-xiaomi-home.bat with port 8123.' }
     Write-Host 'Building Home Assistant. The first download can take several minutes.'
     $env:HABAB_OPENCODE_SHA256 = 'bootstrap-pending'
     Run-Docker -DockerArgs @('compose', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'build', 'homeassistant')
@@ -120,6 +131,15 @@ try {
     if (-not $digestLine) { throw 'OpenCode SHA-256 was not returned.' }
     $env:HABAB_OPENCODE_SHA256 = $digestLine.Split('=')[1]
     [IO.File]::WriteAllText((Join-Path $PSScriptRoot '.env.opencode-windows'), "$digestLine`nHABAB_HOME_PORT=$portNumber`n", [Text.UTF8Encoding]::new($false))
+    if ($XiaomiHome) {
+        Write-Host 'Installing the official Xiaomi Home component for your personal Home Assistant installation.'
+        Write-Host 'Source and license: https://github.com/XiaoMi/ha_xiaomi_home'
+        Run-Docker -DockerArgs @('compose', '--env-file', '.env.opencode-windows', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'run', '--rm', '--no-deps', '--entrypoint', 'python3', 'homeassistant', '/usr/local/bin/habab-install-xiaomi-home')
+        Write-Host 'The Xiaomi OAuth callback requires homeassistant.local to resolve to this computer.'
+        $callbackHelper = Join-Path $PSScriptRoot 'ensure-xiaomi-callback.ps1'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $callbackHelper
+        if ($LASTEXITCODE -ne 0) { throw 'Could not configure the Xiaomi OAuth callback. Approve the Windows hosts-file prompt and rerun start-xiaomi-home.bat.' }
+    }
     Run-Docker -DockerArgs @('compose', '--env-file', '.env.opencode-windows', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'up', '-d', 'homeassistant')
     $url = "http://127.0.0.1:$portNumber"
     Write-Host 'Waiting for Home Assistant...'
@@ -135,7 +155,12 @@ try {
     Write-Host "Ready: $url"
     Write-Host 'Create your owner account, open AI, save your own DeepSeek API key, then use the chat icon in the dashboard.'
     Write-Host 'No API keys are included. Windows Bluetooth/USB is not passed through automatically.'
-    Start-Process $url
+    if ($XiaomiHome) {
+        Write-Host 'Opening the official Xiaomi Home integration. Choose Russia and complete Xiaomi login in your browser.'
+        Start-Process "$url/config/integrations/dashboard/add?domain=xiaomi_home"
+    } else {
+        Start-Process $url
+    }
     exit 0
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red

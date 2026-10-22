@@ -1,0 +1,65 @@
+{
+  "session_id": "a5d16a65156ea4cb4a6489270deea07e",
+  "cases": [
+    {
+      "case": "unapproved_key_denied",
+      "passed": true
+    },
+    {
+      "case": "wrong_remote_binding_denied_127.0.0.1",
+      "passed": true
+    },
+    {
+      "case": "wrong_remote_binding_denied_0.0.0.0",
+      "passed": true
+    },
+    {
+      "case": "real_ssh_forward_reaches_native_ha_before_READY",
+      "passed": true
+    },
+    {
+      "case": "ready_file_matches_forwarded_HA",
+      "passed": true
+    },
+    {
+      "case": "arbitrary_shell_command_not_executed",
+      "passed": true
+    },
+    {
+      "case": "local_forward_to_server_services_denied",
+      "passed": true
+    },
+    {
+      "case": "remote_listener_is_loopback_only",
+      "passed": true
+    },
+    {
+      "case": "closing_client_removes_remote_listener",
+      "passed": true
+    },
+    {
+      "case": "cutoff_fixture_N_session_is_active",
+      "passed": true
+    },
+    {
+      "case": "actual_cutoff_closes_even_N_session",
+      "passed": true
+    },
+    {
+      "case": "revoked_key_cannot_reconnect",
+      "passed": true
+    },
+    {
+      "case": "cutoff_removes_connection_descriptor",
+      "passed": true
+    }
+  ],
+  "approval": {
+    "session_id": "a5d16a65156ea4cb4a6489270deea07e",
+    "username": "habab-s-a5d16a65156ea4cb",
+    "port": 23449,
+    "expires_utc": "2026-10-22T18:21:47+00:00",
+    "connection_file": "/var/lib/habab-support/a5d16a65156ea4cb4a6489270deea07e/connection.json"
+  },
+  "passed": true
+}

@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "filename": "habab-home-windows-6e5c8315ce86.zip",
+  "sha256": "6e5c8315ce8631b4f46e8a7261a616d11364adaaba0dc54f22a78638a28c70b6",
+  "files": 41,
+  "bytes": 70746,
+  "launchers": 3,
+  "physical_windows": "NOT_RUN",
+  "powershell_parse": "PASS",
+  "hosts_mapping_functions": "6 cases PASS",
+  "vendor_source_bundled": false,
+  "credentials_bundled": false
+}

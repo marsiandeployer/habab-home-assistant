@@ -1,0 +1,16 @@
+{
+  "integration": "xiaomi_home",
+  "region": "ru",
+  "initial_type": "form",
+  "initial_step": "eula",
+  "errors": {
+    "base": ""
+  },
+  "type": "progress",
+  "step": "oauth",
+  "oauth_url_created": true,
+  "credential_values_logged": false,
+  "password_login": "identity_verification_required",
+  "verification": "email_code",
+  "device_inventory": "pending_verification"
+}

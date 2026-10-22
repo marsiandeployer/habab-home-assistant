@@ -10,8 +10,10 @@ root = Path(__file__).resolve().parent
 output = root.parent / 'public/downloads'
 output.mkdir(parents=True, exist_ok=True)
 names = ['Dockerfile', 'docker-entrypoint.sh', 'habab-ha.py', 'compose.windows.yaml',
-         'start-windows.bat', 'start-windows.ps1', 'install-opencode-volume.py',
-         'opencode-release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
+         'start-windows.bat', 'start-windows.ps1', 'ensure-xiaomi-callback.ps1',
+         'start-xiaomi-home.bat', 'install-xiaomi-home.py', 'xiaomi-home-release.json',
+         'support_tunnel.bat', 'support_tunnel.ps1', 'support-relay.json',
+         'install-opencode-volume.py', 'opencode-release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
          'config/configuration.yaml']
 names += [str(p.relative_to(root)).replace('\\', '/') for p in (root / 'src/habab_home').rglob('*')
           if p.is_file() and p.suffix in {'.py', '.js', '.json'} and '__pycache__' not in p.parts]
@@ -30,7 +32,7 @@ digest = hashlib.sha256(archive).hexdigest()
 filename = f'habab-home-windows-{digest[:12]}.zip'
 (output / filename).write_bytes(archive)
 url = 'https://habab-demo.wpmix.net/downloads/' + filename
-command = (
+bootstrap_prefix = (
     "$ErrorActionPreference='Stop'; "
     "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; "
     "$installRoot=Join-Path $env:LOCALAPPDATA 'HababHome'; "
@@ -40,10 +42,16 @@ command = (
     f"if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower() -ne '{digest}') "
     "{throw 'Package SHA-256 check failed. Download the BAT again.'}; "
     "Expand-Archive -Path $archive -DestinationPath $installRoot -Force; "
-    "& (Join-Path $installRoot 'start-windows.ps1'); exit $LASTEXITCODE"
 )
-bat = '@echo off\r\nsetlocal\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -Command "' + command + '"\r\nset "HABAB_RESULT=%ERRORLEVEL%"\r\npause\r\nexit /b %HABAB_RESULT%\r\n'
-(output / 'start-home-assistant.bat').write_bytes(bat.encode('ascii'))
+launchers = {
+    'start-home-assistant.bat': "& (Join-Path $installRoot 'start-windows.ps1'); exit $LASTEXITCODE",
+    'start-xiaomi-home.bat': "& (Join-Path $installRoot 'start-windows.ps1') -XiaomiHome; exit $LASTEXITCODE",
+    'support_tunnel.bat': "& (Join-Path $installRoot 'support_tunnel.ps1'); exit $LASTEXITCODE",
+}
+for launcher, target in launchers.items():
+    command = bootstrap_prefix + target
+    bat = '@echo off\r\nsetlocal\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -Command "' + command + '"\r\nset "HABAB_RESULT=%ERRORLEVEL%"\r\npause\r\nexit /b %HABAB_RESULT%\r\n'
+    (output / launcher).write_bytes(bat.encode('ascii'))
 (output / 'windows-package.json').write_text(json.dumps({'filename': filename, 'sha256': digest,
     'bytes': len(archive), 'files': sorted(names)}, indent=2) + '\n')
 print(json.dumps({'filename': filename, 'sha256': digest, 'files': len(names), 'bytes': len(archive)}))

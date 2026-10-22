@@ -1,0 +1,13 @@
+{
+  "integration": "xiaomi_miio",
+  "region": "ru",
+  "initial_step": "cloud",
+  "result_type": "form",
+  "step_id": "cloud",
+  "errors": {
+    "base": "cloud_login_error"
+  },
+  "reason": null,
+  "credential_values_logged": false,
+  "cloud_login": "FAIL"
+}

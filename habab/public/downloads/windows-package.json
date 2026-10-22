@@ -1,7 +1,7 @@
 {
-  "filename": "habab-home-windows-7245ec1af7d7.zip",
-  "sha256": "7245ec1af7d760763dbcb90952084f058d284498a1bf09748fde35445bbb5a86",
-  "bytes": 51454,
+  "filename": "habab-home-windows-6e5c8315ce86.zip",
+  "sha256": "6e5c8315ce8631b4f46e8a7261a616d11364adaaba0dc54f22a78638a28c70b6",
+  "bytes": 70746,
   "files": [
     "Dockerfile",
     "LICENSE",
@@ -10,8 +10,10 @@
     "compose.windows.yaml",
     "config/configuration.yaml",
     "docker-entrypoint.sh",
+    "ensure-xiaomi-callback.ps1",
     "habab-ha.py",
     "install-opencode-volume.py",
+    "install-xiaomi-home.py",
     "opencode-release.json",
     "src/habab_home/__init__.py",
     "src/habab_home/config_flow.py",
@@ -21,6 +23,7 @@
     "src/habab_home/frontend/recorder-worklet.js",
     "src/habab_home/frontend/setup-chat.js",
     "src/habab_home/frontend/strings.js",
+    "src/habab_home/frontend/telemetry-panel.js",
     "src/habab_home/frontend/voice.js",
     "src/habab_home/manifest.json",
     "src/habab_home/providers.py",
@@ -29,11 +32,17 @@
     "src/habab_home/speech.py",
     "src/habab_home/strings.json",
     "src/habab_home/stt.py",
+    "src/habab_home/telemetry.py",
     "src/habab_home/translations/en.json",
     "src/habab_home/translations/ru.json",
     "src/habab_home/tts.py",
     "src/habab_home/websocket.py",
     "start-windows.bat",
-    "start-windows.ps1"
+    "start-windows.ps1",
+    "start-xiaomi-home.bat",
+    "support-relay.json",
+    "support_tunnel.bat",
+    "support_tunnel.ps1",
+    "xiaomi-home-release.json"
   ]
 }
