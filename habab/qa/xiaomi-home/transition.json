@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "official_component_initially_absent",
+      "pass": true,
+      "http_status": 404
+    },
+    {
+      "name": "reproduced_ordinary_up_keeps_old_process_and_missing_handler",
+      "pass": true,
+      "http_status": 404
+    },
+    {
+      "name": "recreated_core_preserves_owner_and_loads_official_component",
+      "pass": true
+    },
+    {
+      "name": "native_Russia_OAuth_flow_after_transition",
+      "pass": true
+    }
+  ],
+  "environment": "Windows Compose services on Linux Docker; not Windows UAC/WSL",
+  "status": "PASS",
+  "cleanup": "project_containers_and_own_volumes_removed"
+}

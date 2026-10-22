@@ -140,7 +140,11 @@ try {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $callbackHelper
         if ($LASTEXITCODE -ne 0) { throw 'Could not configure the Xiaomi OAuth callback. Approve the Windows hosts-file prompt and rerun start-xiaomi-home.bat.' }
     }
-    Run-Docker -DockerArgs @('compose', '--env-file', '.env.opencode-windows', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'up', '-d', 'homeassistant')
+    $startArguments = @('compose', '--env-file', '.env.opencode-windows', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'up', '-d')
+    # Core discovers custom integrations at startup. The image may be unchanged
+    # when switching an already-running ordinary installation to Xiaomi mode.
+    if ($XiaomiHome) { $startArguments += '--force-recreate' }
+    Run-Docker -DockerArgs ($startArguments + @('homeassistant'))
     $url = "http://127.0.0.1:$portNumber"
     Write-Host 'Waiting for Home Assistant...'
     $httpReady = $false
