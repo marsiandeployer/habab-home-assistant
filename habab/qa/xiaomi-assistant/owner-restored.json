@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "existing_owner_login": true,
+  "real_deepseek_requested_xiaomi_setup": true,
+  "phase": "ready",
+  "cutoff_cancelled": true,
+  "unauthenticated_api": 401,
+  "invalid_websocket_token_denied": true
+}

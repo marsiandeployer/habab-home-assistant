@@ -1,0 +1,8 @@
+{
+  "private_qa_containers_stopped": 3,
+  "private_test_timer_stopped": true,
+  "temporary_credential_cookie_callback_files_removed": 4,
+  "private_ha_config_retained": true,
+  "owner_test_left_running_on_user_instruction": true,
+  "owner_restart_policy": "unless-stopped"
+}

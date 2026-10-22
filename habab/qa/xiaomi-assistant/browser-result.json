@@ -1,0 +1,21 @@
+{
+  "cases": [
+    "natural_language_request_creates_native_setup_card",
+    "pinned_component_installed_from_chat",
+    "approved_Core_restart_preserves_chat_and_owner",
+    "manual_return_completed_inside_chat_without_Windows_host_changes",
+    "mobile_no_horizontal_overflow",
+    "assistant_checks_connected_devices"
+  ],
+  "connection": {
+    "phase": "completed",
+    "devices": 1,
+    "entities": 130,
+    "entryState": "loaded"
+  },
+  "pageErrors": [
+    "Object",
+    "Object"
+  ],
+  "status": "PASS"
+}

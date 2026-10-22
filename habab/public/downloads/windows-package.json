@@ -1,7 +1,7 @@
 {
-  "filename": "habab-home-windows-8dc22dca0ed3.zip",
-  "sha256": "8dc22dca0ed33b3da5ed00b45bcf5b9b69c1c1d25d966623fdea86bc0e718e93",
-  "bytes": 70924,
+  "filename": "habab-home-windows-96b98e36b0e6.zip",
+  "sha256": "96b98e36b0e6b19683a4e239b9fac148f6163ef90e99850c84ed41d1ccab27b6",
+  "bytes": 82053,
   "files": [
     "Dockerfile",
     "LICENSE",
@@ -25,6 +25,7 @@
     "src/habab_home/frontend/strings.js",
     "src/habab_home/frontend/telemetry-panel.js",
     "src/habab_home/frontend/voice.js",
+    "src/habab_home/frontend/xiaomi-setup.js",
     "src/habab_home/manifest.json",
     "src/habab_home/providers.py",
     "src/habab_home/setup_actions.py",
@@ -37,6 +38,7 @@
     "src/habab_home/translations/ru.json",
     "src/habab_home/tts.py",
     "src/habab_home/websocket.py",
+    "src/habab_home/xiaomi_setup.py",
     "start-windows.bat",
     "start-windows.ps1",
     "start-xiaomi-home.bat",

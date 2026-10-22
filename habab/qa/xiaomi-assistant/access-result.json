@@ -1,0 +1,64 @@
+{
+  "status": "PASS",
+  "cases": [
+    {
+      "role": "viewer",
+      "case": "private_setup_state",
+      "pass": true
+    },
+    {
+      "role": "viewer",
+      "action": "install",
+      "code": "unauthorized",
+      "pass": true
+    },
+    {
+      "role": "viewer",
+      "action": "restart",
+      "code": "unauthorized",
+      "pass": true
+    },
+    {
+      "role": "viewer",
+      "action": "callback",
+      "code": "unauthorized",
+      "pass": true
+    },
+    {
+      "role": "viewer",
+      "action": "homes",
+      "code": "unauthorized",
+      "pass": true
+    },
+    {
+      "role": "other_admin",
+      "case": "private_setup_state",
+      "pass": true
+    },
+    {
+      "role": "other_admin",
+      "action": "install",
+      "code": "setup_not_requested",
+      "pass": true
+    },
+    {
+      "role": "other_admin",
+      "action": "restart",
+      "code": "setup_not_requested",
+      "pass": true
+    },
+    {
+      "role": "other_admin",
+      "action": "callback",
+      "code": "setup_not_requested",
+      "pass": true
+    },
+    {
+      "role": "other_admin",
+      "action": "homes",
+      "code": "setup_not_requested",
+      "pass": true
+    }
+  ],
+  "temporary_users_removed": 2
+}

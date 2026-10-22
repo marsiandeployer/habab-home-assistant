@@ -118,7 +118,7 @@ class TelemetryTests(unittest.IsolatedAsyncioTestCase):
             manufacturer="Acme", model="Model X", name_by_user="Kitchen", name="Hub")
         unsafe_device = SimpleNamespace(
             manufacturer="10.0.0.5", model="Model Z", name_by_user=None, name=None)
-        registry = SimpleNamespace(async_get_devices=lambda: [device, device, unsafe_device])
+        registry = SimpleNamespace(devices=[device, device, unsafe_device])
         entity_registry = SimpleNamespace(entities=["one", "two", "three"])
         hass.states.async_entity_ids = lambda domain: ["automation.one"] if domain == "automation" else []
         hass.auth.async_get_users = AsyncMock(return_value=["owner", "guest"])

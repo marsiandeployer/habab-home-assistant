@@ -33,7 +33,7 @@ async def async_setup(hass, config):
     await hass.http.async_register_static_paths([
         StaticPathConfig("/habab-home", str(Path(__file__).parent / "frontend"), False),
     ])
-    frontend.add_extra_js_url(hass, "/habab-home/setup-chat.js?v=1")
+    frontend.add_extra_js_url(hass, "/habab-home/setup-chat.js?v=2")
     from .setup_agent import SetupAgent
 
     agent = SetupAgent(hass)
@@ -45,6 +45,12 @@ async def async_setup(hass, config):
     await telemetry.async_setup()
     hass.data[DOMAIN]["telemetry"] = telemetry
     async_register_telemetry_commands(hass)
+    from .xiaomi_setup import XiaomiSetup, async_register_commands as register_xiaomi_commands
+
+    xiaomi_setup = XiaomiSetup(hass)
+    await xiaomi_setup.setup()
+    hass.data[DOMAIN]["xiaomi_setup"] = xiaomi_setup
+    register_xiaomi_commands(hass)
     from .setup_actions import SetupActionsView
 
     hass.http.register_view(SetupActionsView)

@@ -1,0 +1,39 @@
+{
+  "status": "PASS",
+  "cases": [
+    {
+      "case": "negative",
+      "query": "Не подключай Xiaomi и ничего не меняй. Только покажи список устройств.",
+      "actions": [
+        "devices"
+      ],
+      "pass": true
+    },
+    {
+      "case": "legacy",
+      "query": "У меня вход Xiaomi с паролем не получился. Помоги подключить через официальный вариант, без терминала.",
+      "actions": [
+        "xiaomi_setup"
+      ],
+      "pass": true
+    },
+    {
+      "case": "other_brand",
+      "query": "Подключи розетку Tuya. Xiaomi не трогай.",
+      "actions": [
+        "devices",
+        "integrations",
+        "discovered_flows"
+      ],
+      "pass": true
+    },
+    {
+      "case": "natural",
+      "query": "Хочу видеть здесь пылесос из приложения Mi Home. Настрой подключение.",
+      "actions": [
+        "xiaomi_setup"
+      ],
+      "pass": true
+    }
+  ]
+}

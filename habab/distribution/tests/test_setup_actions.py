@@ -4,7 +4,12 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.device_registry import (
+    ActiveDeviceRegistryItems,
+    DeviceEntry,
+    DeviceRegistry,
+    _DeprecatedDeviceRegistryItemsView,
+)
 from homeassistant.helpers.selector import SelectSelector
 from homeassistant.components.habab_home.setup_actions import execute, flow_result
 from probatio import Required
@@ -37,7 +42,13 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
         device = DeviceEntry(config_entry_id="entry-id", id="device-id",
             identifiers={("test", "device")}, name="Sensor", name_by_user="Kitchen",
             model="Model X", manufacturer="Maker", area_id="kitchen")
-        device_registry = SimpleNamespace(async_get_devices=lambda: iter([device]))
+        items = ActiveDeviceRegistryItems()
+        items[device.id] = device
+        device_registry = object.__new__(DeviceRegistry)
+        device_registry._devices = items
+        device_registry.devices = _DeprecatedDeviceRegistryItemsView(items)
+        # Lookup without identifiers returns no matches; it is not enumeration.
+        self.assertEqual(device_registry.async_get_devices(), [])
         entity_registry = object()
         entries = [SimpleNamespace(entity_id="sensor.kitchen_temperature")]
         with patch("homeassistant.components.habab_home.setup_actions.device_registry.async_get",

@@ -1,0 +1,16 @@
+{
+  "exact_credentials_and_oauth_code_absent_from_model_parts": true,
+  "wizard_store_contains_no_credentials_or_oauth_url": true,
+  "vacuum_state": "docked",
+  "physical_commands_sent": false,
+  "public_demo_connected_to_private_home": false,
+  "actual_model_tool_actions": [
+    "xiaomi_setup",
+    "xiaomi_setup",
+    "integrations",
+    "devices",
+    "states",
+    "states",
+    "discovered_flows"
+  ]
+}

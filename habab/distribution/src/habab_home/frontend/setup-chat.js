@@ -12,6 +12,7 @@ function installChat() {
       demo: "DeepSeek помогает с настройкой. Реальные устройства подключаются в вашей домашней установке Home Assistant.",
       answering: "Готовлю ответ…", rate_limited: "Слишком много запросов. Повторите позже.",
       settings: "Подключить DeepSeek", retry: "Повторить подключение",
+      setup_ui_unavailable: "Не удалось открыть настройку устройств. Обновите страницу и попробуйте снова.",
       deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
       not_installed: "OpenCode ещё не подключён к контейнеру. Добавьте compose.opencode.yaml по инструкции установки.",
       binary_changed: "Файл OpenCode изменился. Повторите prepare-opencode.py и пересоздайте контейнер.",
@@ -27,6 +28,7 @@ function installChat() {
       demo: "DeepSeek can help with setup. Connect real devices in your own Home Assistant installation.",
       answering: "Preparing an answer…", rate_limited: "Too many requests. Try again later.",
       settings: "Connect DeepSeek", retry: "Reconnect",
+      setup_ui_unavailable: "Device setup could not open. Refresh the page and try again.",
       deepseek_required: "Connect DeepSeek in AI settings first.",
       not_installed: "OpenCode is not mounted. Follow the installation guide to add compose.opencode.yaml.",
       binary_changed: "The OpenCode executable changed. Run prepare-opencode.py again and recreate the container.",
@@ -46,6 +48,36 @@ function installChat() {
 
     get t() { return copy[this.language || "en"]; }
     q(selector) { return this.shadowRoot.querySelector(selector); }
+
+    async loadSetup() {
+      if (this.demo) return;
+      try {
+        await import("/habab-home/xiaomi-setup.js?v=1");
+        if (!this.setupCard) {
+          this.setupCard = document.createElement("habab-xiaomi-setup");
+          this.setupCard.addEventListener("habab-setup-verify", () => {
+            if (this.busy) return;
+            this.q("textarea").value = this.language === "ru"
+              ? "Проверь подключение Xiaomi Home и доступные устройства реальными командами. Не управляй устройствами."
+              : "Check Xiaomi Home and available devices using actual commands. Do not control devices.";
+            this.send();
+          });
+          this.setupCard.addEventListener("habab-setup-state", ({detail}) => {
+            if (detail.phase === "restarting") {
+              this.setupRestarting = true;
+              this.controls();
+            } else if (this.setupRestarting) {
+              this.setupRestarting = false;
+              this.controls();
+            }
+          });
+        }
+        this.setupCard.hass = this.hass;
+        this.q("#log").append(this.setupCard);
+        await this.setupCard.load();
+        this.setupCard.scrollIntoView({block: "nearest"});
+      } catch (_) { this.status(this.t.setup_ui_unavailable, true); }
+    }
 
     connectedCallback() {
       if (this.shadowRoot.firstChild) return;
@@ -96,8 +128,8 @@ function installChat() {
     }
 
     controls() {
-      this.q("textarea").disabled = !this.sessionId || this.busy;
-      this.q(".send").disabled = !this.sessionId || this.busy;
+      this.q("textarea").disabled = !this.sessionId || this.busy || this.setupRestarting;
+      this.q(".send").disabled = !this.sessionId || this.busy || this.setupRestarting;
       this.q(".send").hidden = this.busy;
       this.q(".stop").hidden = !this.running || this.demo;
       this.q(".fresh").disabled = this.busy || !this.sessionId;
@@ -117,6 +149,7 @@ function installChat() {
         this.messages = result.messages;
         this.draw();
         this.status(this.demo ? this.t.demo : "");
+        await this.loadSetup();
       } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
       finally { this.busy = false; this.controls(); if (this.q("dialog").open) this.q("textarea").focus(); }
     }
@@ -149,6 +182,7 @@ function installChat() {
         else text.textContent = message.text;
         row.append(name, text); log.append(row);
       }
+      if (this.setupCard) log.append(this.setupCard);
       log.scrollTop = log.scrollHeight;
       const tail = log.lastChild;
       Promise.allSettled([...log.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
@@ -158,7 +192,7 @@ function installChat() {
 
     async send() {
       const text = this.q("textarea").value.trim();
-      if (!text || !this.sessionId || this.busy) return;
+      if (!text || !this.sessionId || this.busy || this.setupRestarting) return;
       this.busy = true; this.running = true; this.stopped = false;
       this.messages.push({role: "user", text}); this.q("textarea").value = "";
       this.draw(); this.status(this.demo ? this.t.answering : this.t.working); this.controls();
@@ -166,6 +200,7 @@ function installChat() {
         const result = this.demo ? await this.demoRequest("", "POST", text)
           : await this.hass.callWS({type: "habab_home/agent/run", session_id: this.sessionId, text});
         this.messages = result.messages; this.draw(); this.status(this.stopped ? this.t.stopped : this.demo ? this.t.demo : "");
+        await this.loadSetup();
       } catch (error) { this.status(this.stopped ? this.t.stopped : this.t[error.code] || this.t.failed, true); }
       finally { this.busy = false; this.running = false; this.controls(); if (this.q("dialog").open) this.q("textarea").focus(); }
     }

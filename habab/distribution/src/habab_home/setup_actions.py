@@ -79,6 +79,9 @@ def discovered_flows(hass, manager):
 
 async def execute(hass, manager, owner, body):
     action = body.get("action")
+    if action == "xiaomi_setup":
+        return {"setup": await hass.data[DOMAIN]["xiaomi_setup"].request(owner),
+                "instruction": "The owner's setup card is shown inside this Home Assistant chat. It installs the pinned official component, asks before restarting, opens Xiaomi sign-in, and imports devices from the selected homes (a single home is automatic). There is no device-picker or password field in the card. Passwords and verification codes are entered only on the official Xiaomi website. A failed local redirect can be pasted only into the card's protected callback field, never chat messages. Explain only controls for the returned phase."}
     if action == "integrations":
         return {"integrations": [{"entry_id": e.entry_id, "domain": e.domain, "title": e.title,
                                   "state": e.state.value} for e in hass.config_entries.async_entries()]}
@@ -88,7 +91,7 @@ async def execute(hass, manager, owner, body):
         return {"devices": [{"id": d.id, "name": d.name_by_user or d.name, "model": d.model,
             "manufacturer": d.manufacturer, "area_id": d.area_id,
             "entities": [e.entity_id for e in entity_registry.async_entries_for_device(entities, d.id)]}
-            for d in islice(devices.async_get_devices(), 200)]}
+            for d in islice(devices.devices, 200)]}
     if action == "discovered_flows":
         return {"flows": discovered_flows(hass, manager)}
     if action == "states":

@@ -1,0 +1,30 @@
+{
+  "image": "sha256:e3299f4cb631ace0e6aed732ce6021f05a41166251a70b00490df989e42ce83a",
+  "source_sha256": {
+    "providers.py": "0256115c5a93f16bf3d75bcd33f502c796f22ab097b7079bb42cbff506554ccf",
+    "setup_actions.py": "b361639cccb7ee826d3fa9974bd87d5188092ad84d55facf13061408752e4846",
+    "manifest.json": "8daa2ddca4db55c8dc6587b753db887b8f59c6e4e2425f574986a58f04bfce78",
+    "speech.py": "e242f4d58143e8d9cd251f2798a4f7858fc1a32d220cebb887fe96b7cc13824c",
+    "stt.py": "a4137fafbd03c01ddcf7622445aba61df35c170971efd3a4318f2d3a5bbbbf22",
+    "config_flow.py": "438eb3a4fd0923064308013edc2e87b288ee967a7ae79a5d0d23e9becd186ebf",
+    "conversation.py": "6d27c87f2f70efb9a2f2d93bb6b4c4b10b7724adb67ec619154815a67b399ffc",
+    "websocket.py": "4fe0ff5a4092eab1b8844e8e0df0ebf568246d5ae687e33cc5357e51a5aa1208",
+    "strings.json": "81dbb401ca4b88dbb8aae31fea89f96f3408cba08358b0325d78a1a8e4a7e2b9",
+    "setup_agent.py": "0425f19db5b8df1ec365350830d6d935ff57c706ae231dc97123ea553afbc9f5",
+    "telemetry.py": "9fc408288cbaa6ec3cdff577b3bb081d232101fffe5349d20c7273864160288a",
+    "xiaomi_setup.py": "59d71def3bdc259738d5d4b277583c8765297c661c452b8040f102c7cfa501ff",
+    "const.py": "474980c39d9c614078805b2cd4d971e33315f12a65df287dfcf23eedfb0350bb",
+    "__init__.py": "e52ede4adfa749bc92fc8debc12acecbc7a50a507f71c2be73f211417df51eb2",
+    "tts.py": "2ffba4f5714db19c4e69693ef39bc2fdc0efbbbd0804b85037ee57a3265d5b3a",
+    "frontend/telemetry-panel.js": "517598d03e1f003ab7073a5dfcaac4bc2a03feddd05373f4308b118c028b7e12",
+    "frontend/voice.js": "38db48233d4a237cad1bb76874d47a6f1351c45647f8b087e0805fda90523cef",
+    "frontend/xiaomi-setup.js": "b4727dd216cfef8ed6240751269a450013a0b785a52169846cfd8f64c18e0aee",
+    "frontend/recorder-worklet.js": "b4b5dd6c23d1fb54f0b17642b16dc77b086edc1ad1bcdf3fddf7381afb1fc7bc",
+    "frontend/strings.js": "5248484b4822f3a22a9f3a63cd45ac8378b77f893a0ecf6827ef8674cd517b5e",
+    "frontend/ai-panel.js": "7a2a4a503007b2c66e63167bb41f93780adc7a0c6a86ec6cd226bbc5ae3105a0",
+    "frontend/setup-chat.js": "276018be8fd654e504a8ad0b9d7532c0e7f81990c67a0e138096ddf4caf144d8",
+    "translations/en.json": "81dbb401ca4b88dbb8aae31fea89f96f3408cba08358b0325d78a1a8e4a7e2b9",
+    "translations/ru.json": "761a8ff7d9599cf40f953fb636dcad8299ee46d5439a4fd14cd21e0732a3611c"
+  },
+  "source_matches_running_image": true
+}

@@ -249,7 +249,7 @@ class TelemetryManager:
         )[:500]
         registry = device_registry.async_get(self.hass)
         model_counts = Counter()
-        for device in registry.async_get_devices():
+        for device in registry.devices:
             manufacturer = self._safe_model_value(device.manufacturer, device.name_by_user, device.name)
             model = self._safe_model_value(device.model, device.name_by_user, device.name)
             if manufacturer and model:
@@ -277,7 +277,7 @@ class TelemetryManager:
         return value if re.fullmatch(r"[\w .+()-]{1,80}", value) else ""
 
     async def _statistics_data(self) -> dict[str, int]:
-        devices = device_registry.async_get(self.hass).async_get_devices()
+        devices = device_registry.async_get(self.hass).devices
         entities = entity_registry.async_get(self.hass).entities
         automations = self.hass.states.async_entity_ids("automation")
         users = await self.hass.auth.async_get_users()
