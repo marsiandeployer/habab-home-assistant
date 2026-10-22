@@ -1,0 +1,9 @@
+homeassistant:
+  name: Habab Home
+
+# Keep the base installation small and local. The native onboarding flow creates
+# the first owner; this file contains no account, password, or token.
+api:
+config:
+frontend:
+habab_home:

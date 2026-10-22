@@ -1,0 +1,11 @@
+{
+  "name": "habab-home-assistant",
+  "private": true,
+  "scripts": {
+    "test:browser": "node qa/check-browser.cjs",
+    "test:telegram": "node qa/check-telegram.cjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "24.38.0"
+  }
+}

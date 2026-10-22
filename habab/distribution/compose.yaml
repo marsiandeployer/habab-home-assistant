@@ -1,0 +1,45 @@
+name: habab-home
+services:
+  homeassistant:
+    image: habab-home:0.1.0
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+    ports:
+      - "${HABAB_HOME_BIND:-127.0.0.1}:8123:8123"
+    volumes:
+      - habab_home_data:/config
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    profiles: [zigbee]
+    restart: unless-stopped
+    volumes:
+      - ./zigbee/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./secrets/mosquitto-passwd:/mosquitto/config/passwd:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:2.6.0
+    profiles: [zigbee]
+    restart: unless-stopped
+    depends_on: [mosquitto]
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+      ZIGBEE2MQTT_CONFIG_MQTT_SERVER: mqtt://mosquitto
+      ZIGBEE2MQTT_CONFIG_MQTT_USER: ${MQTT_USER:-}
+      ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      ZIGBEE2MQTT_CONFIG_SERIAL_PORT: ${Z2M_SERIAL_DEVICE:-/dev/ttyUSB0}
+    devices:
+      - ${Z2M_SERIAL_DEVICE:-/dev/ttyUSB0}:${Z2M_SERIAL_DEVICE:-/dev/ttyUSB0}
+    volumes:
+      - zigbee2mqtt_data:/app/data
+
+volumes:
+  habab_home_data:
+  mosquitto_data:
+  mosquitto_log:
+  zigbee2mqtt_data:

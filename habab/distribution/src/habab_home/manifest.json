@@ -1,0 +1,10 @@
+{
+  "domain": "habab_home",
+  "name": "Habab Home",
+  "version": "0.1.0",
+  "documentation": "https://habab.ru/avtomatizaciya-doma",
+  "issue_tracker": "https://habab.ru/avtomatizaciya-doma",
+  "codeowners": [],
+  "config_flow": false,
+  "iot_class": "local_push"
+}

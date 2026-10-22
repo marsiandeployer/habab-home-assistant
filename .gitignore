@@ -68,3 +68,9 @@ test/e2e/app/dist/
 
 test/benchmarks/results/
 
+
+# Local Habab runtime; never publish credentials or Python environment.
+.env
+.env.*
+!.env.example
+.venv/
