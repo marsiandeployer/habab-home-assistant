@@ -13,6 +13,8 @@ const fs=require('fs'),path=require('path'),assert=require('assert/strict'),pupp
         page.on('pageerror',error=>errors.push(error.message));
         const response=await page.goto('https://habab-demo.wpmix.net/',{waitUntil:'networkidle2',timeout:45000});assert.equal(response.status(),200);
         await page.waitForFunction(()=>!!document.querySelector('ha-demo')?.hass?.states?.['light.living_room_floor_lamp']);
+        await page.waitForFunction(()=>{function walk(root){if([...root.querySelectorAll('ha-card')].some(el=>el.innerText?.includes('Торшер')&&el.getBoundingClientRect().width>0))return true;return [...root.querySelectorAll('*')].some(el=>el.shadowRoot&&walk(el.shadowRoot));}return walk(document);});
+        await page.evaluate(async()=>await document.fonts.ready);
         const el=async selector=>(await page.evaluateHandle(selector=>document.querySelector('habab-telegram-setup').shadowRoot.querySelector(selector),selector)).asElement();
         const read=async()=>page.evaluate(()=>{const r=document.querySelector('habab-telegram-setup').shadowRoot;const box=r.querySelector('dialog').getBoundingClientRect();return{open:r.querySelector('dialog').open,password:r.querySelector('input').type==='password',empty:r.querySelector('input').value==='',invalid:r.querySelector('input').getAttribute('aria-invalid')==='true',errorVisible:!r.querySelector('.error').hidden,success:!r.querySelector('.success').hidden,inside:box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight,overflow:document.documentElement.scrollWidth>innerWidth};});
         await(await el('.launcher')).click();assert((await read()).password&&(await read()).inside);
