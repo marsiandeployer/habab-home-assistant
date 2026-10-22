@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-22T17:32:54.363068+00:00",
+  "timer": "habab-owner-test-cutoff.timer",
+  "timer_state": "active",
+  "cutoff_moscow": "2026-10-22T21:31:22+03:00",
+  "configured_interval_seconds": 3600,
+  "actual_cutoff_rehearsal": "owner-cutoff-rehearsal.json",
+  "http_config_type": "stable",
+  "http_config_revert_at": null,
+  "public_demo_http": 200,
+  "windows_bat_http": 200,
+  "private_ha_http": 403,
+  "data_deleted_at_cutoff": false,
+  "existing_private_ha_changed": false,
+  "owner_credential_committed": false,
+  "owner_credential_delivered_privately_on_explicit_request": true
+}

@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-22T17:32:02.754Z",
+  "url": "https://habab-demo.wpmix.net/owner-test",
+  "cases": [
+    {
+      "case": "native_owner_login",
+      "passed": true
+    },
+    {
+      "case": "responsive_mobile_chat",
+      "width": 390,
+      "height": 844,
+      "passed": true
+    },
+    {
+      "case": "unauthorized_denied",
+      "restStatus": 401,
+      "websocketAuth": "auth_invalid",
+      "passed": true
+    }
+  ],
+  "pageErrors": [],
+  "passed": true
+}

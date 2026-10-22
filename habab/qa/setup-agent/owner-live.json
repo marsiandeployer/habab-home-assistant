@@ -1,0 +1,37 @@
+{
+  "at": "2026-10-22T17:30:50.137Z",
+  "url": "https://habab-demo.wpmix.net/owner-test",
+  "cases": [
+    {
+      "case": "native_owner_login",
+      "passed": true
+    },
+    {
+      "case": "actual_keyboard_input",
+      "passed": true
+    },
+    {
+      "case": "real_deepseek_opencode_response",
+      "passed": true
+    },
+    {
+      "case": "shell_command_independent_file_readback",
+      "passed": true
+    },
+    {
+      "case": "ha_service_state_readback",
+      "passed": true
+    },
+    {
+      "case": "unauthorized_denied",
+      "restStatus": 401,
+      "websocketAuth": "auth_invalid",
+      "passed": true
+    }
+  ],
+  "answer": "Готово, по фактическим результатам:\n\n- **Файл**: записан, `cat` вернул `HABAB_OWNER_E2E_OK`.\n- **Права**: `id -u` → `0` (root внутри контейнера HA).\n- **Счётчик**: был `0` → вызван `counter.increment` → проверка показала `1`.\n\nВсе три шага прошли успешно.",
+  "fileReadback": "HABAB_OWNER_E2E_OK",
+  "counterReadback": "1",
+  "pageErrors": [],
+  "passed": true
+}
