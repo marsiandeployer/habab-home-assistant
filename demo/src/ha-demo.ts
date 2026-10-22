@@ -91,6 +91,42 @@ const CONFIG_PANEL_COMMANDS = [
 @customElement("ha-demo")
 export class HaDemo extends HomeAssistantAppEl {
   protected async _initializeHass() {
+    let demoStateReady = false;
+    const installedStateHooks = new WeakSet<object>();
+    const lastPersistedState: Record<string, string> = {};
+
+    const installDemoStateHooks = () => {
+      for (const [entityId, entity] of Object.entries(hass.mockEntities) as any) {
+        if (!isDemoPersistedEntity(entityId) || !entity?.hass) continue;
+        const entityHass = entity.hass as MockHomeAssistant;
+        if (installedStateHooks.has(entityHass)) continue;
+        installedStateHooks.add(entityHass);
+        const updateStates = entityHass.updateStates.bind(entityHass);
+        entityHass.updateStates = (updates) => {
+          const changed: string[] = [];
+          if (demoStateReady) {
+            for (const [updatedId, next] of Object.entries(updates)) {
+              if (!isDemoPersistedEntity(updatedId)) continue;
+              const value = JSON.stringify({
+                state: next.state,
+                brightness: next.attributes.brightness,
+                temperature: next.attributes.temperature,
+              });
+              if (lastPersistedState[updatedId] !== value) {
+                lastPersistedState[updatedId] = value;
+                changed.push(updatedId);
+              }
+            }
+          }
+          const result = updateStates(updates);
+          if (changed.length) {
+            void persistDemoEntities(this.hass!, changed).catch(() => undefined);
+          }
+          return result;
+        };
+      }
+    };
+
     const initial: Partial<MockHomeAssistant> = {
       panelUrl: (this as any)._panelUrl,
       // Override updateHass so that the correct hass lifecycle methods are called
@@ -101,6 +137,11 @@ export class HaDemo extends HomeAssistantAppEl {
     // `false` for contexts: HomeAssistantAppEl already provides them via
     // `contextMixin`, so let provideHass skip them to avoid duplicate providers.
     const hass = provideHass(this, initial, true, false);
+    hass.updateHass({
+      language: "ru",
+      selectedLanguage: "ru",
+      locale: { ...hass.locale, language: "ru" },
+    });
 
     hass.updateHass({
       config: {
@@ -293,12 +334,96 @@ export class HaDemo extends HomeAssistantAppEl {
 
     // Once config is loaded AND localize, set registries, entities and theme.
     Promise.all([selectedDemoConfig, localizePromise]).then(
-      ([conf, localize]) => {
+      async ([conf, localize]) => {
         setDemoFloors(hass, conf.floors);
         setDemoAreas(hass, conf.areas);
         hass.addEntities(demoConfigEntities(selectedDemo, conf, localize));
+        installDemoStateHooks();
         registerDemoAutomations(hass, selectedDemo, conf);
         applyDemoTheme(hass, conf.theme);
+        try {
+          const response = await fetch("/api/ha-demo/state", {
+            credentials: "same-origin",
+          });
+          if (!response.ok) throw new Error("Demo state is unavailable");
+          const payload = await response.json();
+          const restored = {};
+          for (const [entityId, saved] of Object.entries(payload.states ?? {})) {
+            // provideHass() returns its initial object; updateHass replaces it
+            // when the live host state changes. Read the current host snapshot.
+            const current = this.hass!.states[entityId];
+            if (!current || !isDemoPersistedEntity(entityId)) continue;
+            const mockEntity = hass.mockEntities[entityId];
+            if (mockEntity && typeof mockEntity.update === "function") {
+              // Keep the mock entity's own model in sync with the state map.
+              // Its later update() calls republish to hass.states from toState().
+              mockEntity.update({
+                state: saved.state,
+                attributes: saved.attributes ?? {},
+              });
+              restored[entityId] = mockEntity.toState();
+            } else {
+              restored[entityId] = {
+                ...current,
+                state: saved.state,
+                attributes: { ...current.attributes, ...saved.attributes },
+              };
+            }
+          }
+          // Publish through the HA element so both the root property and its
+          // grouped Lit context providers see the restored map.
+          this._updateHass({
+            states: { ...this.hass!.states, ...restored },
+          });
+          for (const entityId of DEMO_PERSISTED_ENTITY_IDS) {
+            const state = this.hass!.states[entityId];
+            if (state) {
+              lastPersistedState[entityId] = JSON.stringify({
+                state: state.state,
+                brightness: state.attributes.brightness,
+                temperature: state.attributes.temperature,
+              });
+            }
+          }
+          demoStateReady = true;
+          hass.mockService("scene", "turn_on", async (data, target, demoHass) => {
+            const ids = data?.entity_id ?? target?.entity_id;
+            const sceneId = Array.isArray(ids) ? ids[0] : ids;
+            const affected = sceneId === "scene.evening"
+              ? [["light.living_room_floor_lamp", "on", 180], ["light.living_room_spotlights", "off"]]
+              : sceneId === "scene.focus"
+                ? [["light.office_desk_lamp", "on", 255], ["light.living_room_floor_lamp", "off"]]
+                : [];
+            if (!affected.length) return;
+            const changes = {};
+            for (const [entityId, state, brightness] of affected) {
+              const old = demoHass.states[entityId];
+              if (!old) continue;
+              changes[entityId] = {
+                ...old,
+                state,
+                attributes: {
+                  ...old.attributes,
+                  ...(brightness === undefined ? {} : { brightness }),
+                },
+              };
+            }
+            demoHass.updateStates(changes);
+            for (const [entityId, state] of Object.entries(changes)) {
+              lastPersistedState[entityId] = JSON.stringify({
+                state: state.state,
+                brightness: state.attributes.brightness,
+                temperature: state.attributes.temperature,
+              });
+            }
+            await persistDemoEntities(demoHass, Object.keys(changes));
+          });
+        } catch (error) {
+          showDemoStateFailure(
+            "Не удалось загрузить состояние демо. Проверьте соединение и попробуйте снова."
+          );
+          throw error;
+        }
       }
     );
 
@@ -321,6 +446,97 @@ export class HaDemo extends HomeAssistantAppEl {
     (this as any).hassConnected();
   }
 }
+
+const DEMO_PERSISTED_ENTITY_IDS = [
+  "climate.living_room",
+  "light.living_room_floor_lamp",
+  "light.living_room_spotlights",
+  "light.kitchen_spotlights",
+  "light.kitchen_worktop",
+  "light.entrance_ceiling",
+  "light.bedroom_ceiling",
+  "light.bedside_lamp",
+  "light.office_desk_lamp",
+  "light.garden_path",
+];
+
+const isDemoPersistedEntity = (entityId: string) =>
+  DEMO_PERSISTED_ENTITY_IDS.includes(entityId);
+
+const showDemoStateFailure = (message: string) => {
+  if (document.querySelector("[data-ha-demo-state-failure]")) return;
+  const panel = document.createElement("main");
+  panel.dataset.haDemoStateFailure = "true";
+  panel.setAttribute("role", "alert");
+  panel.setAttribute("aria-live", "assertive");
+  panel.style.cssText =
+    "position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:var(--primary-background-color,#f5f5f5);color:var(--primary-text-color,#212121);font:16px Roboto,Arial,sans-serif";
+  const content = document.createElement("section");
+  content.style.cssText =
+    "max-width:440px;padding:28px;border-radius:12px;background:var(--card-background-color,#fff);box-shadow:0 4px 24px #0002;text-align:center";
+  const heading = document.createElement("h1");
+  heading.textContent = "Демо временно недоступно";
+  heading.style.cssText = "font-size:22px;margin:0 0 12px";
+  const detail = document.createElement("p");
+  detail.textContent = message;
+  detail.style.cssText = "line-height:1.5;margin:0 0 20px";
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Вернуться в демо";
+  retry.style.cssText =
+    "min-height:44px;padding:0 20px;border:0;border-radius:8px;background:#03a9f4;color:#fff;font:inherit;font-weight:600;cursor:pointer";
+  retry.addEventListener("click", () => {
+    retry.disabled = true;
+    retry.textContent = "Загружаем демо…";
+    // Clear only the demo app's transient route. The server-side saved state
+    // remains untouched and is reloaded by the normal startup GET.
+    window.location.replace(window.location.pathname);
+  });
+  content.append(heading, detail, retry);
+  panel.append(content);
+  document.body.replaceChildren(panel);
+};
+
+let demoPersistenceQueue: Promise<void> = Promise.resolve();
+
+const persistDemoEntities = (hass: MockHomeAssistant, entityIds: string[]) => {
+  const entities = entityIds.map((entity_id) => {
+    const entity = hass.states[entity_id];
+    return {
+      entity_id,
+      state: entity.state,
+      ...(entity.attributes.brightness == null ? {} : { brightness: entity.attributes.brightness }),
+      ...(entity.attributes.temperature == null ? {} : { temperature: entity.attributes.temperature }),
+    };
+  });
+  const save = demoPersistenceQueue.then(async () => {
+    let response: Response;
+    try {
+      response = await fetch("/api/ha-demo/state", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entities }),
+      });
+    } catch {
+      showDemoStateFailure(
+        "Изменение не сохранено. Проверьте соединение и попробуйте снова."
+      );
+      throw new Error("Home Assistant demo state write failed");
+    }
+    if (!response.ok) {
+      showDemoStateFailure(
+        "Изменение не сохранено. Проверьте соединение и попробуйте снова."
+      );
+      throw new Error("Home Assistant demo state write failed");
+    }
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "habab-ha-demo-interaction" }, location.origin);
+    }
+  });
+  demoPersistenceQueue = save.catch(() => undefined);
+  return save;
+};
 
 declare global {
   interface HTMLElementTagNameMap {

@@ -4,7 +4,7 @@ import type { MockHomeAssistant } from "../../../src/fake_data/provide_hass";
 const storage: Person[] = [
   {
     id: "demo_user",
-    name: "Demo User",
+    name: "Демо-пользователь",
     user_id: "abcd",
     device_trackers: [],
   },

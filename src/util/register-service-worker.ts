@@ -11,7 +11,7 @@ export const registerServiceWorker = async (
   rootEl: HTMLElement,
   notifyUpdate = true
 ) => {
-  if (!supportsServiceWorker()) {
+  if (__DEMO__ || !supportsServiceWorker()) {
     return;
   }
 

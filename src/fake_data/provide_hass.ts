@@ -439,7 +439,7 @@ export const provideHass = (
       is_admin: true,
       is_owner: true,
       mfa_modules: [],
-      name: "Demo User",
+      name: "Демо-пользователь",
     },
     panelUrl: "lovelace",
     systemData: {

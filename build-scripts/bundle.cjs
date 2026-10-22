@@ -274,10 +274,13 @@ module.exports.config = {
         ...module.exports.mapWorkerEntry(),
       },
       outputPath: outputPath(paths.demo_output_root, latestBuild),
-      publicPath: publicPath(latestBuild),
+      // Resolve from the demo bundle directory back to this same directory.
+      // Rspack combines this with import.meta.url when loading nested workers.
+      publicPath: publicPath(latestBuild, "./../"),
       defineOverlay: {
         __VERSION__: JSON.stringify(`DEMO-${env.version()}`),
         __DEMO__: true,
+        __STATIC_PATH__: JSON.stringify("./static/"),
       },
       isProdBuild,
       latestBuild,

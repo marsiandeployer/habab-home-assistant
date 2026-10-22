@@ -2,6 +2,7 @@
 <html>
   <head>
     <title>Home Assistant Demo</title>
+    <script>window.name = "ha-main-window";</script>
     <%= renderTemplate("../../../src/html/_header.html.template") %>
     <link rel="mask-icon" href="/static/icons/mask-icon.svg" color="#03a9f4" />
     <link

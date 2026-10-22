@@ -4,12 +4,12 @@ import type { DemoFloor } from "../../stubs/floor_registry";
 export const demoFloorsHome: DemoFloor[] = [
   {
     floor_id: "ground",
-    name: "Ground floor",
+    name: "Первый этаж",
     level: 0,
   },
   {
     floor_id: "upstairs",
-    name: "Upstairs",
+    name: "Второй этаж",
     level: 1,
   },
 ];
@@ -17,7 +17,7 @@ export const demoFloorsHome: DemoFloor[] = [
 export const demoAreasHome: DemoArea[] = [
   {
     area_id: "living_room",
-    name: "Living room",
+    name: "Гостиная",
     floor_id: "ground",
     icon: "mdi:sofa",
     temperature_entity_id: "sensor.living_room_temperature",
@@ -25,7 +25,7 @@ export const demoAreasHome: DemoArea[] = [
   },
   {
     area_id: "kitchen",
-    name: "Kitchen",
+    name: "Кухня",
     floor_id: "ground",
     icon: "mdi:fridge",
     temperature_entity_id: "sensor.kitchen_temperature",
@@ -33,13 +33,13 @@ export const demoAreasHome: DemoArea[] = [
   },
   {
     area_id: "entrance",
-    name: "Entrance",
+    name: "Прихожая",
     floor_id: "ground",
     icon: "mdi:door",
   },
   {
     area_id: "bedroom",
-    name: "Bedroom",
+    name: "Спальня",
     floor_id: "upstairs",
     icon: "mdi:bed",
     temperature_entity_id: "sensor.bedroom_temperature",
@@ -47,7 +47,7 @@ export const demoAreasHome: DemoArea[] = [
   },
   {
     area_id: "office",
-    name: "Office",
+    name: "Кабинет",
     floor_id: "upstairs",
     icon: "mdi:desk",
     temperature_entity_id: "sensor.office_temperature",
@@ -55,7 +55,7 @@ export const demoAreasHome: DemoArea[] = [
   },
   {
     area_id: "garden",
-    name: "Garden",
+    name: "Участок",
     icon: "mdi:tree",
     temperature_entity_id: "sensor.garden_temperature",
     humidity_entity_id: "sensor.garden_humidity",

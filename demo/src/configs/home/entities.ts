@@ -1,6 +1,18 @@
 import type { DemoConfig } from "../types";
 
 export const demoEntitiesHome: DemoConfig["entities"] = () => [
+  {
+    entity_id: "scene.evening",
+    state: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    area_id: "living_room",
+    attributes: { friendly_name: "Вечерний свет", icon: "mdi:weather-night" },
+  },
+  {
+    entity_id: "scene.focus",
+    state: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    area_id: "office",
+    attributes: { friendly_name: "Рабочий режим", icon: "mdi:briefcase" },
+  },
   // The devices tile on the overview uses zone.home, which always exists in
   // a real installation.
   {
@@ -10,7 +22,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       latitude: 52.3731339,
       longitude: 4.8903147,
       radius: 100,
-      friendly_name: "Home",
+      friendly_name: "Дом",
       icon: "mdi:home",
     },
   },
@@ -26,7 +38,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       brightness: 178,
       color_temp_kelvin: 2583,
       icon: "mdi:floor-lamp",
-      friendly_name: "Floor lamp",
+      friendly_name: "Торшер",
       supported_features: 44,
     },
   },
@@ -39,7 +51,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       color_mode: "brightness",
       brightness: 126,
       icon: "mdi:ceiling-light-multiple",
-      friendly_name: "Spotlights",
+      friendly_name: "Точечный свет",
       supported_features: 32,
     },
   },
@@ -53,7 +65,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       max_temp: 35,
       current_temperature: 21.5,
       temperature: 21,
-      friendly_name: "Thermostat",
+      friendly_name: "Термостат",
       supported_features: 385,
     },
   },
@@ -64,7 +76,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     attributes: {
       current_position: 100,
       device_class: "blind",
-      friendly_name: "Blinds",
+      friendly_name: "Шторы",
       supported_features: 15,
     },
   },
@@ -74,7 +86,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "living_room",
     attributes: {
       device_class: "window",
-      friendly_name: "Window",
+      friendly_name: "Окно",
     },
   },
   {
@@ -95,7 +107,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       media_artist: "The Byrds",
       media_album_name: "The Notorious Byrd Brothers",
       shuffle: false,
-      friendly_name: "Living room speaker",
+      friendly_name: "Колонка в гостиной",
       supported_features: 64063,
     },
   },
@@ -107,7 +119,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "°C",
       device_class: "temperature",
-      friendly_name: "Temperature",
+      friendly_name: "Температура",
     },
   },
   {
@@ -118,7 +130,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "%",
       device_class: "humidity",
-      friendly_name: "Humidity",
+      friendly_name: "Влажность",
     },
   },
   {
@@ -130,7 +142,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       color_mode: "brightness",
       brightness: 255,
       icon: "mdi:ceiling-light-multiple",
-      friendly_name: "Spotlights",
+      friendly_name: "Точечный свет",
       supported_features: 32,
     },
   },
@@ -143,7 +155,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       color_mode: null,
       brightness: null,
       icon: "mdi:light-flood-down",
-      friendly_name: "Worktop",
+      friendly_name: "Подсветка столешницы",
       supported_features: 32,
     },
   },
@@ -153,7 +165,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "kitchen",
     attributes: {
       icon: "mdi:coffee-maker",
-      friendly_name: "Coffee machine",
+      friendly_name: "Кофемашина",
     },
   },
   {
@@ -162,7 +174,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "kitchen",
     attributes: {
       device_class: "motion",
-      friendly_name: "Motion",
+      friendly_name: "Датчик движения",
     },
   },
   {
@@ -173,7 +185,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       device_class: "speaker",
       volume_level: 0.18,
       is_volume_muted: false,
-      friendly_name: "Kitchen speaker",
+      friendly_name: "Колонка на кухне",
       supported_features: 64063,
     },
   },
@@ -185,7 +197,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "°C",
       device_class: "temperature",
-      friendly_name: "Temperature",
+      friendly_name: "Температура",
     },
   },
   {
@@ -196,7 +208,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "%",
       device_class: "humidity",
-      friendly_name: "Humidity",
+      friendly_name: "Влажность",
     },
   },
   {
@@ -204,7 +216,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     state: "locked",
     area_id: "entrance",
     attributes: {
-      friendly_name: "Front door",
+      friendly_name: "Входная дверь",
       supported_features: 1,
     },
   },
@@ -214,7 +226,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "entrance",
     attributes: {
       device_class: "door",
-      friendly_name: "Front door",
+      friendly_name: "Входная дверь",
     },
   },
   {
@@ -224,7 +236,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     attributes: {
       changed_by: null,
       code_arm_required: false,
-      friendly_name: "Home alarm",
+      friendly_name: "Охранная система",
       supported_features: 3,
     },
   },
@@ -236,7 +248,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       supported_color_modes: ["brightness"],
       color_mode: null,
       brightness: null,
-      friendly_name: "Ceiling light",
+      friendly_name: "Потолочный свет",
       supported_features: 32,
     },
   },
@@ -248,7 +260,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "%",
       device_class: "battery",
-      friendly_name: "Front door lock battery",
+      friendly_name: "Батарея замка входной двери",
     },
   },
   {
@@ -259,7 +271,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       supported_color_modes: ["color_temp"],
       color_mode: null,
       brightness: null,
-      friendly_name: "Ceiling light",
+      friendly_name: "Потолочный свет",
       supported_features: 44,
     },
   },
@@ -272,7 +284,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       color_mode: null,
       brightness: null,
       icon: "mdi:lamp",
-      friendly_name: "Bedside lamp",
+      friendly_name: "Прикроватная лампа",
       supported_features: 32,
     },
   },
@@ -283,7 +295,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     attributes: {
       current_position: 100,
       device_class: "shutter",
-      friendly_name: "Shutter",
+      friendly_name: "Рольставня",
       supported_features: 15,
     },
   },
@@ -293,7 +305,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "bedroom",
     attributes: {
       device_class: "speaker",
-      friendly_name: "Bedroom speaker",
+      friendly_name: "Колонка в спальне",
       supported_features: 64063,
     },
   },
@@ -303,7 +315,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "bedroom",
     attributes: {
       device_class: "motion",
-      friendly_name: "Motion",
+      friendly_name: "Датчик движения",
     },
   },
   {
@@ -314,7 +326,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "%",
       device_class: "battery",
-      friendly_name: "Motion sensor battery",
+      friendly_name: "Батарея датчика движения",
     },
   },
   {
@@ -325,7 +337,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "°C",
       device_class: "temperature",
-      friendly_name: "Temperature",
+      friendly_name: "Температура",
     },
   },
   {
@@ -336,7 +348,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "%",
       device_class: "humidity",
-      friendly_name: "Humidity",
+      friendly_name: "Влажность",
     },
   },
   {
@@ -348,7 +360,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       color_mode: "brightness",
       brightness: 200,
       icon: "mdi:desk-lamp",
-      friendly_name: "Desk lamp",
+      friendly_name: "Настольная лампа",
       supported_features: 32,
     },
   },
@@ -359,7 +371,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     attributes: {
       percentage: 0,
       percentage_step: 25,
-      friendly_name: "Ceiling fan",
+      friendly_name: "Потолочный вентилятор",
       supported_features: 1,
     },
   },
@@ -369,7 +381,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "office",
     attributes: {
       device_class: "window",
-      friendly_name: "Window",
+      friendly_name: "Окно",
     },
   },
   {
@@ -380,7 +392,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "°C",
       device_class: "temperature",
-      friendly_name: "Temperature",
+      friendly_name: "Температура",
     },
   },
   {
@@ -391,7 +403,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "%",
       device_class: "humidity",
-      friendly_name: "Humidity",
+      friendly_name: "Влажность",
     },
   },
   {
@@ -400,7 +412,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "garden",
     attributes: {
       icon: "mdi:sprinkler-variant",
-      friendly_name: "Sprinkler",
+      friendly_name: "Полив участка",
     },
   },
   {
@@ -412,7 +424,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       color_mode: null,
       brightness: null,
       icon: "mdi:outdoor-lamp",
-      friendly_name: "Path lights",
+      friendly_name: "Освещение дорожки",
       supported_features: 32,
     },
   },
@@ -422,7 +434,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
     area_id: "garden",
     attributes: {
       device_class: "opening",
-      friendly_name: "Gate",
+      friendly_name: "Ворота",
     },
   },
   {
@@ -433,7 +445,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "°C",
       device_class: "temperature",
-      friendly_name: "Temperature",
+      friendly_name: "Температура",
     },
   },
   {
@@ -444,7 +456,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       state_class: "measurement",
       unit_of_measurement: "%",
       device_class: "humidity",
-      friendly_name: "Humidity",
+      friendly_name: "Влажность",
     },
   },
   {
@@ -459,7 +471,7 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
       pressure_unit: "hPa",
       wind_speed: 11.2,
       wind_speed_unit: "km/h",
-      friendly_name: "Home",
+      friendly_name: "Дом",
     },
   },
 ];

@@ -6,9 +6,9 @@ import { demoLovelaceHome } from "./lovelace";
 export const demoHome: DemoConfig = {
   authorName: "Home Assistant",
   authorUrl: "https://www.home-assistant.io",
-  name: "Home page",
+  name: "Мой дом",
   description:
-    "The page you land on when you open Home Assistant, automatically built from the areas in your home and the devices in them.",
+    "Обзор дома, автоматически собранный по комнатам и устройствам.",
   lovelace: demoLovelaceHome,
   entities: demoEntitiesHome,
   floors: demoFloorsHome,

@@ -71,9 +71,9 @@
       "purpose": "maskable"
     }
   ],
-  "lang": "en-US",
+  "lang": "ru-RU",
   "name": "Home Assistant Demo",
   "short_name": "HA Demo",
-  "start_url": "/?homescreen=1",
+  "start_url": "./?homescreen=1",
   "theme_color": "#009ac7"
 }

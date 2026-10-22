@@ -388,7 +388,7 @@ class MoreInfoLight extends LitElement {
           border-radius: var(--ha-border-radius-circle);
         }
         .wheel.color {
-          background-image: url("/static/images/color_wheel.png");
+          background-image: url("/demos/home-assistant/static/images/color_wheel.png");
           background-size: cover;
         }
         .wheel.color-temp {

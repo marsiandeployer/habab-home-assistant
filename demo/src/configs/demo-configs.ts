@@ -123,7 +123,7 @@ export const demos = Object.keys(demoConfigs);
 
 const initialDemo = () => {
   const slug = new URLSearchParams(window.location.search).get("demo");
-  return slug && demos.includes(slug) ? slug : demos[0];
+  return slug && demos.includes(slug) ? slug : "home";
 };
 
 // eslint-disable-next-line import-x/no-mutable-exports

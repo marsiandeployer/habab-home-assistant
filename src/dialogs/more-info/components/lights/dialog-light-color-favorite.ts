@@ -274,7 +274,7 @@ class DialogLightColorFavorite extends DirtyStateProviderMixin<LightColorFavorit
           border-radius: var(--ha-border-radius-xl);
         }
         .wheel.color {
-          background-image: url("/static/images/color_wheel.png");
+          background-image: url("/demos/home-assistant/static/images/color_wheel.png");
           background-size: cover;
         }
         .wheel.color_temp {
