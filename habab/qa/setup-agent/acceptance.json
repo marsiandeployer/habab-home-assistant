@@ -1,0 +1,19 @@
+{
+  "environment": "isolated Docker HA + read-only OpenCode 1.14.21 + live DeepSeek",
+  "cases": [
+    {
+      "name": "foreign_session_denied",
+      "pass": true
+    },
+    {
+      "name": "actual_container_write",
+      "pass": true
+    },
+    {
+      "name": "history_readback",
+      "pass": true
+    }
+  ],
+  "answer": "Фактический результат:\n\n| Проверка | Результат |\n|---|---|\n| `id -u` | `0` (root внутри контейнера) |\n| `/.dockerenv` | существует |\n| `/var/run/docker.sock` | отсутствует |\n| `/run/dbus/system_bus_socket` | отсутствует |\n| `bluetoothctl` | `/usr/bin/bluetoothctl` |\n\nФайл `/config/habab-agent-check.txt` перезаписан: 19 байт, 1 строка — `root-inside-docker`.\n\n**Bluetooth:** сканировать не могу — нет сокета системного D-Bus (и, соответственно, доступа к BT-стеку/адаптеру), хотя `bluetoothctl` установлен. Нужен проброс D-Bus/Bluetooth override на хосте; после этого могу повторить проверку.",
+  "status": "PASS"
+}

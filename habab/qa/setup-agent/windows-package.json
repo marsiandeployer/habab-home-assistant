@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "filename": "habab-home-windows-4ac5defb0a8a.zip",
+  "sha256": "4ac5defb0a8ad6dd5b6b876cb03d0513063239e6d69344329e571b3ac2ecae72",
+  "files": 32,
+  "windows_bat_crlf": true,
+  "windows_physical_execution": "NOT RUN"
+}

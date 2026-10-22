@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "real_deepseek_reply": true,
+  "separate_cookie_history": true,
+  "history_readback": true,
+  "foreign_origin_denied": true,
+  "reset_readback": true
+}

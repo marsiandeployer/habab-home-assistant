@@ -1,0 +1,17 @@
+# OpenCode + DeepSeek acceptance, 2026-10-22
+
+PASS: live DeepSeek through OpenCode 1.14.21 in an isolated Home Assistant 2026.10.2 container. A real shell command reported uid 0 and created a control file; Docker readback confirmed the file. The executable is a shared read-only bind mount, also confirmed by kernel mount options. Running image and source match; the native `habab-ha` CLI matches its source.
+
+Native HA setup PASS: the assistant increased a test counter from 0 to 1 and completed a real Workday config flow. Independent HA state/config-entry readback confirmed the counter and loaded integration. The first counter-config-flow attempt correctly failed: this pinned counter integration uses a storage helper API. The failed result is retained separately; the subsequent test created its counter fixture with native `counter/create` before asking the assistant to operate it. Workday creation was performed by the assistant.
+
+Access PASS: a read-only user cannot list/start/run/abort the assistant; another administrator cannot run or abort the owner's session. Five live denial checks, temporary accounts removed. Cancellation PASS: an actual bash sleep process stopped, its delayed write did not happen, and a concurrent request was rejected.
+
+Browser PASS: native and public demo at 1280x800 and 390x844, toolbar placement, Escape/reopen, real responses, and no page errors. Public input was originally disabled as a preview; following the user's report, it was replaced with an editable composer and real server-side DeepSeek guidance. Browser acceptance uses actual keyboard typing and Enter. Public chat has separate cookie-isolated PostgreSQL history, same-origin checks and request quotas; no shell, device tools or private-Core connection.
+
+Windows package checks PASS: official npm archive SHA-512, installation into a Docker volume, warm reuse, PowerShell parser, published ZIP SHA-256 and file allowlist. Full Docker Desktop/WSL installation on a physical Windows computer was NOT RUN. Windows Bluetooth/USB is not automatically passed through. No provider key or owner account is bundled.
+
+Fourteen Python integration-unit checks, three Node voice lifecycle checks, and ten Flask checks plus four subtests passed. Prior voice live acceptance remains under ../voice/. Gemini live API, physical microphone/iOS, real Bluetooth pairing and physical devices are outside this acceptance. The D-Bus/BlueZ adapter-list probe failed; no host Bluetooth configuration was changed.
+
+Independent Impeccable finish review: ship. Initial missing-mobile-header finding was withdrawn after reopening the actual 390x844 capture; title, New chat and close are present in its top 64 pixels. No UI change was needed for that finding. Documenter: ordinary HA extension, no system-file changes and no visual drift found in the supplied evidence.
+
+The public demo chat and Windows downloads are deployed. The existing separate private HA test service was not upgraded; native behavior was accepted against our isolated localhost QA container. Private QA credentials/runtime are removed after verification. Production public-chat credentials remain outside the repository in a private server file.

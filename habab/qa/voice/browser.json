@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "mode": "desktop",
+      "providers": 3,
+      "guides": true,
+      "passwordField": true,
+      "noHorizontalOverflow": true,
+      "errors": []
+    },
+    {
+      "mode": "mobile",
+      "providers": 3,
+      "guides": true,
+      "passwordField": true,
+      "noHorizontalOverflow": true,
+      "errors": []
+    }
+  ],
+  "protocolErrors": [
+    {
+      "id": 43,
+      "code": "invalid_auth"
+    }
+  ],
+  "browserVoice": {
+    "transcript": "Включи тестовую лампу.",
+    "state": "on",
+    "response": "Готово — тестовая лампа включена.",
+    "error": "false",
+    "microphoneStopped": true
+  },
+  "asyncErrors": [],
+  "passed": true
+}

@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify
 
 from habab_demo.routes import ha_demo_bp, HADemoSessionInterface
+from habab_demo import chat  # Registers the isolated public help-chat routes.
 
 ROOT = Path(__file__).resolve().parent
 

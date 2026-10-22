@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "qa_container_removed": true,
+  "bootstrap_test_volume_removed": true,
+  "private_qa_runtime_removed": true,
+  "existing_private_ha_service_unchanged": true,
+  "production_key_outside_repository": true
+}

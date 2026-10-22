@@ -73,7 +73,8 @@ def scope_html(html):
         for old in ('./manifest.json', '/manifest.json'):
             html = html.replace(f'{quote}{old}{quote}', f'{quote}{PREFIX}manifest.json{quote}')
     html = html.replace('<head>', f'<head><meta name="habab-demo-release" content="{RELEASE}">')
-    return html.replace('</body>', '<script src="/demos/home-assistant/integrations/telegram-setup.js?v=20261022-1" defer></script></body>')
+    html = html.replace('<html', '<html data-habab-demo="true"', 1)
+    return html.replace('</body>', '<script src="/demos/home-assistant/integrations/telegram-setup.js?v=20261022-1" defer></script><script type="module" src="/demos/home-assistant/integrations/setup-chat.js?v=2"></script></body>')
 
 
 def main():
@@ -94,6 +95,9 @@ def main():
     if STAGE.exists():
         shutil.rmtree(STAGE)
     shutil.copytree(source_root, STAGE, ignore=shutil.ignore_patterns('releases'))
+    (TARGET / 'integrations').mkdir(exist_ok=True)
+    shutil.copy2(ROOT / 'distribution/src/habab_home/frontend/setup-chat.js',
+                 TARGET / 'integrations/setup-chat.js')
     if not args.from_published:
         shutil.copy2(UPSTREAM / 'LICENSE.md', STAGE / 'LICENSE.md')
     (STAGE / 'ATTRIBUTION.md').write_text(

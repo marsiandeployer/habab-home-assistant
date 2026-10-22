@@ -1,0 +1,14 @@
+{
+  "amd64": {
+    "package": "opencode-linux-x64-baseline-musl",
+    "version": "1.14.21",
+    "url": "https://registry.npmjs.org/opencode-linux-x64-baseline-musl/-/opencode-linux-x64-baseline-musl-1.14.21.tgz",
+    "integrity": "sha512-AWkSw2pX4f/XQuNXC8HxxUOHUChiKdLdn+z3gpIGXAZIsP37TgDusfX555nFdcB/pOcXwffNE4dPoNOc9NYdIg=="
+  },
+  "arm64": {
+    "package": "opencode-linux-arm64-musl",
+    "version": "1.14.21",
+    "url": "https://registry.npmjs.org/opencode-linux-arm64-musl/-/opencode-linux-arm64-musl-1.14.21.tgz",
+    "integrity": "sha512-+4MmIKeDCNukkNhaGOULFFquCFzzSr1alIUErsFeczOJO43Sl1/g+j8v1vjTSjvCwvMFbCBfGsFfo/MXnOQtFA=="
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "counters": [
+    {
+      "entity_id": "counter.habab_qa",
+      "state": "1"
+    }
+  ],
+  "workday": [
+    {
+      "domain": "workday",
+      "state": "loaded",
+      "title": "Workday Sensor RU"
+    }
+  ],
+  "answer": "Достигнут лимит шагов агента — инструменты больше не вызываются. Итог по фактическим результатам:\n\n**Счётчик**\n- До: `counter.habab_qa` = `0`, friendly_name «Habab QA».\n- `counter.increment` с target `counter.habab_qa` — вызов принят (`{\"called\":\"counter.increment\"}`).\n- После: `counter.habab_qa` = `1`. Увеличение подтверждено.\n\n**Config flow workday**\n- `start_integration` домен `workday` → форма шага `user`, поле `country`.\n- Шаг `user` с `{\"country\":\"RU\"}` → форма шага `options`, поля: workdays, excludes, days_offset, add_holidays, remove_holidays, language.\n- Изучены исходники `/usr/src/homeassistant/homeassistant/components/workday/config_flow.py` и `const.py` (без пользовательских секретов): defaults — workdays `mon..fri`, excludes `sat,sun,holiday`, days_offset `0`, add/remove_holidays пустые.\n- Шаг `options` со стандартными значениями → `{\"type\":\"create_entry\"}`. Flow завершён успешно.\n- `integrations`: появилась запись `workday`, entry_id `01M5J8QBYD72M2S53CW2XEF9ES`, title «Workday Sensor RU», state `loaded`.\n- `states`: `binary_sensor.workday_sensor_ru` существует, state `on`, friendly_name «Workday Sensor RU». `calendar.workday_sensor_ru` запрос вернул пусто — календарная сущность ещё не отражена/не создана на момент проверки.\n\n**Не выполнено / требует внимания**\n- Проверка календарной сущности workday (например, поиск по другим entity_id вида `calendar.workday_*`) не завершена — лимит шагов.\n- Language/province/category не передавались (оставлены дефолтными) — соответствует запросу «стандартные настройки без секретов».\n\n**Рекомендация:** в следующем сообщении попросить проверить `states` для `calendar.*workday*` (или перечислить сущности), чтобы подтвердить календарь workday после загрузки интеграции.",
+  "status": "PASS"
+}

@@ -1,0 +1,576 @@
+{
+  "environment": "isolated localhost Home Assistant 2026.10.2",
+  "cases": [
+    {
+      "provider": "openai",
+      "kind": "text_action",
+      "command": "Включи тестовую лампу",
+      "expected": "on",
+      "state": "on",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Тестовая лампа включена.",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [
+              {
+                "name": "Тестовая лампа",
+                "type": "entity",
+                "id": "light.testovaia_lampa"
+              }
+            ],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3AMM7WQX0RM4SHXP1TS8G",
+        "continue_conversation": false
+      },
+      "pass": true
+    },
+    {
+      "provider": "openai",
+      "kind": "text_action",
+      "command": "Выключи тестовую лампу",
+      "expected": "off",
+      "state": "off",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Тестовая лампа выключена.",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [
+              {
+                "name": "Тестовая лампа",
+                "type": "entity",
+                "id": "light.testovaia_lampa"
+              }
+            ],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3AP6J0HQ6ZX3MH5MQJTPR",
+        "continue_conversation": false
+      },
+      "pass": true
+    },
+    {
+      "provider": "openai",
+      "kind": "unexposed_or_absent_device",
+      "command": "Включи закрытое устройство",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Пожалуйста, уточните, какое конкретно закрытое устройство вы хотите включить?",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3AR2GX3VWN49G3HQ11CKM",
+        "continue_conversation": true
+      },
+      "pass": true
+    },
+    {
+      "provider": "openai",
+      "kind": "unexposed_or_absent_device",
+      "command": "Включи лампу на Марсе",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "В вашем умном доме нет ламп на Марсе. Пожалуйста, укажите другую локацию или устройство, которое вы хотите включить.",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3ARTRNTKT8WGYSB8HF5MT",
+        "continue_conversation": false
+      },
+      "pass": true
+    },
+    {
+      "provider": "openai",
+      "kind": "unexposed_or_absent_device",
+      "command": "Открой замок входной двери",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Пожалуйста, уточните название или расположение устройства замка входной двери, чтобы я мог выполнить вашу команду.",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3ASY0Q7JAYW33TAAZT75J",
+        "continue_conversation": false
+      },
+      "pass": true
+    },
+    {
+      "provider": "openai",
+      "kind": "voice_pipeline",
+      "synthetic_input": true,
+      "transcript": "Включи тестовую лампу.",
+      "events": [
+        {
+          "type": "run-start",
+          "data": {
+            "pipeline": "01m5j290esrsy93712fgddcmzn",
+            "language": "ru",
+            "conversation_id": "01M5J3ATVPCYHSZHXHWW8F78ZN",
+            "runner_data": {
+              "stt_binary_handler_id": 1,
+              "timeout": 300
+            },
+            "tts_output": {
+              "url": "/api/tts_proxy/GYDQNGQ6W0sdsvPh82XJkQ.mp3",
+              "mime_type": "audio/mpeg",
+              "stream_response": false
+            }
+          },
+          "timestamp": "2026-10-22T15:23:04.950703+00:00"
+        },
+        {
+          "type": "stt-start",
+          "data": {
+            "engine": "stt.habab_openai_speech_recognition",
+            "metadata": {
+              "language": "ru-RU",
+              "format": "wav",
+              "codec": "pcm",
+              "bit_rate": 16,
+              "sample_rate": 16000,
+              "channel": 1
+            },
+            "audio_processing": {
+              "requires_external_vad": true,
+              "prefers_auto_gain_enabled": true,
+              "prefers_noise_reduction_enabled": true
+            }
+          },
+          "timestamp": "2026-10-22T15:23:04.950759+00:00"
+        },
+        {
+          "type": "stt-vad-start",
+          "data": {
+            "timestamp": 1150
+          },
+          "timestamp": "2026-10-22T15:23:06.098987+00:00"
+        },
+        {
+          "type": "stt-vad-end",
+          "data": {
+            "timestamp": 2930
+          },
+          "timestamp": "2026-10-22T15:23:07.890838+00:00"
+        },
+        {
+          "type": "stt-end",
+          "data": {
+            "stt_output": {
+              "text": "Включи тестовую лампу."
+            }
+          },
+          "timestamp": "2026-10-22T15:23:09.417280+00:00"
+        },
+        {
+          "type": "intent-start",
+          "data": {
+            "engine": "conversation.habab_openai",
+            "language": "ru",
+            "intent_input": "Включи тестовую лампу.",
+            "conversation_id": "01M5J3ATVPCYHSZHXHWW8F78ZN",
+            "device_id": null,
+            "satellite_id": null,
+            "prefer_local_intents": false
+          },
+          "timestamp": "2026-10-22T15:23:09.417325+00:00"
+        },
+        {
+          "type": "intent-end",
+          "data": {
+            "processed_locally": false,
+            "intent_output": {
+              "response": {
+                "speech": {
+                  "plain": {
+                    "speech": "Тестовая лампа включена.",
+                    "extra_data": null
+                  }
+                },
+                "card": {},
+                "language": "ru",
+                "response_type": "action_done",
+                "data": {
+                  "success": [
+                    {
+                      "name": "Тестовая лампа",
+                      "type": "entity",
+                      "id": "light.testovaia_lampa"
+                    }
+                  ],
+                  "failed": []
+                }
+              },
+              "conversation_id": "01M5J3ATVPCYHSZHXHWW8F78ZN",
+              "continue_conversation": false
+            }
+          },
+          "timestamp": "2026-10-22T15:23:10.971035+00:00"
+        },
+        {
+          "type": "tts-start",
+          "data": {
+            "engine": "tts.habab_openai_voice",
+            "language": "ru-RU",
+            "voice": null,
+            "tts_input": "Тестовая лампа включена.",
+            "acknowledge_override": false
+          },
+          "timestamp": "2026-10-22T15:23:10.971075+00:00"
+        },
+        {
+          "type": "tts-end",
+          "data": {
+            "tts_output": {
+              "media_id": "media-source://tts/-stream-/GYDQNGQ6W0sdsvPh82XJkQ.mp3",
+              "url": "/api/tts_proxy/GYDQNGQ6W0sdsvPh82XJkQ.mp3",
+              "mime_type": "audio/mpeg"
+            }
+          },
+          "timestamp": "2026-10-22T15:23:10.971119+00:00"
+        },
+        {
+          "type": "run-end",
+          "data": null,
+          "timestamp": "2026-10-22T15:23:10.971151+00:00"
+        }
+      ],
+      "state": "on",
+      "response_audio_bytes": 27660,
+      "pass": true
+    },
+    {
+      "provider": "deepseek",
+      "kind": "text_action",
+      "command": "Включи тестовую лампу",
+      "expected": "on",
+      "state": "on",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Готово, тестовая лампа включена.",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [
+              {
+                "name": "Тестовая лампа",
+                "type": "entity",
+                "id": "light.testovaia_lampa"
+              }
+            ],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3B0R2GSSWF32VT0BPP3VZ",
+        "continue_conversation": false
+      },
+      "pass": true
+    },
+    {
+      "provider": "deepseek",
+      "kind": "text_action",
+      "command": "Выключи тестовую лампу",
+      "expected": "off",
+      "state": "off",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Тестовая лампа выключена.",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [
+              {
+                "name": "Тестовая лампа",
+                "type": "entity",
+                "id": "light.testovaia_lampa"
+              }
+            ],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3B29TXFZGTM1ZXJ7MK9YT",
+        "continue_conversation": false
+      },
+      "pass": true
+    },
+    {
+      "provider": "deepseek",
+      "kind": "unexposed_or_absent_device",
+      "command": "Включи закрытое устройство",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Уточните, пожалуйста, что именно включить — я не совсем понял, какое устройство вы имеете в виду. В доме доступны «Тестовая лампа» (свет) и список покупок.",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3B4K2FKYFK1V5W47SF0N3",
+        "continue_conversation": false
+      },
+      "pass": true
+    },
+    {
+      "provider": "deepseek",
+      "kind": "unexposed_or_absent_device",
+      "command": "Включи лампу на Марсе",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "Помещения «Марс» нет, поэтому лампу там включить не могу. В доме есть только «Тестовая лампа» — включить её?",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3B5QM5SZNFAVDFQ8G3J8E",
+        "continue_conversation": true
+      },
+      "pass": true
+    },
+    {
+      "provider": "deepseek",
+      "kind": "unexposed_or_absent_device",
+      "command": "Открой замок входной двери",
+      "response": {
+        "response": {
+          "speech": {
+            "plain": {
+              "speech": "В доме нет замка или устройства «входная дверь» — доступны только «Тестовая лампа» и список покупок. Поэтому открыть нечего. Возможно, вы имели в виду другое устройство?",
+              "extra_data": null
+            }
+          },
+          "card": {},
+          "language": "ru",
+          "response_type": "action_done",
+          "data": {
+            "success": [],
+            "failed": []
+          }
+        },
+        "conversation_id": "01M5J3B8EBWSQ3BW7P8RKMC4PE",
+        "continue_conversation": true
+      },
+      "pass": true
+    },
+    {
+      "provider": "deepseek",
+      "kind": "voice_pipeline",
+      "synthetic_input": true,
+      "transcript": "Включи тестовую лампу.",
+      "events": [
+        {
+          "type": "run-start",
+          "data": {
+            "pipeline": "01m5j29f3v2qnt91a4se6ebmyg",
+            "language": "ru",
+            "conversation_id": "01M5J3B9D43HHSCWMJ8JNY1900",
+            "runner_data": {
+              "stt_binary_handler_id": 2,
+              "timeout": 300
+            },
+            "tts_output": {
+              "url": "/api/tts_proxy/UVEe1SzfuGtANfLtWHZTrg.mp3",
+              "mime_type": "audio/mpeg",
+              "stream_response": false
+            }
+          },
+          "timestamp": "2026-10-22T15:23:19.844823+00:00"
+        },
+        {
+          "type": "stt-start",
+          "data": {
+            "engine": "stt.habab_openai_speech_recognition",
+            "metadata": {
+              "language": "ru-RU",
+              "format": "wav",
+              "codec": "pcm",
+              "bit_rate": 16,
+              "sample_rate": 16000,
+              "channel": 1
+            },
+            "audio_processing": {
+              "requires_external_vad": true,
+              "prefers_auto_gain_enabled": true,
+              "prefers_noise_reduction_enabled": true
+            }
+          },
+          "timestamp": "2026-10-22T15:23:19.844875+00:00"
+        },
+        {
+          "type": "stt-vad-start",
+          "data": {
+            "timestamp": 1150
+          },
+          "timestamp": "2026-10-22T15:23:20.993310+00:00"
+        },
+        {
+          "type": "stt-vad-end",
+          "data": {
+            "timestamp": 2930
+          },
+          "timestamp": "2026-10-22T15:23:22.787581+00:00"
+        },
+        {
+          "type": "stt-end",
+          "data": {
+            "stt_output": {
+              "text": "Включи тестовую лампу."
+            }
+          },
+          "timestamp": "2026-10-22T15:23:24.013919+00:00"
+        },
+        {
+          "type": "intent-start",
+          "data": {
+            "engine": "conversation.habab_deepseek",
+            "language": "ru",
+            "intent_input": "Включи тестовую лампу.",
+            "conversation_id": "01M5J3B9D43HHSCWMJ8JNY1900",
+            "device_id": null,
+            "satellite_id": null,
+            "prefer_local_intents": false
+          },
+          "timestamp": "2026-10-22T15:23:24.013965+00:00"
+        },
+        {
+          "type": "intent-end",
+          "data": {
+            "processed_locally": false,
+            "intent_output": {
+              "response": {
+                "speech": {
+                  "plain": {
+                    "speech": "Готово — тестовая лампа включена.",
+                    "extra_data": null
+                  }
+                },
+                "card": {},
+                "language": "ru",
+                "response_type": "action_done",
+                "data": {
+                  "success": [
+                    {
+                      "name": "Тестовая лампа",
+                      "type": "entity",
+                      "id": "light.testovaia_lampa"
+                    }
+                  ],
+                  "failed": []
+                }
+              },
+              "conversation_id": "01M5J3B9D43HHSCWMJ8JNY1900",
+              "continue_conversation": false
+            }
+          },
+          "timestamp": "2026-10-22T15:23:25.894305+00:00"
+        },
+        {
+          "type": "tts-start",
+          "data": {
+            "engine": "tts.habab_openai_voice",
+            "language": "ru-RU",
+            "voice": null,
+            "tts_input": "Готово — тестовая лампа включена.",
+            "acknowledge_override": false
+          },
+          "timestamp": "2026-10-22T15:23:25.894355+00:00"
+        },
+        {
+          "type": "tts-end",
+          "data": {
+            "tts_output": {
+              "media_id": "media-source://tts/-stream-/UVEe1SzfuGtANfLtWHZTrg.mp3",
+              "url": "/api/tts_proxy/UVEe1SzfuGtANfLtWHZTrg.mp3",
+              "mime_type": "audio/mpeg"
+            }
+          },
+          "timestamp": "2026-10-22T15:23:25.894409+00:00"
+        },
+        {
+          "type": "run-end",
+          "data": null,
+          "timestamp": "2026-10-22T15:23:25.894449+00:00"
+        }
+      ],
+      "state": "on",
+      "response_audio_bytes": 36518,
+      "pass": true
+    }
+  ],
+  "passed": true
+}

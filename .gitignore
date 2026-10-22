@@ -72,6 +72,7 @@ test/benchmarks/results/
 # Local Habab runtime; never publish credentials or Python environment.
 .env
 .env.*
+**/.env.opencode
 !.env.example
 .venv/
 

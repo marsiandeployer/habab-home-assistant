@@ -1,0 +1,217 @@
+// Independent downstream extension: no dependency on compiled HA internals.
+function installChat() {
+  // HA installs its scoped registry polyfill before defining home-assistant.
+  // Registering earlier loses the extension when that registry is replaced.
+  if (customElements.get("habab-setup-chat")) return;
+  const copy = {
+    ru: {
+      title: "Помощник", open: "Открыть чат с помощником", close: "Закрыть", fresh: "Новый чат",
+      intro: "Что подключим к вашему дому?", help: "Помогу найти устройство, проверить подключение и настроить Home Assistant.",
+      placeholder: "Например: проверь Bluetooth и найди устройства", send: "Отправить", stop: "Остановить",
+      working: "Проверяю и выполняю…", loading: "Подключаю помощника…", you: "Вы", assistant: "Помощник",
+      demo: "DeepSeek помогает с настройкой. Реальные устройства подключаются в вашей домашней установке Home Assistant.",
+      answering: "Готовлю ответ…", rate_limited: "Слишком много запросов. Повторите позже.",
+      settings: "Подключить DeepSeek", retry: "Повторить подключение",
+      deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
+      not_installed: "OpenCode ещё не подключён к контейнеру. Добавьте compose.opencode.yaml по инструкции установки.",
+      binary_changed: "Файл OpenCode изменился. Повторите prepare-opencode.py и пересоздайте контейнер.",
+      busy: "Помощник уже выполняет задачу. Дождитесь завершения и повторите подключение.",
+      stopped: "Выполнение остановлено. Уже сделанные изменения могли сохраниться.",
+      failed: "Не удалось завершить запрос. Некоторые действия могли выполниться. Повторите подключение, чтобы проверить историю.",
+    },
+    en: {
+      title: "Assistant", open: "Open assistant chat", close: "Close", fresh: "New chat",
+      intro: "What shall we connect?", help: "Find devices, check connections and set up Home Assistant.",
+      placeholder: "For example: check Bluetooth and scan for devices", send: "Send", stop: "Stop",
+      working: "Checking and working…", loading: "Connecting…", you: "You", assistant: "Assistant",
+      demo: "DeepSeek can help with setup. Connect real devices in your own Home Assistant installation.",
+      answering: "Preparing an answer…", rate_limited: "Too many requests. Try again later.",
+      settings: "Connect DeepSeek", retry: "Reconnect",
+      deepseek_required: "Connect DeepSeek in AI settings first.",
+      not_installed: "OpenCode is not mounted. Follow the installation guide to add compose.opencode.yaml.",
+      binary_changed: "The OpenCode executable changed. Run prepare-opencode.py again and recreate the container.",
+      busy: "The assistant is already working. Wait for it to finish, then reconnect.",
+      stopped: "Stopped. Changes already made may remain.",
+      failed: "The request did not finish. Some actions may have run. Reconnect to check the history.",
+    },
+  };
+
+  class HababSetupChat extends HTMLElement {
+    constructor() {
+      super();
+      this.attachShadow({mode: "open"});
+      this.messages = [];
+      this.busy = false;
+    }
+
+    get t() { return copy[this.language || "en"]; }
+    q(selector) { return this.shadowRoot.querySelector(selector); }
+
+    connectedCallback() {
+      if (this.shadowRoot.firstChild) return;
+      this.language = this.demo || this.hass?.locale.language.startsWith("ru") ? "ru" : "en";
+      const t = this.t;
+      this.shadowRoot.innerHTML = `<style>
+        :host{display:inline-flex;white-space:normal;color:var(--primary-text-color,#212121);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
+        *{box-sizing:border-box}button,textarea{font:inherit}button{cursor:pointer;color:inherit;background:transparent;border:0;min-height:44px;border-radius:8px;padding:8px 12px}button:hover{background:var(--secondary-background-color,#f0f2f4)}button:disabled{opacity:.5;cursor:default}
+        :is(button,textarea,a):focus-visible{outline:3px solid var(--primary-color,#007a9e);outline-offset:2px}::selection{background:var(--primary-color,#007a9e);color:#fff}
+        .icon{width:48px;height:48px;padding:12px;display:grid;place-items:center}svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+        dialog{color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border:0;border-radius:16px;padding:0;width:min(680px,calc(100vw - 32px));height:min(720px,calc(100dvh - 48px));max-width:none;max-height:none;margin:auto;box-shadow:0 18px 56px #0003}
+        dialog::backdrop{background:#0005}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}
+        #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:26px;line-height:1.25;font-weight:500;margin:0 0 12px}.empty p{color:var(--secondary-text-color,#5f6368);margin:0;max-width:55ch}
+        .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
+        footer{padding:12px 20px 20px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
+        form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
+        @media(max-width:600px){dialog{width:100vw;height:100dvh;border-radius:0;margin:0}header{padding:8px 12px}#log{padding:20px 16px}footer{padding:12px 12px max(16px,env(safe-area-inset-bottom))}.empty h3{font-size:24px}.fresh{padding-inline:8px}.message.user{max-width:92%}}
+        @media(prefers-reduced-motion:no-preference){dialog[open]{animation:arrive 160ms cubic-bezier(.16,1,.3,1)}@keyframes arrive{from{transform:translateY(10px);opacity:.7}to{transform:translateY(0);opacity:1}}}
+      </style>
+      <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
+      <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <div id="log" role="log" aria-live="polite" aria-label="${t.title}"></div><footer><p id="status" role="status"></p><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
+      <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
+      this.q(".launcher").onclick = () => this.open();
+      this.q(".close").onclick = () => this.q("dialog").close();
+      this.q("dialog").addEventListener("close", () => this.q(".launcher").focus());
+      this.q(".fresh").onclick = () => this.connect(true);
+      this.q(".retry").onclick = () => this.connect();
+      this.q("form").onsubmit = (event) => {event.preventDefault(); this.send();};
+      this.q("textarea").onkeydown = (event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {event.preventDefault(); this.send();}
+      };
+      this.q(".stop").onclick = () => this.stop();
+      this.draw();
+    }
+
+    async open() {
+      this.q("dialog").showModal();
+      this.q("textarea").focus();
+      if (!this.sessionId && !this.busy) await this.connect();
+    }
+
+    status(text, error = false) {
+      this.q("#status").textContent = text;
+      this.q("#status").classList.toggle("error", error);
+      this.q(".recovery").hidden = !error;
+      this.q(".recovery a").hidden = this.demo;
+    }
+
+    controls() {
+      this.q("textarea").disabled = !this.sessionId || this.busy;
+      this.q(".send").disabled = !this.sessionId || this.busy;
+      this.q(".send").hidden = this.busy;
+      this.q(".stop").hidden = !this.running || this.demo;
+      this.q(".fresh").disabled = this.busy || !this.sessionId;
+      this.q(".retry").disabled = this.busy;
+    }
+
+    async connect(fresh = false) {
+      if (this.busy) return;
+      this.busy = true;
+      this.status(this.t.loading);
+      this.controls();
+      try {
+        const result = this.demo
+          ? await this.demoRequest(fresh ? "/reset" : "", fresh ? "POST" : "GET")
+          : await this.hass.callWS({type: "habab_home/agent/session", new: fresh});
+        this.sessionId = result.session_id;
+        this.messages = result.messages;
+        this.draw();
+        this.status(this.demo ? this.t.demo : "");
+      } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
+      finally { this.busy = false; this.controls(); if (this.q("dialog").open) this.q("textarea").focus(); }
+    }
+
+    async demoRequest(suffix = "", method = "GET", text) {
+      const response = await fetch(`/api/ha-demo/chat${suffix}`, {
+        method, credentials: "same-origin", headers: {"Content-Type": "application/json"},
+        ...(text !== undefined ? {body: JSON.stringify({text})} : {}),
+      });
+      const result = await response.json();
+      if (!response.ok) throw {code: result.error};
+      return {session_id: "public-demo", messages: result.messages.map(item => ({role: item.role, text: item.content}))};
+    }
+
+    draw() {
+      const log = this.q("#log");
+      log.replaceChildren();
+      if (!this.messages.length) {
+        const empty = document.createElement("div"); empty.className = "empty";
+        const title = document.createElement("h3"); title.textContent = this.t.intro;
+        const help = document.createElement("p"); help.textContent = this.t.help;
+        empty.append(title, help); log.append(empty);
+      }
+      for (const message of this.messages) {
+        const row = document.createElement("div"); row.className = `message ${message.role}`;
+        const name = document.createElement("div"); name.className = "name"; name.textContent = message.role === "user" ? this.t.you : this.t.assistant;
+        const markdown = message.role === "assistant" && customElements.get("ha-markdown");
+        const text = document.createElement(markdown ? "ha-markdown" : "p");
+        if (markdown) {text.content = message.text; text.breaks = true;}
+        else text.textContent = message.text;
+        row.append(name, text); log.append(row);
+      }
+      log.scrollTop = log.scrollHeight;
+      const tail = log.lastChild;
+      Promise.allSettled([...log.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
+        if (log.lastChild === tail) log.scrollTop = log.scrollHeight;
+      });
+    }
+
+    async send() {
+      const text = this.q("textarea").value.trim();
+      if (!text || !this.sessionId || this.busy) return;
+      this.busy = true; this.running = true; this.stopped = false;
+      this.messages.push({role: "user", text}); this.q("textarea").value = "";
+      this.draw(); this.status(this.demo ? this.t.answering : this.t.working); this.controls();
+      try {
+        const result = this.demo ? await this.demoRequest("", "POST", text)
+          : await this.hass.callWS({type: "habab_home/agent/run", session_id: this.sessionId, text});
+        this.messages = result.messages; this.draw(); this.status(this.stopped ? this.t.stopped : this.demo ? this.t.demo : "");
+      } catch (error) { this.status(this.stopped ? this.t.stopped : this.t[error.code] || this.t.failed, true); }
+      finally { this.busy = false; this.running = false; this.controls(); if (this.q("dialog").open) this.q("textarea").focus(); }
+    }
+
+    async stop() {
+      this.q(".stop").disabled = true;
+      try {
+        const result = await this.hass.callWS({type: "habab_home/agent/abort", session_id: this.sessionId});
+        this.stopped = result.stopped;
+        if (this.stopped) this.status(this.t.stopped);
+      } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
+      finally { this.q(".stop").disabled = false; }
+    }
+  }
+  customElements.define("habab-setup-chat", HababSetupChat);
+
+  function locate(root) {
+    for (const element of root.querySelectorAll("*")) {
+      if (element.localName === "hui-root") return element;
+      if (element.shadowRoot) {const found = locate(element.shadowRoot); if (found) return found;}
+    }
+  }
+
+  // A downstream module must also work with the stock Docker frontend. Keep the
+  // search off the render loop and reuse the element across dashboard updates.
+  let launcher;
+  setInterval(() => {
+    const dashboard = locate(document);
+    const actions = dashboard?.shadowRoot?.querySelector(".toolbar .action-items");
+    if (!actions) return;
+    const demo = document.documentElement.dataset.hababDemo === "true";
+    const hass = dashboard.hass;
+    if (!demo && !hass?.user?.is_admin) {launcher?.remove(); return;}
+    if (!launcher) {
+      launcher = document.createElement("habab-setup-chat");
+      launcher.demo = demo;
+      launcher.hass = hass;
+    }
+    launcher.hass = hass;
+    if (launcher.parentNode !== actions) actions.prepend(launcher);
+  }, 1500);
+}
+
+const registryReady = setInterval(() => {
+  if (customElements.get("home-assistant")) {
+    clearInterval(registryReady);
+    installChat();
+  }
+}, 50);

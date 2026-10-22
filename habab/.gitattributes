@@ -1,0 +1,3 @@
+# Preserve audio fixtures and Windows launchers when the public repo is cloned.
+*.wav binary
+*.bat text eol=crlf

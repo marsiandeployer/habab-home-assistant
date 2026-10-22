@@ -1,0 +1,32 @@
+{
+  "title": "Habab Home AI",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect an AI provider",
+        "description": "Get a key from [OpenAI](https://platform.openai.com/api-keys), [DeepSeek](https://platform.deepseek.com/api_keys), or [Google AI Studio](https://aistudio.google.com/api-keys). API billing and quotas are managed by the provider. Saving makes a small model and tool-calling check. The key is stored in this Home Assistant installation.",
+        "data": {
+          "provider": "Provider",
+          "api_key": "API key",
+          "model": "Model"
+        }
+      }
+    },
+    "error": {
+      "invalid_provider": "Choose one of the supported providers.",
+      "invalid_auth": "The key was rejected. Check API access and your key.",
+      "invalid_model": "The model request was rejected. Check its name and tool support.",
+      "tools_unsupported": "The model did not call the test tool. Choose a tool-capable model.",
+      "quota": "The provider reported a balance or request limit. Check billing and quotas.",
+      "cannot_connect": "Could not connect to the provider.",
+      "timeout": "The connection check timed out.",
+      "invalid_response": "The provider returned an unexpected response.",
+      "assistant_busy": "The assistant is busy. Wait for the current command to finish.",
+      "assistant_failed": "The request could not finish. Check device states: some actions may have completed."
+    },
+    "abort": {
+      "reconfigured": "Connection checked and updated.",
+      "setup_failed": "Settings saved, but the integration failed to start."
+    }
+  }
+}

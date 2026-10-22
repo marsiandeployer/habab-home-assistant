@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "powershell_main_parser": "PASS",
+  "powershell_download_wrapper_parser": "PASS",
+  "npm_sha512_download": "PASS",
+  "volume_install_and_warm_reuse": "PASS",
+  "mounted_linux_executable_version": "1.14.21",
+  "windows_physical_execution": "NOT RUN"
+}

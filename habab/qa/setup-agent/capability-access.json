@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "cases": [
+    {
+      "case": "no_token",
+      "http": 403,
+      "pass": true
+    },
+    {
+      "case": "owner_bearer_without_capability",
+      "http": 403,
+      "pass": true
+    },
+    {
+      "case": "wrong_capability",
+      "http": 403,
+      "pass": true
+    }
+  ]
+}

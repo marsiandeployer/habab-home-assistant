@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "cases": [
+    {
+      "command": "habab_home/providers/list",
+      "denied": true
+    },
+    {
+      "command": "habab_home/providers/check",
+      "denied": true
+    },
+    {
+      "command": "habab_home/providers/save",
+      "denied": true
+    },
+    {
+      "anonymous_status_denied": true
+    }
+  ]
+}

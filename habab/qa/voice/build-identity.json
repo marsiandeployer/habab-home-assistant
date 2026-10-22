@@ -1,0 +1,25 @@
+{
+  "image": "habab-home:voice-20261022",
+  "image_id": "sha256:f4b30c05dee1f9b81db49271843f9c38000f1a7d73d6bf06c259e807711f3e7e",
+  "source_matches_runtime": true,
+  "source_matches_image": true,
+  "source_files": {
+    "providers.py": "0256115c5a93f16bf3d75bcd33f502c796f22ab097b7079bb42cbff506554ccf",
+    "manifest.json": "01b9fd1972190ef9d64bfe3a8b7e9facc9ba0e1a3f3c7517a8b047e76feb842c",
+    "speech.py": "e242f4d58143e8d9cd251f2798a4f7858fc1a32d220cebb887fe96b7cc13824c",
+    "stt.py": "a4137fafbd03c01ddcf7622445aba61df35c170971efd3a4318f2d3a5bbbbf22",
+    "config_flow.py": "438eb3a4fd0923064308013edc2e87b288ee967a7ae79a5d0d23e9becd186ebf",
+    "conversation.py": "6d27c87f2f70efb9a2f2d93bb6b4c4b10b7724adb67ec619154815a67b399ffc",
+    "websocket.py": "1cf8b56dccaa4766e8a25af689f463a15871cb18e790178a10db67640ab3fb54",
+    "strings.json": "81dbb401ca4b88dbb8aae31fea89f96f3408cba08358b0325d78a1a8e4a7e2b9",
+    "const.py": "474980c39d9c614078805b2cd4d971e33315f12a65df287dfcf23eedfb0350bb",
+    "__init__.py": "c101f7d1ddbb3a46910b81b6eb0e6d93a1958a197f83350290e714825d1d82df",
+    "tts.py": "2ffba4f5714db19c4e69693ef39bc2fdc0efbbbd0804b85037ee57a3265d5b3a",
+    "frontend/voice.js": "38db48233d4a237cad1bb76874d47a6f1351c45647f8b087e0805fda90523cef",
+    "frontend/recorder-worklet.js": "b4b5dd6c23d1fb54f0b17642b16dc77b086edc1ad1bcdf3fddf7381afb1fc7bc",
+    "frontend/strings.js": "5248484b4822f3a22a9f3a63cd45ac8378b77f893a0ecf6827ef8674cd517b5e",
+    "frontend/ai-panel.js": "fca050acb4ebd6ac2c9327786dc609617f79823a51fdce802a727815f715ee0b",
+    "translations/en.json": "81dbb401ca4b88dbb8aae31fea89f96f3408cba08358b0325d78a1a8e4a7e2b9",
+    "translations/ru.json": "761a8ff7d9599cf40f953fb636dcad8299ee46d5439a4fd14cd21e0732a3611c"
+  }
+}

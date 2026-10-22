@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "role": "viewer",
+      "command": "habab_home/agent/run",
+      "code": "unauthorized",
+      "pass": true
+    },
+    {
+      "role": "viewer",
+      "command": "habab_home/agent/abort",
+      "code": "unauthorized",
+      "pass": true
+    },
+    {
+      "role": "viewer",
+      "command": "habab_home/agent/session",
+      "code": "unauthorized",
+      "pass": true
+    },
+    {
+      "role": "admin",
+      "command": "habab_home/agent/run",
+      "code": "not_found",
+      "pass": true
+    },
+    {
+      "role": "admin",
+      "command": "habab_home/agent/abort",
+      "code": "not_found",
+      "pass": true
+    }
+  ],
+  "temporary_users_removed": 2
+}

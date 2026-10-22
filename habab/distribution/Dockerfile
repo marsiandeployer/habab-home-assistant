@@ -9,7 +9,8 @@ LABEL org.opencontainers.image.title="Habab Home" \
 COPY src/habab_home /usr/src/homeassistant/homeassistant/components/habab_home
 COPY config/configuration.yaml /usr/local/share/habab-home/configuration.yaml
 COPY docker-entrypoint.sh /usr/local/bin/habab-home-entrypoint
-RUN chmod 0755 /usr/local/bin/habab-home-entrypoint
+COPY habab-ha.py /usr/local/bin/habab-ha
+RUN chmod 0755 /usr/local/bin/habab-home-entrypoint /usr/local/bin/habab-ha
 
 ENTRYPOINT ["/usr/local/bin/habab-home-entrypoint"]
 CMD ["/init"]

@@ -1,0 +1,13 @@
+# Shares only the executable, never the host OpenCode HOME/config/session state.
+services:
+  homeassistant:
+    environment:
+      HABAB_OPENCODE_BINARY: /opt/habab-opencode/opencode
+      HABAB_OPENCODE_SHA256: ${HABAB_OPENCODE_SHA256:?Run prepare-opencode.py first}
+    volumes:
+      - type: bind
+        source: ${HABAB_OPENCODE_HOST_BINARY:?Run prepare-opencode.py first}
+        target: /opt/habab-opencode/opencode
+        read_only: true
+        bind:
+          create_host_path: false

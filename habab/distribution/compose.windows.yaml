@@ -1,0 +1,20 @@
+# No Windows drive, user HOME, Docker socket or physical device mounts.
+services:
+  homeassistant:
+    image: habab-home:windows-test
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HABAB_HOME_PORT:-8123}:8123"
+    environment:
+      TZ: Europe/Moscow
+      HABAB_OPENCODE_SHA256: ${HABAB_OPENCODE_SHA256:?Run start-windows.bat}
+    volumes:
+      - config:/config
+      - opencode:/opt/habab-opencode:ro
+volumes:
+  config:
+  opencode:
+    external: true
+    name: habab-home-opencode-bin

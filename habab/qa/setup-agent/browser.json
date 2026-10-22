@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "mode": "native",
+      "pass": true,
+      "viewports": [
+        "1280x800",
+        "390x844"
+      ],
+      "toolbar": true,
+      "escapeAndReopen": true
+    },
+    {
+      "mode": "demo",
+      "pass": true,
+      "viewports": [
+        "1280x800",
+        "390x844"
+      ],
+      "toolbar": true,
+      "escapeAndReopen": true
+    }
+  ],
+  "errors": [],
+  "status": "PASS"
+}

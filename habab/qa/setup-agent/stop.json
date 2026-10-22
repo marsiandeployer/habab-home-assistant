@@ -1,0 +1,7 @@
+{
+  "status": "PASS",
+  "real_tool_started": true,
+  "child_process_stopped": true,
+  "write_prevented": true,
+  "concurrent_request_rejected": true
+}

@@ -12,6 +12,10 @@
     "Russian-language install and operation documentation",
     "minimal first-boot configuration, seeded only when configuration.yaml is absent",
     "habab_home Core integration exposing authenticated product status",
-    "container identity and local Docker Compose packaging"
+    "container identity and local Docker Compose packaging",
+    "administrator-only AI connections for OpenAI, DeepSeek and Google Gemini",
+    "native Assist conversation agents and OpenAI speech input and output",
+    "administrator setup chat using private OpenCode and DeepSeek inside the HA container",
+    "read-only executable sharing and optional Bluetooth D-Bus Compose overrides"
   ]
 }

@@ -1,0 +1,12 @@
+# Optional access to host BlueZ, as documented by Home Assistant.
+# No Docker socket, host root filesystem or privileged mode.
+services:
+  homeassistant:
+    cap_add: [NET_ADMIN, NET_RAW]
+    volumes:
+      - type: bind
+        source: /run/dbus
+        target: /run/dbus
+        read_only: true
+        bind:
+          create_host_path: false
