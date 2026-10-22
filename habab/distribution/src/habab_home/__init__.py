@@ -39,13 +39,19 @@ async def async_setup(hass, config):
     agent = SetupAgent(hass)
     await agent.setup()
     hass.data[DOMAIN]["setup_agent"] = agent
+    from .telemetry import TelemetryManager, async_register_commands as async_register_telemetry_commands
+
+    telemetry = TelemetryManager(hass)
+    await telemetry.async_setup()
+    hass.data[DOMAIN]["telemetry"] = telemetry
+    async_register_telemetry_commands(hass)
     from .setup_actions import SetupActionsView
 
     hass.http.register_view(SetupActionsView)
     await async_register_panel(
         hass, frontend_url_path="habab-ai", webcomponent_name="habab-ai-panel",
         sidebar_title="AI", sidebar_icon="mdi:assistant", require_admin=True,
-        module_url="/habab-home/ai-panel.js?v=1",
+        module_url="/habab-home/ai-panel.js?v=2",
     )
     from .websocket import async_register_commands
 

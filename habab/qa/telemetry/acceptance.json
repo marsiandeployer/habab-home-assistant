@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "cases": [
+    "default_all_off",
+    "native_https_delivery_accepted",
+    "postgres_readback_exact_categories",
+    "revoked_categories_pruned",
+    "withdrawal_deletes_installation_and_diagnostics"
+  ]
+}

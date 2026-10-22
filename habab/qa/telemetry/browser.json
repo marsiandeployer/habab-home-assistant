@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "mode": "desktop",
+      "checked": false,
+      "usageDisabled": true,
+      "buttonEnabled": true,
+      "overflow": false,
+      "pageErrors": []
+    },
+    {
+      "mode": "mobile",
+      "checked": false,
+      "usageDisabled": true,
+      "buttonEnabled": true,
+      "overflow": false,
+      "pageErrors": []
+    }
+  ],
+  "status": "PASS"
+}

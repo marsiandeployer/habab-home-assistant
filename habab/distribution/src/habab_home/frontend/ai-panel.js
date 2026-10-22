@@ -1,5 +1,6 @@
 import { strings } from "./strings.js";
 import { AssistVoice } from "./voice.js";
+import "./telemetry-panel.js";
 
 const providers = {
   openai: { name: "OpenAI", model: "gpt-4.1-mini", keyUrl: "https://platform.openai.com/api-keys" },
@@ -26,6 +27,8 @@ class HababAIPanel extends HTMLElement {
     }
     const menu = this.shadowRoot.querySelector("ha-menu-button");
     if (menu) menu.hass = value;
+    const telemetry = this.shadowRoot.querySelector("habab-telemetry-panel");
+    if (telemetry) telemetry.hass = value;
   }
 
   connectedCallback() {
@@ -79,8 +82,10 @@ class HababAIPanel extends HTMLElement {
       <div class="links"><a href="/config/voice-assistants/expose">${this.t("expose")}</a><a href="/config/voice-assistants/assistants">${this.t("voiceSettings")}</a></div>
       <label for="command">${this.t("command")}</label><textarea id="command" maxlength="1000" placeholder="${this.t("commandExample")}"></textarea><div class="actions"><button type="button" id="send" class="primary">${this.t("send")}</button></div>
       <div class="voice"><p class="help" id="voice-status"></p><div class="actions"><button type="button" id="create-voice">${this.t("createVoice")}</button><button type="button" id="mic">${this.t("mic")}</button></div><p class="help">${this.t("voiceHelp")}</p></div>
-      <div id="answer" role="status" aria-live="polite" hidden></div></section><p class="help disclosure">${this.t("cloud")}</p></main>`;
+      <div id="answer" role="status" aria-live="polite" hidden></div></section><p class="help disclosure">${this.t("cloud")}</p>
+      <habab-telemetry-panel></habab-telemetry-panel></main>`;
     this.q("ha-menu-button").hass = this._hass;
+    this.q("habab-telemetry-panel").hass = this._hass;
     this.q("nav").addEventListener("click", (event) => {
       const button = event.target.closest("[data-provider]");
       if (!button || this.busy) return;
