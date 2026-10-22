@@ -1,0 +1,520 @@
+diff --git a/build-scripts/bundle.cjs b/build-scripts/bundle.cjs
+index 4757a97..65ba7f8 100644
+--- a/build-scripts/bundle.cjs
++++ b/build-scripts/bundle.cjs
+@@ -277 +277,3 @@ module.exports.config = {
+-      publicPath: publicPath(latestBuild),
++      // Resolve from the demo bundle directory back to this same directory.
++      // Rspack combines this with import.meta.url when loading nested workers.
++      publicPath: publicPath(latestBuild, "./../"),
+@@ -280,0 +283 @@ module.exports.config = {
++        __STATIC_PATH__: JSON.stringify("./static/"),
+diff --git a/demo/public/_headers b/demo/public/_headers
+index 1a4137c..0ba318d 100644
+--- a/demo/public/_headers
++++ b/demo/public/_headers
+@@ -3 +3 @@
+-  Content-Security-Policy: form-action https:
++  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob: data:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://habab.ru https://www.habab.ru
+diff --git a/demo/public/manifest.json b/demo/public/manifest.json
+index 209ee1d..da5fba8 100644
+--- a/demo/public/manifest.json
++++ b/demo/public/manifest.json
+@@ -74 +74 @@
+-  "lang": "en-US",
++  "lang": "ru-RU",
+@@ -77 +77 @@
+-  "start_url": "/?homescreen=1",
++  "start_url": "./?homescreen=1",
+diff --git a/demo/src/configs/demo-configs.ts b/demo/src/configs/demo-configs.ts
+index cd7bb69..0b5dee5 100644
+--- a/demo/src/configs/demo-configs.ts
++++ b/demo/src/configs/demo-configs.ts
+@@ -126 +126 @@ const initialDemo = () => {
+-  return slug && demos.includes(slug) ? slug : demos[0];
++  return slug && demos.includes(slug) ? slug : "home";
+diff --git a/demo/src/configs/home/areas.ts b/demo/src/configs/home/areas.ts
+index 3174876..22089f3 100644
+--- a/demo/src/configs/home/areas.ts
++++ b/demo/src/configs/home/areas.ts
+@@ -7 +7 @@ export const demoFloorsHome: DemoFloor[] = [
+-    name: "Ground floor",
++    name: "Первый этаж",
+@@ -12 +12 @@ export const demoFloorsHome: DemoFloor[] = [
+-    name: "Upstairs",
++    name: "Второй этаж",
+@@ -20 +20 @@ export const demoAreasHome: DemoArea[] = [
+-    name: "Living room",
++    name: "Гостиная",
+@@ -28 +28 @@ export const demoAreasHome: DemoArea[] = [
+-    name: "Kitchen",
++    name: "Кухня",
+@@ -36 +36 @@ export const demoAreasHome: DemoArea[] = [
+-    name: "Entrance",
++    name: "Прихожая",
+@@ -42 +42 @@ export const demoAreasHome: DemoArea[] = [
+-    name: "Bedroom",
++    name: "Спальня",
+@@ -50 +50 @@ export const demoAreasHome: DemoArea[] = [
+-    name: "Office",
++    name: "Кабинет",
+@@ -58 +58 @@ export const demoAreasHome: DemoArea[] = [
+-    name: "Garden",
++    name: "Участок",
+diff --git a/demo/src/configs/home/entities.ts b/demo/src/configs/home/entities.ts
+index 76e83d9..943e45d 100644
+--- a/demo/src/configs/home/entities.ts
++++ b/demo/src/configs/home/entities.ts
+@@ -3,0 +4,12 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
++  {
++    entity_id: "scene.evening",
++    state: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
++    area_id: "living_room",
++    attributes: { friendly_name: "Вечерний свет", icon: "mdi:weather-night" },
++  },
++  {
++    entity_id: "scene.focus",
++    state: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
++    area_id: "office",
++    attributes: { friendly_name: "Рабочий режим", icon: "mdi:briefcase" },
++  },
+@@ -13 +25 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Home",
++      friendly_name: "Дом",
+@@ -29 +41 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Floor lamp",
++      friendly_name: "Торшер",
+@@ -42 +54 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Spotlights",
++      friendly_name: "Точечный свет",
+@@ -56 +68 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Thermostat",
++      friendly_name: "Термостат",
+@@ -67 +79 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Blinds",
++      friendly_name: "Шторы",
+@@ -77 +89 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Window",
++      friendly_name: "Окно",
+@@ -98 +110 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Living room speaker",
++      friendly_name: "Колонка в гостиной",
+@@ -110 +122 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Temperature",
++      friendly_name: "Температура",
+@@ -121 +133 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Humidity",
++      friendly_name: "Влажность",
+@@ -133 +145 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Spotlights",
++      friendly_name: "Точечный свет",
+@@ -146 +158 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Worktop",
++      friendly_name: "Подсветка столешницы",
+@@ -156 +168 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Coffee machine",
++      friendly_name: "Кофемашина",
+@@ -165 +177 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Motion",
++      friendly_name: "Датчик движения",
+@@ -176 +188 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Kitchen speaker",
++      friendly_name: "Колонка на кухне",
+@@ -188 +200 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Temperature",
++      friendly_name: "Температура",
+@@ -199 +211 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Humidity",
++      friendly_name: "Влажность",
+@@ -207 +219 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Front door",
++      friendly_name: "Входная дверь",
+@@ -217 +229 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Front door",
++      friendly_name: "Входная дверь",
+@@ -227 +239 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Home alarm",
++      friendly_name: "Охранная система",
+@@ -239 +251 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Ceiling light",
++      friendly_name: "Потолочный свет",
+@@ -251 +263 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Front door lock battery",
++      friendly_name: "Батарея замка входной двери",
+@@ -262 +274 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Ceiling light",
++      friendly_name: "Потолочный свет",
+@@ -275 +287 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Bedside lamp",
++      friendly_name: "Прикроватная лампа",
+@@ -286 +298 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Shutter",
++      friendly_name: "Рольставня",
+@@ -296 +308 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Bedroom speaker",
++      friendly_name: "Колонка в спальне",
+@@ -306 +318 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Motion",
++      friendly_name: "Датчик движения",
+@@ -317 +329 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Motion sensor battery",
++      friendly_name: "Батарея датчика движения",
+@@ -328 +340 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Temperature",
++      friendly_name: "Температура",
+@@ -339 +351 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Humidity",
++      friendly_name: "Влажность",
+@@ -351 +363 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Desk lamp",
++      friendly_name: "Настольная лампа",
+@@ -362 +374 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Ceiling fan",
++      friendly_name: "Потолочный вентилятор",
+@@ -372 +384 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Window",
++      friendly_name: "Окно",
+@@ -383 +395 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Temperature",
++      friendly_name: "Температура",
+@@ -394 +406 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Humidity",
++      friendly_name: "Влажность",
+@@ -403 +415 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Sprinkler",
++      friendly_name: "Полив участка",
+@@ -415 +427 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Path lights",
++      friendly_name: "Освещение дорожки",
+@@ -425 +437 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Gate",
++      friendly_name: "Ворота",
+@@ -436 +448 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Temperature",
++      friendly_name: "Температура",
+@@ -447 +459 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Humidity",
++      friendly_name: "Влажность",
+@@ -462 +474 @@ export const demoEntitiesHome: DemoConfig["entities"] = () => [
+-      friendly_name: "Home",
++      friendly_name: "Дом",
+diff --git a/demo/src/configs/home/index.ts b/demo/src/configs/home/index.ts
+index 2fa303b..c53ceaa 100644
+--- a/demo/src/configs/home/index.ts
++++ b/demo/src/configs/home/index.ts
+@@ -9 +9 @@ export const demoHome: DemoConfig = {
+-  name: "Home page",
++  name: "Мой дом",
+@@ -11 +11 @@ export const demoHome: DemoConfig = {
+-    "The page you land on when you open Home Assistant, automatically built from the areas in your home and the devices in them.",
++    "Обзор дома, автоматически собранный по комнатам и устройствам.",
+diff --git a/demo/src/configs/home/lovelace.ts b/demo/src/configs/home/lovelace.ts
+index 6ddef19..f941349 100644
+--- a/demo/src/configs/home/lovelace.ts
++++ b/demo/src/configs/home/lovelace.ts
+@@ -7 +7 @@ export const demoLovelaceHome: DemoConfig["lovelace"] = () => ({
+-    favorite_entities: ["lock.front_door", "switch.garden_sprinkler"],
++    favorite_entities: ["lock.front_door", "scene.evening", "scene.focus"],
+diff --git a/demo/src/ha-demo.ts b/demo/src/ha-demo.ts
+index 98efe2d..683913e 100644
+--- a/demo/src/ha-demo.ts
++++ b/demo/src/ha-demo.ts
+@@ -93,0 +94,36 @@ export class HaDemo extends HomeAssistantAppEl {
++    let demoStateReady = false;
++    const installedStateHooks = new WeakSet<object>();
++    const lastPersistedState: Record<string, string> = {};
++
++    const installDemoStateHooks = () => {
++      for (const [entityId, entity] of Object.entries(hass.mockEntities) as any) {
++        if (!isDemoPersistedEntity(entityId) || !entity?.hass) continue;
++        const entityHass = entity.hass as MockHomeAssistant;
++        if (installedStateHooks.has(entityHass)) continue;
++        installedStateHooks.add(entityHass);
++        const updateStates = entityHass.updateStates.bind(entityHass);
++        entityHass.updateStates = (updates) => {
++          const changed: string[] = [];
++          if (demoStateReady) {
++            for (const [updatedId, next] of Object.entries(updates)) {
++              if (!isDemoPersistedEntity(updatedId)) continue;
++              const value = JSON.stringify({
++                state: next.state,
++                brightness: next.attributes.brightness,
++                temperature: next.attributes.temperature,
++              });
++              if (lastPersistedState[updatedId] !== value) {
++                lastPersistedState[updatedId] = value;
++                changed.push(updatedId);
++              }
++            }
++          }
++          const result = updateStates(updates);
++          if (changed.length) {
++            void persistDemoEntities(this.hass!, changed).catch(() => undefined);
++          }
++          return result;
++        };
++      }
++    };
++
+@@ -103,0 +140,5 @@ export class HaDemo extends HomeAssistantAppEl {
++    hass.updateHass({
++      language: "ru",
++      selectedLanguage: "ru",
++      locale: { ...hass.locale, language: "ru" },
++    });
+@@ -296 +337 @@ export class HaDemo extends HomeAssistantAppEl {
+-      ([conf, localize]) => {
++      async ([conf, localize]) => {
+@@ -299,0 +341 @@ export class HaDemo extends HomeAssistantAppEl {
++        installDemoStateHooks();
+@@ -301,0 +344,83 @@ export class HaDemo extends HomeAssistantAppEl {
++        try {
++          const response = await fetch("/api/ha-demo/state", {
++            credentials: "same-origin",
++          });
++          if (!response.ok) throw new Error("Demo state is unavailable");
++          const payload = await response.json();
++          const restored = {};
++          for (const [entityId, saved] of Object.entries(payload.states ?? {})) {
++            // provideHass() returns its initial object; updateHass replaces it
++            // when the live host state changes. Read the current host snapshot.
++            const current = this.hass!.states[entityId];
++            if (!current || !isDemoPersistedEntity(entityId)) continue;
++            const mockEntity = hass.mockEntities[entityId];
++            if (mockEntity && typeof mockEntity.update === "function") {
++              // Keep the mock entity's own model in sync with the state map.
++              // Its later update() calls republish to hass.states from toState().
++              mockEntity.update({
++                state: saved.state,
++                attributes: saved.attributes ?? {},
++              });
++              restored[entityId] = mockEntity.toState();
++            } else {
++              restored[entityId] = {
++                ...current,
++                state: saved.state,
++                attributes: { ...current.attributes, ...saved.attributes },
++              };
++            }
++          }
++          // Publish through the HA element so both the root property and its
++          // grouped Lit context providers see the restored map.
++          this._updateHass({
++            states: { ...this.hass!.states, ...restored },
++          });
++          for (const entityId of DEMO_PERSISTED_ENTITY_IDS) {
++            const state = this.hass!.states[entityId];
++            if (state) {
++              lastPersistedState[entityId] = JSON.stringify({
++                state: state.state,
++                brightness: state.attributes.brightness,
++                temperature: state.attributes.temperature,
++              });
++            }
++          }
++          demoStateReady = true;
++          hass.mockService("scene", "turn_on", async (data, target, demoHass) => {
++            const ids = data?.entity_id ?? target?.entity_id;
++            const sceneId = Array.isArray(ids) ? ids[0] : ids;
++            const affected = sceneId === "scene.evening"
++              ? [["light.living_room_floor_lamp", "on", 180], ["light.living_room_spotlights", "off"]]
++              : sceneId === "scene.focus"
++                ? [["light.office_desk_lamp", "on", 255], ["light.living_room_floor_lamp", "off"]]
++                : [];
++            if (!affected.length) return;
++            const changes = {};
++            for (const [entityId, state, brightness] of affected) {
++              const old = demoHass.states[entityId];
++              if (!old) continue;
++              changes[entityId] = {
++                ...old,
++                state,
++                attributes: {
++                  ...old.attributes,
++                  ...(brightness === undefined ? {} : { brightness }),
++                },
++              };
++            }
++            demoHass.updateStates(changes);
++            for (const [entityId, state] of Object.entries(changes)) {
++              lastPersistedState[entityId] = JSON.stringify({
++                state: state.state,
++                brightness: state.attributes.brightness,
++                temperature: state.attributes.temperature,
++              });
++            }
++            await persistDemoEntities(demoHass, Object.keys(changes));
++          });
++        } catch (error) {
++          showDemoStateFailure(
++            "Не удалось загрузить состояние демо. Проверьте соединение и попробуйте снова."
++          );
++          throw error;
++        }
+@@ -324,0 +450,91 @@ export class HaDemo extends HomeAssistantAppEl {
++const DEMO_PERSISTED_ENTITY_IDS = [
++  "climate.living_room",
++  "light.living_room_floor_lamp",
++  "light.living_room_spotlights",
++  "light.kitchen_spotlights",
++  "light.kitchen_worktop",
++  "light.entrance_ceiling",
++  "light.bedroom_ceiling",
++  "light.bedside_lamp",
++  "light.office_desk_lamp",
++  "light.garden_path",
++];
++
++const isDemoPersistedEntity = (entityId: string) =>
++  DEMO_PERSISTED_ENTITY_IDS.includes(entityId);
++
++const showDemoStateFailure = (message: string) => {
++  if (document.querySelector("[data-ha-demo-state-failure]")) return;
++  const panel = document.createElement("main");
++  panel.dataset.haDemoStateFailure = "true";
++  panel.setAttribute("role", "alert");
++  panel.setAttribute("aria-live", "assertive");
++  panel.style.cssText =
++    "position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:24px;box-sizing:border-box;background:var(--primary-background-color,#f5f5f5);color:var(--primary-text-color,#212121);font:16px Roboto,Arial,sans-serif";
++  const content = document.createElement("section");
++  content.style.cssText =
++    "max-width:440px;padding:28px;border-radius:12px;background:var(--card-background-color,#fff);box-shadow:0 4px 24px #0002;text-align:center";
++  const heading = document.createElement("h1");
++  heading.textContent = "Демо временно недоступно";
++  heading.style.cssText = "font-size:22px;margin:0 0 12px";
++  const detail = document.createElement("p");
++  detail.textContent = message;
++  detail.style.cssText = "line-height:1.5;margin:0 0 20px";
++  const retry = document.createElement("button");
++  retry.type = "button";
++  retry.textContent = "Вернуться в демо";
++  retry.style.cssText =
++    "min-height:44px;padding:0 20px;border:0;border-radius:8px;background:#03a9f4;color:#fff;font:inherit;font-weight:600;cursor:pointer";
++  retry.addEventListener("click", () => {
++    retry.disabled = true;
++    retry.textContent = "Загружаем демо…";
++    // Clear only the demo app's transient route. The server-side saved state
++    // remains untouched and is reloaded by the normal startup GET.
++    window.location.replace(window.location.pathname);
++  });
++  content.append(heading, detail, retry);
++  panel.append(content);
++  document.body.replaceChildren(panel);
++};
++
++let demoPersistenceQueue: Promise<void> = Promise.resolve();
++
++const persistDemoEntities = (hass: MockHomeAssistant, entityIds: string[]) => {
++  const entities = entityIds.map((entity_id) => {
++    const entity = hass.states[entity_id];
++    return {
++      entity_id,
++      state: entity.state,
++      ...(entity.attributes.brightness == null ? {} : { brightness: entity.attributes.brightness }),
++      ...(entity.attributes.temperature == null ? {} : { temperature: entity.attributes.temperature }),
++    };
++  });
++  const save = demoPersistenceQueue.then(async () => {
++    let response: Response;
++    try {
++      response = await fetch("/api/ha-demo/state", {
++        method: "POST",
++        credentials: "same-origin",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ entities }),
++      });
++    } catch {
++      showDemoStateFailure(
++        "Изменение не сохранено. Проверьте соединение и попробуйте снова."
++      );
++      throw new Error("Home Assistant demo state write failed");
++    }
++    if (!response.ok) {
++      showDemoStateFailure(
++        "Изменение не сохранено. Проверьте соединение и попробуйте снова."
++      );
++      throw new Error("Home Assistant demo state write failed");
++    }
++    if (window.parent !== window) {
++      window.parent.postMessage({ type: "habab-ha-demo-interaction" }, location.origin);
++    }
++  });
++  demoPersistenceQueue = save.catch(() => undefined);
++  return save;
++};
++
+diff --git a/demo/src/html/index.html.template b/demo/src/html/index.html.template
+index de7e152..1753d8d 100644
+--- a/demo/src/html/index.html.template
++++ b/demo/src/html/index.html.template
+@@ -4,0 +5 @@
++    <script>window.name = "ha-main-window";</script>
+diff --git a/demo/src/stubs/person.ts b/demo/src/stubs/person.ts
+index 075b09b..2d82ae2 100644
+--- a/demo/src/stubs/person.ts
++++ b/demo/src/stubs/person.ts
+@@ -7 +7 @@ const storage: Person[] = [
+-    name: "Demo User",
++    name: "Демо-пользователь",
+diff --git a/demo/src/stubs/translations.ts b/demo/src/stubs/translations.ts
+index 632d9ff..28610e6 100644
+--- a/demo/src/stubs/translations.ts
++++ b/demo/src/stubs/translations.ts
+@@ -4,0 +5,15 @@ import { connectivityBackendTranslations } from "./connectivity/fixtures";
++// Native component-state strings are supplied by Home Assistant Core in a
++// real installation. The standalone demo has no Core, so seed the same keys
++// from the official Russian locale artifact used by this build.
++const demoComponentTranslations = {
++  "component.light.entity_component._.state.on": "Включено",
++  "component.light.entity_component._.state.off": "Выключено",
++  "component.lock.entity_component._.state.locked": "Заблокировано",
++  "component.lock.entity_component._.state.unlocked": "Открыто",
++  "component.climate.entity_component._.state.heat": "Обогрев",
++  "component.cover.entity_component._.state.open": "Открыто",
++  "component.cover.entity_component._.state.closed": "Закрыто",
++  "component.weather.entity_component._.state.partlycloudy":
++    "Переменная облачность",
++};
++
+@@ -12,2 +27,4 @@ export const mockTranslations = (
+-      resources:
+-        (msg.category && connectivityBackendTranslations[msg.category]) || {},
++      resources: {
++        ...(msg.category && connectivityBackendTranslations[msg.category]),
++        ...(msg.category === "entity_component" ? demoComponentTranslations : {}),
++      },
+@@ -23 +40,5 @@ export const mockTranslations = (
+-      Object.assign({}, ...Object.values(connectivityBackendTranslations))
++      Object.assign(
++        {},
++        ...Object.values(connectivityBackendTranslations),
++        demoComponentTranslations
++      )
+diff --git a/src/dialogs/more-info/components/lights/dialog-light-color-favorite.ts b/src/dialogs/more-info/components/lights/dialog-light-color-favorite.ts
+index 4444f69..fa03244 100644
+--- a/src/dialogs/more-info/components/lights/dialog-light-color-favorite.ts
++++ b/src/dialogs/more-info/components/lights/dialog-light-color-favorite.ts
+@@ -277 +277 @@ class DialogLightColorFavorite extends DirtyStateProviderMixin<LightColorFavorit
+-          background-image: url("/static/images/color_wheel.png");
++          background-image: url("/demos/home-assistant/static/images/color_wheel.png");
+diff --git a/src/dialogs/more-info/controls/more-info-light.ts b/src/dialogs/more-info/controls/more-info-light.ts
+index 77bf4aa..ed0c56f 100644
+--- a/src/dialogs/more-info/controls/more-info-light.ts
++++ b/src/dialogs/more-info/controls/more-info-light.ts
+@@ -391 +391 @@ class MoreInfoLight extends LitElement {
+-          background-image: url("/static/images/color_wheel.png");
++          background-image: url("/demos/home-assistant/static/images/color_wheel.png");
+diff --git a/src/fake_data/provide_hass.ts b/src/fake_data/provide_hass.ts
+index e8cd310..e44453b 100644
+--- a/src/fake_data/provide_hass.ts
++++ b/src/fake_data/provide_hass.ts
+@@ -442 +442 @@ export const provideHass = (
+-      name: "Demo User",
++      name: "Демо-пользователь",
+diff --git a/src/util/register-service-worker.ts b/src/util/register-service-worker.ts
+index 6404c17..c7b3eb7 100644
+--- a/src/util/register-service-worker.ts
++++ b/src/util/register-service-worker.ts
+@@ -14 +14 @@ export const registerServiceWorker = async (
+-  if (!supportsServiceWorker()) {
++  if (__DEMO__ || !supportsServiceWorker()) {

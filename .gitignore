@@ -74,3 +74,7 @@ test/benchmarks/results/
 .env.*
 !.env.example
 .venv/
+
+# Habab build scripts and pinned translation are source, not compiler output.
+!habab/build/
+!habab/build/**

@@ -162,4 +162,3 @@ def put_demo_state():
         current_app.logger.warning('Home Assistant demo state write failed')
         return jsonify(error='Демо временно недоступно. Изменение не сохранено.'), 503
     return jsonify(saved=True)
-

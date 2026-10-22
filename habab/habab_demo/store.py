@@ -65,4 +65,3 @@ class HADemoStore:
                 ).fetchone()
                 if row['event_count'] > 120:
                     raise HADemoRateLimit()
-
