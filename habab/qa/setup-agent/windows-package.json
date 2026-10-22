@@ -1,8 +1,10 @@
 {
   "status": "PASS",
-  "filename": "habab-home-windows-4ac5defb0a8a.zip",
-  "sha256": "4ac5defb0a8ad6dd5b6b876cb03d0513063239e6d69344329e571b3ac2ecae72",
+  "filename": "habab-home-windows-7245ec1af7d7.zip",
+  "sha256": "7245ec1af7d760763dbcb90952084f058d284498a1bf09748fde35445bbb5a86",
   "files": 32,
   "windows_bat_crlf": true,
-  "windows_physical_execution": "NOT RUN"
+  "published_ps1_matches_source": true,
+  "credential_helper_path_fix_included": true,
+  "windows_physical_execution": "USER RETEST PENDING"
 }

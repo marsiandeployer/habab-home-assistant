@@ -13,6 +13,18 @@ function Find-Docker {
     return $null
 }
 
+function Add-DockerDirectoryToPath {
+    param([string]$DockerPath)
+    $dockerDirectory = Split-Path -Parent $DockerPath
+    $pathSeparator = [string][IO.Path]::PathSeparator
+    $pathEntries = @($env:PATH -split [regex]::Escape($pathSeparator))
+    if (-not ($pathEntries | Where-Object {
+        [string]::Equals($_, $dockerDirectory, [StringComparison]::OrdinalIgnoreCase)
+    })) {
+        $env:PATH = if ($env:PATH) { "$dockerDirectory$pathSeparator$env:PATH" } else { $dockerDirectory }
+    }
+}
+
 function Run-Docker {
     param([string[]]$DockerArgs)
     & $script:Docker @DockerArgs
@@ -54,6 +66,10 @@ try {
         $Docker = Find-Docker
         if (-not $Docker) { throw 'Restart Windows if requested, then run this BAT again. Docker Desktop was not found yet.' }
     }
+
+    # Credential helpers are launched through PATH. A newly installed Docker
+    # Desktop may not yet have refreshed this process's PATH.
+    Add-DockerDirectoryToPath -DockerPath $Docker
 
     $desktop = @(
         "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
