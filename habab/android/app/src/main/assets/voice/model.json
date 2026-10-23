@@ -1,0 +1,8 @@
+{
+  "name": "vosk-model-small-ru-0.22",
+  "url": "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip",
+  "bytes": 46236750,
+  "sha256": "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4",
+  "license": "Apache-2.0",
+  "source": "https://alphacephei.com/vosk/models"
+}

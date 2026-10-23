@@ -37,6 +37,7 @@ public final class MainActivity extends Activity {
         // ADB provisioning is available only in a debug build, never the release APK.
         if (BuildConfig.DEBUG && getIntent().hasExtra("install_url")) install(getIntent().getStringExtra("install_url"));
         else if (BuildConfig.DEBUG && getIntent().getBooleanExtra("start_server", false)) startServer();
+        else if (BuildConfig.DEBUG && getIntent().getBooleanExtra("provision_voice", false)) provisionVoice();
     }
 
     private TextView text(String value) {
@@ -63,6 +64,7 @@ public final class MainActivity extends Activity {
         button(R.string.setup, this::installDialog);
         button(R.string.start, this::startServer);
         button(R.string.open_home, this::openHome);
+        button(R.string.voice_title, this::voiceSettings);
         button(R.string.stop, () -> {
             getSharedPreferences("server", 0).edit().putBoolean("desired", false).apply();
             stopService(new Intent(this, ServerService.class));
@@ -134,6 +136,8 @@ public final class MainActivity extends Activity {
         if (busy) return;
         LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL);
         Button back = new Button(this); back.setText(R.string.back); back.setOnClickListener(view -> home()); layout.addView(back);
+        Button voice = new Button(this); voice.setText(R.string.voice_authorize);
+        voice.setOnClickListener(view -> authorizeVoice()); layout.addView(voice);
         browser = new WebView(this);
         browser.getSettings().setJavaScriptEnabled(true); browser.getSettings().setDomStorageEnabled(true);
         browser.getSettings().setAllowFileAccess(false); browser.getSettings().setAllowContentAccess(false);
@@ -141,7 +145,7 @@ public final class MainActivity extends Activity {
         browser.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                if (("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) && "127.0.0.1".equals(uri.getHost())) return false;
+                if ("http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost()) && uri.getPort() == 8123) return false;
                 try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
                 catch (ActivityNotFoundException error) { message(getString(R.string.no_link_handler)); }
                 return true;
@@ -149,6 +153,77 @@ public final class MainActivity extends Activity {
         });
         layout.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1)); setContentView(layout);
         state = null; browser.loadUrl("http://127.0.0.1:8123");
+    }
+
+    private void voiceSettings() {
+        if (!new VoiceCredentials(this).configured()) {
+            new AlertDialog.Builder(this).setTitle(R.string.voice_title).setMessage(R.string.voice_login_help)
+                    .setPositiveButton(R.string.open_home, (dialog, which) -> openHome())
+                    .setNegativeButton(R.string.cancel, null).show();
+            return;
+        }
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(28, 8, 28, 8);
+        TextView explanation = new TextView(this); explanation.setText(R.string.voice_privacy); form.addView(explanation);
+        TextView phase = new TextView(this); phase.setText(VoiceService.label(this, VoiceService.status)); form.addView(phase);
+        EditText phrase = new EditText(this); phrase.setHint(R.string.voice_phrase);
+        phrase.setText(getSharedPreferences("voice", 0).getString("phrase", "эй дом"));
+        phrase.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)}); form.addView(phrase);
+        CheckBox enabled = new CheckBox(this); enabled.setText(R.string.voice_enable);
+        enabled.setChecked(getSharedPreferences("voice", 0).getBoolean("enabled", false)); form.addView(enabled);
+        new AlertDialog.Builder(this).setTitle(R.string.voice_title).setView(form)
+                .setPositiveButton(R.string.configure, (dialog, which) -> {
+                    String value = WakeDetector.normalize(phrase.getText().toString());
+                    if (value.isEmpty()) { message(getString(R.string.voice_invalid_phrase)); return; }
+                    getSharedPreferences("voice", 0).edit().putString("phrase", value).putBoolean("enabled", enabled.isChecked()).apply();
+                    stopService(new Intent(this, VoiceService.class));
+                    if (enabled.isChecked()) handler.postDelayed(this::startVoice, 500);
+                }).setNegativeButton(R.string.cancel, null).show();
+    }
+
+    private void authorizeVoice() {
+        if (browser == null || browser.getUrl() == null) return;
+        Uri uri = Uri.parse(browser.getUrl());
+        if (!"http".equals(uri.getScheme()) || !"127.0.0.1".equals(uri.getHost()) || uri.getPort() != 8123) return;
+        browser.evaluateJavascript("localStorage.getItem('hassTokens')", value -> {
+            try {
+                Object decoded = new org.json.JSONTokener(value).nextValue();
+                if (!(decoded instanceof String)) { message(getString(R.string.voice_login_help)); return; }
+                org.json.JSONObject auth = new org.json.JSONObject((String) decoded);
+                operations.execute(() -> {
+                    try { new VoiceCredentials(this).save(auth); handler.post(this::voiceSettings); }
+                    catch (Exception error) { handler.post(() -> message(getString(R.string.voice_auth_failed))); }
+                });
+            } catch (Exception error) { message(getString(R.string.voice_login_help)); }
+        });
+    }
+
+    private void startVoice() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 20); return;
+        }
+        startForegroundService(new Intent(this, VoiceService.class));
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == 20 && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) startVoice();
+    }
+
+    private void provisionVoice() {
+        work(() -> {
+            File file = new File(getFilesDir(), "voice-provision.json");
+            try {
+                org.json.JSONObject data = new org.json.JSONObject(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+                new VoiceCredentials(this).save(data);
+                boolean enabled = data.optBoolean("enable_voice", false);
+                getSharedPreferences("voice", 0).edit().putString("phrase", "эй дом").putBoolean("enabled", enabled).commit();
+                String endpoint = data.optString("openai_base", "");
+                if (!endpoint.isEmpty()) getSharedPreferences("voice", 0).edit().putString("openai_base", endpoint).commit();
+                String telegram = data.optString("telegram_relay", "");
+                if (!telegram.isEmpty()) getSharedPreferences("voice", 0).edit().putString("telegram_relay", telegram).commit();
+                if (enabled) handler.post(this::startVoice);
+            } finally { Files.deleteIfExists(file.toPath()); }
+        });
     }
 
     private void showLogs() {

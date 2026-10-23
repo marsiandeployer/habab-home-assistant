@@ -7,5 +7,8 @@ public final class BootReceiver extends BroadcastReceiver {
         if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())
                 && context.getSharedPreferences("server", 0).getBoolean("desired", false))
             context.startForegroundService(new Intent(context, ServerService.class));
+        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())
+                && context.getSharedPreferences("voice", 0).getBoolean("enabled", false))
+            context.startForegroundService(new Intent(context, VoiceService.class));
     }
 }

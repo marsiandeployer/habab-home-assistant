@@ -22,6 +22,15 @@ from homeassistant.components.habab_home.runtime_context import (
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    def test_provider_selection_supports_openai_but_preserves_existing_deepseek(self):
+        agent = object.__new__(SetupAgent)
+        openai = SimpleNamespace(data={"provider": "openai", "model": "gpt-4.1-mini", "api_key": "test-openai-key"})
+        deepseek = SimpleNamespace(data={"provider": "deepseek", "model": "deepseek-flash", "api_key": "test-deepseek-key"})
+        agent.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: [openai]))
+        self.assertIs(agent.settings(), openai.data)
+        agent.hass.config_entries.async_entries = lambda _: [openai, deepseek]
+        self.assertIs(agent.settings(), deepseek.data)
+
     def agent(self):
         agent = object.__new__(SetupAgent)
         agent.lock = asyncio.Lock()
@@ -152,6 +161,24 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
             agent.fingerprint,
             runtime_fingerprint(settings, ANDROID_PROOT_RUNTIME_KIND),
         )
+
+    async def test_openai_uses_selected_endpoint_and_only_its_private_key(self):
+        agent = object.__new__(SetupAgent)
+        agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
+        agent.password = "private-password"; agent.control_token = "private-control"
+        agent.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
+        agent.settings = Mock(return_value={"provider": "openai", "model": "gpt-4.1-mini", "api_key": "test-openai-key"})
+        agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
+        with patch.dict("os.environ", {"HABAB_OPENAI_BASE_URL": "https://voice.example.test/v1"}):
+            with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
+                await agent.ensure()
+        env = spawn.await_args.kwargs["env"]
+        config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+        self.assertEqual(config["enabled_providers"], ["habab-openai"])
+        self.assertEqual(config["provider"]["habab-openai"]["options"]["baseURL"], "https://voice.example.test/v1")
+        self.assertEqual(env["HABAB_OPENAI_KEY"], "test-openai-key")
+        self.assertNotIn("HABAB_DEEPSEEK_KEY", env)
+        self.assertNotIn("test-openai-key", env["OPENCODE_CONFIG_CONTENT"])
 
     async def test_unknown_runtime_fails_before_settings_or_process_spawn(self):
         agent = object.__new__(SetupAgent)

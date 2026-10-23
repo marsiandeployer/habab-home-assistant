@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
+from .transport import get_me_request
 
 
 async def get_bot(session, token):
@@ -16,8 +17,9 @@ async def get_bot(session, token):
     if not isinstance(token, str) or not re.fullmatch(r"[0-9]{1,20}:[A-Za-z0-9_-]{20,256}", token):
         raise ValueError("invalid_token")
     try:
+        url, headers = get_me_request(token)
         async with session.get(
-            f"https://api.telegram.org/bot{token}/getMe",
+            url, headers=headers,
             timeout=aiohttp.ClientTimeout(total=10), allow_redirects=False,
         ) as response:
             if response.status != 200:

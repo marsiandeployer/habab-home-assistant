@@ -192,7 +192,7 @@ class TelegramManager:
             await assistant.telegram_forget(entry.data["owner_id"], entry.entry_id, chat_id)
 
     async def async_setup_entry(self, entry):
-        env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE") if k in os.environ}
+        env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE", "HABAB_TELEGRAM_RELAY") if k in os.environ}
         env.update({"HOME": "/config/.habab-telegram", "NODE_NO_WARNINGS": "1"})
         proc = await asyncio.create_subprocess_exec(
             "node", "/opt/habab-telegram/worker.mjs", stdin=asyncio.subprocess.PIPE,

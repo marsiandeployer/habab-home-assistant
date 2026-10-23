@@ -60,9 +60,10 @@ function installChat() {
       placeholder: "Например: хочу подключить пылесос Xiaomi", send: "Отправить", stop: "Остановить",
       working: "Проверяю и выполняю…", loading: "Подключаю помощника…", you: "Вы", assistant: "Помощник",
       answering: "Готовлю ответ…", rate_limited: "Слишком много запросов. Повторите позже.",
-      settings: "Подключить DeepSeek", retry: "Повторить подключение",
+      settings: "Подключить AI", retry: "Повторить подключение",
       setup_ui_unavailable: "Не удалось открыть настройку устройств. Обновите страницу и попробуйте снова.",
       deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
+      provider_required: "Сначала подключите OpenAI или DeepSeek в разделе AI.",
       not_installed: "OpenCode ещё не подключён к контейнеру. Добавьте compose.opencode.yaml по инструкции установки.",
       binary_changed: "Файл OpenCode изменился. Повторите prepare-opencode.py и пересоздайте контейнер.",
       busy: "Помощник уже выполняет задачу. Дождитесь завершения и повторите подключение.",
@@ -98,9 +99,10 @@ function installChat() {
       placeholder: "For example: I want to connect a Xiaomi vacuum", send: "Send", stop: "Stop",
       working: "Checking and working…", loading: "Connecting…", you: "You", assistant: "Assistant",
       answering: "Preparing an answer…", rate_limited: "Too many requests. Try again later.",
-      settings: "Connect DeepSeek", retry: "Reconnect",
+      settings: "Connect AI", retry: "Reconnect",
       setup_ui_unavailable: "Device setup could not open. Refresh the page and try again.",
       deepseek_required: "Connect DeepSeek in AI settings first.",
+      provider_required: "Connect OpenAI or DeepSeek in AI settings first.",
       not_installed: "OpenCode is not mounted. Follow the installation guide to add compose.opencode.yaml.",
       binary_changed: "The OpenCode executable changed. Run prepare-opencode.py again and recreate the container.",
       busy: "The assistant is already working. Wait for it to finish, then reconnect.",
@@ -196,10 +198,32 @@ function installChat() {
       }
       if (this.setupCard) this.setupCard.hass = value;
       if (this.integrationCard) this.integrationCard.hass = value;
+      this.subscribeVoiceHistory();
     }
 
     get t() { return copy[this.language || "en"]; }
     q(selector) { return this.shadowRoot.querySelector(selector); }
+
+    subscribeVoiceHistory() {
+      const connection = !this.demo && this.isConnected && this.hass?.user?.is_admin
+        ? this.hass.connection : undefined;
+      if (this.historyConnection === connection) return;
+      this.historyUnsubscribe?.();
+      this.historyUnsubscribe = undefined;
+      this.historyConnection = connection;
+      const attempt = this.historyAttempt = {};
+      if (!connection) return;
+      connection.subscribeMessage((result) => {
+        if (this.historyAttempt !== attempt || result.session_id !== this.sessionId || !Array.isArray(result.messages)) return;
+        this.messages = result.messages;
+        this.draw();
+      }, {type: "habab_home/realtime/subscribe"}).then((unsubscribe) => {
+        if (this.historyAttempt === attempt) this.historyUnsubscribe = unsubscribe;
+        else unsubscribe();
+      }).catch(() => {
+        if (this.historyAttempt === attempt) this.historyConnection = undefined;
+      });
+    }
 
     async loadSetup(afterTurn = false) {
       if (this.demo) return;
@@ -258,6 +282,7 @@ function installChat() {
     }
 
     connectedCallback() {
+      this.subscribeVoiceHistory();
       if (this.shadowRoot.firstChild) {
         this.installLayoutLifecycle();
         if (this.q("dialog").open) this.setAssistantOpen(true);
@@ -326,6 +351,10 @@ function installChat() {
     }
 
     disconnectedCallback() {
+      this.historyConnection = undefined;
+      this.historyAttempt = undefined;
+      this.historyUnsubscribe?.();
+      this.historyUnsubscribe = undefined;
       window.removeEventListener("resize", this.onAssistantViewportChange);
       this.assistantViewport?.removeEventListener("resize", this.onAssistantViewportChange);
       this.assistantViewport?.removeEventListener("scroll", this.onAssistantViewportChange);

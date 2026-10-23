@@ -45,11 +45,11 @@ def main():
         bundle.add(ROOT.parents[1] / 'LICENSE.md', arcname='habab-android/LICENSE.md')
         for path in sorted(cache.iterdir()):
             if path.is_file(): bundle.add(path, arcname='upstream/' + path.name)
-        for directory in ('app/src', 'runtime', 'tools', 'tests'):
+        for directory in ('app/src', 'runtime', 'tools', 'tests', 'relay'):
             for path in sorted((ROOT / directory).rglob('*')):
-                if path.is_file() and path.suffix in {'.java', '.xml', '.py', '.md', '.json'} and '__pycache__' not in path.parts:
+                if path.is_file() and path.suffix in {'.java', '.xml', '.py', '.md', '.json', '.txt', '.conf', '.cjs'} and '__pycache__' not in path.parts:
                     bundle.add(path, arcname='habab-android/' + str(path.relative_to(ROOT)))
-        for name in ('build.gradle', 'settings.gradle', 'gradle.properties', 'app/build.gradle', 'README.md', 'NOTICE.md', 'native-packages.json'):
+        for name in ('build.gradle', 'settings.gradle', 'gradle.properties', 'app/build.gradle', 'README.md', 'NOTICE.md', 'native-packages.json', 'voice-model.json'):
             bundle.add(ROOT / name, arcname='habab-android/' + name)
     print(json.dumps({'sourceBundle': str(output), 'bytes': output.stat().st_size}))
 

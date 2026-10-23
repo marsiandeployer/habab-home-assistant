@@ -1,2 +1,2 @@
 DOMAIN = "habab_home"
-VERSION = "0.3.1"
+VERSION = "0.3.2"

@@ -49,4 +49,21 @@
     <string name="tunnel_waiting">Сначала создайте владельца Home Assistant</string>
     <string name="tunnel_disconnected">Переподключение SSH</string>
     <string name="check_compatibility">Проверка совместимости телефона…</string>
+    <string name="voice_title">Голосовой помощник</string>
+    <string name="voice_authorize">Подключить голос к этому аккаунту</string>
+    <string name="voice_login_help">Войдите в умный дом своим аккаунтом администратора. Затем нажмите сверху «Подключить голос к этому аккаунту».</string>
+    <string name="voice_privacy">Фраза активации распознаётся на телефоне. После сигнала речь отправляется в OpenAI, команда и ответ сохраняются в общем чате. Микрофон работает с погашенным экраном. Отключить его можно здесь или в уведомлении.</string>
+    <string name="voice_phrase">Фраза активации, например: эй дом</string>
+    <string name="voice_enable">Слушать фразу в фоне</string>
+    <string name="voice_stop">Выключить микрофон</string>
+    <string name="voice_invalid_phrase">Укажите фразу активации.</string>
+    <string name="voice_auth_failed">Не удалось сохранить доступ. Войдите в умный дом ещё раз.</string>
+    <string name="voice_preparing">Подготовка локального распознавания</string>
+    <string name="voice_wake">Слушаю фразу активации на телефоне</string>
+    <string name="voice_connecting">Фраза услышана, подключаю голос</string>
+    <string name="voice_listening">Слушаю обращение</string>
+    <string name="voice_thinking">Помощник готовит ответ</string>
+    <string name="voice_speaking">Озвучиваю ответ</string>
+    <string name="voice_off">Микрофон выключен</string>
+    <string name="voice_error">Голос недоступен. Откройте настройки помощника.</string>
 </resources>

@@ -4,6 +4,7 @@ local.properties
 dist/
 app/src/main/jniLibs/
 app/src/main/assets/release/
+app/src/main/assets/voice/*.zip
 *.jks
 *.keystore
 *.key

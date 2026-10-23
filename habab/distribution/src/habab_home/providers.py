@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 import aiohttp
+from .openai_transport import endpoint as openai_endpoint
 
 PROVIDERS = {
     "openai": {
@@ -88,7 +89,7 @@ class ProviderClient:
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):
                 async with self.session.post(
-                    PROVIDERS[provider]["url"],
+                    openai_endpoint("chat/completions") if provider == "openai" else PROVIDERS[provider]["url"],
                     headers={"Authorization": f"Bearer {self.settings['api_key']}"},
                     json=body,
                     allow_redirects=False,

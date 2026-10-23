@@ -23,3 +23,14 @@ The Android application also uses Apache Commons Compress, mwiede/JSch and
 net.i2p.crypto/EdDSA. Their notices remain part of their upstream distributions.
 OpenCode is included in the separately downloaded runtime with the pinned
 ARM64 version and integrity record from distribution/opencode-release.json.
+
+The voice preview includes Vosk Android 0.3.75 (Apache-2.0), JNA 5.18.1
+(Apache-2.0 option of its dual license), and OkHttp 4.12.0 (Apache-2.0), with
+their transitive dependencies and upstream notices. The offline Russian model
+vosk-model-small-ru-0.22 is distributed under Apache-2.0; voice-model.json
+records its exact source, size and checksum. Source projects:
+
+- https://github.com/alphacep/vosk-api/tree/v0.3.75
+- https://github.com/java-native-access/jna/tree/5.18.1
+- https://github.com/square/okhttp/tree/parent-4.12.0
+- https://alphacephei.com/vosk/models

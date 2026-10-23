@@ -24,6 +24,7 @@ class HababHomeStatusView(HomeAssistantView):
                 "version": VERSION,
                 "home_assistant_version": HA_VERSION,
                 "status": "running",
+                "lan_alias": hass.data.get(DOMAIN, {}).get("lan_alias"),
                 "capabilities": ["global_chat", "xiaomi_setup", "telegram_agent", "native_discovery", "unified_assistant", "integration_setup"],
             }
         )
@@ -32,6 +33,9 @@ class HababHomeStatusView(HomeAssistantView):
 async def async_setup(hass, config):
     hass.http.register_view(HababHomeStatusView)
     hass.data[DOMAIN] = {"version": VERSION, "settings_lock": asyncio.Lock()}
+    from .mdns import async_setup_alias
+
+    await async_setup_alias(hass)
     frontend_dir = Path(__file__).parent / "frontend"
     assistant_file = frontend_dir / "setup-chat.js"
     assistant_digest = await hass.async_add_executor_job(
@@ -53,6 +57,9 @@ async def async_setup(hass, config):
     assistant = AssistantService(hass, agent)
     await assistant.setup()
     hass.data[DOMAIN]["assistant"] = assistant
+    from .realtime import async_register_views as register_realtime_views
+
+    register_realtime_views(hass)
     from .integration_setup import IntegrationSetup, async_register_commands as register_integration_setup_commands
 
     hass.data[DOMAIN]["integration_setup"] = IntegrationSetup(hass, agent)

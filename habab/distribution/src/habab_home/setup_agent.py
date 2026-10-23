@@ -19,6 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .agent_diagnostics import AgentDiagnostics
 from .const import DOMAIN
+from .openai_transport import base_url as openai_base_url
 from .runtime_context import (
     DOCKER_RUNTIME_KIND,
     RUNTIME_KIND_ENV,
@@ -125,10 +126,13 @@ class SetupAgent:
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self.close)
 
     def settings(self):
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.data.get("provider") == "deepseek":
-                return entry.data
-        raise AgentError("deepseek_required")
+        entries = self.hass.config_entries.async_entries(DOMAIN)
+        # Preserve the established provider when both are configured.
+        for provider in ("deepseek", "openai"):
+            for entry in entries:
+                if entry.data.get("provider") == provider:
+                    return entry.data
+        raise AgentError("provider_required")
 
     async def request(self, method, route, body=None, timeout=15):
         session = async_get_clientsession(self.hass)
@@ -158,6 +162,9 @@ class SetupAgent:
             raise AgentError("unsupported_runtime") from error
 
         settings = self.settings()
+        is_openai = settings.get("provider") == "openai"
+        provider_id = "habab-openai" if is_openai else "habab-deepseek"
+        key_name = "HABAB_OPENAI_KEY" if is_openai else "HABAB_DEEPSEEK_KEY"
         fingerprint = runtime_fingerprint(settings, runtime_kind)
         if self.process and self.process.returncode is None and fingerprint == self.fingerprint:
             return
@@ -170,17 +177,18 @@ class SetupAgent:
         config = {
             "$schema": "https://opencode.ai/config.json", "autoupdate": False,
             "share": "disabled", "snapshot": False, "plugin": [], "mcp": {},
-            "lsp": False, "formatter": False, "enabled_providers": ["habab-deepseek"],
-            "model": f"habab-deepseek/{settings['model']}",
+            "lsp": False, "formatter": False, "enabled_providers": [provider_id],
+            "model": f"{provider_id}/{settings['model']}",
             "permission": {"*": "deny", "bash": "allow", "read": "allow",
                            "edit": "allow", "glob": "allow", "grep": "allow",
                            "external_directory": "allow"},
-            "provider": {"habab-deepseek": {
-                "npm": "@ai-sdk/openai-compatible", "name": "DeepSeek",
-                "options": {"baseURL": "https://api.deepseek.com", "apiKey": "{env:HABAB_DEEPSEEK_KEY}"},
+            "provider": {provider_id: {
+                "npm": "@ai-sdk/openai-compatible", "name": "OpenAI" if is_openai else "DeepSeek",
+                "options": {"baseURL": openai_base_url() if is_openai else "https://api.deepseek.com",
+                            "apiKey": "{env:" + key_name + "}"},
                 "models": {settings["model"]: {"name": settings["model"],
                     "limit": {"context": 131072, "output": 4096},
-                    "options": {"thinking": {"type": "disabled"}}}},
+                    "options": {} if is_openai else {"thinking": {"type": "disabled"}}}},
             }},
             "agent": {"build": {"prompt": prompt, "steps": 12}},
         }
@@ -193,7 +201,7 @@ class SetupAgent:
             "OPENCODE_CONFIG_CONTENT": json.dumps(config),
             "OPENCODE_DISABLE_PROJECT_CONFIG": "true", "OPENCODE_DISABLE_AUTOUPDATE": "true",
             "OPENCODE_SERVER_PASSWORD": self.password,
-            "HABAB_DEEPSEEK_KEY": settings["api_key"],
+            key_name: settings["api_key"],
             "HABAB_HA_CONTROL_TOKEN": self.control_token,
         })
         try:

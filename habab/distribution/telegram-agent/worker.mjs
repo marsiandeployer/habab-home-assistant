@@ -2,7 +2,22 @@ import { createInterface } from 'node:readline';
 import { TelegramTransport } from 'noxon-telegram';
 
 const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
-const transport = new TelegramTransport({ emit });
+let relay;
+if (process.env.HABAB_TELEGRAM_RELAY) {
+  const url = new URL(process.env.HABAB_TELEGRAM_RELAY);
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || !['', '/'].includes(url.pathname)) throw new Error('invalid_telegram_relay');
+  relay = url.origin;
+}
+const fetchImpl = (url, options) => {
+  if (!relay) return globalThis.fetch(url, options);
+  const prefix = `https://api.telegram.org/bot${transport.token}/`;
+  if (!url.startsWith(prefix)) throw new Error('invalid_telegram_operation');
+  const method = url.slice(prefix.length);
+  if (!['getMe', 'getUpdates', 'sendMessage', 'sendChatAction'].includes(method)) throw new Error('invalid_telegram_operation');
+  return globalThis.fetch(`${relay}/telegram/${method}`, {...options,
+    headers: {...options.headers, authorization: `Bearer ${transport.token}`}});
+};
+const transport = new TelegramTransport({ emit, fetchImpl });
 let configured = false;
 let configuring = false;
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
