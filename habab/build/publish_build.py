@@ -7,9 +7,12 @@ import re
 import shutil
 from pathlib import Path
 
+from demo_service_worker import publish_retirement_worker
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT.parent / 'demo/dist'
 TARGET = ROOT / 'public'
+RETIREMENT_WORKER = ROOT / 'build/retire-demo-service-worker.js'
 UPSTREAM = ROOT.parent
 STAGE = ROOT / 'tmp/ha-frontend-build/publish-stage'
 RELEASE = os.environ.get('HABAB_DEMO_RELEASE', '20261021-ui5')
@@ -163,6 +166,7 @@ def main():
         shutil.copy2(source, destination)
 
     # Switch the entrypoint only after every referenced asset is in place.
+    publish_retirement_worker(TARGET, RETIREMENT_WORKER)
     next_index = TARGET / '.index.html.next'
     shutil.copy2(STAGE / 'index.html', next_index)
     os.replace(next_index, TARGET / 'index.html')

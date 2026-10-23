@@ -1,0 +1,23 @@
+[
+  {
+    "path": "/sw-modern.js",
+    "status": 200,
+    "content_type": "application/javascript",
+    "cache_control": "no-store",
+    "sha256": "2c0cacaed2cbc4f831d267e1741abff431ff54dfe930f755c3cd56e48f6e24fb"
+  },
+  {
+    "path": "/sw-legacy.js",
+    "status": 200,
+    "content_type": "application/javascript",
+    "cache_control": "no-store",
+    "sha256": "2c0cacaed2cbc4f831d267e1741abff431ff54dfe930f755c3cd56e48f6e24fb"
+  },
+  {
+    "path": "/service_worker.js",
+    "status": 200,
+    "content_type": "application/javascript",
+    "cache_control": "no-store",
+    "sha256": "2c0cacaed2cbc4f831d267e1741abff431ff54dfe930f755c3cd56e48f6e24fb"
+  }
+]

@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "script": "/sw-modern.js",
+      "native_auth_requests": 1,
+      "native_ws_requests": 1,
+      "stale_shell_reproduced": true,
+      "recovered": {
+        "registrations": 0,
+        "auth_preserved": true,
+        "cookie_preserved": true,
+        "unrelated_cache_preserved": true,
+        "stale_cache_preserved": true,
+        "preview_open": true,
+        "dashboard_rows": 3
+      },
+      "no_native_auth_after_reload": true
+    },
+    {
+      "script": "/sw-legacy.js",
+      "native_auth_requests": 1,
+      "native_ws_requests": 1,
+      "stale_shell_reproduced": true,
+      "recovered": {
+        "registrations": 0,
+        "auth_preserved": true,
+        "cookie_preserved": true,
+        "unrelated_cache_preserved": true,
+        "stale_cache_preserved": true,
+        "preview_open": true,
+        "dashboard_rows": 3
+      },
+      "no_native_auth_after_reload": true
+    },
+    {
+      "script": "/service_worker.js",
+      "native_auth_requests": 1,
+      "native_ws_requests": 1,
+      "stale_shell_reproduced": true,
+      "recovered": {
+        "registrations": 0,
+        "auth_preserved": true,
+        "cookie_preserved": true,
+        "unrelated_cache_preserved": true,
+        "stale_cache_preserved": true,
+        "preview_open": true,
+        "dashboard_rows": 3
+      },
+      "no_native_auth_after_reload": true
+    }
+  ],
+  "limitation": "Synthetic stale native shell; actual demo compiler assets and real browser service-worker lifecycle. No private HA, account or hardware access.",
+  "verdict": "PASS",
+  "existing_pages_preserved": true,
+  "server_closed": true
+}

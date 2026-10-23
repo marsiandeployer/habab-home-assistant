@@ -1,0 +1,30 @@
+{
+  "url": "https://habab-demo.wpmix.net/?habab-preview=onboarding",
+  "errors": [],
+  "native_auth_requests": [],
+  "native_websockets": [],
+  "bundles": [
+    "https://habab-demo.wpmix.net/demos/home-assistant/releases/20261021-ui5/frontend_latest/main.7fb75074ba88b0cf.js",
+    "https://habab-demo.wpmix.net/demos/home-assistant/releases/20261021-ui5/frontend_latest/main.7fb75074ba88b0cf.js",
+    "https://habab-demo.wpmix.net/demos/home-assistant/releases/20261021-ui5/frontend_latest/main.7fb75074ba88b0cf.js"
+  ],
+  "desktop": {
+    "open": true,
+    "rows": 3,
+    "input_bottom": 775,
+    "send_bottom": 775,
+    "viewport_height": 800,
+    "registrations": 0
+  },
+  "mobile": {
+    "open": true,
+    "rows": 3,
+    "input_bottom": 819,
+    "send_bottom": 819,
+    "viewport_height": 844,
+    "registrations": 0
+  },
+  "verdict": "PASS",
+  "context_closed": true,
+  "existing_pages_preserved": true
+}

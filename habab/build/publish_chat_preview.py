@@ -6,9 +6,12 @@ import json
 import os
 from pathlib import Path
 
+from demo_service_worker import publish_retirement_worker
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'distribution/src/habab_home/frontend'
 PUBLIC = ROOT / 'public'
+RETIREMENT_WORKER = ROOT / 'build/retire-demo-service-worker.js'
 ORIGINAL = '<script type="module" src="/demos/home-assistant/integrations/setup-chat.js?v=5"></script>'
 START = '<!-- habab-assistant-preview:start -->'
 END = '<!-- habab-assistant-preview:end -->'
@@ -57,6 +60,7 @@ def main():
                 raise ValueError('immutable preview artifact differs')
             if not target.exists():
                 target.write_bytes(data)
+        publish_retirement_worker(PUBLIC, RETIREMENT_WORKER)
         next_index = PUBLIC / '.index.preview.next'
         next_index.write_text(after, encoding='utf-8')
         os.replace(next_index, index)

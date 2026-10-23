@@ -16,3 +16,20 @@
 
 /frontend_latest/*
   Cache-Control: public, max-age: 604800, s-maxage=604800
+
+# HABAB demo service-worker retirement headers:begin
+/sw-modern.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: text/javascript; charset=utf-8
+  X-Content-Type-Options: nosniff
+
+/sw-legacy.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: text/javascript; charset=utf-8
+  X-Content-Type-Options: nosniff
+
+/service_worker.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Type: text/javascript; charset=utf-8
+  X-Content-Type-Options: nosniff
+# HABAB demo service-worker retirement headers:end
