@@ -1,7 +1,7 @@
 {
   "version": "0.2.0",
   "image": "sha256:b0c6f0d1088702aa932ee85fa177c934d5f1c546fbdab76b89da355e2ca48ac0",
-  "python_tests": 56,
+  "python_tests": 62,
   "frontend_tests": 7,
   "transport_tests": 5,
   "windows_contract_tests": 5,
@@ -13,5 +13,6 @@
   "telegram_live": "NOT_RUN_no_dedicated_bot_configured",
   "archive_change": "Updated README and added read-only diagnostic launcher; HA runtime sources unchanged",
   "diagnostic_tests": 6,
-  "relay_tests": 8
+  "relay_tests": 8,
+  "diagnostic_tests_included_in_python_tests": true
 }

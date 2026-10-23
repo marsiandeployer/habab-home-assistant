@@ -71,8 +71,8 @@ Gemini реализован и проверен на уровне транспо
 ```sh
 docker build -t habab-home:opencode-20261022 habab/distribution
 docker run --rm --network none --entrypoint python3 \
-  -v "$PWD/habab/distribution/tests:/tests:ro" habab-home:opencode-20261022 \
-  -m unittest discover -s /tests -v
+  -v "$PWD/habab/distribution:/diagnostics:ro" habab-home:opencode-20261022 \
+  -m unittest discover -s /diagnostics/tests -v
 
 node --test habab/distribution/tests/test-voice-lifecycle.mjs
 ```

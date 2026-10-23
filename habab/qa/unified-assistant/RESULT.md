@@ -2,7 +2,7 @@
 
 Проверено 23 октября 2026 года в отдельном Linux Docker Home Assistant на loopback-порту 8402. Приватный owner-test этим прогоном не менялся. После появления support-туннеля дополнительно проверена установленная версия Windows; её настройки не менялись.
 
-- 56 Python-тестов в итоговом образе: PASS.
+- 62 Python-теста в среде итогового образа с read-only mount исходников: PASS, включая шесть тестов диагностического читателя.
 - 7 тестов frontend lifecycle и dashboard: PASS.
 - 5 Node transport-тестов с подменённым Bot API: PASS. Это не проверка живого бота.
 - 5 контрактных тестов Windows callback: PASS. PowerShell и Windows UAC здесь не запускались.

@@ -110,7 +110,7 @@ CLI `habab-ha` использует отдельный случайный capabi
 
 ```sh
 docker build -t habab-home:opencode-20261022 habab/distribution
-docker run --rm --network none --entrypoint python3 -v "$PWD/habab/distribution/tests:/tests:ro" habab-home:opencode-20261022 -m unittest discover -s /tests -v
+docker run --rm --network none --entrypoint python3 -v "$PWD/habab/distribution:/diagnostics:ro" habab-home:opencode-20261022 -m unittest discover -s /diagnostics/tests -v
 ```
 
 Новый сценарий Xiaomi проверен отдельно на loopback-порту 8400: запрос в чате, установка закреплённого компонента, подтверждённый перезапуск, официальный OAuth и импорт реального устройства. Для недоступного `homeassistant.local` проверена передача адреса возврата через защищённое поле карточки. Результаты без персональных данных находятся в `habab/qa/xiaomi-assistant/`. Состояние пылесоса прочитано, команды управления не отправлялись. Это Linux Docker/browser QA; физический Windows этим прогоном не проверен.
