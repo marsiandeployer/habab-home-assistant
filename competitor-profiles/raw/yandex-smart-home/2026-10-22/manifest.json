@@ -1,0 +1,15 @@
+{
+  "pages": {
+    "homepage": "https://alice.yandex.ru/smart-home",
+    "local-scenarios": "https://alice.yandex.ru/support/ru/smart-home/scenarios/local",
+    "scenarios": "https://alice.yandex.ru/support/ru/smart-home/scenarios/create",
+    "hub": "https://alice.yandex.ru/smart-home/hub",
+    "hub-faq": "https://alice.yandex.ru/support/ru/hub/need",
+    "camera-subscription": "https://alice.yandex.ru/support/ru/ipcamera/subscription"
+  },
+  "limitations": "SEO tools unavailable. Telegram source stored privately outside repository; no raw private chat exports in repository.",
+  "page_status": {
+    "homepage": "CAPTCHA on direct GET despite HTTP 200; substantive source in homepage-web.txt",
+    "other_pages": "extracted successfully; no authenticated app checks"
+  }
+}

@@ -1,7 +1,7 @@
 module.exports = {apps: [{
   name: 'habab-home-demo',
-  cwd: '/root/habab-home-assistant/habab',
-  script: '/root/habab-home-assistant/.venv/bin/gunicorn',
+  cwd: '/root/homeassistent/habab',
+  script: '/root/homeassistent/.venv/bin/gunicorn',
   interpreter: 'none',
   args: '--workers 2 --threads 2 --worker-class gthread --bind 127.0.0.1:8318 --timeout 45 --access-logfile - --error-logfile - app:application',
   exec_mode: 'fork', instances: 1, kill_timeout: 35000,
