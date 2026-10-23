@@ -1,7 +1,7 @@
 {
-  "filename": "habab-home-windows-4c1d8e230806.zip",
-  "sha256": "4c1d8e2308066ba848a03b3e22fba838e778f720dcaa3faf39147ea873344343",
-  "bytes": 110292,
+  "filename": "habab-home-windows-53913a9b700b.zip",
+  "sha256": "53913a9b700b17d859873ac58954db045a3247d75501cfd07b8a29b4a3ab58b0",
+  "bytes": 114964,
   "files": [
     ".dockerignore",
     "Dockerfile",
@@ -10,6 +10,9 @@
     "README-WINDOWS.md",
     "compose.windows.yaml",
     "config/configuration.yaml",
+    "diagnose-assistant.bat",
+    "diagnose-assistant.ps1",
+    "diagnose-assistant.py",
     "docker-entrypoint.sh",
     "ensure-xiaomi-callback.ps1",
     "habab-ha.py",

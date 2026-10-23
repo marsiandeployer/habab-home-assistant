@@ -1,0 +1,39 @@
+{
+  "environment": "user Windows Home Assistant via authorized support tunnel",
+  "checkedAt": "2026-10-23T10:12:55.359Z",
+  "habab_version": "0.2.0",
+  "core_version": "2026.10.2",
+  "admin": true,
+  "language": "ru",
+  "launcher_bounds": {
+    "x": 1208,
+    "y": 728,
+    "width": 56,
+    "height": 56
+  },
+  "launcher_parent": "body",
+  "passed_cases": [
+    "actual_windows_bottom_right_launcher",
+    "desktop_chat_nonmodal",
+    "draft_survives_native_settings_route",
+    "native_telegram_sidebar_and_protected_form"
+  ],
+  "page_errors": [],
+  "telegram": {
+    "phase": "not_configured",
+    "protectedFieldEmpty": true
+  },
+  "chat_request": "FAILED_model_error",
+  "minimal_agent_request_error": "model_error",
+  "provider_connection_check": "PASS_tool_call_verified",
+  "selected_model": "deepseek-flash",
+  "settings_changed": false,
+  "physical_commands_sent": false,
+  "new_conversation_created": false,
+  "test_chat_messages_sent": true,
+  "remaining": [
+    "exact OpenCode error detail requires local read-only diagnostics",
+    "live Telegram requires token configuration and pairing; outside read-only approval",
+    "physical device connection/control not performed"
+  ]
+}
