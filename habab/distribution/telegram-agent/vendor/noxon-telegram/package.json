@@ -1,0 +1,8 @@
+{
+  "name": "noxon-telegram",
+  "version": "1.0.0-habab.1",
+  "description": "Small provider-neutral Telegram Bot API transport for the Habab agent bridge",
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "license": "ISC"
+}

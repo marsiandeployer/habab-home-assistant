@@ -16,7 +16,7 @@ const copy = {
     callbackLabel: 'Адрес страницы после входа', callbackSubmit: 'Завершить вход',
     homes: 'Выберите дома для подключения.', selectHomes: 'Подключить выбранные дома',
     configuring: 'Home Assistant добавляет устройства…', completed: 'Xiaomi Home подключён.',
-    counts: 'Устройств: {devices}. Сущностей в реестре: {entities}.', verify: 'Проверить с помощником',
+    counts: 'Устройств: {devices}. Сущностей в реестре: {entities}.', verify: 'Проверить с помощником', openDevices: 'Открыть устройства',
     error: 'Подключение не завершено.', retry: 'Повторить подключение',
     installation_failed: 'Не удалось скачать или проверить интеграцию. Повторите установку.',
     invalid_callback: 'Адрес не соответствует этому подключению. Скопируйте полный адрес страницы после входа Xiaomi.',
@@ -43,7 +43,7 @@ const copy = {
     callbackLabel: 'Page address after sign-in', callbackSubmit: 'Complete sign-in',
     homes: 'Choose the homes to connect.', selectHomes: 'Connect selected homes',
     configuring: 'Home Assistant is adding devices…', completed: 'Xiaomi Home is connected.',
-    counts: 'Devices: {devices}. Registered entities: {entities}.', verify: 'Check with the assistant',
+    counts: 'Devices: {devices}. Registered entities: {entities}.', verify: 'Check with the assistant', openDevices: 'Open devices',
     error: 'Setup is incomplete.', retry: 'Retry sign-in',
     installation_failed: 'The integration could not be downloaded or verified. Retry installation.',
     invalid_callback: 'This address does not match your setup. Copy the full page address after Xiaomi sign-in.',
@@ -122,7 +122,7 @@ class HababXiaomiSetup extends HTMLElement {
     } else if (phase === 'oauth') {
       body = `<a id="login" class="button" target="_blank" rel="noopener noreferrer">${this.t('login')}</a><details><summary>${this.t('callbackHelp')}</summary><p>${this.t('callbackInstructions')}</p><label for="callback">${this.t('callbackLabel')}</label><input id="callback" type="password" autocomplete="off" spellcheck="false"><button id="callback-submit" type="button">${this.t('callbackSubmit')}</button></details>`;
     } else if (phase === 'homes') body = `<div id="homes"></div><button id="main" type="button">${this.t('selectHomes')}</button>`;
-    else if (phase === 'completed') body = `<p id="counts"></p><button id="verify" type="button">${this.t('verify')}</button>`;
+    else if (phase === 'completed') body = `<p id="counts"></p><div class="actions"><button id="open-devices" type="button">${this.t('openDevices')}</button><button id="verify" type="button">${this.t('verify')}</button></div>`;
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;margin-block:20px;color:var(--primary-text-color);font:inherit}*{box-sizing:border-box}
       section{padding:16px;border:1px solid var(--divider-color,#ddd);border-radius:12px;background:var(--card-background-color,#fff)}
@@ -150,6 +150,7 @@ class HababXiaomiSetup extends HTMLElement {
       main.onclick = () => this.act('homes', {homes: [...this.q('#homes').querySelectorAll('input:checked')].map(x=>x.value)});
     } else if (phase === 'completed') {
       this.q('#counts').textContent = this.t('counts').replace('{devices}', String(this.state.device_count)).replace('{entities}', String(this.state.entity_count));
+      this.q('#open-devices').onclick = () => this.dispatchEvent(new CustomEvent('habab-open-devices'));
       this.q('#verify').onclick = () => this.dispatchEvent(new CustomEvent('habab-setup-verify'));
     }
     if (this.q('#accept')) this.q('#accept').onchange = () => this.controls();

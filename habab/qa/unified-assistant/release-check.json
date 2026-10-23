@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "image": "sha256:b0c6f0d1088702aa932ee85fa177c934d5f1c546fbdab76b89da355e2ca48ac0",
+  "python_tests": 56,
+  "frontend_tests": 7,
+  "transport_tests": 5,
+  "windows_contract_tests": 5,
+  "archive": "habab-home-windows-94d288fbe9ae.zip",
+  "sha256": "94d288fbe9ae0921002eec32cfb489747cee6423412e862e77e44b1e2b36803a",
+  "files": 61,
+  "source_and_archive_gitleaks": "PASS",
+  "windows_live": "NOT_RUN_tunnel_expired",
+  "telegram_live": "NOT_RUN_no_dedicated_bot_configured"
+}

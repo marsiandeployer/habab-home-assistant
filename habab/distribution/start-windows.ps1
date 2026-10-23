@@ -119,6 +119,28 @@ try {
     $portNumber = 0
     if (-not [int]::TryParse($env:HABAB_HOME_PORT, [ref]$portNumber) -or $portNumber -lt 1024 -or $portNumber -gt 65535) { throw 'HABAB_HOME_PORT must be a number between 1024 and 65535.' }
     if ($XiaomiHome -and $portNumber -ne 8123) { throw 'Xiaomi Home OAuth is registered for homeassistant.local:8123. Run start-xiaomi-home.bat with port 8123.' }
+
+    # Prepare the registered Xiaomi callback name during the ordinary setup.
+    # This only changes the Windows hosts file; it does not install or enable
+    # the optional Xiaomi integration. A declined/unavailable callback must not
+    # prevent the general Home Assistant installation from starting.
+    $callbackReady = $false
+    if ($portNumber -eq 8123) {
+        $callbackHelper = Join-Path $PSScriptRoot 'ensure-xiaomi-callback.ps1'
+        Write-Host 'Preparing the optional Xiaomi callback address. Windows may ask once for permission to add homeassistant.local to this computer.'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $callbackHelper
+        $callbackExitCode = $LASTEXITCODE
+        if ($callbackExitCode -eq 0) {
+            $callbackReady = $true
+        } elseif ($XiaomiHome) {
+            throw 'Xiaomi Home needs homeassistant.local to resolve to this computer. Callback preparation did not complete; approve the Windows prompt or resolve the existing hosts-file conflict, then rerun this BAT.'
+        } else {
+            Write-Host 'Xiaomi callback preparation was not completed. Home Assistant will still start; if you later choose Xiaomi Home, use the protected callback field in its setup card.' -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Xiaomi's registered callback uses port 8123. This Home Assistant instance uses port $portNumber; it will still start, and the Xiaomi setup card has a protected manual callback option if needed." -ForegroundColor Yellow
+    }
+
     Write-Host 'Building Home Assistant. The first download can take several minutes.'
     $env:HABAB_OPENCODE_SHA256 = 'bootstrap-pending'
     Run-Docker -DockerArgs @('compose', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'build', 'homeassistant')
@@ -135,10 +157,7 @@ try {
         Write-Host 'Installing the official Xiaomi Home component for your personal Home Assistant installation.'
         Write-Host 'Source and license: https://github.com/XiaoMi/ha_xiaomi_home'
         Run-Docker -DockerArgs @('compose', '--env-file', '.env.opencode-windows', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'run', '--rm', '--no-deps', '--entrypoint', 'python3', 'homeassistant', '/usr/local/bin/habab-install-xiaomi-home')
-        Write-Host 'The Xiaomi OAuth callback requires homeassistant.local to resolve to this computer.'
-        $callbackHelper = Join-Path $PSScriptRoot 'ensure-xiaomi-callback.ps1'
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $callbackHelper
-        if ($LASTEXITCODE -ne 0) { throw 'Could not configure the Xiaomi OAuth callback. Approve the Windows hosts-file prompt and rerun start-xiaomi-home.bat.' }
+        if (-not $callbackReady) { throw 'The Xiaomi callback address is not ready. Rerun with the ordinary launcher after resolving the Windows hosts-file prompt or conflict.' }
     }
     $startArguments = @('compose', '--env-file', '.env.opencode-windows', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'up', '-d')
     # Core discovers custom integrations at startup. The image may be unchanged

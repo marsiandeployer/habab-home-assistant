@@ -1,0 +1,31 @@
+{
+  "src/habab_home": {
+    "files": 28,
+    "mismatches": []
+  },
+  "src/habab_telegram": {
+    "files": 5,
+    "mismatches": []
+  },
+  "telegram-agent": {
+    "files": 7,
+    "mismatches": []
+  },
+  "status_api": {
+    "product": "Habab Home",
+    "version": "0.2.0",
+    "home_assistant_version": "2026.10.2",
+    "status": "running",
+    "capabilities": [
+      "global_chat",
+      "xiaomi_setup",
+      "telegram_agent",
+      "native_discovery"
+    ]
+  },
+  "container": {
+    "image": "sha256:b0c6f0d1088702aa932ee85fa177c934d5f1c546fbdab76b89da355e2ca48ac0",
+    "state": "running",
+    "restarts": 0
+  }
+}

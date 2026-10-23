@@ -28,9 +28,13 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_other_administrator_cannot_run_or_abort_session(self):
         agent = self.agent()
-        for operation in (agent.run("bob", "ses_alice", "test"), agent.abort("bob", "ses_alice")):
+        operations = (
+            lambda: agent.run("bob", "ses_alice", "test"),
+            lambda: agent.abort("bob", "ses_alice"),
+        )
+        for operation in operations:
             with self.assertRaises(AgentError) as error:
-                await operation
+                await operation()
             self.assertEqual(error.exception.code, "not_found")
         agent.ensure.assert_not_awaited()
         agent.request.assert_not_awaited()

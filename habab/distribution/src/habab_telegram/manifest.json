@@ -1,0 +1,10 @@
+{
+  "domain": "habab_telegram",
+  "name": "Habab Telegram",
+  "version": "0.1.0",
+  "documentation": "https://habab.ru/",
+  "codeowners": [],
+  "config_flow": true,
+  "integration_type": "service",
+  "iot_class": "cloud_polling"
+}

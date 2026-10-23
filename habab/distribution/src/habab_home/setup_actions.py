@@ -79,6 +79,13 @@ def discovered_flows(hass, manager):
 
 async def execute(hass, manager, owner, body):
     action = body.get("action")
+    if action == "discover_devices":
+        from .discovery import observe
+
+        duration = body.get("duration", 8)
+        if type(duration) is not int or not 1 <= duration <= 15:
+            raise ValueError("invalid_duration")
+        return await observe(hass, manager, duration)
     if action == "xiaomi_setup":
         return {"setup": await hass.data[DOMAIN]["xiaomi_setup"].request(owner),
                 "instruction": "The owner's setup card is shown inside this Home Assistant chat. It installs the pinned official component, asks before restarting, opens Xiaomi sign-in, and imports devices from the selected homes (a single home is automatic). There is no device-picker or password field in the card. Passwords and verification codes are entered only on the official Xiaomi website. A failed local redirect can be pasted only into the card's protected callback field, never chat messages. Explain only controls for the returned phase."}

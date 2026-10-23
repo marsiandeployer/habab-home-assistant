@@ -1,0 +1,12 @@
+{
+  "cases": [
+    "global_launcher_bottom_right_russian",
+    "desktop_nonmodal_panel",
+    "draft_survives_settings_route",
+    "native_telegram_settings_registered",
+    "real_deepseek_prepares_native_xiaomi_card",
+    "mobile_fullscreen_modal"
+  ],
+  "pageErrors": [],
+  "status": "PASS"
+}

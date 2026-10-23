@@ -1,4 +1,11 @@
 // Independent downstream extension: no dependency on compiled HA internals.
+export function visibleTextMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages.filter((message) =>
+    typeof message?.text === "string" && message.text.trim().length > 0
+  );
+}
+
 function installChat() {
   // HA installs its scoped registry polyfill before defining home-assistant.
   // Registering earlier loses the extension when that registry is replaced.
@@ -19,6 +26,9 @@ function installChat() {
       busy: "Помощник уже выполняет задачу. Дождитесь завершения и повторите подключение.",
       stopped: "Выполнение остановлено. Уже сделанные изменения могли сохраниться.",
       failed: "Не удалось завершить запрос. Некоторые действия могли выполниться. Повторите подключение, чтобы проверить историю.",
+      openingDevices: "Готовлю страницу устройств…", devicesReady: "Страница «Мои устройства» открыта.",
+      noVacuumDevices: "Страница открыта. Подключённые роботы-пылесосы появятся здесь, когда Home Assistant добавит их в реестр устройств.",
+      devicesFailed: "Не удалось подготовить страницу устройств. Проверьте права администратора и конфигурацию Lovelace.",
     },
     en: {
       title: "Assistant", open: "Open assistant chat", close: "Close", fresh: "New chat",
@@ -35,6 +45,9 @@ function installChat() {
       busy: "The assistant is already working. Wait for it to finish, then reconnect.",
       stopped: "Stopped. Changes already made may remain.",
       failed: "The request did not finish. Some actions may have run. Reconnect to check the history.",
+      openingDevices: "Preparing your devices page…", devicesReady: "The My devices page is open.",
+      noVacuumDevices: "The page is open. Vacuums will appear when Home Assistant adds them to the device registry.",
+      devicesFailed: "Could not prepare the devices page. Check administrator access and the Lovelace configuration.",
     },
   };
 
@@ -46,13 +59,25 @@ function installChat() {
       this.busy = false;
     }
 
+    get hass() { return this._hass; }
+    set hass(value) {
+      const nextLanguage = this.demo || value?.locale?.language?.startsWith("ru") ? "ru" : "en";
+      const languageChanged = this.language !== nextLanguage;
+      this._hass = value;
+      if (languageChanged) {
+        this.language = nextLanguage;
+        this.updateLanguage();
+      }
+      if (this.setupCard) this.setupCard.hass = value;
+    }
+
     get t() { return copy[this.language || "en"]; }
     q(selector) { return this.shadowRoot.querySelector(selector); }
 
     async loadSetup() {
       if (this.demo) return;
       try {
-        await import("/habab-home/xiaomi-setup.js?v=1");
+        await import("/habab-home/xiaomi-setup.js?v=2");
         if (!this.setupCard) {
           this.setupCard = document.createElement("habab-xiaomi-setup");
           this.setupCard.addEventListener("habab-setup-verify", () => {
@@ -71,6 +96,17 @@ function installChat() {
               this.controls();
             }
           });
+          this.setupCard.addEventListener("habab-open-devices", async () => {
+            this.status(this.t.openingDevices);
+            try {
+              const {openDevices} = await import("/habab-home/device-dashboard.js");
+              const result = await openDevices(this.hass);
+              this.status(result.count ? this.t.devicesReady : this.t.noVacuumDevices);
+              this.q("dialog").close();
+            } catch (_) {
+              this.status(this.t.devicesFailed, true);
+            }
+          });
         }
         this.setupCard.hass = this.hass;
         this.q("#log").append(this.setupCard);
@@ -84,17 +120,17 @@ function installChat() {
       this.language = this.demo || this.hass?.locale.language.startsWith("ru") ? "ru" : "en";
       const t = this.t;
       this.shadowRoot.innerHTML = `<style>
-        :host{display:inline-flex;white-space:normal;color:var(--primary-text-color,#212121);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
+        :host{position:fixed;z-index:10;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));display:block;white-space:normal;pointer-events:none;color:var(--primary-text-color,#212121);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
         *{box-sizing:border-box}button,textarea{font:inherit}button{cursor:pointer;color:inherit;background:transparent;border:0;min-height:44px;border-radius:8px;padding:8px 12px}button:hover{background:var(--secondary-background-color,#f0f2f4)}button:disabled{opacity:.5;cursor:default}
         :is(button,textarea,a):focus-visible{outline:3px solid var(--primary-color,#007a9e);outline-offset:2px}::selection{background:var(--primary-color,#007a9e);color:#fff}
-        .icon{width:48px;height:48px;padding:12px;display:grid;place-items:center}svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-        dialog{color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border:0;border-radius:16px;padding:0;width:min(680px,calc(100vw - 32px));height:min(720px,calc(100dvh - 48px));max-width:none;max-height:none;margin:auto;box-shadow:0 18px 56px #0003}
-        dialog::backdrop{background:#0005}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}
+        .icon{width:56px;height:56px;padding:16px;display:grid;place-items:center}.launcher{position:relative;z-index:1;pointer-events:auto;border-radius:50%;background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff);box-shadow:0 3px 12px #0003}.launcher:hover{background:var(--dark-primary-color,#006686)}svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+        dialog{pointer-events:auto;position:fixed;inset:auto max(16px,env(safe-area-inset-right)) max(84px,calc(env(safe-area-inset-bottom) + 72px)) auto;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e3e6e8);border-radius:16px;padding:0;width:min(420px,calc(100vw - 32px));height:min(680px,calc(100dvh - 120px));max-width:none;max-height:none;margin:0;box-shadow:0 12px 36px #0003}
+        dialog::backdrop{background:transparent}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}
         #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:26px;line-height:1.25;font-weight:500;margin:0 0 12px}.empty p{color:var(--secondary-text-color,#5f6368);margin:0;max-width:55ch}
         .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
         footer{padding:12px 20px 20px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
-        @media(max-width:600px){dialog{width:100vw;height:100dvh;border-radius:0;margin:0}header{padding:8px 12px}#log{padding:20px 16px}footer{padding:12px 12px max(16px,env(safe-area-inset-bottom))}.empty h3{font-size:24px}.fresh{padding-inline:8px}.message.user{max-width:92%}}
+        @media(max-width:600px){:host{inset:0;z-index:1000}.launcher{position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom))}dialog{inset:0;width:100vw;height:100dvh;border-radius:0;margin:0}header{padding:8px 12px}#log{padding:20px 16px}footer{padding:12px 12px max(16px,env(safe-area-inset-bottom))}.empty h3{font-size:24px}.fresh{padding-inline:8px}.message.user{max-width:92%}}
         @media(prefers-reduced-motion:no-preference){dialog[open]{animation:arrive 160ms cubic-bezier(.16,1,.3,1)}@keyframes arrive{from{transform:translateY(10px);opacity:.7}to{transform:translateY(0);opacity:1}}}
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
@@ -114,8 +150,31 @@ function installChat() {
       this.draw();
     }
 
+    updateLanguage() {
+      if (!this.shadowRoot.firstChild) return;
+      const t = this.t;
+      const launcher = this.q(".launcher");
+      launcher.title = t.open;
+      launcher.setAttribute("aria-label", t.open);
+      this.q("#chat-title").textContent = t.title;
+      this.q(".fresh").textContent = t.fresh;
+      this.q(".close").setAttribute("aria-label", t.close);
+      this.q("#log").setAttribute("aria-label", t.title);
+      const textarea = this.q("textarea");
+      textarea.placeholder = t.placeholder;
+      textarea.setAttribute("aria-label", t.placeholder);
+      this.q(".recovery a").textContent = t.settings;
+      this.q(".retry").textContent = t.retry;
+      this.q(".send").title = t.send;
+      this.q(".send").setAttribute("aria-label", t.send);
+      this.q(".stop").textContent = t.stop;
+      this.draw();
+    }
+
     async open() {
-      this.q("dialog").showModal();
+      const dialog = this.q("dialog");
+      if (matchMedia("(max-width: 600px)").matches) dialog.showModal();
+      else dialog.show();
       this.q("textarea").focus();
       if (!this.sessionId && !this.busy) await this.connect();
     }
@@ -167,13 +226,14 @@ function installChat() {
     draw() {
       const log = this.q("#log");
       log.replaceChildren();
-      if (!this.messages.length) {
+      const visibleMessages = visibleTextMessages(this.messages);
+      if (!visibleMessages.length) {
         const empty = document.createElement("div"); empty.className = "empty";
         const title = document.createElement("h3"); title.textContent = this.t.intro;
         const help = document.createElement("p"); help.textContent = this.t.help;
         empty.append(title, help); log.append(empty);
       }
-      for (const message of this.messages) {
+      for (const message of visibleMessages) {
         const row = document.createElement("div"); row.className = `message ${message.role}`;
         const name = document.createElement("div"); name.className = "name"; name.textContent = message.role === "user" ? this.t.you : this.t.assistant;
         const markdown = message.role === "assistant" && customElements.get("ha-markdown");
@@ -217,31 +277,66 @@ function installChat() {
   }
   customElements.define("habab-setup-chat", HababSetupChat);
 
-  function locate(root) {
+  function locateMain(root) {
     for (const element of root.querySelectorAll("*")) {
-      if (element.localName === "hui-root") return element;
-      if (element.shadowRoot) {const found = locate(element.shadowRoot); if (found) return found;}
+      if (element.localName === "home-assistant-main") return element;
+      if (element.shadowRoot) {const found = locateMain(element.shadowRoot); if (found) return found;}
     }
   }
 
   // A downstream module must also work with the stock Docker frontend. Keep the
   // search off the render loop and reuse the element across dashboard updates.
   let launcher;
-  setInterval(() => {
-    const dashboard = locate(document);
-    const actions = dashboard?.shadowRoot?.querySelector(".toolbar .action-items");
-    if (!actions) return;
+  const syncLauncher = () => {
+    const main = locateMain(document);
     const demo = document.documentElement.dataset.hababDemo === "true";
-    const hass = dashboard.hass;
-    if (!demo && !hass?.user?.is_admin) {launcher?.remove(); return;}
+    const hass = main?.hass;
+    if (!demo && !hass?.user?.is_admin) {launcher?.remove(); launcher = undefined; return;}
+    if (!demo && !main) {launcher?.remove(); launcher = undefined; return;}
     if (!launcher) {
       launcher = document.createElement("habab-setup-chat");
       launcher.demo = demo;
       launcher.hass = hass;
+      document.body.append(launcher);
     }
     launcher.hass = hass;
-    if (launcher.parentNode !== actions) actions.prepend(launcher);
-  }, 1500);
+    syncThemeVariables(launcher, main);
+    if (launcher.parentNode !== document.body) document.body.append(launcher);
+  };
+  const themeVariables = new WeakMap();
+  const themeVariableNames = [
+    "--primary-text-color", "--secondary-text-color", "--primary-background-color",
+    "--card-background-color", "--secondary-background-color", "--divider-color",
+    "--primary-color", "--dark-primary-color", "--text-primary-color", "--error-color",
+    "--ha-color-focus", "--ha-color-fill-primary-loud-hover", "--ha-color-on-primary-loud",
+    "--paper-font-body1_-_font-family",
+  ];
+  function syncThemeVariables(element, source) {
+    if (!source || typeof getComputedStyle !== "function") return;
+    let synced = themeVariables.get(element);
+    if (!synced) {synced = new Map(); themeVariables.set(element, synced);}
+    const computed = getComputedStyle(source);
+    const present = new Set();
+    for (const name of themeVariableNames) {
+      const value = computed.getPropertyValue(name).trim();
+      if (!value) continue;
+      present.add(name);
+      if (synced.get(name) !== value) {
+        element.style.setProperty(name, value);
+        synced.set(name, value);
+      }
+    }
+    for (const name of synced.keys()) {
+      if (!present.has(name)) {
+        element.style.removeProperty(name);
+        synced.delete(name);
+      }
+    }
+  }
+  const observer = new MutationObserver(syncLauncher);
+  observer.observe(document.documentElement, {childList: true, subtree: true});
+  setInterval(syncLauncher, 1000);
+  syncLauncher();
 }
 
 const registryReady = setInterval(() => {

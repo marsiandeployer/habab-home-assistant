@@ -9,14 +9,16 @@ import zipfile
 root = Path(__file__).resolve().parent
 output = root.parent / 'public/downloads'
 output.mkdir(parents=True, exist_ok=True)
-names = ['Dockerfile', 'docker-entrypoint.sh', 'habab-ha.py', 'compose.windows.yaml',
+names = ['Dockerfile', '.dockerignore', 'docker-entrypoint.sh', 'habab-ha.py', 'compose.windows.yaml',
          'start-windows.bat', 'start-windows.ps1', 'ensure-xiaomi-callback.ps1',
          'start-xiaomi-home.bat', 'install-xiaomi-home.py', 'xiaomi-home-release.json',
          'support_tunnel.bat', 'support_tunnel.ps1', 'support-relay.json',
-         'install-opencode-volume.py', 'opencode-release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
+         'install-opencode-volume.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
          'config/configuration.yaml']
-names += [str(p.relative_to(root)).replace('\\', '/') for p in (root / 'src/habab_home').rglob('*')
-          if p.is_file() and p.suffix in {'.py', '.js', '.json'} and '__pycache__' not in p.parts]
+for directory in ('src/habab_home', 'src/habab_telegram', 'telegram-agent'):
+    names += [str(p.relative_to(root)).replace('\\', '/') for p in (root / directory).rglob('*')
+              if p.is_file() and p.suffix in {'.py', '.js', '.mjs', '.json', '.svg', '.md'}
+              and not {'__pycache__', 'node_modules', 'test', 'tests'}.intersection(p.parts)]
 buffer = io.BytesIO()
 with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
     for name in sorted(names):

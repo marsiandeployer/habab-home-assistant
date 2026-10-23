@@ -74,7 +74,7 @@ def scope_html(html):
             html = html.replace(f'{quote}{old}{quote}', f'{quote}{PREFIX}manifest.json{quote}')
     html = html.replace('<head>', f'<head><meta name="habab-demo-release" content="{RELEASE}">')
     html = html.replace('<html', '<html data-habab-demo="true"', 1)
-    return html.replace('</body>', '<script src="/demos/home-assistant/integrations/telegram-setup.js?v=20261022-1" defer></script><script type="module" src="/demos/home-assistant/integrations/setup-chat.js?v=2"></script></body>')
+    return html.replace('</body>', '<script src="/demos/home-assistant/integrations/telegram-setup.js?v=20261023-1" defer></script><script type="module" src="/demos/home-assistant/integrations/setup-chat.js?v=5"></script></body>')
 
 
 def main():

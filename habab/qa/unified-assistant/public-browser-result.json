@@ -1,0 +1,71 @@
+{
+  "checkedAt": "2026-10-23T09:03:07.041Z",
+  "baseUrl": "https://habab-demo.wpmix.net/",
+  "cases": [
+    {
+      "mode": "desktop",
+      "passed": true,
+      "sidebarTitle": "Telegram",
+      "panelHeading": "Подключение Telegram",
+      "tokenInput": false,
+      "fakeConnectAction": false,
+      "oldTelegramLauncher": false,
+      "assistantLauncherSurvivesRoute": true,
+      "telegramRequests": 0,
+      "addonResponses": [
+        {
+          "status": 200,
+          "url": "https://habab-demo.wpmix.net/demos/home-assistant/integrations/telegram-setup.js?v=20261023-1"
+        },
+        {
+          "status": 200,
+          "url": "https://habab-demo.wpmix.net/demos/home-assistant/integrations/setup-chat.js?v=5"
+        },
+        {
+          "status": 200,
+          "url": "https://habab-demo.wpmix.net/demos/home-assistant/integrations/telegram-settings.js?v=20261023-1"
+        }
+      ],
+      "screenshot": "/root/homeassistent/habab/qa/unified-assistant/public-telegram-desktop.png",
+      "pageErrors": []
+    },
+    {
+      "mode": "mobile",
+      "passed": true,
+      "sidebarTitle": "Telegram",
+      "panelHeading": "Подключение Telegram",
+      "tokenInput": false,
+      "fakeConnectAction": false,
+      "oldTelegramLauncher": false,
+      "assistantLauncherSurvivesRoute": true,
+      "mobileBackgroundTap": {
+        "found": true,
+        "center": {
+          "x": 40,
+          "y": 31.5
+        },
+        "closed": true,
+        "hostPointerEvents": "none",
+        "reachedHomeAssistant": true
+      },
+      "telegramRequests": 0,
+      "addonResponses": [
+        {
+          "status": 200,
+          "url": "https://habab-demo.wpmix.net/demos/home-assistant/integrations/setup-chat.js?v=5"
+        },
+        {
+          "status": 200,
+          "url": "https://habab-demo.wpmix.net/demos/home-assistant/integrations/telegram-setup.js?v=20261023-1"
+        },
+        {
+          "status": 200,
+          "url": "https://habab-demo.wpmix.net/demos/home-assistant/integrations/telegram-settings.js?v=20261023-1"
+        }
+      ],
+      "screenshot": "/root/homeassistent/habab/qa/unified-assistant/public-telegram-mobile.png",
+      "pageErrors": []
+    }
+  ],
+  "passed": true
+}

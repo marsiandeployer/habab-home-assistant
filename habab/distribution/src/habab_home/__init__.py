@@ -23,6 +23,7 @@ class HababHomeStatusView(HomeAssistantView):
                 "version": VERSION,
                 "home_assistant_version": HA_VERSION,
                 "status": "running",
+                "capabilities": ["global_chat", "xiaomi_setup", "telegram_agent", "native_discovery"],
             }
         )
 
@@ -33,7 +34,7 @@ async def async_setup(hass, config):
     await hass.http.async_register_static_paths([
         StaticPathConfig("/habab-home", str(Path(__file__).parent / "frontend"), False),
     ])
-    frontend.add_extra_js_url(hass, "/habab-home/setup-chat.js?v=2")
+    frontend.add_extra_js_url(hass, "/habab-home/setup-chat.js?v=5")
     from .setup_agent import SetupAgent
 
     agent = SetupAgent(hass)
@@ -51,6 +52,9 @@ async def async_setup(hass, config):
     await xiaomi_setup.setup()
     hass.data[DOMAIN]["xiaomi_setup"] = xiaomi_setup
     register_xiaomi_commands(hass)
+    from .discovery import async_register_commands as register_discovery_commands
+
+    register_discovery_commands(hass)
     from .setup_actions import SetupActionsView
 
     hass.http.register_view(SetupActionsView)
@@ -58,6 +62,11 @@ async def async_setup(hass, config):
         hass, frontend_url_path="habab-ai", webcomponent_name="habab-ai-panel",
         sidebar_title="AI", sidebar_icon="mdi:assistant", require_admin=True,
         module_url="/habab-home/ai-panel.js?v=2",
+    )
+    await async_register_panel(
+        hass, frontend_url_path="habab-telegram", webcomponent_name="habab-telegram-panel",
+        sidebar_title="Telegram", sidebar_icon="mdi:message-text", require_admin=True,
+        module_url="/habab-home/telegram-panel.js?v=1",
     )
     from .websocket import async_register_commands
 

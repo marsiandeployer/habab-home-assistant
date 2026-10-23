@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 220" role="img" aria-label="Robot vacuum cleaner">
+  <rect width="320" height="220" rx="18" fill="#e9eef0"/>
+  <ellipse cx="164" cy="179" rx="88" ry="17" fill="#cbd5d9"/>
+  <path d="M92 150c-9-13-14-29-14-45 0-48 39-86 87-86s87 38 87 86c0 16-5 32-14 45l-13 18H105z" fill="#b8c6cb" stroke="#607d86" stroke-width="5"/>
+  <path d="M105 150c-7-12-11-26-11-41 0-39 32-71 71-71s71 32 71 71c0 15-4 29-11 41" fill="#dbe3e6" stroke="#eef3f4" stroke-width="5"/>
+  <circle cx="165" cy="79" r="21" fill="#607d86"/>
+  <circle cx="165" cy="79" r="13" fill="#90a4ae"/>
+  <circle cx="165" cy="79" r="5" fill="#263238"/>
+  <path d="M107 141h116" stroke="#90a4ae" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="124" cy="148" r="7" fill="#455a64"/>
+  <circle cx="206" cy="148" r="7" fill="#455a64"/>
+  <path d="M80 166l-19 14m42-9-9 21m148-26 19 14m-42-9 9 21" stroke="#607d86" stroke-width="4" stroke-linecap="round"/>
+  <path d="M153 123h24" stroke="#90a4ae" stroke-width="4" stroke-linecap="round"/>
+</svg>

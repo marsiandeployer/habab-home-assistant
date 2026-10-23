@@ -24,7 +24,7 @@ function Test-CallbackMapping {
     $mappings = @(Get-CallbackMappings)
     if ($mappings.Count -eq 0) { return $false }
     if (@($mappings | Where-Object { $_ -ne '127.0.0.1' }).Count -gt 0) {
-        throw 'homeassistant.local already has a different hosts-file mapping. It was left unchanged.'
+        throw 'CONFLICT: homeassistant.local already has a different hosts-file mapping. It was left unchanged.'
     }
     return $true
 }
@@ -41,7 +41,16 @@ try {
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Host 'Windows will ask for administrator approval to add one loopback alias to the hosts file.'
         $arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"'
-        $elevated = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList $arguments
+        try {
+            $elevated = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList $arguments
+        } catch {
+            $nativeErrorCode = if ($_.Exception -is [System.ComponentModel.Win32Exception]) { $_.Exception.NativeErrorCode } else { 0 }
+            if ($nativeErrorCode -eq 1223 -or $_.Exception.Message -match '(?i)(cancelled|canceled|declined by the user)') {
+                Write-Host 'UAC permission was declined. No hosts-file changes were made.' -ForegroundColor Yellow
+                exit 3
+            }
+            throw
+        }
         if ($elevated.ExitCode -ne 0) { throw 'Windows did not add the Xiaomi callback alias.' }
         if (-not (Test-CallbackMapping)) { throw 'The Xiaomi callback alias was not found after the Windows prompt.' }
         exit 0
@@ -68,5 +77,6 @@ try {
     exit 0
 } catch {
     Write-Host $_.Exception.Message -ForegroundColor Red
+    if ($_.Exception.Message -like 'CONFLICT:*') { exit 2 }
     exit 1
 }
