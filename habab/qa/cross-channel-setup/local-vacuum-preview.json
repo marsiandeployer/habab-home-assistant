@@ -1,0 +1,33 @@
+{
+  "recorded_at_utc": "2026-10-23T17:21:15.934Z",
+  "scope": "Isolated Linux baked0.3.1 native card render fixture",
+  "fixture_is_physical_device": false,
+  "backend_configuration_writes": 0,
+  "stage": "inspect_assets_and_fixture",
+  "preview": {
+    "assets": {
+      "module_status": 200,
+      "module_sha256": "38d88e9d49929c66f873ec9b52ec513d34e923eee98d1cbe5d0b5a33055f6137",
+      "image_status": 200,
+      "image_type": "image/svg+xml",
+      "image_sha256": "fa5da4fd28be4f98a1f390b7e6fa53caa4f0d53fde089d04357bc607421bd295"
+    },
+    "rendered": true,
+    "card_types": [
+      "picture-entity",
+      "tile",
+      "tile"
+    ],
+    "card_count": 3,
+    "virtual_ids_in_native_backend": 0
+  },
+  "local_source_sha256": "38d88e9d49929c66f873ec9b52ec513d34e923eee98d1cbe5d0b5a33055f6137",
+  "local_image_sha256": "fa5da4fd28be4f98a1f390b7e6fa53caa4f0d53fde089d04357bc607421bd295",
+  "installed_source_matches": true,
+  "installed_image_matches": true,
+  "verdict": "INSTALLED_ASSETS_MATCH",
+  "own_tab_closed": true,
+  "manual_visual_verdict": "PASS: robot illustration, Russian docked state, vacuum controls and86percent battery all visible",
+  "screenshot_viewed": true,
+  "native_card_preview_only": true
+}

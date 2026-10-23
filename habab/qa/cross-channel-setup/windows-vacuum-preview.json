@@ -1,0 +1,10 @@
+{
+  "recorded_at_utc": "2026-10-23T17:17:56.178Z",
+  "scope": "User Windows read-only assets and browser-only vacuum fixture",
+  "fixture_is_physical_device": false,
+  "backend_configuration_writes": 0,
+  "stage": "connect",
+  "verdict": "CHECK_FAILED",
+  "error": "Error",
+  "reason": "Chrome connection failed. Run the selected tunnel BAT again."
+}

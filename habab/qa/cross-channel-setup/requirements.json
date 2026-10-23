@@ -31,6 +31,18 @@
       "original_bot_identity_bound": true,
       "native_loaded_event_without_web_polling_covered": true,
       "real_bot_delivery_test": false
+    },
+    "vacuum_card_preview": {
+      "environment": "isolated Linux baked0.3.1",
+      "real_device": false,
+      "native_card_types": [
+        "picture-entity",
+        "tile",
+        "tile"
+      ],
+      "rendered_and_manually_viewed": true,
+      "baked_module_and_image_sha_match_source": true,
+      "synthetic_vacuum_ids_added_to_backend": 0
     }
   },
   "unverified_or_incomplete": [
