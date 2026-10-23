@@ -19,6 +19,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .agent_diagnostics import AgentDiagnostics
 from .const import DOMAIN
+from .runtime_context import (
+    DOCKER_RUNTIME_KIND,
+    RUNTIME_KIND_ENV,
+    runtime_fingerprint,
+    runtime_prompt,
+)
 
 PORT = 4197
 PROMPT = """Ты помощник по настройке домашнего Home Assistant. Отвечай по-русски,
@@ -144,8 +150,15 @@ class SetupAgent:
             raise AgentError("runtime_error") from error
 
     async def ensure(self):
+        runtime_kind = os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND)
+        try:
+            prompt = runtime_prompt(runtime_kind, PROMPT)
+        except ValueError as error:
+            await self.close()
+            raise AgentError("unsupported_runtime") from error
+
         settings = self.settings()
-        fingerprint = hashlib.sha256(json.dumps(dict(settings), sort_keys=True).encode()).hexdigest()
+        fingerprint = runtime_fingerprint(settings, runtime_kind)
         if self.process and self.process.returncode is None and fingerprint == self.fingerprint:
             return
         await self.close()
@@ -169,7 +182,7 @@ class SetupAgent:
                     "limit": {"context": 131072, "output": 4096},
                     "options": {"thinking": {"type": "disabled"}}}},
             }},
-            "agent": {"build": {"prompt": PROMPT, "steps": 12}},
+            "agent": {"build": {"prompt": prompt, "steps": 12}},
         }
         # Do not inherit host provider credentials, HOME, or an existing runtime.
         env = {key: os.environ[key] for key in ("PATH", "LANG", "TZ", "SSL_CERT_FILE") if key in os.environ}

@@ -1,0 +1,16 @@
+{
+  "runtime_env": "HABAB_RUNTIME_KIND",
+  "default": "docker",
+  "opt_in": "android_proot",
+  "docker_prompt_sha256": "2d1bc151f1e28e3053b4ed3ff50fcbc68720a108dcc1736a29a5123081bfa681",
+  "tests": {
+    "focused_setup_agent": 10,
+    "network": "none",
+    "source_and_tests_read_only": true,
+    "base_image": "sha256:450d74da2368074366820a24486164cff51f5f685d9b5fbaaf34ac362550abee"
+  },
+  "independent_review": "No shared source blocker; Android launcher must set explicit env before activation.",
+  "phone_ai_e2e": "NOT_RUN owner key unavailable",
+  "phone_telegram_e2e": "NOT_RUN owner token/pairing unavailable",
+  "windows": "Default Docker prompt unchanged; no Windows device/settings changes."
+}
