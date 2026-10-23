@@ -1,0 +1,45 @@
+{
+  "status": "PARTIAL",
+  "interactionStatus": "PASS",
+  "baseUrl": "http://127.0.0.1:8402",
+  "image": "b0c6f0d10887",
+  "viewport": "390x844",
+  "checks": {
+    "authenticatedAdministrator": true,
+    "locale": "ru",
+    "route": "/habab-telegram",
+    "chatInitiallyClosed": true,
+    "launcherOpenedChat": true,
+    "messageFieldFocusedOnOpen": true,
+    "chatClosedByTouch": true,
+    "closedChatBackgroundTokenInputReceivedTouch": true,
+    "tokenFieldStayedEmpty": true,
+    "nativeHAMenuControlVisible": true,
+    "nativeHAMenuControlHasIconButton": true,
+    "closedChatMenuTouchEmittedHassToggleMenu": true,
+    "menuToggleEvents": 1,
+    "nativeDrawerOpened": true,
+    "nativeDrawerDismissedByBackdrop": true,
+    "launcherRemainedMountedAndVisible": true,
+    "launcherReopenedAfterDrawerDismissal": true,
+    "messageFieldFocusedOnReopen": true,
+    "telegramConfigurePairUnlinkRequests": 0
+  },
+  "pageError": {
+    "count": 1,
+    "firstObserved": "initial page load before any test interaction",
+    "countAfterOpen": 1,
+    "countAfterClose": 1,
+    "source": "frontend_latest/core.b387881ced09e4aa.js:1:4415; _handleMessage at :1:4091",
+    "name": "Object",
+    "message": "Object: Object",
+    "assessment": "The error originates in the bundled Core WebSocket message handler. Its relation to this chat interaction is unknown. The count remained unchanged through chat open and close."
+  },
+  "screenshot": {
+    "status": "omitted",
+    "reason": "No further browser runs per parent instruction."
+  },
+  "notes": [
+    "The first attempt to reopen the launcher while the Home Assistant modal drawer was still open was intercepted by that drawer. After dismissing the drawer via its backdrop, the launcher reopened and focused the message field."
+  ]
+}
