@@ -9,6 +9,6 @@
   "sha256": "94d288fbe9ae0921002eec32cfb489747cee6423412e862e77e44b1e2b36803a",
   "files": 61,
   "source_and_archive_gitleaks": "PASS",
-  "windows_live": "NOT_RUN_tunnel_expired",
+  "windows_live": "PARTIAL_0.1.0_top_toolbar_chat_real_reply_PASS_0.2_bottom_right_pending",
   "telegram_live": "NOT_RUN_no_dedicated_bot_configured"
 }

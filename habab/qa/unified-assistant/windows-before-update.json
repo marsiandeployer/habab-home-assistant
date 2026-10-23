@@ -1,0 +1,47 @@
+{
+  "checkedAt": "2026-10-23T09:31:54.055138+00:00",
+  "environment": "user Windows via authorized support tunnel",
+  "home_assistant_version": "2026.10.2",
+  "habab_version": "0.1.0",
+  "native_admin": true,
+  "installed_frontend_matches_commit": "3fb587549",
+  "installed_frontend_sha256": "276018be8fd654e504a8ad0b9d7532c0e7f81990c67a0e138096ddf4caf144d8",
+  "launcher_position": "top_toolbar",
+  "bottom_right_launcher": false,
+  "telegram_sidebar": false,
+  "chat_open_input_real_reply": "PASS",
+  "integration_domains": [
+    {
+      "domain": "analytics",
+      "state": "loaded"
+    },
+    {
+      "domain": "backup",
+      "state": "loaded"
+    },
+    {
+      "domain": "shopping_list",
+      "state": "loaded"
+    },
+    {
+      "domain": "radio_browser",
+      "state": "loaded"
+    },
+    {
+      "domain": "google_translate",
+      "state": "loaded"
+    },
+    {
+      "domain": "met",
+      "state": "loaded"
+    },
+    {
+      "domain": "habab_home",
+      "state": "loaded"
+    }
+  ],
+  "device_count": 3,
+  "vacuum_state_count": 0,
+  "settings_or_physical_commands_changed": false,
+  "remaining": "Owner must run updated Windows BAT to rebuild container; bottom-right launcher E2E remains pending"
+}
