@@ -1,0 +1,61 @@
+{
+  "state": "PARTIAL",
+  "apkVersion": "0.1.5-voice-preview",
+  "versionCode": 7,
+  "hababVersion": "0.3.2",
+  "sourceCommit": "570f6f641a003db10b3f0dc80fcc05687a78f553",
+  "runtime": "release-ab1dba548a40e5b3.json",
+  "runtimeVerify": {
+    "result": "PASS",
+    "release": "ab1dba548a40e5b3",
+    "files": 155812,
+    "symlinks": 1634,
+    "regularBytes": 2525043301,
+    "hababSourceFiles": 54
+  },
+  "javaFullArchive": {
+    "tests": 16,
+    "failures": 0,
+    "skipped": 0
+  },
+  "backend": {
+    "previousSuitePass": 123,
+    "addedTransportFocusedPass": 4
+  },
+  "gatewayTestsPass": 5,
+  "nodeRelayAndVendorPass": 10,
+  "nodeChatAndBrowserVoicePass": 15,
+  "phone": {
+    "apkInstalled": true,
+    "nativeAuthorization": "encrypted-and-consumed",
+    "microphoneEnabled": true,
+    "runtimeUpdate": "PASS",
+    "wakeWordPhysical": "NOT_VERIFIED",
+    "screenOffVoice": "CAPTURE_FRAMES_ONLY",
+    "telegramReply": "NOT_VERIFIED",
+    "aliasExternalClient": "WINDOWS_OWN_SERVER_CONFIRMED",
+    "runtimeReadback": {
+      "release": "ab1dba548a40e5b3",
+      "sourceCommit": "570f6f641a003db10b3f0dc80fcc05687a78f553",
+      "checkedSourceFiles": 54,
+      "mismatches": []
+    },
+    "ownerLogin": "PASS",
+    "coreState": "RUNNING",
+    "nativeEmbeddedChat": "PASS_PHYSICAL_RENDER",
+    "aliasAndroidChrome": "DNS_PROBE_FINISHED_NXDOMAIN",
+    "aliasAndroidApplication": "PASS_LOCAL_LINK_HANDLER",
+    "aliasDefaultSelection": "Android app chooser, select Habab Home",
+    "screenOffCaptureEvidence": "voice/build7-screen-off-capture.json",
+    "microphoneNote": "Build7 native service resumed through existing enabled setting; AudioRecord frame counter advances with screen off. Audible wake phrase and reply NOT_VERIFIED."
+  },
+  "providerProof": {
+    "phoneDirectOpenAI": "403 unsupported_country_region_territory",
+    "phoneDirectTelegram": "network_unreachable",
+    "phoneExplicitRelayOpenAI": 200,
+    "phoneExplicitRelayBotGetMe": 200,
+    "realEphemeralWebSocket": "session.created"
+  },
+  "commercialContract": "OPEN - awaiting authoritative current provider/Telegram steering; no commercial compliance claim",
+  "apkSha256": "0e88d068063077895d4e82c796608b1418bd448dcd9d3bf474b06d8e189fe46a"
+}

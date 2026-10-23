@@ -35,9 +35,21 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved); store = new RuntimeStore(this); home(); handler.post(refresh);
         // ADB provisioning is available only in a debug build, never the release APK.
+        if (openAlias(getIntent())) return;
         if (BuildConfig.DEBUG && getIntent().hasExtra("install_url")) install(getIntent().getStringExtra("install_url"));
         else if (BuildConfig.DEBUG && getIntent().getBooleanExtra("start_server", false)) startServer();
         else if (BuildConfig.DEBUG && getIntent().getBooleanExtra("provision_voice", false)) provisionVoice();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent); setIntent(intent); openAlias(intent);
+    }
+
+    private boolean openAlias(Intent intent) {
+        if (!Intent.ACTION_VIEW.equals(intent.getAction())) return false;
+        String address = LocalAddress.resolve(intent.getDataString());
+        if (address == null) return false;
+        openHome(address); return true;
     }
 
     private TextView text(String value) {
@@ -133,7 +145,12 @@ public final class MainActivity extends Activity {
     }
 
     private void openHome() {
+        openHome("http://127.0.0.1:8123");
+    }
+
+    private void openHome(String address) {
         if (busy) return;
+        if (browser != null) { browser.destroy(); browser = null; }
         LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL);
         Button back = new Button(this); back.setText(R.string.back); back.setOnClickListener(view -> home()); layout.addView(back);
         Button voice = new Button(this); voice.setText(R.string.voice_authorize);
@@ -152,7 +169,7 @@ public final class MainActivity extends Activity {
             }
         });
         layout.addView(browser, new LinearLayout.LayoutParams(-1, 0, 1)); setContentView(layout);
-        state = null; browser.loadUrl("http://127.0.0.1:8123");
+        state = null; browser.loadUrl(address);
     }
 
     private void voiceSettings() {
