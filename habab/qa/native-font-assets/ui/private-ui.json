@@ -1,0 +1,334 @@
+{
+  "base": "http://127.0.0.1:8403",
+  "private_source_overlay": false,
+  "private_baked_image": "sha256:614b4c89cfb5ec9942bf7a784b9903266d96c7ea4af8cce6fac7c13ef9befc71",
+  "errors": [],
+  "cases": [
+    {
+      "route": "/config/dashboard",
+      "view": "desktop",
+      "width": 1280,
+      "height": 800,
+      "open": true,
+      "chat": {
+        "x": 640,
+        "y": 0,
+        "right": 1280,
+        "bottom": 800,
+        "width": 640,
+        "height": 800
+      },
+      "dashboard": {
+        "x": 0,
+        "y": 0,
+        "right": 640,
+        "bottom": 800,
+        "width": 640,
+        "height": 800
+      },
+      "inert": false,
+      "input": {
+        "x": 670,
+        "y": 707,
+        "right": 1187,
+        "bottom": 771,
+        "width": 517,
+        "height": 64
+      },
+      "send": {
+        "x": 1195,
+        "y": 715,
+        "right": 1251,
+        "bottom": 771,
+        "width": 56,
+        "height": 56
+      },
+      "expanded": false,
+      "duplicate_rows": 0,
+      "status": "",
+      "hook": true,
+      "scrollbar": false
+    },
+    {
+      "route": "/habab-ai",
+      "view": "desktop",
+      "width": 1280,
+      "height": 800,
+      "open": true,
+      "chat": {
+        "x": 640,
+        "y": 0,
+        "right": 1280,
+        "bottom": 800,
+        "width": 640,
+        "height": 800
+      },
+      "dashboard": {
+        "x": 0,
+        "y": 0,
+        "right": 640,
+        "bottom": 800,
+        "width": 640,
+        "height": 800
+      },
+      "inert": false,
+      "input": {
+        "x": 670,
+        "y": 707,
+        "right": 1187,
+        "bottom": 771,
+        "width": 517,
+        "height": 64
+      },
+      "send": {
+        "x": 1195,
+        "y": 715,
+        "right": 1251,
+        "bottom": 771,
+        "width": 56,
+        "height": 56
+      },
+      "expanded": false,
+      "duplicate_rows": 0,
+      "status": "",
+      "hook": true,
+      "scrollbar": false
+    },
+    {
+      "route": "/lovelace/0",
+      "view": "desktop",
+      "width": 1280,
+      "height": 800,
+      "open": true,
+      "chat": {
+        "x": 640,
+        "y": 0,
+        "right": 1280,
+        "bottom": 800,
+        "width": 640,
+        "height": 800
+      },
+      "dashboard": {
+        "x": 0,
+        "y": 0,
+        "right": 640,
+        "bottom": 800,
+        "width": 640,
+        "height": 800
+      },
+      "inert": false,
+      "input": {
+        "x": 670,
+        "y": 707,
+        "right": 1187,
+        "bottom": 771,
+        "width": 517,
+        "height": 64
+      },
+      "send": {
+        "x": 1195,
+        "y": 715,
+        "right": 1251,
+        "bottom": 771,
+        "width": 56,
+        "height": 56
+      },
+      "expanded": false,
+      "duplicate_rows": 0,
+      "status": "",
+      "hook": true,
+      "scrollbar": false
+    },
+    {
+      "view": "mobile-stacked",
+      "width": 390,
+      "height": 844,
+      "open": true,
+      "chat": {
+        "x": 0,
+        "y": 422,
+        "right": 390,
+        "bottom": 844,
+        "width": 390,
+        "height": 422
+      },
+      "dashboard": {
+        "x": 0,
+        "y": 0,
+        "right": 390,
+        "bottom": 422,
+        "width": 390,
+        "height": 422
+      },
+      "inert": false,
+      "input": {
+        "x": 30,
+        "y": 751,
+        "right": 297,
+        "bottom": 815,
+        "width": 267,
+        "height": 64
+      },
+      "send": {
+        "x": 305,
+        "y": 759,
+        "right": 361,
+        "bottom": 815,
+        "width": 56,
+        "height": 56
+      },
+      "expanded": false,
+      "duplicate_rows": 0,
+      "status": "",
+      "hook": true,
+      "scrollbar": false
+    },
+    {
+      "view": "mobile-expanded",
+      "width": 390,
+      "height": 844,
+      "open": true,
+      "chat": {
+        "x": 0,
+        "y": 0,
+        "right": 390,
+        "bottom": 844,
+        "width": 390,
+        "height": 844
+      },
+      "dashboard": {
+        "x": 0,
+        "y": 0,
+        "right": 390,
+        "bottom": 0,
+        "width": 390,
+        "height": 0
+      },
+      "inert": true,
+      "input": {
+        "x": 30,
+        "y": 751,
+        "right": 297,
+        "bottom": 815,
+        "width": 267,
+        "height": 64
+      },
+      "send": {
+        "x": 305,
+        "y": 759,
+        "right": 361,
+        "bottom": 815,
+        "width": 56,
+        "height": 56
+      },
+      "expanded": true,
+      "duplicate_rows": 0,
+      "status": "",
+      "hook": true,
+      "scrollbar": false
+    },
+    {
+      "view": "mobile-keyboard-space",
+      "width": 390,
+      "height": 420,
+      "open": true,
+      "chat": {
+        "x": 0,
+        "y": 0,
+        "right": 390,
+        "bottom": 420,
+        "width": 390,
+        "height": 420
+      },
+      "dashboard": {
+        "x": 0,
+        "y": 0,
+        "right": 390,
+        "bottom": 0,
+        "width": 390,
+        "height": 0
+      },
+      "inert": true,
+      "input": {
+        "x": 30,
+        "y": 327,
+        "right": 297,
+        "bottom": 391,
+        "width": 267,
+        "height": 64
+      },
+      "send": {
+        "x": 305,
+        "y": 335,
+        "right": 361,
+        "bottom": 391,
+        "width": 56,
+        "height": 56
+      },
+      "expanded": true,
+      "duplicate_rows": 0,
+      "status": "",
+      "hook": true,
+      "scrollbar": false
+    },
+    {
+      "view": "mobile-return-to-dashboard",
+      "width": 390,
+      "height": 844,
+      "open": true,
+      "chat": {
+        "x": 0,
+        "y": 422,
+        "right": 390,
+        "bottom": 844,
+        "width": 390,
+        "height": 422
+      },
+      "dashboard": {
+        "x": 0,
+        "y": 0,
+        "right": 390,
+        "bottom": 422,
+        "width": 390,
+        "height": 422
+      },
+      "inert": false,
+      "input": {
+        "x": 30,
+        "y": 751,
+        "right": 297,
+        "bottom": 815,
+        "width": 267,
+        "height": 64
+      },
+      "send": {
+        "x": 305,
+        "y": 759,
+        "right": 361,
+        "bottom": 815,
+        "width": 56,
+        "height": 56
+      },
+      "expanded": false,
+      "duplicate_rows": 0,
+      "status": "",
+      "hook": true,
+      "scrollbar": false
+    }
+  ],
+  "limitations": [
+    "Mobile keyboard space is emulated by viewport resize."
+  ],
+  "failed_requests": [],
+  "stock_assist": {
+    "same_widget": true,
+    "widgets": 1,
+    "stock_imports": 0,
+    "prevented": true
+  },
+  "draft_preserved": true,
+  "closed_respected": true,
+  "verdict": "PASS_WITH_LIMITS",
+  "context_closed": true,
+  "existing_pages_preserved": true
+}

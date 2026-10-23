@@ -1,0 +1,28 @@
+{
+  "sourceCommit": "51e42204781d6076b38bcb27b3918b2d0910d6a3",
+  "physicalWindows": false,
+  "fonts": {
+    "Roboto-Bold.woff2": {
+      "status": 200,
+      "bytes": 64740,
+      "sha256": "8e44376b735dcc9027acbcc8a0df64c3f886a23529eff27b022f344d719e90f2",
+      "magic": "wOF2"
+    },
+    "Roboto-Medium.woff2": {
+      "status": 200,
+      "bytes": 65484,
+      "sha256": "96025fe9db6578d8bc7f4b8be739750b1490e07221c2b1f16acde2ea7669cedf",
+      "magic": "wOF2"
+    },
+    "Roboto-Regular.woff2": {
+      "status": 200,
+      "bytes": 64632,
+      "sha256": "47107401d0adb375ab9aa167f9d62489a849d510e740a307b5a4db60e5db3562",
+      "magic": "wOF2"
+    }
+  },
+  "imageId": "sha256:614b4c89cfb5ec9942bf7a784b9903266d96c7ea4af8cce6fac7c13ef9befc71",
+  "sourceOverlay": false,
+  "nativeFrontend": "20260930.4+habab.4",
+  "verdict": "PASS_NATIVE_FONT_HTTP"
+}

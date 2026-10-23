@@ -1,0 +1,43 @@
+{
+  "at": "2026-10-23T20:57:18.303Z",
+  "sourceCommit": "51e42204781d6076b38bcb27b3918b2d0910d6a3",
+  "physicalWindows": false,
+  "physicalAndroidKeyboard": false,
+  "pageErrors": [],
+  "fonts": [
+    {
+      "weight": 400,
+      "count": 1,
+      "statuses": [
+        "loaded"
+      ],
+      "families": [
+        "Roboto"
+      ]
+    },
+    {
+      "weight": 500,
+      "count": 1,
+      "statuses": [
+        "loaded"
+      ],
+      "families": [
+        "Roboto"
+      ]
+    },
+    {
+      "weight": 700,
+      "count": 1,
+      "statuses": [
+        "loaded"
+      ],
+      "families": [
+        "Roboto"
+      ]
+    }
+  ],
+  "launchScreenGone": true,
+  "verdict": "PASS_REAL_CORE_BROWSER_FONTS",
+  "ownContextClosed": true,
+  "preexistingPagesPreserved": true
+}

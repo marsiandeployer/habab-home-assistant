@@ -1,0 +1,59 @@
+{
+  "source": {
+    "commit": "51e42204781d6076b38bcb27b3918b2d0910d6a3",
+    "build_context": "/root/.local/share/habab-canonical-qa/build-fonts-51e422047",
+    "context_source": "extracted Windows ZIP only",
+    "windows_zip_sha256": "604e4f9a793bf73010a418585ad44d7a7df10536183c9be288eebfbd6d6e8b0c",
+    "windows_zip_bytes": 157731,
+    "windows_zip_members": 76,
+    "product_ui_sha256_expected_and_baked": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0",
+    "ui_bytes": 53773
+  },
+  "image": {
+    "tag": "habab-home:windows-kit-0.3.3-604e4f9a793b",
+    "id": "sha256:614b4c89cfb5ec9942bf7a784b9903266d96c7ea4af8cce6fac7c13ef9befc71",
+    "size_bytes": 2668180309,
+    "product_version": "0.3.3",
+    "home_assistant_core": "2026.10.2",
+    "node": "v24.22.1",
+    "native_frontend": {
+      "version": "20260930.4+habab.4",
+      "sha256": "40d4d8def3c8436069d2f3d88ef0a2a3934f2e31761f1527a9104dc6d6874cb9",
+      "bytes": 111672769
+    }
+  },
+  "build": {
+    "command": "docker build --cache-from habab-home:windows-kit-0.3.3-cb1ffc67434c -t habab-home:windows-kit-0.3.3-604e4f9a793b /root/.local/share/habab-canonical-qa/build-fonts-51e422047",
+    "result": "PASS",
+    "only_one_image_built": true,
+    "frontend_build_repeated": false
+  },
+  "baked_validation": {
+    "method": "ephemeral --rm --network none Python container; no source/config mounts",
+    "metadata": "PASS",
+    "ui_hash": "PASS",
+    "woff2_count": 12,
+    "required_fonts": {
+      "Roboto-Bold.woff2": {
+        "bytes": 64740,
+        "magic": "wOF2",
+        "sha256": "8e44376b735dcc9027acbcc8a0df64c3f886a23529eff27b022f344d719e90f2"
+      },
+      "Roboto-Medium.woff2": {
+        "bytes": 65484,
+        "magic": "wOF2",
+        "sha256": "96025fe9db6578d8bc7f4b8be739750b1490e07221c2b1f16acde2ea7669cedf"
+      },
+      "Roboto-Regular.woff2": {
+        "bytes": 64632,
+        "magic": "wOF2",
+        "sha256": "47107401d0adb375ab9aa167f9d62489a849d510e740a307b5a4db60e5db3562"
+      }
+    }
+  },
+  "limits": [
+    "No browser/UI runtime check in this task; reserved for root isolated Core QA.",
+    "No Windows or Android installation performed.",
+    "Full 141 Python and 12 Telegram Node tests were not repeated; they passed on prior image e49, and backend/agent code is unchanged in this wheel-only candidate."
+  ]
+}

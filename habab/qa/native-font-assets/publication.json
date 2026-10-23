@@ -1,0 +1,11 @@
+{
+  "sourceCommit": "51e42204781d6076b38bcb27b3918b2d0910d6a3",
+  "url": "https://habab-demo.wpmix.net/downloads/habab-home-windows-604e4f9a793b.zip",
+  "sha256": "604e4f9a793bf73010a418585ad44d7a7df10536183c9be288eebfbd6d6e8b0c",
+  "bytes": 157731,
+  "httpStatus": 200,
+  "candidateOnly": true,
+  "stableArchiveUnchanged": true,
+  "stableLaunchersUpdated": false,
+  "physicalWindowsInstall": false
+}

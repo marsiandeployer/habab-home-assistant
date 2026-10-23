@@ -1,0 +1,430 @@
+{
+  "source_commit": "51e42204781d6076b38bcb27b3918b2d0910d6a3",
+  "source_export_command": "git archive --format=tar 51e422047 habab/distribution",
+  "builder_command": "python3 /root/.local/share/habab-canonical-qa/windows-51e422047/habab/distribution/package-windows.py",
+  "candidate_zip_path": "/root/.local/share/habab-canonical-qa/windows-51e422047/habab/public/downloads/habab-home-windows-604e4f9a793b.zip",
+  "candidate_zip_sha256": "604e4f9a793bf73010a418585ad44d7a7df10536183c9be288eebfbd6d6e8b0c",
+  "candidate_zip_bytes": 157731,
+  "candidate_zip_members": 76,
+  "versions": {
+    "product": "0.3.3",
+    "integration": "0.3.3",
+    "home_assistant_core": "2026.10.2",
+    "native_frontend": "20260930.4+habab.4",
+    "native_frontend_wheel_sha256": "40d4d8def3c8436069d2f3d88ef0a2a3934f2e31761f1527a9104dc6d6874cb9",
+    "setup_chat_sha256": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0"
+  },
+  "bat_ps_paths": [
+    "diagnose-assistant.bat",
+    "diagnose-assistant.ps1",
+    "ensure-xiaomi-callback.ps1",
+    "start-windows.bat",
+    "start-windows.ps1",
+    "start-xiaomi-home.bat",
+    "support_tunnel.bat",
+    "support_tunnel.ps1"
+  ],
+  "all_bat_ps_tracked_in_source_commit": true,
+  "member_manifest": [
+    {
+      "path": ".dockerignore",
+      "bytes": 122,
+      "sha256": "02aa931bdac0c2f425e56dbb0a8371a69aa2307b40c35be8020004ba96e1c642"
+    },
+    {
+      "path": "Dockerfile",
+      "bytes": 1686,
+      "sha256": "609dec3cb0931f4a013f6f353f7af1dcab2ff3aae110ce7db9b637b9781c51b7"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "NOTICE",
+      "bytes": 1186,
+      "sha256": "3ebaef4b7311c34f67e3a7f2bf21e6e38f015edee916679074c8e2923c2cd47f"
+    },
+    {
+      "path": "README-WINDOWS.md",
+      "bytes": 23209,
+      "sha256": "1109371a33609a29106e6ba84e36d5194ff2871443624895633c6f061b24d47d"
+    },
+    {
+      "path": "compose.windows.yaml",
+      "bytes": 529,
+      "sha256": "9f3b12bc88eae18eb18a776514e18b16e64387bf9721339a11f1c06a8db983e7"
+    },
+    {
+      "path": "config/configuration.yaml",
+      "bytes": 221,
+      "sha256": "d2812209ffec48d939fb73c038100882540135ab6e14df0b03417b1c936f5754"
+    },
+    {
+      "path": "diagnose-assistant.bat",
+      "bytes": 316,
+      "sha256": "06858e75c2dc0e9e923b35f4fe7dcaba5bb956b3ebf22400173a0aed72d7880e"
+    },
+    {
+      "path": "diagnose-assistant.ps1",
+      "bytes": 4080,
+      "sha256": "59f56ef6d73d5dc222c00b8b02195dbfb5aa4dc5773f55fee134e0776221ef35"
+    },
+    {
+      "path": "diagnose-assistant.py",
+      "bytes": 6716,
+      "sha256": "4bf816000ade48a673302216607ecf096d4213dda36e71fd9a3b0f4e613ca50f"
+    },
+    {
+      "path": "docker-entrypoint.sh",
+      "bytes": 237,
+      "sha256": "1f1d18bf4dff526c98c4f36343b4bd53bee00837a1c3ae9909dad6b01ec2e168"
+    },
+    {
+      "path": "ensure-xiaomi-callback.ps1",
+      "bytes": 4025,
+      "sha256": "357a71f394763bd1257f42d97b5831b4e485d60aec6ab072cfec798fa9a183e0"
+    },
+    {
+      "path": "habab-ha.py",
+      "bytes": 1184,
+      "sha256": "ed885da31364a7b85671ffebfeb8997a727010335bba0e61170d2073e0ed4fa9"
+    },
+    {
+      "path": "install-native-frontend.py",
+      "bytes": 2984,
+      "sha256": "867cdba882fbd4dae1fe553fa09848fd5e89e8f8f6358ff230bef1113e4f9fa0"
+    },
+    {
+      "path": "install-opencode-volume.py",
+      "bytes": 2128,
+      "sha256": "bd7a1bcbcd2d26e6c4fa4e96d6b11757a0be077d454596acfab56c65b1cbaf88"
+    },
+    {
+      "path": "install-xiaomi-home.py",
+      "bytes": 3655,
+      "sha256": "f7e6684e4b343567f7117202596a6cdf53745f2ac1efc83f96fb4092b132f66e"
+    },
+    {
+      "path": "native-frontend-release.json",
+      "bytes": 830,
+      "sha256": "bcb915c34b3f167ef779394b7f4f78ea79533e296f1b9cd9e9dcaf15f4b1bcc0"
+    },
+    {
+      "path": "opencode-release.json",
+      "bytes": 644,
+      "sha256": "54afe1c7304f6f0f3f998fe2ebea5a98735562eb348c66c91ec468c96989c084"
+    },
+    {
+      "path": "release.json",
+      "bytes": 1556,
+      "sha256": "3c0319711edff7eef3e153c75d0bc44c06661634fcbf5797991f2f69d385f4f7"
+    },
+    {
+      "path": "src/habab_home/__init__.py",
+      "bytes": 4411,
+      "sha256": "3c8b449840ab23e86c242946c81e42b6368f82283774684fba338f0b81603098"
+    },
+    {
+      "path": "src/habab_home/agent_diagnostics.py",
+      "bytes": 3793,
+      "sha256": "8f400cca27f08067724b5f36c53cfe8c41bfe5c40fc9c639f60948d81d2872f3"
+    },
+    {
+      "path": "src/habab_home/assist_adapter.py",
+      "bytes": 5098,
+      "sha256": "ef4589bd2867d152b463b2ea0cf02c8c1885c0db10f6c8843ccd886d7c3a2b09"
+    },
+    {
+      "path": "src/habab_home/assistant.py",
+      "bytes": 7274,
+      "sha256": "a856c3f30d7c92f85b61439cc6f11a66959f06e5d4132660dc8112677605ad48"
+    },
+    {
+      "path": "src/habab_home/config_flow.py",
+      "bytes": 2340,
+      "sha256": "438eb3a4fd0923064308013edc2e87b288ee967a7ae79a5d0d23e9becd186ebf"
+    },
+    {
+      "path": "src/habab_home/const.py",
+      "bytes": 40,
+      "sha256": "fe60cc1e06e409270ec1a453f34fcfb328e616dcd572a738c9dd0c4778bc22cd"
+    },
+    {
+      "path": "src/habab_home/conversation.py",
+      "bytes": 3154,
+      "sha256": "1c39488a522c2a240fc3751ff8d45fa560d4fc256c647e91e571b7abb75e1ae8"
+    },
+    {
+      "path": "src/habab_home/discovery.py",
+      "bytes": 2853,
+      "sha256": "e4d446e46f92443c1aff274c7f17fd5a098c81a12639b701954f51b32535fe62"
+    },
+    {
+      "path": "src/habab_home/frontend/ai-panel.js",
+      "bytes": 12689,
+      "sha256": "01cd5eb83491df0bd121c65f4cbee4d499c0851c1f3e8dfcaaf0c948d49f0591"
+    },
+    {
+      "path": "src/habab_home/frontend/assets/robot-vacuum.svg",
+      "bytes": 1057,
+      "sha256": "fa5da4fd28be4f98a1f390b7e6fa53caa4f0d53fde089d04357bc607421bd295"
+    },
+    {
+      "path": "src/habab_home/frontend/device-dashboard.js",
+      "bytes": 7188,
+      "sha256": "38d88e9d49929c66f873ec9b52ec513d34e923eee98d1cbe5d0b5a33055f6137"
+    },
+    {
+      "path": "src/habab_home/frontend/integration-setup.js",
+      "bytes": 32435,
+      "sha256": "d643b50698bb6ce9790f80f5ae73e50058ba258e0f896eb38ad444f387a2a88a"
+    },
+    {
+      "path": "src/habab_home/frontend/recorder-worklet.js",
+      "bytes": 554,
+      "sha256": "b4b5dd6c23d1fb54f0b17642b16dc77b086edc1ad1bcdf3fddf7381afb1fc7bc"
+    },
+    {
+      "path": "src/habab_home/frontend/setup-chat.js",
+      "bytes": 53773,
+      "sha256": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0"
+    },
+    {
+      "path": "src/habab_home/frontend/strings.js",
+      "bytes": 17870,
+      "sha256": "fd3b451466e8baae9cc2f4d0a23ad1ccca8345ca27109a14d513fc1e223d05cf"
+    },
+    {
+      "path": "src/habab_home/frontend/telegram-panel.js",
+      "bytes": 9060,
+      "sha256": "72dd2650daecf17a0537f408d9cca51d0928e35c1866378f90a2de9a0d6d7481"
+    },
+    {
+      "path": "src/habab_home/frontend/telemetry-panel.js",
+      "bytes": 14323,
+      "sha256": "517598d03e1f003ab7073a5dfcaac4bc2a03feddd05373f4308b118c028b7e12"
+    },
+    {
+      "path": "src/habab_home/frontend/voice.js",
+      "bytes": 7182,
+      "sha256": "0dd8811ee0edc717e308df8876df6327308a589674c25da18101310621b0b72d"
+    },
+    {
+      "path": "src/habab_home/frontend/xiaomi-setup.js",
+      "bytes": 14369,
+      "sha256": "acf38dbd35e8cbd2264721c27519ca398e7cb4ea51f4480e9ee4d1bb234d913d"
+    },
+    {
+      "path": "src/habab_home/integration_setup.py",
+      "bytes": 39436,
+      "sha256": "214fe0392b90765e2177f6489ab3abf553f5ef1297ccb475d2bc781d892eee4b"
+    },
+    {
+      "path": "src/habab_home/manifest.json",
+      "bytes": 428,
+      "sha256": "0fa35ea272de615b02606422fbe14af82b5f73016dd721d2da2cbdc2f3725366"
+    },
+    {
+      "path": "src/habab_home/mdns.py",
+      "bytes": 4332,
+      "sha256": "f85a92b674e741172448ef4eba7566eb7faddb1e8acda2e2617fcf021496f25a"
+    },
+    {
+      "path": "src/habab_home/providers.py",
+      "bytes": 6719,
+      "sha256": "b5c63221279259b4c0fa35d5735d43ddf41049b92fd8df358326ddf666a16321"
+    },
+    {
+      "path": "src/habab_home/realtime.py",
+      "bytes": 8468,
+      "sha256": "356db0e5f7a677ec52bcfd73c87a401238667eda19e53951b3ae2ae502610633"
+    },
+    {
+      "path": "src/habab_home/runtime_context.py",
+      "bytes": 5024,
+      "sha256": "0f628dea0e0f2059c887352b3f8b05f4c11c71115a116a4d6ecc7bb01e3836f9"
+    },
+    {
+      "path": "src/habab_home/setup_actions.py",
+      "bytes": 8009,
+      "sha256": "8357d995987ca84672d0ec6f64ad0efdd339b223ceaa508788acdec646d00f01"
+    },
+    {
+      "path": "src/habab_home/setup_agent.py",
+      "bytes": 20888,
+      "sha256": "0786272954fb534853d43b535a560ab989639c8380061b0893a8c4d930e79a6a"
+    },
+    {
+      "path": "src/habab_home/speech.py",
+      "bytes": 1874,
+      "sha256": "ffe586f8741fad6f84a5aee4da48cbff533f9149a304e9c1959940f78bccce9d"
+    },
+    {
+      "path": "src/habab_home/strings.json",
+      "bytes": 1615,
+      "sha256": "81dbb401ca4b88dbb8aae31fea89f96f3408cba08358b0325d78a1a8e4a7e2b9"
+    },
+    {
+      "path": "src/habab_home/stt.py",
+      "bytes": 2796,
+      "sha256": "a4137fafbd03c01ddcf7622445aba61df35c170971efd3a4318f2d3a5bbbbf22"
+    },
+    {
+      "path": "src/habab_home/telemetry.py",
+      "bytes": 18264,
+      "sha256": "9fc408288cbaa6ec3cdff577b3bb081d232101fffe5349d20c7273864160288a"
+    },
+    {
+      "path": "src/habab_home/translations/en.json",
+      "bytes": 1615,
+      "sha256": "81dbb401ca4b88dbb8aae31fea89f96f3408cba08358b0325d78a1a8e4a7e2b9"
+    },
+    {
+      "path": "src/habab_home/translations/ru.json",
+      "bytes": 2299,
+      "sha256": "761a8ff7d9599cf40f953fb636dcad8299ee46d5439a4fd14cd21e0732a3611c"
+    },
+    {
+      "path": "src/habab_home/tts.py",
+      "bytes": 1163,
+      "sha256": "2ffba4f5714db19c4e69693ef39bc2fdc0efbbbd0804b85037ee57a3265d5b3a"
+    },
+    {
+      "path": "src/habab_home/websocket.py",
+      "bytes": 6489,
+      "sha256": "cc0c4bb1fbf86cf93b71d4d6c593ce8b906ed9dd23cf0e8617577283c1a7dae3"
+    },
+    {
+      "path": "src/habab_home/xiaomi_setup.py",
+      "bytes": 23267,
+      "sha256": "210f38b846ef8bd02927bf15a0394a565a06b1b901d0f5e10013fb31925819d7"
+    },
+    {
+      "path": "src/habab_telegram/__init__.py",
+      "bytes": 28372,
+      "sha256": "efd98a6cb72fa1e8c594c73ad992a2754faaa44feb522366034448fc5499715e"
+    },
+    {
+      "path": "src/habab_telegram/config_flow.py",
+      "bytes": 3965,
+      "sha256": "87d353dd7eb46804d1c3aa568953e9b8a6dd0f5cab97989882fac9b8f628512e"
+    },
+    {
+      "path": "src/habab_telegram/const.py",
+      "bytes": 58,
+      "sha256": "61301036ca9a247e64d36bacb41184cf4afbcb8064ff3a1646f3cbea8829264b"
+    },
+    {
+      "path": "src/habab_telegram/manifest.json",
+      "bytes": 231,
+      "sha256": "55450ea5e27c185a83981684460adb6235d3aad4961c092b33ecb14cd2c5b624"
+    },
+    {
+      "path": "src/habab_telegram/transport.py",
+      "bytes": 1774,
+      "sha256": "37fc801e82c6ac71e2740a41527cbd5b16494068d6a6a9a479b9f1940f3d3ed8"
+    },
+    {
+      "path": "src/habab_telegram/websocket.py",
+      "bytes": 2115,
+      "sha256": "5b23658b5e4b4cffab662efc43babb9f0080ef066044934de71088cc2490b604"
+    },
+    {
+      "path": "start-windows.bat",
+      "bytes": 305,
+      "sha256": "a69a14e014c89fbaeae3970b3fbe480191760cf5f2c059d80f59a8d15b5d7a00"
+    },
+    {
+      "path": "start-windows.ps1",
+      "bytes": 11426,
+      "sha256": "efbc80a7b1cfa9b7fdc3a70754285d084ca8cdba518ae86b3cb571d5afa4b241"
+    },
+    {
+      "path": "start-xiaomi-home.bat",
+      "bytes": 194,
+      "sha256": "210b2f2268a1fc09e3107bd25c7f0ad9e70cc2e1f38cc5b521460d07edafcb47"
+    },
+    {
+      "path": "support-relay.json",
+      "bytes": 145,
+      "sha256": "1dee187a3f81f83452db8000c16d508c7d69b5494f2dfb48b8e920d715cbad45"
+    },
+    {
+      "path": "support_tunnel.bat",
+      "bytes": 186,
+      "sha256": "b7af5a931c62ac41154254bd7de3a9d882dc0ce70753ba5b836e904fda0bc81c"
+    },
+    {
+      "path": "support_tunnel.ps1",
+      "bytes": 6459,
+      "sha256": "1d6e306a25dff739d3f63824ad02cd4b2815a2fd2910384e211f3150704d7eda"
+    },
+    {
+      "path": "telegram-agent/PROVENANCE.md",
+      "bytes": 1265,
+      "sha256": "59ee57f5ad8ee62c605188b4b38c4360c91c8d6f2ddda5b9b03cf799eb6bb972"
+    },
+    {
+      "path": "telegram-agent/README.md",
+      "bytes": 1865,
+      "sha256": "d4a731aa506c9ba1e0dec830902f2faec3ca1a622b959f3284d47f6315a5b03b"
+    },
+    {
+      "path": "telegram-agent/package-lock.json",
+      "bytes": 512,
+      "sha256": "2da0c6f399a597de067c50c81ec7ea337c89537ce72923c0c50d8fcb2bb7b5c3"
+    },
+    {
+      "path": "telegram-agent/package.json",
+      "bytes": 230,
+      "sha256": "bf008b2709a96e668148d3a7a765d5dbbf9471bd6f493b2a5f4269424481f9bf"
+    },
+    {
+      "path": "telegram-agent/relay-fetch.mjs",
+      "bytes": 4895,
+      "sha256": "6c3c24096186ea9c59837cb668ae77dc23f64c048f7ef797412a9b7cfd443c85"
+    },
+    {
+      "path": "telegram-agent/vendor/noxon-telegram/package.json",
+      "bytes": 230,
+      "sha256": "af72e008e3bee00eb18165cb1461bc02138dcb7a0134aa984c234364f67a9e4b"
+    },
+    {
+      "path": "telegram-agent/vendor/noxon-telegram/src/index.mjs",
+      "bytes": 6615,
+      "sha256": "83798c8295308b606b26475641d44c1b5f36772650b900b2555c0c9f22834d02"
+    },
+    {
+      "path": "telegram-agent/worker.mjs",
+      "bytes": 2391,
+      "sha256": "cae633ddea58cb475f79aa0422bdc87b1adc281bf1cbfd38c02eb9b8a4a58e74"
+    },
+    {
+      "path": "xiaomi-home-release.json",
+      "bytes": 443,
+      "sha256": "f1438b2e7af71ae61f9c22c58f3baa8c1ab1e8839e887b9c856b7b6622b296f7"
+    }
+  ],
+  "security_checks": {
+    "config_paths": [
+      "config/configuration.yaml"
+    ],
+    "only_default_config_template": true,
+    "env_key_storage_userlog_backup_paths": [],
+    "gitleaks_command": "gitleaks dir --redact --no-banner --report-format json --report-path <temp-report> <extracted-candidate-zip>",
+    "gitleaks_exit_code": 0,
+    "gitleaks_findings": 0,
+    "gitleaks_report_path": "/root/.local/share/habab-canonical-qa/windows-51e422047/gitleaks-report.json"
+  },
+  "stable_public_artifact": {
+    "filename": "habab-home-windows-dcfbe4740bb6.zip",
+    "sha256": "dcfbe4740bb6f39044bd14c66a449a7b02d626a28f6405990cc301161748825f",
+    "bytes": 144222,
+    "unchanged": true,
+    "public_manifest_or_launchers_written": false
+  },
+  "physical_windows_install_tested": false,
+  "candidate_published": false
+}

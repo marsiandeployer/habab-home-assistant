@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-23T20:50:49.695Z",
+  "mode": "main-profile",
+  "port": 6259,
+  "settings_changed": false,
+  "device_commands_sent": 0,
+  "verdict": "CURRENT_WINDOWS_NOT_VERIFIED",
+  "failureClass": "Error",
+  "own_tabs_closed": false,
+  "browser_connected": false,
+  "own_tabs_created": 0,
+  "own_tabs_left_open": 0
+}

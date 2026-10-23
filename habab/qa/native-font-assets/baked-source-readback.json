@@ -1,0 +1,6 @@
+{
+  "bakedSourceFilesComparedToZip": 50,
+  "backendAndAgentDiffFromPriorFullSuiteSource": "empty",
+  "priorPython141AndTelegram12": "retained evidence; not rerun for wheel-only change",
+  "verdict": "PASS_BAKED_SOURCE_IDENTITY"
+}
