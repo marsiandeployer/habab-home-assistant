@@ -1,7 +1,7 @@
 {
-  "filename": "habab-home-windows-79ce5e3d0865.zip",
-  "sha256": "79ce5e3d086550ed94b7b93dd4b58f83f64071a79a8afbfb143ba0c6a9f02058",
-  "bytes": 139517,
+  "filename": "habab-home-windows-dcfbe4740bb6.zip",
+  "sha256": "dcfbe4740bb6f39044bd14c66a449a7b02d626a28f6405990cc301161748825f",
+  "bytes": 144222,
   "files": [
     ".dockerignore",
     "Dockerfile",
@@ -44,6 +44,7 @@
     "src/habab_home/integration_setup.py",
     "src/habab_home/manifest.json",
     "src/habab_home/providers.py",
+    "src/habab_home/runtime_context.py",
     "src/habab_home/setup_actions.py",
     "src/habab_home/setup_agent.py",
     "src/habab_home/speech.py",

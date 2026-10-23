@@ -6,36 +6,10 @@ export function visibleTextMessages(messages) {
   );
 }
 
-export function isOnboardingPreview(demoEnabled, previewMarker) {
-  return demoEnabled === true && previewMarker === "onboarding";
-}
-
 export function appendQuickReplyToDraft(draft, prompt) {
   return typeof draft === "string" && draft.trim()
     ? `${draft.replace(/\s+$/, "")}\n${prompt}`
     : prompt;
-}
-
-export function demoChatRequestBody(text, onboarding = false) {
-  return JSON.stringify(onboarding ? {text, mode: "onboarding"} : {text});
-}
-
-export function buildPreviewRows(states, language = "ru") {
-  if (!states || typeof states !== "object" || Array.isArray(states)) return [];
-  const labels = language === "ru" ? {
-    "light.living_room_floor_lamp": "Напольная лампа",
-    "light.living_room_spotlights": "Точечный свет",
-    "climate.living_room": "Климат в гостиной",
-  } : {
-    "light.living_room_floor_lamp": "Living room floor lamp",
-    "light.living_room_spotlights": "Living room spotlights",
-    "climate.living_room": "Living room climate",
-  };
-  return Object.entries(labels).flatMap(([entityId, label]) => {
-    const entry = states[entityId];
-    if (!entry || typeof entry !== "object" || typeof entry.state !== "string") return [];
-    return [{entityId, label, state: entry.state}];
-  });
 }
 
 export function mountStableElement(parent, element) {
@@ -80,15 +54,11 @@ function installChat() {
   const copy = {
     ru: {
       title: "Помощник", open: "Открыть чат с помощником", close: "Закрыть", fresh: "Новый чат",
-      intro: "Что подключим к вашему дому?", help: "Помогу найти устройство, проверить подключение и настроить Home Assistant.",
-      previewQuestion: "Что подключим к дому? Какое оборудование у вас уже есть?",
-      previewDashboard: "Дом сейчас", dashboardLoading: "Загружаю состояние дома…", dashboardFailed: "Не удалось загрузить состояние дома. Проверьте подключение и повторите попытку.", dashboardRetry: "Повторить загрузку", dashboardEmpty: "Состояние устройств пока недоступно.",
-      quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Другое оборудование",
-      previewPlaceholder: "Например: хочу подключить пылесос Xiaomi",
-      stateOn: "Включено", stateOff: "Выключено", stateHeat: "Обогрев", stateUnavailable: "Нет данных",
-      placeholder: "Например: проверь Bluetooth и найди устройства", send: "Отправить", stop: "Остановить",
+      intro: "Что подключим к дому? Какое оборудование у вас уже есть?",
+      quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Другое",
+      collapseChat: "Показать панель дома",
+      placeholder: "Например: хочу подключить пылесос Xiaomi", send: "Отправить", stop: "Остановить",
       working: "Проверяю и выполняю…", loading: "Подключаю помощника…", you: "Вы", assistant: "Помощник",
-      demo: "DeepSeek помогает с настройкой. Реальные устройства подключаются в вашей домашней установке Home Assistant.",
       answering: "Готовлю ответ…", rate_limited: "Слишком много запросов. Повторите позже.",
       settings: "Подключить DeepSeek", retry: "Повторить подключение",
       setup_ui_unavailable: "Не удалось открыть настройку устройств. Обновите страницу и попробуйте снова.",
@@ -122,15 +92,11 @@ function installChat() {
     },
     en: {
       title: "Assistant", open: "Open assistant chat", close: "Close", fresh: "New chat",
-      intro: "What shall we connect?", help: "Find devices, check connections and set up Home Assistant.",
-      previewQuestion: "What should we connect to your home? What equipment do you already have?",
-      previewDashboard: "Home right now", dashboardLoading: "Loading home state…", dashboardFailed: "Could not load the home state. Check your connection and try again.", dashboardRetry: "Retry loading", dashboardEmpty: "Device state is not available yet.",
-      quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Other equipment",
-      previewPlaceholder: "For example: I want to connect a Xiaomi vacuum",
-      stateOn: "On", stateOff: "Off", stateHeat: "Heating", stateUnavailable: "Unavailable",
-      placeholder: "For example: check Bluetooth and scan for devices", send: "Send", stop: "Stop",
+      intro: "What should we connect to your home? What equipment do you already have?",
+      quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Other",
+      collapseChat: "Show home dashboard",
+      placeholder: "For example: I want to connect a Xiaomi vacuum", send: "Send", stop: "Stop",
       working: "Checking and working…", loading: "Connecting…", you: "You", assistant: "Assistant",
-      demo: "DeepSeek can help with setup. Connect real devices in your own Home Assistant installation.",
       answering: "Preparing an answer…", rate_limited: "Too many requests. Try again later.",
       settings: "Connect DeepSeek", retry: "Reconnect",
       setup_ui_unavailable: "Device setup could not open. Refresh the page and try again.",
@@ -164,6 +130,48 @@ function installChat() {
     },
   };
 
+  function installAssistantSplitStyles() {
+    if (!document.head || document.getElementById?.("habab-assistant-split-style")) return;
+    const style = document.createElement("style");
+    style.id = "habab-assistant-split-style";
+    style.textContent = `
+      @media (min-width: 721px) {
+        html[data-habab-assistant-open="true"] {
+          --habab-assistant-chat-width: max(420px, 50vw);
+        }
+        html[data-habab-assistant-open="true"] body > ha-demo,
+        html[data-habab-assistant-open="true"] body > home-assistant {
+          display: block !important;
+          width: calc(100% - var(--habab-assistant-chat-width)) !important;
+          max-width: calc(100% - var(--habab-assistant-chat-width)) !important;
+          min-width: 0 !important;
+          margin-inline: 0 !important;
+          height: 100dvh !important;
+          overflow: auto !important;
+        }
+      }
+      @media (max-width: 720px) {
+        html[data-habab-assistant-open="true"] body > ha-demo,
+        html[data-habab-assistant-open="true"] body > home-assistant {
+          display: block !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          min-width: 0 !important;
+          height: 50dvh !important;
+          overflow: auto !important;
+        }
+        html[data-habab-assistant-open="true"][data-habab-assistant-expanded="true"] body > ha-demo,
+        html[data-habab-assistant-open="true"][data-habab-assistant-expanded="true"] body > home-assistant {
+          height: 0 !important;
+          overflow: hidden !important;
+          visibility: hidden !important;
+          pointer-events: none !important;
+        }
+      }
+    `;
+    document.head.append(style);
+  }
+
   class HababSetupChat extends HTMLElement {
     constructor() {
       super();
@@ -172,10 +180,9 @@ function installChat() {
       this.busy = false;
       this.voiceBusy = false;
       this.voiceGeneration = 0;
-      this.previewState = {status: "idle"};
-      this.previewOpened = false;
-      this.previewHistoryPositioned = false;
-      this.previewFocusComposer = true;
+      this.autoOpenStarted = false;
+      this.mobileExpanded = false;
+      this.layoutLifecycleInstalled = false;
     }
 
     get hass() { return this._hass; }
@@ -252,7 +259,8 @@ function installChat() {
 
     connectedCallback() {
       if (this.shadowRoot.firstChild) {
-        if (this.preview) this.installPreviewLifecycle();
+        this.installLayoutLifecycle();
+        if (this.q("dialog").open) this.setAssistantOpen(true);
         return;
       }
       this.language = this.demo || this.hass?.locale.language.startsWith("ru") ? "ru" : "en";
@@ -263,27 +271,28 @@ function installChat() {
         :is(button,textarea,a):focus-visible{outline:3px solid var(--primary-color,#007a9e);outline-offset:2px}::selection{background:var(--primary-color,#007a9e);color:#fff}
         .icon{width:56px;height:56px;padding:16px;display:grid;place-items:center}.launcher{position:relative;z-index:1;pointer-events:auto;border-radius:50%;background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff);box-shadow:0 3px 12px #0003}.launcher:hover{background:var(--dark-primary-color,#006686)}svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
         dialog{pointer-events:auto;position:fixed;inset:auto max(16px,env(safe-area-inset-right)) max(84px,calc(env(safe-area-inset-bottom) + 72px)) auto;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e3e6e8);border-radius:16px;padding:0;width:min(420px,calc(100vw - 32px));height:min(680px,calc(100dvh - 120px));max-width:none;max-height:none;margin:0;box-shadow:0 12px 36px #0003}
-        dialog::backdrop{background:transparent}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}
-        #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:26px;line-height:1.25;font-weight:500;margin:0 0 12px}.empty p{color:var(--secondary-text-color,#5f6368);margin:0;max-width:55ch}
+        dialog::backdrop{background:transparent}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}.collapse{display:none}
+        #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:24px;line-height:1.3;font-weight:500;margin:0 0 16px}
         .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
+        .quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
         footer{padding:12px 20px 20px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
-        .preview-message{max-width:none;padding:0 0 20px}.preview-message h3{font-size:23px;line-height:1.3;font-weight:500;margin:0 0 16px}.preview-dashboard{margin:0 0 18px;padding:14px 0;border-block:1px solid var(--divider-color,#e3e6e8)}.preview-dashboard h4{font-size:14px;font-weight:600;margin:0 0 10px}.preview-rows{display:grid;gap:4px}.preview-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0}.preview-label{color:var(--secondary-text-color,#5f6368)}.preview-value{font-weight:500;text-align:end}.preview-state{color:var(--secondary-text-color,#5f6368);margin:0}.preview-state.error{color:var(--error-color,#b3261e)}.preview-retry{padding-inline:0;text-decoration:underline;color:var(--primary-color,#007a9e)}.quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
-        :host([data-preview="onboarding"]){inset:0;z-index:10;pointer-events:none}:host([data-preview="onboarding"]:not([data-preview-open])) .launcher{display:grid;position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));pointer-events:auto}:host([data-preview="onboarding"][data-preview-open]) .launcher{display:none}:host([data-preview="onboarding"]) dialog{inset:0 0 0 auto;width:min(440px,46vw);height:100dvh;border-radius:0;border-block:0;border-inline-end:0;box-shadow:-8px 0 28px #0002}:host([data-preview="onboarding"]) dialog:not([open]){display:none}:host([data-preview="onboarding"]) dialog::backdrop{background:transparent}:host([data-preview="onboarding"]) #log{padding:24px 22px}:host([data-preview="onboarding"]) footer{padding:12px 18px max(16px,env(safe-area-inset-bottom))}
-        @media(max-width:600px){:host{inset:0;z-index:1000}.launcher{position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom))}dialog{inset:0;width:100vw;height:100dvh;border-radius:0;margin:0}header{padding:8px 12px}#log{padding:20px 16px}footer{padding:12px 12px max(16px,env(safe-area-inset-bottom))}.empty h3{font-size:24px}.fresh{padding-inline:8px}.message.user{max-width:92%}}
-        @media(max-width:720px){:host([data-preview="onboarding"]){z-index:1000}:host([data-preview="onboarding"]) dialog{inset-inline:0;inset-block-start:var(--preview-viewport-offset-top,0px);inset-block-end:auto;width:100vw;height:var(--preview-viewport-height,100dvh);max-height:var(--preview-viewport-height,100dvh);border-radius:0}:host([data-preview="onboarding"]) .launcher{position:fixed}}
+        :host([data-assistant-open]){inset:0;z-index:10;pointer-events:none}:host([data-assistant-open]) .launcher{display:none}:host([data-assistant-open]) dialog{inset:0 0 0 auto;width:var(--habab-assistant-chat-width,50vw);height:100dvh;border-radius:0;border-block:0;border-inline-end:0;box-shadow:-8px 0 28px #0002}:host([data-assistant-open]) dialog:not([open]){display:none}:host([data-assistant-open]) dialog::backdrop{background:transparent}
+        @media(max-width:720px){:host{inset:0;z-index:1000}:host([data-assistant-open]) dialog{inset-inline:0;inset-block-start:50dvh;inset-block-end:0;width:100vw;height:50dvh;max-height:50dvh;border-radius:0}:host([data-assistant-open][data-assistant-mobile-expanded]) dialog{inset-block-start:var(--assistant-viewport-offset-top,0px);height:var(--assistant-viewport-height,100dvh);max-height:var(--assistant-viewport-height,100dvh)}:host([data-assistant-mobile-expanded]) .collapse{display:grid}:host(:not([data-assistant-open])) .launcher{position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom))}}
+        @media(max-width:720px){header{padding:8px;gap:4px}header .icon{width:44px;height:44px;padding:10px}h2{font-size:16px}.fresh{font-size:12px;padding-inline:6px}#log{padding:16px}.empty h3{font-size:20px;margin-block-end:12px}.quick-replies{margin-block-start:8px}}
         @media(prefers-reduced-motion:no-preference){dialog[open]{animation:arrive 160ms cubic-bezier(.16,1,.3,1)}@keyframes arrive{from{transform:translateY(10px);opacity:.7}to{transform:translateY(0);opacity:1}}}
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
-      <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
       <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><p id="status" role="status"></p><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
       this.q("dialog").addEventListener("close", () => {
-        this.removeAttribute("data-preview-open");
+        this.setAssistantOpen(false);
         this.onClose();
       });
+      this.q(".collapse").onclick = () => this.collapseMobileChat();
       this.q(".mic").onclick = () => this.voiceBusy ? this.voice?.finishRecording() : this.startVoice("last_used");
       this.q(".fresh").onclick = () => this.connect(true);
       this.q(".retry").onclick = () => this.connect();
@@ -291,64 +300,100 @@ function installChat() {
       this.q("textarea").onkeydown = (event) => {
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {event.preventDefault(); this.send();}
       };
+      this.q("textarea").onfocus = () => this.setMobileExpanded(true);
       this.q(".stop").onclick = () => this.stop();
-      if (this.preview) {
-        this.q("textarea").placeholder = t.previewPlaceholder;
-        this.q("textarea").setAttribute("aria-label", t.previewPlaceholder);
-      }
       this.shadowRoot.addEventListener("click", (event) => {
         const target = event.composedPath().find((item) => item?.classList);
         if (target?.classList.contains("quick-reply")) this.chooseQuickReply(target.dataset.prompt);
-        if (target?.classList.contains("preview-retry")) void this.loadPreviewDashboard();
       });
-      if (this.preview) this.installPreviewLifecycle();
+      this.installLayoutLifecycle();
       this.draw();
-      if (this.preview && !this.previewOpened) {
-        this.previewOpened = true;
-        void this.loadPreviewDashboard();
+      if (this.autoOpenOnConnect && !this.autoOpenStarted) {
+        this.autoOpenStarted = true;
         this.open({}, null, {focus: false});
       }
     }
 
-    installPreviewLifecycle() {
-      if (!this.preview || this.previewViewport) return;
-      this.previewViewport = window.visualViewport;
-      this.onPreviewViewportResize = () => this.updatePreviewViewport();
-      this.previewViewport?.addEventListener("resize", this.onPreviewViewportResize);
-      this.previewViewport?.addEventListener("scroll", this.onPreviewViewportResize);
-      this.updatePreviewViewport();
+    installLayoutLifecycle() {
+      if (this.layoutLifecycleInstalled) return;
+      this.layoutLifecycleInstalled = true;
+      this.assistantViewport = window.visualViewport;
+      this.onAssistantViewportChange = () => this.updateAssistantViewport();
+      window.addEventListener("resize", this.onAssistantViewportChange);
+      this.assistantViewport?.addEventListener("resize", this.onAssistantViewportChange);
+      this.assistantViewport?.addEventListener("scroll", this.onAssistantViewportChange);
+      this.updateAssistantViewport();
     }
 
     disconnectedCallback() {
-      this.previewViewport?.removeEventListener("resize", this.onPreviewViewportResize);
-      this.previewViewport?.removeEventListener("scroll", this.onPreviewViewportResize);
-      this.previewViewport = undefined;
+      window.removeEventListener("resize", this.onAssistantViewportChange);
+      this.assistantViewport?.removeEventListener("resize", this.onAssistantViewportChange);
+      this.assistantViewport?.removeEventListener("scroll", this.onAssistantViewportChange);
+      this.assistantViewport = undefined;
+      this.layoutLifecycleInstalled = false;
+      this.setAssistantOpen(false);
     }
 
-    updatePreviewViewport() {
-      if (!this.preview || !this.previewViewport) return;
-      this.style.setProperty("--preview-viewport-height", `${Math.max(240, this.previewViewport.height)}px`);
-      this.style.setProperty("--preview-viewport-offset-top", `${Math.max(0, this.previewViewport.offsetTop)}px`);
+    dashboardRoot() {
+      return document.querySelector(this.demo ? "body > ha-demo" : "body > home-assistant");
     }
 
-    async loadPreviewDashboard() {
-      if (!this.preview) return;
-      this.previewState = {status: "loading"};
-      this.draw({preserveScroll: true});
-      try {
-        const response = await fetch("/api/ha-demo/state", {credentials: "same-origin", cache: "no-store"});
-        if (!response.ok) throw new Error("state unavailable");
-        const result = await response.json();
-        if (!result || !result.states || typeof result.states !== "object" || Array.isArray(result.states)) throw new Error("state invalid");
-        this.previewState = {status: "ready", states: result.states};
-      } catch (_) {
-        this.previewState = {status: "error"};
+    setAssistantOpen(open) {
+      if (open) {
+        installAssistantSplitStyles();
+        document.documentElement.dataset.hababAssistantOpen = "true";
+        this.setAttribute("data-assistant-open", "");
+      } else {
+        this.setMobileExpanded(false);
+        delete document.documentElement.dataset.hababAssistantOpen;
+        this.removeAttribute("data-assistant-open");
       }
-      this.draw({preserveScroll: true});
+    }
+
+    setMobileExpanded(expanded) {
+      const mobile = matchMedia("(max-width: 720px)").matches;
+      const shouldExpand = expanded === true && mobile && this.q("dialog")?.open === true;
+      if (shouldExpand) {
+        const root = this.dashboardRoot();
+        if (!this.mobileExpanded || root !== this.mobileInertRoot) {
+          this.restoreDashboardInert();
+          if (root && !root.inert) {
+            this.mobileInertOriginal = root.inert;
+            root.inert = true;
+            this.mobileInertRoot = root;
+          }
+        }
+      } else {
+        this.restoreDashboardInert();
+      }
+      this.mobileExpanded = shouldExpand;
+      this.toggleAttribute("data-assistant-mobile-expanded", this.mobileExpanded);
+      if (this.mobileExpanded) document.documentElement.dataset.hababAssistantExpanded = "true";
+      else delete document.documentElement.dataset.hababAssistantExpanded;
+    }
+
+    restoreDashboardInert() {
+      if (this.mobileInertRoot?.inert === true) this.mobileInertRoot.inert = this.mobileInertOriginal;
+      this.mobileInertRoot = undefined;
+      this.mobileInertOriginal = undefined;
+    }
+
+    updateAssistantViewport() {
+      if (this.assistantViewport) {
+        this.style.setProperty("--assistant-viewport-height", `${Math.max(240, this.assistantViewport.height)}px`);
+        this.style.setProperty("--assistant-viewport-offset-top", `${Math.max(0, this.assistantViewport.offsetTop)}px`);
+      }
+      if (!matchMedia("(max-width: 720px)").matches && this.mobileExpanded) this.setMobileExpanded(false);
+    }
+
+    collapseMobileChat() {
+      this.q("textarea").blur();
+      this.setMobileExpanded(false);
+      this.q(".close").focus({preventScroll: true});
     }
 
     chooseQuickReply(prompt) {
-      if (!this.preview || typeof prompt !== "string" || this.busy || !this.sessionId) return;
+      if (typeof prompt !== "string" || this.busy || !this.sessionId) return;
       const textarea = this.q("textarea");
       const draft = textarea.value;
       if (draft.trim()) {
@@ -368,12 +413,14 @@ function installChat() {
       this.q("#chat-title").textContent = t.title;
       this.q(".fresh").textContent = t.fresh;
       this.q(".close").setAttribute("aria-label", t.close);
+      this.q(".collapse").title = t.collapseChat;
+      this.q(".collapse").setAttribute("aria-label", t.collapseChat);
       this.q(".mic").title = t.mic;
       this.q(".mic").setAttribute("aria-label", t.mic);
       this.q("#messages").setAttribute("aria-label", t.title);
       const textarea = this.q("textarea");
-      textarea.placeholder = this.preview ? t.previewPlaceholder : t.placeholder;
-      textarea.setAttribute("aria-label", this.preview ? t.previewPlaceholder : t.placeholder);
+      textarea.placeholder = t.placeholder;
+      textarea.setAttribute("aria-label", t.placeholder);
       this.q(".recovery a").textContent = t.settings;
       this.q(".retry").textContent = t.retry;
       this.q(".send").title = t.send;
@@ -384,7 +431,9 @@ function installChat() {
 
     open(params = {}, opener = null, options = {}) {
       if (!this.isConnected || (!this.demo && !this.hass?.user?.is_admin) || !params || typeof params !== "object") return false;
-      this.previewFocusComposer = !(options && typeof options === "object" && options.focus === false);
+      const mobile = matchMedia("(max-width: 720px)").matches;
+      const focusComposer = options?.focus !== false && !mobile;
+      this.focusComposerOnOpen = focusComposer;
       this.openParams = {
         ...params,
         pipeline_id: typeof params.pipeline_id === "string" ? params.pipeline_id : "last_used",
@@ -395,15 +444,12 @@ function installChat() {
       };
       if (this.openParams.initial_prompt !== undefined) this.q("textarea").value = this.openParams.initial_prompt;
       this.returnFocus = opener || this.q(".launcher");
-      if (this.preview) this.setAttribute("data-preview-open", "");
+      this.setAssistantOpen(true);
       const dialog = this.q("dialog");
-      if (!dialog.open) {
-        if (matchMedia(this.preview ? "(max-width: 720px)" : "(max-width: 600px)").matches) dialog.showModal();
-        else dialog.show();
-      }
+      if (!dialog.open) dialog.show();
       if (this.integrationCard) this.integrationCard.active = true;
-      if (this.previewFocusComposer) this.q("textarea").focus({preventScroll: true});
-      else if (this.preview) this.q(".close").focus({preventScroll: true});
+      if (focusComposer) this.q("textarea").focus({preventScroll: true});
+      else this.q(".close").focus({preventScroll: true});
       if (!this.sessionId && !this.busy) void this.connect();
       else if (this.sessionId && !this.busy) this.startPendingAssist();
       return true;
@@ -439,7 +485,7 @@ function installChat() {
       this.q(".mic").title = this.voiceBusy ? this.t.stopVoice : this.t.mic;
       this.q(".mic").setAttribute("aria-label", this.voiceBusy ? this.t.stopVoice : this.t.mic);
       this.q(".send").disabled = !this.sessionId || this.busy || this.setupRestarting;
-      this.q(".send").hidden = this.busy && !this.preview;
+      this.q(".send").hidden = false;
       this.q(".stop").hidden = !this.running || this.demo;
       this.q(".fresh").disabled = this.busy || !this.sessionId;
       this.q(".retry").disabled = this.busy;
@@ -458,12 +504,12 @@ function installChat() {
         this.sessionId = result.session_id;
         this.messages = result.messages;
         this.draw();
-        this.status(this.demo ? this.t.demo : "");
+        this.status("");
         await this.loadSetup();
       } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
       finally {
         this.busy = false; this.controls();
-        if (this.q("dialog").open && this.previewFocusComposer) this.q("textarea").focus({preventScroll: true});
+        if (this.q("dialog").open && this.focusComposerOnOpen && !matchMedia("(max-width: 720px)").matches) this.q("textarea").focus({preventScroll: true});
         this.startPendingAssist();
       }
     }
@@ -471,7 +517,7 @@ function installChat() {
     async demoRequest(suffix = "", method = "GET", text) {
       const response = await fetch(`/api/ha-demo/chat${suffix}`, {
         method, credentials: "same-origin", headers: {"Content-Type": "application/json"},
-        ...(text !== undefined ? {body: demoChatRequestBody(text, this.preview === true)} : {}),
+        ...(text !== undefined ? {body: JSON.stringify({text})} : {}),
       });
       const result = await response.json();
       if (!response.ok) throw {code: result.error};
@@ -479,13 +525,14 @@ function installChat() {
     }
 
     startPendingAssist() {
-      if (!this.sessionId || this.busy || this.demo || !this.q("dialog").open || !this.openParams) return;
+      if (!this.sessionId || this.busy || !this.q("dialog").open || !this.openParams) return;
       if (this.openParams.submit_prompt && this.openParams.initial_prompt) {
         const prompt = this.openParams.initial_prompt;
         this.openParams.submit_prompt = false;
         void this.send(prompt, {clearDraft: true});
         return;
       }
+      if (this.demo) return;
       if (this.openParams.start_listening) {
         this.openParams.start_listening = false;
         void this.startVoice(this.openParams.pipeline_id, this.openParams.invalid_pipeline_id);
@@ -606,95 +653,7 @@ function installChat() {
       }
     }
 
-    draw({preserveScroll = false} = {}) {
-      const log = this.q("#log");
-      const previousScrollTop = log.scrollTop;
-      const messageContainer = this.q("#messages");
-      messageContainer.replaceChildren();
-      const visibleMessages = visibleTextMessages(this.messages);
-      if (this.preview) messageContainer.append(this.renderPreviewMessage());
-      if (!visibleMessages.length && !this.preview) {
-        const empty = document.createElement("div"); empty.className = "empty";
-        const title = document.createElement("h3"); title.textContent = this.t.intro;
-        const help = document.createElement("p"); help.textContent = this.t.help;
-        empty.append(title, help); messageContainer.append(empty);
-      }
-      for (const message of visibleMessages) {
-        const row = document.createElement("div"); row.className = `message ${message.role}`;
-        const name = document.createElement("div"); name.className = "name"; name.textContent = message.role === "user" ? this.t.you : this.t.assistant;
-        const markdown = message.role === "assistant" && customElements.get("ha-markdown");
-        const text = document.createElement(markdown ? "ha-markdown" : "p");
-        if (markdown) {text.content = message.text; text.breaks = true;}
-        else text.textContent = message.text;
-        row.append(name, text); messageContainer.append(row);
-      }
-      const keepPreviewIntroVisible = this.preview && this.sessionId && !this.previewHistoryPositioned;
-      log.scrollTop = preserveScroll ? previousScrollTop : keepPreviewIntroVisible ? 0 : log.scrollHeight;
-      if (keepPreviewIntroVisible) this.previewHistoryPositioned = true;
-      const tail = log.lastChild;
-      Promise.allSettled([...messageContainer.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
-        if (log.lastChild === tail && !keepPreviewIntroVisible && !preserveScroll) log.scrollTop = log.scrollHeight;
-      });
-    }
-
-    renderPreviewMessage() {
-      const section = document.createElement("section");
-      section.className = "preview-message";
-      const name = document.createElement("div");
-      name.className = "name";
-      name.textContent = this.t.assistant;
-      const question = document.createElement("h3");
-      question.textContent = this.t.previewQuestion;
-      section.append(name, question);
-
-      const dashboard = document.createElement("div");
-      dashboard.className = "preview-dashboard";
-      const heading = document.createElement("h4");
-      heading.textContent = this.t.previewDashboard;
-      dashboard.append(heading);
-      if (this.previewState.status === "loading" || this.previewState.status === "idle") {
-        const message = document.createElement("p");
-        message.className = "preview-state";
-        message.textContent = this.t.dashboardLoading;
-        dashboard.append(message);
-      } else if (this.previewState.status === "error") {
-        const message = document.createElement("p");
-        message.className = "preview-state error";
-        message.textContent = this.t.dashboardFailed;
-        const retry = document.createElement("button");
-        retry.className = "preview-retry";
-        retry.type = "button";
-        retry.textContent = this.t.dashboardRetry;
-        dashboard.append(message, retry);
-      } else {
-        const rows = buildPreviewRows(this.previewState.states, this.language);
-        if (!rows.length) {
-          const message = document.createElement("p");
-          message.className = "preview-state";
-          message.textContent = this.t.dashboardEmpty;
-          dashboard.append(message);
-        } else {
-          const rowList = document.createElement("div");
-          rowList.className = "preview-rows";
-          for (const item of rows) {
-            const row = document.createElement("div");
-            row.className = "preview-row";
-            const label = document.createElement("span");
-            label.className = "preview-label";
-            label.textContent = item.label;
-            const value = document.createElement("span");
-            value.className = "preview-value";
-            value.textContent = item.state === "on" ? this.t.stateOn
-              : item.state === "off" ? this.t.stateOff
-                : item.state === "heat" ? this.t.stateHeat : this.t.stateUnavailable;
-            row.append(label, value);
-            rowList.append(row);
-          }
-          dashboard.append(rowList);
-        }
-      }
-      section.append(dashboard);
-
+    renderQuickReplies() {
       const quickReplies = document.createElement("div");
       quickReplies.className = "quick-replies";
       const choices = [
@@ -711,8 +670,34 @@ function installChat() {
         button.disabled = this.busy || !this.sessionId;
         quickReplies.append(button);
       }
-      section.append(quickReplies);
-      return section;
+      return quickReplies;
+    }
+
+    draw() {
+      const log = this.q("#log");
+      const messageContainer = this.q("#messages");
+      messageContainer.replaceChildren();
+      const visibleMessages = visibleTextMessages(this.messages);
+      if (!visibleMessages.length) {
+        const empty = document.createElement("div"); empty.className = "empty";
+        const title = document.createElement("h3"); title.textContent = this.t.intro;
+        empty.append(title, this.renderQuickReplies());
+        messageContainer.append(empty);
+      }
+      for (const message of visibleMessages) {
+        const row = document.createElement("div"); row.className = `message ${message.role}`;
+        const name = document.createElement("div"); name.className = "name"; name.textContent = message.role === "user" ? this.t.you : this.t.assistant;
+        const markdown = message.role === "assistant" && customElements.get("ha-markdown");
+        const text = document.createElement(markdown ? "ha-markdown" : "p");
+        if (markdown) {text.content = message.text; text.breaks = true;}
+        else text.textContent = message.text;
+        row.append(name, text); messageContainer.append(row);
+      }
+      log.scrollTop = visibleMessages.length ? log.scrollHeight : 0;
+      const tail = log.lastChild;
+      Promise.allSettled([...messageContainer.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
+        if (log.lastChild === tail && visibleMessages.length) log.scrollTop = log.scrollHeight;
+      });
     }
 
     async send(textValue, {voiceReply = false, clearDraft = false} = {}) {
@@ -721,17 +706,17 @@ function installChat() {
       this.busy = true; this.running = true; this.stopped = false;
       this.messages.push({role: "user", text});
       if (typeof textValue !== "string" || clearDraft) this.q("textarea").value = "";
-      this.draw(); this.status(this.demo ? this.t.answering : this.t.working); this.controls();
+      this.draw(); this.status(this.t.working); this.controls();
       try {
         const result = this.demo ? await this.demoRequest("", "POST", text)
           : await this.hass.callWS({type: "habab_home/agent/run", session_id: this.sessionId, text});
-        this.messages = result.messages; this.draw(); this.status(this.stopped ? this.t.stopped : this.demo ? this.t.demo : "");
+        this.messages = result.messages; this.draw(); this.status(this.stopped ? this.t.stopped : "");
         if (voiceReply) await this.speakReply(result.messages);
       } catch (error) { this.status(this.stopped ? this.t.stopped : await this.errorMessage(error), true); }
       finally {
         if (!this.demo) await this.loadSetup(true);
         this.busy = false; this.running = false; this.controls();
-        if (this.q("dialog").open && this.previewFocusComposer) this.q("textarea").focus({preventScroll: true});
+        if (this.q("dialog").open && this.focusComposerOnOpen && !matchMedia("(max-width: 720px)").matches) this.q("textarea").focus({preventScroll: true});
         this.startPendingAssist();
       }
     }
@@ -767,6 +752,15 @@ function installChat() {
       return launcher.open(params, opener);
     },
   };
+  window.addEventListener("show-dialog", (event) => {
+    const detail = event.detail;
+    if (detail?.dialogTag !== "ha-voice-command-dialog" || !launcher) return;
+    if (!launcher.demo && launcher.hass?.user?.is_admin !== true) return;
+    const opener = event.composedPath?.().find((element) => element instanceof HTMLElement);
+    if (launcher.open(detail.dialogParams, opener) !== true) return;
+    event.stopPropagation();
+    event.preventDefault();
+  }, true);
   let lastAssistantAvailability = false;
   const syncAssistantHook = () => {
     const available = assistantHook.available;
@@ -780,22 +774,19 @@ function installChat() {
   const syncLauncher = () => {
     const main = locateMain(document);
     const demo = document.documentElement.dataset.hababDemo === "true";
-    const preview = isOnboardingPreview(demo, document.documentElement.dataset.hababDemoPreview);
+    const autoOpenOnConnect = true;
     const hass = main?.hass;
     if (!demo && !hass?.user?.is_admin) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
     if (!demo && !main) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
     if (!launcher) {
       launcher = document.createElement("habab-setup-chat");
       launcher.demo = demo;
-      launcher.preview = preview;
-      if (preview) launcher.setAttribute("data-preview", "onboarding");
+      launcher.autoOpenOnConnect = autoOpenOnConnect;
       launcher.hass = hass;
       document.body.append(launcher);
     }
     launcher.demo = demo;
-    launcher.preview = preview;
-    if (preview) launcher.setAttribute("data-preview", "onboarding");
-    else launcher.removeAttribute("data-preview");
+    launcher.autoOpenOnConnect = autoOpenOnConnect;
     launcher.hass = hass;
     syncThemeVariables(launcher, main);
     if (launcher.parentNode !== document.body) document.body.append(launcher);

@@ -12,7 +12,12 @@ test("global chat launcher follows the authenticated main element across routes"
   const intervals = [];
   const definitions = new Map();
   const children = [];
-  const windowStub = { dispatchEvent() {} };
+  const windowListeners = new Map();
+  const windowStub = {
+    location: {search: ""},
+    dispatchEvent() {},
+    addEventListener(type, callback, options) { windowListeners.set(type, {callback, options}); },
+  };
   const main = { localName: "home-assistant-main", hass: { user: { is_admin: true }, locale: { language: "ru" } } };
   class HTMLElementStub {
     constructor() { this.shadowRoot = {}; }
@@ -49,11 +54,38 @@ test("global chat launcher follows the authenticated main element across routes"
     assert.equal(children.length, 1);
     const launcher = children[0];
     assert.equal(launcher.hass, main.hass);
+    assert.equal(launcher.autoOpenOnConnect, true, "the authorized admin assistant opens on its first mount");
     assert.equal(launcher.language, "ru");
     launcher.isConnected = true;
     const opener = { isConnected: true };
     const originalParams = { pipeline_id: "pipeline-original", start_listening: true };
     let forwarded;
+    launcher.open = (...args) => { forwarded = args; return true; };
+    const nativeDialogBridge = windowListeners.get("show-dialog");
+    assert.equal(nativeDialogBridge.options, true, "native Assist rerouting runs in capture phase");
+    const nativeOpener = Object.assign(new HTMLElementStub(), {isConnected: true, focus() {}});
+    const makeDialogEvent = (detail, path = [nativeOpener]) => ({
+      detail,
+      composedPath: () => path,
+      stopped: 0,
+      prevented: 0,
+      stopPropagation() { this.stopped++; },
+      preventDefault() { this.prevented++; },
+    });
+    const nativeDialogEvent = makeDialogEvent({dialogTag: "ha-voice-command-dialog", dialogParams: originalParams});
+    nativeDialogBridge.callback(nativeDialogEvent);
+    assert.deepEqual(forwarded, [originalParams, nativeOpener]);
+    assert.equal(nativeDialogEvent.stopped, 1);
+    assert.equal(nativeDialogEvent.prevented, 1);
+    const unrelatedDialogEvent = makeDialogEvent({dialogTag: "ha-config-flow-dialog", dialogParams: {}});
+    nativeDialogBridge.callback(unrelatedDialogEvent);
+    assert.equal(unrelatedDialogEvent.stopped, 0, "other HA dialogs keep their normal handler");
+    assert.equal(unrelatedDialogEvent.prevented, 0);
+    launcher.open = () => false;
+    const rejectedDialogEvent = makeDialogEvent({dialogTag: "ha-voice-command-dialog", dialogParams: originalParams});
+    nativeDialogBridge.callback(rejectedDialogEvent);
+    assert.equal(rejectedDialogEvent.stopped, 0, "a declined chat open leaves the stock dialog available");
+    assert.equal(rejectedDialogEvent.prevented, 0);
     launcher.open = (...args) => { forwarded = args; return true; };
     assert.equal(windowStub.hababAssistant.available, true);
     assert.equal(windowStub.hababAssistant.open(originalParams, opener), true);
@@ -90,17 +122,22 @@ test("global chat launcher follows the authenticated main element across routes"
     intervals[1]();
     assert.equal(children.length, 0);
     assert.equal(windowStub.hababAssistant, undefined);
+    const guestDialogEvent = makeDialogEvent({dialogTag: "ha-voice-command-dialog", dialogParams: originalParams});
+    nativeDialogBridge.callback(guestDialogEvent);
+    assert.equal(guestDialogEvent.stopped, 0, "a private non-admin event is left untouched");
+    assert.equal(guestDialogEvent.prevented, 0);
     document.documentElement.dataset.hababDemo = "true";
     intervals[1]();
     assert.equal(children.length, 1);
     assert.equal(windowStub.hababAssistant, undefined, "the public demo must not expose the assistant hook");
-    assert.equal(children[0].preview, false, "the standard public demo keeps its existing chat mode");
-    document.documentElement.dataset.hababDemoPreview = "onboarding";
-    intervals[1]();
-    assert.equal(children[0].preview, true, "only the explicit preview marker enables onboarding mode");
-    delete document.documentElement.dataset.hababDemoPreview;
-    intervals[1]();
-    assert.equal(children[0].preview, false);
+    assert.equal(children[0].autoOpenOnConnect, true, "the public demo opens the same assistant on first mount");
+    let demoForwarded;
+    children[0].open = (...args) => { demoForwarded = args; return true; };
+    const demoDialogEvent = makeDialogEvent({dialogTag: "ha-voice-command-dialog", dialogParams: originalParams});
+    nativeDialogBridge.callback(demoDialogEvent);
+    assert.deepEqual(demoForwarded, [originalParams, nativeOpener], "the public stock Assist launcher opens the same chat");
+    assert.equal(demoDialogEvent.stopped, 1);
+    assert.equal(demoDialogEvent.prevented, 1);
   } finally {
     for (const [key, descriptor] of descriptors) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -109,15 +146,22 @@ test("global chat launcher follows the authenticated main element across routes"
   }
 });
 
-test("real open method keeps preview startup unfocused and focuses a manual reopen", () => {
-  const makeInstance = ({preview, demo}) => {
-    const instance = Object.create(setupChatElementClass.prototype);
+test("real open method preserves startup focus and desktop manual focus", () => {
+  const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const mediaDescriptor = Object.getOwnPropertyDescriptor(globalThis, "matchMedia");
+  let dashboard = {inert: false};
+  Object.defineProperty(globalThis, "document", {configurable: true, value: {
+    documentElement: {dataset: {}}, head: null,
+    querySelector: () => dashboard,
+  }});
+  Object.defineProperty(globalThis, "matchMedia", {configurable: true, value: () => ({matches: false})});
+  const makeInstance = ({demo}) => {
     const calls = {textarea: 0, close: 0, attributes: new Set()};
     const textarea = {value: "", focus(options) { calls.textarea++; calls.textareaOptions = options; }};
     const close = {focus(options) { calls.close++; calls.closeOptions = options; }};
-    const dialog = {open: true};
+    const dialog = {open: false, show() { this.open = true; }};
+    const instance = Object.create(setupChatElementClass.prototype);
     instance.isConnected = true;
-    instance.preview = preview;
     instance.demo = demo;
     instance._hass = {user: {is_admin: true}};
     instance.sessionId = "existing-session";
@@ -127,24 +171,109 @@ test("real open method keeps preview startup unfocused and focuses a manual reop
         : selector === ".launcher" ? close
           : selector === "dialog" ? dialog : undefined;
     instance.setAttribute = (name) => calls.attributes.add(name);
+    instance.removeAttribute = (name) => calls.attributes.delete(name);
+    instance.toggleAttribute = (name, enabled) => enabled ? calls.attributes.add(name) : calls.attributes.delete(name);
     return {instance, calls};
   };
 
-  const startup = makeInstance({preview: true, demo: true});
-  assert.equal(setupChatElementClass.prototype.open.call(startup.instance, {}, null, {focus: false}), true);
-  assert.equal(startup.calls.textarea, 0, "automatic preview open must not focus the composer or raise a mobile keyboard");
-  assert.equal(startup.calls.close, 1, "startup focus stays on the chat header");
-  assert.equal(startup.calls.closeOptions.preventScroll, true);
-  assert.equal(startup.calls.attributes.has("data-preview-open"), true);
+  try {
+    const startup = makeInstance({demo: true});
+    assert.equal(setupChatElementClass.prototype.open.call(startup.instance, {}, null, {focus: false}), true);
+    assert.equal(startup.calls.textarea, 0, "automatic open does not raise the keyboard");
+    assert.equal(startup.calls.close, 1, "startup focus stays on the chat header");
+    assert.equal(startup.calls.closeOptions.preventScroll, true);
+    assert.equal(startup.calls.attributes.has("data-assistant-open"), true);
+    assert.equal(document.documentElement.dataset.hababAssistantOpen, "true");
+    assert.equal(startup.instance.focusComposerOnOpen, false, "connection completion must retain startup focus policy");
 
-  assert.equal(setupChatElementClass.prototype.open.call(startup.instance, {}, null), true);
-  assert.equal(startup.calls.textarea, 1, "a later manual open focuses the composer");
-  assert.equal(startup.calls.textareaOptions.preventScroll, true);
+    startup.instance.setAssistantOpen(false);
+    assert.equal(document.documentElement.dataset.hababAssistantOpen, undefined, "closing restores dashboard width");
+    assert.equal(setupChatElementClass.prototype.open.call(startup.instance, {}, null), true);
+    assert.equal(startup.calls.textarea, 1, "a later desktop open focuses the composer");
+    assert.equal(startup.calls.textareaOptions.preventScroll, true);
 
-  const native = makeInstance({preview: false, demo: false});
-  assert.equal(setupChatElementClass.prototype.open.call(native.instance, {}), true);
-  assert.equal(native.calls.textarea, 1, "the native assistant keeps its default composer focus");
-  assert.equal(native.calls.attributes.size, 0, "only the preview marks its launcher as open");
+    const native = makeInstance({demo: false});
+    assert.equal(setupChatElementClass.prototype.open.call(native.instance, {}), true);
+    assert.equal(native.calls.textarea, 1, "the native assistant keeps default desktop composer focus");
+    assert.equal(native.calls.attributes.has("data-assistant-open"), true, "all assistant surfaces share the split state");
+  } finally {
+    if (documentDescriptor) Object.defineProperty(globalThis, "document", documentDescriptor);
+    else delete globalThis.document;
+    if (mediaDescriptor) Object.defineProperty(globalThis, "matchMedia", mediaDescriptor);
+    else delete globalThis.matchMedia;
+  }
+});
+
+test("mobile open starts split, textarea focus expands, and collapse restores the dashboard", () => {
+  const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const mediaDescriptor = Object.getOwnPropertyDescriptor(globalThis, "matchMedia");
+  let dashboard = {inert: false};
+  Object.defineProperty(globalThis, "document", {configurable: true, value: {
+    documentElement: {dataset: {}}, head: null,
+    querySelector: () => dashboard,
+  }});
+  Object.defineProperty(globalThis, "matchMedia", {configurable: true, value: () => ({matches: true})});
+  const calls = {textarea: 0, blur: 0, close: 0, attributes: new Set()};
+  const textarea = {value: "", focus() { calls.textarea++; }, blur() { calls.blur++; }};
+  const close = {focus(options) { calls.close++; calls.closeOptions = options; }};
+  const dialog = {open: false, show() { this.open = true; }};
+  const instance = Object.create(setupChatElementClass.prototype);
+  Object.assign(instance, {isConnected: true, demo: true, sessionId: "existing-session", busy: true, mobileExpanded: false});
+  instance.q = (selector) => selector === "textarea" ? textarea
+    : selector === ".close" ? close
+      : selector === ".launcher" ? close
+        : selector === "dialog" ? dialog : undefined;
+  instance.setAttribute = (name) => calls.attributes.add(name);
+  instance.removeAttribute = (name) => calls.attributes.delete(name);
+  instance.toggleAttribute = (name, enabled) => enabled ? calls.attributes.add(name) : calls.attributes.delete(name);
+
+  try {
+    assert.equal(setupChatElementClass.prototype.open.call(instance), true);
+    assert.equal(calls.textarea, 0, "mobile open does not raise the keyboard");
+    assert.equal(instance.mobileExpanded, false);
+    instance.setMobileExpanded(true);
+    assert.equal(instance.mobileExpanded, true);
+    assert.equal(dashboard.inert, true, "the dashboard is inert while the chat uses the full mobile viewport");
+    instance.setMobileExpanded(true);
+    assert.equal(instance.mobileInertOriginal, false, "repeated focus does not recapture the chat's own inert value");
+    assert.equal(document.documentElement.dataset.hababAssistantExpanded, "true");
+    instance.collapseMobileChat();
+    assert.equal(calls.blur, 1);
+    assert.equal(instance.mobileExpanded, false);
+    assert.equal(dashboard.inert, false);
+    assert.equal(document.documentElement.dataset.hababAssistantExpanded, undefined);
+    assert.equal(calls.closeOptions.preventScroll, true);
+
+    dashboard = {inert: true};
+    const alreadyInert = Object.create(setupChatElementClass.prototype);
+    Object.assign(alreadyInert, {demo: true, mobileExpanded: false});
+    alreadyInert.q = (selector) => selector === "dialog" ? dialog : undefined;
+    alreadyInert.toggleAttribute = () => {};
+    alreadyInert.setMobileExpanded(true);
+    alreadyInert.setMobileExpanded(false);
+    assert.equal(dashboard.inert, true, "a pre-existing inert dashboard remains inert after collapse");
+  } finally {
+    if (documentDescriptor) Object.defineProperty(globalThis, "document", documentDescriptor);
+    else delete globalThis.document;
+    if (mediaDescriptor) Object.defineProperty(globalThis, "matchMedia", mediaDescriptor);
+    else delete globalThis.matchMedia;
+  }
+});
+
+test("explicit submitted prompts use the shared public chat transport", () => {
+  const instance = Object.create(setupChatElementClass.prototype);
+  const sent = [];
+  Object.assign(instance, {
+    sessionId: "public-demo", busy: false, demo: true,
+    openParams: {submit_prompt: true, initial_prompt: "connect Zigbee", start_listening: true},
+    q: (selector) => selector === "dialog" ? {open: true} : undefined,
+    send: (...args) => sent.push(args),
+    startVoice: () => assert.fail("public submitted prompts must not start the private voice path"),
+  });
+  setupChatElementClass.prototype.startPendingAssist.call(instance);
+  assert.deepEqual(sent, [["connect Zigbee", {clearDraft: true}]]);
+  assert.equal(instance.openParams.submit_prompt, false);
+  assert.equal(instance.openParams.start_listening, true);
 });
 
 test("native pipeline selectors retain explicit, last-used, and preferred pipeline choices", async () => {
@@ -163,35 +292,12 @@ test("assistant diagnostics use only bounded safe fields and never provider resp
   assert.equal(setupChatModule.assistantDiagnosticMessage({name: "other", raw: "provider secret"}, copy), "Check settings.");
 });
 
-test("preview is opt-in only and live dashboard rows never invent missing entity state", () => {
-  assert.equal(setupChatModule.isOnboardingPreview(true, "onboarding"), true);
-  assert.equal(setupChatModule.isOnboardingPreview(true, undefined), false);
-  assert.equal(setupChatModule.isOnboardingPreview(false, "onboarding"), false);
-  assert.equal(setupChatModule.isOnboardingPreview(true, "other"), false);
-
-  const rows = setupChatModule.buildPreviewRows({
-    "light.living_room_floor_lamp": {state: "on"},
-    "climate.living_room": {state: "heat"},
-    "light.living_room_spotlights": null,
-    "switch.unknown": {state: "on"},
-  });
-  assert.deepEqual(rows.map(({entityId, state}) => ({entityId, state})), [
-    {entityId: "light.living_room_floor_lamp", state: "on"},
-    {entityId: "climate.living_room", state: "heat"},
-  ]);
-  assert.deepEqual(setupChatModule.buildPreviewRows({}), [], "missing state renders as unavailable, never as seeded sample data");
-});
 
 test("quick replies append to a draft instead of replacing user text", () => {
   assert.equal(setupChatModule.appendQuickReplyToDraft("I have two lights  \n", "Can I add them?"), "I have two lights\nCan I add them?");
   assert.equal(setupChatModule.appendQuickReplyToDraft("  ", "I want Zigbee"), "I want Zigbee");
 });
 
-test("demo chat payload adds onboarding mode only for the preview while preserving the normal body", () => {
-  assert.equal(setupChatModule.demoChatRequestBody("hello"), '{"text":"hello"}');
-  assert.equal(setupChatModule.demoChatRequestBody("hello", false), '{"text":"hello"}');
-  assert.equal(setupChatModule.demoChatRequestBody("hello", true), '{"text":"hello","mode":"onboarding"}');
-});
 
 test("integration verification prompt uses only a validated domain from the sanitized event", () => {
   const detail = {domain: "mqtt", api_key: "protected-value", form: {host: "private-host"}};

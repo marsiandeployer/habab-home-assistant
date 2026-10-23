@@ -1,0 +1,104 @@
+{
+  "version": "0.3.1",
+  "assistant": {
+    "path": "habab/distribution/src/habab_home/frontend/setup-chat.js",
+    "sha256": "c1b763f4dc0619d49c21def52474f3c9837e619b347e03a70eb0480cc5c2beac",
+    "bytes": 49721,
+    "baked_sha_matches_fixture": true
+  },
+  "baked_image": {
+    "tag": "habab-home:shared-chat-0.3.1-20261023",
+    "id": "sha256:9efca5c859862be84723b9ce299df0b41be43377e2b9e1c3a53c7699645fe8d1",
+    "size_bytes": 2667333388,
+    "product_version": "0.3.1",
+    "home_assistant_core": "2026.10.2",
+    "node": "v24.22.1",
+    "native_frontend": "20260930.4+habab.3"
+  },
+  "tests": {
+    "baked_python": {
+      "passed": 105
+    },
+    "javascript": {
+      "passed": 30
+    },
+    "baked_node_chat_lifecycle": {
+      "passed": 8
+    },
+    "baked_node_telegram_transport": {
+      "passed": 5
+    },
+    "assistant_bundle": {
+      "passed": 3
+    },
+    "public_live_model_cases": {
+      "passed_http_200": 5,
+      "answers_manually_read": true
+    }
+  },
+  "browser": {
+    "public": {
+      "verdict": "PASS_WITH_LIMITS",
+      "routes": [
+        "/",
+        "/?habab-preview=onboarding",
+        "/demos/home-assistant/"
+      ],
+      "page_errors": 0,
+      "failed_requests": 0
+    },
+    "private": {
+      "verdict": "PASS_WITH_LIMITS",
+      "image": "sha256:9efca5c859862be84723b9ce299df0b41be43377e2b9e1c3a53c7699645fe8d1",
+      "source_overlay": false,
+      "routes": [
+        "/config/dashboard",
+        "/habab-ai",
+        "/lovelace/0"
+      ],
+      "page_errors": 0,
+      "font_requests_aborted": 10
+    },
+    "desktop_1280_chat_width": 640,
+    "mobile_390x844_dashboard_height": 422,
+    "mobile_390x844_chat_height": 422,
+    "stock_assist_shared_widget": true,
+    "compatibility_entry_shared_widget": true,
+    "duplicate_dashboard_rows": 0,
+    "draft_preserved": true,
+    "contexts_closed": true,
+    "other_browser_pages_preserved": true
+  },
+  "limitations": [
+    "Mobile keyboard space emulated by viewport resize; physical keyboard not tested.",
+    "Latest0.3.1 UI not yet accepted on physical Windows or Android.",
+    "No new native frontend compilation; pinned20260930.4+habab.3 retained.",
+    "No ARM image build.",
+    "This UI QA did not pair or actuate physical devices or send Telegram messages."
+  ],
+  "windows_package": {
+    "url": "https://habab-demo.wpmix.net/downloads/habab-home-windows-dcfbe4740bb6.zip",
+    "sha256": "dcfbe4740bb6f39044bd14c66a449a7b02d626a28f6405990cc301161748825f",
+    "bytes": 144222,
+    "members": 72,
+    "public_http_body_sha_matches": true,
+    "node_pin": "24.22.1-r0",
+    "setup_agent_from_accepted_HEAD": true,
+    "realtime_WIP_excluded": true,
+    "source_module_sha_matches": true,
+    "launcher_checksums_match": true
+  },
+  "independent_code_review": {
+    "agent": "setup_chat_finish_review",
+    "verdict": "ready",
+    "material_blockers": 0,
+    "edits": false,
+    "independent_browser_run": false
+  },
+  "secret_scan": {
+    "tool": "gitleaks dir --redact",
+    "scope": "43 explicit release files plus extracted final ZIP",
+    "exit_code": 0,
+    "findings": 0
+  }
+}

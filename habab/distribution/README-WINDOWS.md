@@ -1,6 +1,6 @@
 # Запуск на Windows
 
-Инструкция относится к Habab Home 0.3.0 на Home Assistant Core 2026.10.2.
+Инструкция относится к Habab Home 0.3.1 на Home Assistant Core 2026.10.2.
 Для новой Git-установки из корня checkout запустите отслеживаемый
 `habab\distribution\start-windows.bat`; двойной щелчок тоже подходит. Для
 обновления сначала выполните `git pull`. Батник пересобирает локальный Docker-
@@ -26,7 +26,7 @@ OpenCode отдельно в Windows устанавливать не нужно.
 
 1. Создайте владельца Home Assistant.
 2. В разделе **AI** выберите DeepSeek, получите свой ключ в кабинете провайдера и сохраните его. Ключей в пакете нет.
-3. Нажмите круглую кнопку в правом нижнем углу. Она доступна администратору и открывает один чат; кнопка на странице AI ведёт в ту же панель.
+3. После входа один чат администратора откроется на любой странице. На компьютере он занимает панель справа. На телефоне дашборд остаётся сверху, чат появляется снизу; сверните чат, чтобы вернуться к дашборду, или раскройте его на весь экран.
 4. Попросите: «Проверь доступ к настройкам Home Assistant и покажи подключённые интеграции».
 
 На странице загрузки доступны три BAT: обычный `start-home-assistant.bat`, отдельный
@@ -72,7 +72,7 @@ start-home-assistant.bat
 OpenCode завершился `model_error`; прямая проверка соединения DeepSeek прошла.
 Причина не установлена. После `git pull` запустите из того же каталога
 `diagnose-assistant.bat` (`habab\distribution\diagnose-assistant.bat` в Git-
-checkout). Он не пересобирает образ и не отправляет запрос модели. Версия 0.3.0
+checkout). Он не пересобирает образ и не отправляет запрос модели. Версия 0.3.1
 ещё не проверена на физическом Windows-компьютере, поэтому этот сбой нельзя
 считать исправленным.
 
@@ -156,20 +156,32 @@ docker compose --env-file .env.opencode-windows -p habab-home-windows -f compose
 
 ## Что проверено
 
-Изолированный Linux Docker QA для образа 0.3.0 без overlays прошёл 7/7 browser
+Изолированный Linux Docker QA для принятого образа 0.3.0 без overlays прошёл 7/7 browser
 сценариев и 100 Python, 26 JavaScript и 10 native frontend tests; lint,
 pre/post-build typechecks и frontend build также прошли. В браузере native форма
 Time & Date создала загруженную сущность реального времени, состояние которой
 подтвердили в Home Assistant. Selector context matrix использовал синтетические
 данные без отправки формы. Bootstrap после исправления прошёл без ошибок и без
 Recorder-запросов при отключённой интеграции, конфигурацию тест не менял.
-Отчёты: `habab/qa/canonical-assistant/release-check.json` и
+Это browser и release checks принятого образа 0.3.0. Отчёты:
+`habab/qa/canonical-assistant/release-check.json` и
 `habab/qa/canonical-assistant/browser-result.json`.
+
+Чистая Linux-сборка Docker-образа 0.3.1 прошла на Core 2026.10.2 и Node 24.22.1.
+В baked QA прошли 105 Python tests, 30 host JavaScript tests, 8/8 JS lifecycle
+tests под Node из образа и 5/5 transport tests под baked SDK; отдельно прошли
+5/5 Telegram backend tests под baked Python. Браузерная проверка образа прошла
+7 сценариев со статусом `PASS_WITH_LIMITS`, без ошибок страницы и source overlays.
+Проверены `/config/dashboard`, `/habab-ai`, `/lovelace/0`, мобильный split,
+раскрытие, возврат и сохранение черновика. Публичные страницы и preview прошли
+отдельные 7 сценариев. Клавиатуру телефона моделировали изменением viewport;
+физические Windows и Android-устройства не проверялись. Подробности — в
+`habab/qa/shared-assistant/`.
 
 На реальной Windows-установке проверен интерфейс 0.2.0: нижняя кнопка,
 desktop-панель, сохранение черновика при переходе в настройки и защищённая форма
 Telegram. Прямая проверка DeepSeek прошла, запрос OpenCode вернул `model_error`;
-причина не установлена. Версия 0.3.0 на физическом Windows, живой Telegram-бот
+причина не установлена. Версия 0.3.1 на физическом Windows, живой Telegram-бот
 и управление физическими устройствами не проверялись. Bluetooth Windows не
 проброшен в Docker Desktop автоматически; результаты native discovery этого не
 доказывают.

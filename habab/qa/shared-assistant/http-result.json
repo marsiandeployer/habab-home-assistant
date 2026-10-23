@@ -1,0 +1,26 @@
+[
+  {
+    "path": "/",
+    "status": 200,
+    "sha256": "67161981365d88e6e80bb563e18c32d0481c04d60b46bd42df6cc9d3e9b03ebc",
+    "bytes": 7213
+  },
+  {
+    "path": "/?habab-preview=onboarding",
+    "status": 200,
+    "sha256": "67161981365d88e6e80bb563e18c32d0481c04d60b46bd42df6cc9d3e9b03ebc",
+    "bytes": 7213
+  },
+  {
+    "path": "/demos/home-assistant/",
+    "status": 200,
+    "sha256": "67161981365d88e6e80bb563e18c32d0481c04d60b46bd42df6cc9d3e9b03ebc",
+    "bytes": 7213
+  },
+  {
+    "path": "/demos/home-assistant/assistant/releases/c1b763f4dc0619d4/setup-chat.js",
+    "status": 200,
+    "sha256": "c1b763f4dc0619d49c21def52474f3c9837e619b347e03a70eb0480cc5c2beac",
+    "bytes": 49721
+  }
+]

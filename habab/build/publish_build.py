@@ -7,6 +7,7 @@ import re
 import shutil
 from pathlib import Path
 
+from assistant_bundle import publish_assistant, render_entrypoint
 from demo_service_worker import publish_retirement_worker
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,8 +100,7 @@ def main():
         shutil.rmtree(STAGE)
     shutil.copytree(source_root, STAGE, ignore=shutil.ignore_patterns('releases'))
     (TARGET / 'integrations').mkdir(exist_ok=True)
-    shutil.copy2(ROOT / 'distribution/src/habab_home/frontend/setup-chat.js',
-                 TARGET / 'integrations/setup-chat.js')
+    assistant = publish_assistant(TARGET, ROOT / 'distribution/src/habab_home/frontend/setup-chat.js')
     if not args.from_published:
         shutil.copy2(UPSTREAM / 'LICENSE.md', STAGE / 'LICENSE.md')
     (STAGE / 'ATTRIBUTION.md').write_text(
@@ -116,7 +116,7 @@ def main():
     )
 
     index = STAGE / 'index.html'
-    html = scope_html(source_html)
+    html = render_entrypoint(scope_html(source_html), assistant['module_url'])
     index.write_text(html, encoding='utf-8')
 
     manifest = STAGE / 'manifest.json'

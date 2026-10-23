@@ -1,6 +1,6 @@
 # Помощник для подключения устройств
 
-В Habab Home 0.3.0 одна кнопка чата закреплена справа внизу на страницах Home Assistant. На компьютере она открывает немодальную панель справа; на телефоне чат занимает весь экран. Кнопка и WebSocket-команды доступны только администраторам. Кнопка на странице AI открывает ту же панель. Публичное демо отдельно отвечает через DeepSeek без инструментов, приватного Core и устройств.
+В Habab Home 0.3.1 один административный чат автоматически открывается после авторизованной загрузки Home Assistant на любой странице. На компьютере это немодальная панель справа; на телефоне сверху остаётся дашборд, снизу открывается чат. Его можно свернуть или раскрыть на весь экран. Кнопки и WebSocket-команды доступны только администраторам; кнопка на странице AI открывает тот же чат. Публичные обычная и preview-страницы используют одну реализацию чата и общий prompt. Публичное демо отвечает через DeepSeek без инструментов, приватного Core и устройств.
 
 Помощник выполняет команды от root внутри контейнера Home Assistant. Он может проверять конфигурацию, писать файлы в `/config`, запускать доступные в образе программы и диагностировать подключения. Включение и сканирование Bluetooth требуют отдельного доступа к BlueZ хоста.
 
@@ -49,17 +49,17 @@ HTTP-запросы не выполняются. Адрес и код не вх�
 
 ```sh
 docker compose -f compose.yaml build homeassistant
-python3 prepare-opencode.py --image habab-home:0.3.0
+python3 prepare-opencode.py --image habab-home:0.3.1
 docker compose --env-file .env.opencode -f compose.yaml -f compose.opencode.yaml up -d homeassistant
 ```
 
 Если пакет находится в другом месте:
 
 ```sh
-python3 prepare-opencode.py --binary /absolute/path/to/musl/opencode --image habab-home:0.3.0
+python3 prepare-opencode.py --binary /absolute/path/to/musl/opencode --image habab-home:0.3.1
 ```
 
-Откройте Home Assistant, войдите администратором, подключите DeepSeek в разделе **AI** и нажмите плавающую кнопку чата справа внизу. Можно попросить: «Проверь, какие устройства обнаружил Home Assistant».
+Откройте Home Assistant, войдите администратором и подключите DeepSeek в разделе **AI**. Чат появится после авторизованной загрузки; можно попросить: «Проверь, какие устройства обнаружил Home Assistant».
 
 Проверена версия OpenCode **1.14.21**. После обновления файла повторите `prepare-opencode.py` и пересоздайте контейнер. Несовпадение SHA-256 блокирует запуск помощника.
 
@@ -117,29 +117,42 @@ CLI `habab-ha` использует отдельный случайный capabi
 
 ## Проверки и ограничения
 
-Release check образа 0.3.0 без source overlays зафиксировал 100 Python tests,
+Release check принятого образа 0.3.0 без source overlays зафиксировал 100 Python tests,
 26 JavaScript tests, 10 native frontend tests, lint, pre/post-build typechecks и
 полную frontend сборку. В изолированном Linux browser QA прошли 7/7 сценариев,
 ошибок страницы не было. Native форма Time & Date создала загруженную сущность
 реального времени, состояние проверили в Home Assistant; selector context matrix
 проверен на синтетических данных без отправки формы. После исправления старта
 bootstrap не дал ошибок и не обращался к Recorder при отключённой интеграции;
-конфигурацию для теста не меняли. Отчёты находятся в `habab/qa/canonical-assistant/`:
+конфигурацию для теста не меняли. Это проверки принятого образа 0.3.0. Отчёты
+находятся в `habab/qa/canonical-assistant/`:
 `release-check.json`, `browser-result.json`, `bootstrap-after-fix.json` и
 `form-lifecycle.json`.
+
+Чистая сборка Docker-образа 0.3.1 на Core 2026.10.2 и Node 24.22.1 прошла;
+digest: `9efca5c859862be84723b9ce299df0b41be43377e2b9e1c3a53c7699645fe8d1`.
+В baked Linux QA прошли 105 Python tests, 30 host JavaScript tests, 8/8 JS
+lifecycle tests под Node из образа и 5/5 transport tests под baked SDK. Отдельно
+5/5 Telegram backend tests прошли под Python образа. Браузерная проверка baked
+образа прошла 7 сценариев со статусом `PASS_WITH_LIMITS`, без ошибок страницы и
+без source overlays. Проверены `/config/dashboard`, `/habab-ai`, `/lovelace/0`,
+мобильный split, раскрытие и возврат. Публичные страницы и preview прошли ещё 7
+сценариев. Высота viewport эмулировала место под экранную клавиатуру; физические
+Windows и Android-устройства не проверялись. Запросов к провайдерам и сообщений
+боту во время тестов не было. Отчёты находятся в `habab/qa/shared-assistant/`.
 
 Отдельный model benchmark завершился `PASS_WITH_LIMITS` для семи запросов.
 HA отклонил пустой запрос продолжения формы кодом 400; запись интеграции не
 создалась. В benchmark форму не отправляли и команды управления устройствами не
 выполняли. Отчёт: `habab/qa/canonical-assistant/model-benchmark-final.json`.
 
-На Windows проверен интерфейс установленной версии 0.2.0: нижняя кнопка, desktop-панель, сохранение черновика и защищённая форма Telegram. Прямой connection check DeepSeek прошёл, но запрос через OpenCode вернул `model_error`; read-only диагностика на Windows ещё не выполнена, а версия 0.3.0 физически там не установлена. Сквозной тест живого Telegram-бота и управление физическими устройствами также ожидают отдельной проверки.
+На Windows проверен интерфейс установленной версии 0.2.0: нижняя кнопка, desktop-панель, сохранение черновика и защищённая форма Telegram. Прямой connection check DeepSeek прошёл, но запрос через OpenCode вернул `model_error`; read-only диагностика на Windows ещё не выполнена, а версия 0.3.1 физически там не установлена. Сквозной тест живого Telegram-бота и управление физическими устройствами также ожидают отдельной проверки.
 
 `discover_devices` возвращает ограниченные наблюдения из штатных источников Home Assistant, включая zeroconf, SSDP, DHCP и доступные Bluetooth-сканеры. Это не сканирование Wi-Fi и не доказательство BLE-доступа Docker Desktop к адаптеру Windows. BLE, реальный Telegram и физическое подключение устройств отмечаются как проверенные только после соответствующих сквозных тестов.
 
 ```sh
-docker build -t habab-home:0.3.0 habab/distribution
-docker run --rm --network none --entrypoint python3 -v "$PWD/habab/distribution:/diagnostics:ro" habab-home:0.3.0 -m unittest discover -s /diagnostics/tests -v
+docker build -t habab-home:0.3.1 habab/distribution
+docker run --rm --network none --entrypoint python3 -v "$PWD/habab/distribution:/diagnostics:ro" habab-home:0.3.1 -m unittest discover -s /diagnostics/tests -v
 ```
 
 Новый сценарий Xiaomi проверен отдельно на loopback-порту 8400: запрос в чате, установка закреплённого компонента, подтверждённый перезапуск, официальный OAuth и импорт реального устройства. Для недоступного `homeassistant.local` проверена передача адреса возврата через защищённое поле карточки. Результаты без персональных данных находятся в `habab/qa/xiaomi-assistant/`. Состояние пылесоса прочитано, команды управления не отправлялись. Это Linux Docker/browser QA; физический Windows этим прогоном не проверен.

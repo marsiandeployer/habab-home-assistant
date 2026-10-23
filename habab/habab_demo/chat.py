@@ -1,7 +1,6 @@
 """Public DeepSeek help chat. No shell, hardware or private Home Assistant API."""
 import json
 import os
-from functools import partial
 from pathlib import Path
 
 from flask import current_app, jsonify, request
@@ -19,28 +18,25 @@ PROMPT = """Ты помощник по настройке Home Assistant на с
 Docker-установке Home Assistant под администратором. Если не хватает сведений
 об устройстве, уточни модель и способ подключения. Не проси присылать API-ключи,
 пароли или токены. Ты не видишь список реальных устройств пользователя.
-"""
 
-ONBOARDING_PROMPT = PROMPT + """
-
-Режим первичного уточнения для публичного preview. Сначала помоги понять, какое
-устройство пользователь хочет подключить и что уже известно. Если точной модели,
-типа устройства, протокола или способа установки HA не хватает для точного ответа,
-задай не больше двух коротких конкретных вопросов и дождись уточнения. Не перечисляй
-предположительные интеграции и способы подключения, не утверждай совместимость,
-наличие функций устройства или поддержку интеграции без проверенного источника.
-В этом preview нет доступа к источникам совместимости: если данных недостаточно,
-скажи это. Если точная модель неизвестна, предложи проверить её на маркировке
-устройства или в приложении производителя и попроси сообщить, что там указано.
-Конкретные пункты меню называй только при наличии проверенного источника. Для
-неизвестного протокола попроси модель или сведения из маркировки/приложения, а не
-угадывай. Не выдавай предположение за проверенную рекомендацию.
+Когда пользователь хочет подключить устройство, прежде чем рекомендовать способ
+или интеграцию, проверь, хватает ли точной модели и типа устройства, способа связи
+или протокола, а также версии и типа установки Home Assistant, если они влияют на
+шаги. Если важной информации не хватает, задай не больше двух коротких вопросов
+и дождись ответа. Не перечисляй предположительные интеграции и способы подключения,
+не утверждай совместимость, наличие функций устройства или поддержку интеграции
+без проверенного источника. В этом публичном чате нет доступа к источникам
+совместимости: при сомнении скажи, что не можешь это проверить, и сначала уточни
+данные. Если точная модель неизвестна, предложи проверить её на маркировке
+устройства или в приложении производителя; конкретные пункты меню называй только
+при наличии проверенного источника. Попроси сообщить, что там указано. Не угадывай
+протокол и не выдавай предположение за проверенную рекомендацию.
 
 Docker-установка Home Assistant Core не включает Supervisor и магазин add-ons.
 Не представляй add-on как доступный в Docker Core и не утверждай, что команды,
 установка или подключение уже выполнены. Не проси API-ключи, пароли, токены или
 коды подтверждения. Для фактических действий требуется домашний чат HA под
-администратором; этот публичный preview таких действий выполнить не может.
+администратором; этот публичный чат таких действий выполнить не может.
 """
 
 
@@ -49,10 +45,7 @@ class ChatError(Exception):
         self.code = code
 
 
-def deepseek_reply(messages, mode=None):
-    if mode not in (None, 'onboarding'):
-        raise ChatError('invalid_mode')
-    system_prompt = ONBOARDING_PROMPT if mode == 'onboarding' else PROMPT
+def deepseek_reply(messages):
     filename = current_app.config.get('HA_DEMO_DEEPSEEK_KEY_FILE') or os.getenv('HABAB_DEMO_DEEPSEEK_KEY_FILE')
     if not filename:
         raise ChatError('unavailable')
@@ -67,7 +60,7 @@ def deepseek_reply(messages, mode=None):
             headers={'Authorization': 'Bearer ' + key},
             json={
                 'model': 'deepseek-flash',
-                'messages': [{'role': 'system', 'content': system_prompt}] + messages[-12:],
+                'messages': [{'role': 'system', 'content': PROMPT}] + messages[-12:],
                 'max_tokens': 1024,
                 'thinking': {'type': 'disabled'},
             },
@@ -107,17 +100,14 @@ def send_chat():
     if request.content_length and request.content_length > 18000:
         return jsonify(error='too_large'), 413
     body = request.get_json(silent=True)
-    mode = None
     if isinstance(body, dict) and 'mode' in body:
         if not isinstance(body['mode'], str) or body['mode'] != 'onboarding':
             return jsonify(error='invalid_mode'), 400
-        mode = 'onboarding'
     text = body.get('text') if isinstance(body, dict) else None
     if not isinstance(text, str) or not 1 <= len(text.strip()) <= 4000:
         return jsonify(error='invalid'), 400
     try:
-        reply = deepseek_reply if mode is None else partial(deepseek_reply, mode=mode)
-        messages = _store().chat_turn(_session_hash(), text.strip(), reply)
+        messages = _store().chat_turn(_session_hash(), text.strip(), deepseek_reply)
         return jsonify(messages=messages)
     except ChatError as error:
         return jsonify(error=error.code), 429 if error.code == 'rate_limited' else 503

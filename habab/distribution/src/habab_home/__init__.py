@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from pathlib import Path
 
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
@@ -31,10 +32,17 @@ class HababHomeStatusView(HomeAssistantView):
 async def async_setup(hass, config):
     hass.http.register_view(HababHomeStatusView)
     hass.data[DOMAIN] = {"version": VERSION, "settings_lock": asyncio.Lock()}
+    frontend_dir = Path(__file__).parent / "frontend"
+    assistant_file = frontend_dir / "setup-chat.js"
+    assistant_digest = await hass.async_add_executor_job(
+        lambda: hashlib.sha256(assistant_file.read_bytes()).hexdigest()[:16]
+    )
+    assistant_url = f"/habab-assistant/{assistant_digest}.js"
     await hass.http.async_register_static_paths([
-        StaticPathConfig("/habab-home", str(Path(__file__).parent / "frontend"), False),
+        StaticPathConfig(assistant_url, str(assistant_file), False),
+        StaticPathConfig("/habab-home", str(frontend_dir), False),
     ])
-    frontend.add_extra_js_url(hass, "/habab-home/setup-chat.js?v=6")
+    frontend.add_extra_js_url(hass, assistant_url)
     from .setup_agent import SetupAgent
 
     agent = SetupAgent(hass)

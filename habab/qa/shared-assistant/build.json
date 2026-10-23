@@ -1,0 +1,70 @@
+{
+  "build": {
+    "command": "docker build -t habab-home:shared-chat-0.3.1-20261023 .",
+    "context": "habab/distribution",
+    "dockerfile_node_pin_change": "24.18.1-r0 -> 24.22.1-r0",
+    "base_image": "ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4",
+    "result": "PASS",
+    "builder": "legacy Docker builder (host has no buildx component)"
+  },
+  "image": {
+    "tag": "habab-home:shared-chat-0.3.1-20261023",
+    "id": "sha256:9efca5c859862be84723b9ce299df0b41be43377e2b9e1c3a53c7699645fe8d1",
+    "size_bytes": 2667333388,
+    "product_version": "0.3.1",
+    "home_assistant_core": "2026.10.2",
+    "node": "v24.22.1",
+    "native_frontend": "20260930.4+habab.3"
+  },
+  "source": {
+    "setup_chat": {
+      "path": "habab/distribution/src/habab_home/frontend/setup-chat.js",
+      "sha256": "c1b763f4dc0619d49c21def52474f3c9837e619b347e03a70eb0480cc5c2beac",
+      "bytes": 49721,
+      "baked_sha_matches_fixture": true
+    },
+    "native_frontend_release_manifest_sha256": "077be12151da495b0b3939b21cd167414232938ffe68737314e98ec1a31c7892",
+    "native_frontend_wheel_sha256": "fd39da4a4cd3a36573100681636edbb5f81825850265a5df203fa550b61ae79b"
+  },
+  "apk_index_verification": {
+    "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main",
+    "package": "nodejs",
+    "version": "24.22.1-r0",
+    "x86_64": {
+      "index": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/APKINDEX.tar.gz",
+      "last_modified_utc": "2026-10-23T14:37:43Z",
+      "sha256": "e9f0f0546a3bad03fb189101c837cf96f61ea020213f096536587f572060d225"
+    },
+    "aarch64": {
+      "index": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/APKINDEX.tar.gz",
+      "last_modified_utc": "2026-10-23T15:28:33Z",
+      "sha256": "13413756c9031e9ba8e9ebb148933984387091d114273850a52e6b22079c94a6"
+    },
+    "arm64_build_performed": false
+  },
+  "baked_validation": {
+    "method": "one ephemeral --rm --network none container with Python entrypoint; read-only mounts limited to required tests/frontend source; no user HA config mounted",
+    "version_and_source_assertions": "PASS",
+    "chat_lifecycle_tests_under_baked_node": {
+      "passed": 8,
+      "failed": 0
+    },
+    "telegram_backend_tests_under_baked_python": {
+      "passed": 5,
+      "failed": 0,
+      "names": [
+        "SessionBoundaryTests.test_web_and_telegram_sessions_are_channel_scoped",
+        "TelegramManagerTests.test_identity_and_private_chat_are_enforced",
+        "TelegramManagerTests.test_configure_uses_trusted_owner_context_and_returns_pairable_status",
+        "TelegramManagerTests.test_send_waits_for_worker_ack",
+        "TokenValidationTests.test_getme_does_not_return_token_or_raw_error"
+      ]
+    },
+    "provider_calls_or_telegram_messages": 0
+  },
+  "notes": [
+    "Legacy builder rejected --progress=plain; the build succeeded without that unsupported flag.",
+    "Initial build attempts with the stale Node pin failed before product copies; no image tag was created by those attempts.",
+    "The new image was retained; no containers were started or stopped by the build command."
+  ]
+}

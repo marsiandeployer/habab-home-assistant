@@ -1,4 +1,3 @@
-import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -47,12 +46,7 @@ class ChatRoutesTests(unittest.TestCase):
         self.assertEqual(client.post('/api/ha-demo/chat/reset', headers={'Origin': 'https://evil.example'}).status_code, 403)
         self.store.chat_turn.assert_not_called()
 
-    def test_prompt_modes_use_same_deepseek_provider_and_keep_default_prompt(self):
-        self.assertEqual(
-            hashlib.sha256(chat.PROMPT.encode()).hexdigest(),
-            '8425c60a97bd047b9601c2fa6ae2e936f6e52bd66b5ab0398160a3e6dea452f6',
-        )
-
+    def test_default_and_compat_mode_use_one_prompt_and_same_provider(self):
         def reply(_session_hash, text, callback):
             answer = callback([{'role': 'user', 'content': text}])
             return [{'role': 'assistant', 'content': answer}]
@@ -84,7 +78,7 @@ class ChatRoutesTests(unittest.TestCase):
                     ({'text': 'Подскажи настройку.'}, chat.PROMPT),
                     (
                         {'text': 'Подключи устройство.', 'mode': 'onboarding'},
-                        chat.ONBOARDING_PROMPT,
+                        chat.PROMPT,
                     ),
                 ]
                 for body, expected_prompt in cases:
@@ -97,16 +91,17 @@ class ChatRoutesTests(unittest.TestCase):
         self.assertEqual(provider.call_count, 2)
         for call, expected_prompt in zip(
             provider.call_args_list,
-            (chat.PROMPT, chat.ONBOARDING_PROMPT),
+            (chat.PROMPT, chat.PROMPT),
         ):
             self.assertEqual(call.args[0], 'https://api.deepseek.com/chat/completions')
             payload = call.kwargs['json']
             self.assertEqual(payload['model'], 'deepseek-flash')
             self.assertEqual(payload['messages'][0], {'role': 'system', 'content': expected_prompt})
             self.assertEqual(set(payload), {'model', 'messages', 'max_tokens', 'thinking'})
-        self.assertIn('не больше двух коротких конкретных вопросов', chat.ONBOARDING_PROMPT)
-        self.assertIn('не включает Supervisor и магазин add-ons', chat.ONBOARDING_PROMPT)
+        self.assertIn('не больше двух коротких вопросов', chat.PROMPT)
+        self.assertIn('не включает Supervisor и магазин add-ons', chat.PROMPT)
         self.assertIn('Не утверждай, что выполнил', chat.PROMPT)
+        self.assertNotIn('ONBOARDING_PROMPT', vars(chat))
 
     def test_upstream_failure_is_an_error_without_body_or_fake_answer(self):
         self.store.chat_turn.side_effect = chat.ChatError('provider_error')
