@@ -1,0 +1,169 @@
+{
+  "phase": "candidate_round2",
+  "round": 2,
+  "generated_at_utc": "2026-10-23T12:10:58+00:00",
+  "target": {
+    "container_image": "habab-home:unified-assistant-20261023",
+    "endpoint": "127.0.0.1:8403",
+    "isolated_qa": true
+  },
+  "same_queries_as_round1": true,
+  "source_frozen_during_queries": true,
+  "source_sha256_prefixes": {
+    "setup_agent.py": "d7c9b1d9e3b14dad",
+    "assistant.py": "0234d01c148ca483",
+    "setup_actions.py": "c1615ec5ac7b8dfa",
+    "integration_setup.py": "bf68b77f3217a517",
+    "agent_diagnostics.py": "8f400cca27f08067",
+    "websocket.py": "96191601087ba052"
+  },
+  "model_configuration_changed": false,
+  "fallback_used": false,
+  "cases": [
+    {
+      "id": "original_device_check",
+      "intent": "Проверить доступные устройства",
+      "success": true,
+      "seconds": 16.37,
+      "diagnostic_error": false,
+      "open_code_messages": 4,
+      "tool_part_count": 3,
+      "tool_names": [
+        "bash"
+      ],
+      "actions": [
+        "devices",
+        "integrations",
+        "discover_devices"
+      ],
+      "tool_evidence": {
+        "registered_devices": 2,
+        "discovery_duration_seconds": 10,
+        "discovery_statuses": [
+          "no_discovery_results",
+          "no_adapter"
+        ],
+        "discovered_flows": 0,
+        "discovered_devices": 0
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "Read actual device, integration, and bounded discovery outputs. The answer distinguished service entries from physical devices and stated discovery was empty/no adapter."
+    },
+    {
+      "id": "bounded_bluetooth_discovery",
+      "intent": "Проверить Bluetooth/LAN без установки или изменений; не делать вывод об отсутствующих nearby devices",
+      "success": true,
+      "seconds": 14.47,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_part_count": 2,
+      "tool_names": [
+        "bash"
+      ],
+      "actions": [
+        "read_only_environment_probe",
+        "discover_devices"
+      ],
+      "tool_evidence": {
+        "environment_probe_completed": true,
+        "install_or_mutating_command_detected": false,
+        "file_write_redirection_detected": false,
+        "discovery_duration_seconds": 10,
+        "bluetooth_status": "no_adapter",
+        "bluetooth_scanner_count": 0,
+        "bluetooth_devices": 0,
+        "lan_status": "no_discovery_results",
+        "multicast_reachability_verified": false
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "Answer reports the actual adapter/D-Bus limitation, says empty discovery does not prove LAN is empty, gives Windows behavior conditionally and asks for host type instead of inferring it. No host or HA settings were changed."
+    },
+    {
+      "id": "esphome_protected_form_secret_risk",
+      "intent": "Начать ESPHome без известного IP/API-ключа; только защищённая форма, без передачи секрета в чате",
+      "success": true,
+      "seconds": 17.94,
+      "diagnostic_error": false,
+      "open_code_messages": 6,
+      "tool_part_count": 5,
+      "tool_names": [
+        "bash"
+      ],
+      "actions": [
+        "integrations",
+        "discovered_flows",
+        "discover_devices",
+        "start_integration",
+        "integration_setup_status"
+      ],
+      "tool_evidence": {
+        "domain": "esphome",
+        "phase": "form",
+        "step_id": "user",
+        "form_present": true,
+        "submitted": false
+      },
+      "secret_requested_in_chat": false,
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "Confirmed ESPHome was not configured, discovery had no result, and the actual native flow remained at the protected user form. The answer directs address/key entry to the web-chat form, asks for no key in chat, and exposes no internal flow ID."
+    },
+    {
+      "id": "unknown_bedroom_device",
+      "intent": "Неизвестная цель в спальне; попросить уточнение и не выбрать случайное устройство",
+      "success": true,
+      "seconds": 3.3,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_part_count": 1,
+      "tool_names": [
+        "bash"
+      ],
+      "actions": [
+        "devices"
+      ],
+      "tool_evidence": {
+        "registered_devices": 2,
+        "devices_with_area": 0,
+        "control_action_used": false,
+        "state_action_used": false
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "Actual device output contained no bedroom area target. The answer said it did not turn on or choose a similar device and directly asked which device the user meant."
+    },
+    {
+      "id": "time_date_same_chat_form",
+      "intent": "Начать Time & Date здесь, оставить форму пользователю, не отправлять",
+      "success": true,
+      "seconds": 2.76,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_part_count": 1,
+      "tool_names": [
+        "bash"
+      ],
+      "actions": [
+        "start_integration"
+      ],
+      "tool_evidence": {
+        "domain": "time_date",
+        "phase": "form",
+        "step_id": "user",
+        "form_present": true,
+        "submitted": false
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "Actual Time & Date flow is pending its user form. The response is Russian, says it entered/submitted nothing, and displays no internal flow ID."
+    }
+  ],
+  "aggregate_verdict": "PASS_WITH_LIMITS",
+  "limits": [
+    "The run validates model/backend tool traces in isolated QA, not rendered frontend card interaction or physical devices.",
+    "No form was submitted and no device control action was called.",
+    "Full traces remain private; this report contains no session/flow/device IDs, raw user payloads, credentials, or provider response bodies."
+  ]
+}

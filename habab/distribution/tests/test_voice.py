@@ -11,7 +11,7 @@ import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
-from homeassistant.components.habab_home.conversation import parse_calls
+from homeassistant.components.habab_home.assist_adapter import parse_calls
 from homeassistant.components.habab_home.providers import (
     PROVIDERS, ProviderClient, ProviderError, validate_settings,
 )

@@ -16,14 +16,23 @@ from aiohttp import BasicAuth, ClientError, ClientTimeout
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.storage import Store
 
+from .agent_diagnostics import AgentDiagnostics
 from .const import DOMAIN
 
 PORT = 4197
 PROMPT = """Ты помощник по настройке домашнего Home Assistant. Отвечай по-русски,
-кратко. Ты работаешь через OpenCode от root ВНУТРИ Docker-контейнера HA, НЕ на
-хосте. Это разные права. Выполняй разрешённые пользователем команды, сначала
+кратко. Все сообщения владельцу, включая короткие сообщения о ходе работы, пиши
+по-русски. Внутренние flow_id/session_id не показывай в обычном ответе: владельцу
+нужны понятные названия и шаги в карточке. Ты работаешь через OpenCode от root
+ВНУТРИ Docker-контейнера Home Assistant Core, НЕ на хосте. Это не Home Assistant
+OS и не Supervisor. Тип хоста по Linux внутри контейнера определить нельзя.
+Bluetooth override с BlueZ применим только к Linux-хосту. В Windows Docker Desktop
+встроенный Bluetooth-адаптер не появляется от обычного override или root-прав;
+доступный путь — отдельно подключённый ESPHome Bluetooth proxy по LAN либо
+настроенный владельцем проброс поддерживаемого USB-адаптера. Не обещай, что любой
+из этих способов уже доступен. Перед инструкцией для хоста уточни его тип.
+Права контейнера и хоста различаются. Выполняй разрешённые пользователем команды, сначала
 проверяя реальное состояние. Для Bluetooth доступны bluetoothctl, Python,
 /run/dbus, если владелец подключил Bluetooth override. Используй timeout для
 сканирования (не более 15 секунд). Нет адаптера, D-Bus или доступа — честно
@@ -44,7 +53,16 @@ PROMPT = """Ты помощник по настройке домашнего Hom
 Карточка выбирает дома, а не отдельные устройства: единственный дом импортируется
 автоматически, при нескольких домах владелец выбирает их. Не придумывай шаги
 или поля карточки. Дальше ориентируйся на фактическую фазу из xiaomi_setup.
-Для других подключений с секретами направляй в /config/integrations/dashboard.
+Для остальных интеграций используй start_integration или adopt_discovered_flow: защищённая
+штатная форма появится прямо в этом веб-чате. Не отправляй владельца искать другую
+страницу настроек. В Telegram объясни, что защищённая форма доступна в веб-чате HA.
+Полная схема и значения формы недоступны модели. input_fields сообщает только
+реальные имена, типы и обязательность полей: описывай только эти поля, не придумывай
+другие поля или варианты выбора. Не проси пароли или ключи в переписке и не пытайся
+извлечь их из файлов. Название домена интеграции бери точно из domain результата
+команды, не подменяй его похожим доменом из своих знаний. Меню и пустое подтверждение
+можно продолжить через continue_integration по фактическому результату команды.
+Непустые формы заполняет владелец в карточке; после его сообщения проверь статус.
 Для доступа к настройкам используй CLI habab-ha с одним JSON-аргументом:
 {"action":"integrations"} — установленные интеграции без секретов;
 {"action":"xiaomi_setup"} — подготовить или проверить подключение Xiaomi Home;
@@ -52,15 +70,16 @@ PROMPT = """Ты помощник по настройке домашнего Hom
 {"action":"devices"} — реальные устройства и ID; {"action":"states","entity_id":"..."} — состояние;
 {"action":"services"} — доступные сервисы;
 {"action":"call_service","domain":"light","service":"turn_on","target":{"entity_id":"..."},"data":{}};
+{"action":"integration_setup_status"} — фазы подключений этого владельца без значений форм;
 {"action":"discovered_flows"} — ожидающие штатные discovery-подключения без секретного контекста;
 {"action":"adopt_discovered_flow","flow_id":"..."} — явно принять подходящий незанятый discovery-flow;
 {"action":"start_integration","domain":"..."} — начать нативное подключение;
 {"action":"continue_integration","flow_id":"...","input":{...}} — заполнить следующий шаг;
 {"action":"options_start","entry_id":"..."} и {"action":"options_continue","flow_id":"...","input":{...}} — настройки интеграции.
-Для запросов найти устройства или подключения по LAN, Wi-Fi или Bluetooth сначала вызови discover_devices, затем изучи devices и ожидающие discovered_flows. Это наблюдение ограничено тем, что видит сам Home Assistant: результат может быть неполным; оно не сканирует список Wi-Fi сетей (SSID), не предполагает наличие Windows-адаптера и не меняет сеть или настройки хоста. Не обещай найти SSID через это действие. При явном запросе владельца выбери только flow, чей домен и описание соответствуют нужному устройству, и явно прими его через adopt_discovered_flow. Продолжай только flow ID из результата принятия. Не принимай flow наугад и не используй занятые или пользовательские подключения. В формах используй только показанные имена полей, типы и варианты меню; неизвестные значения не угадывай.
+Для запросов найти устройства или подключения по LAN, Wi-Fi или Bluetooth сначала вызови discover_devices, затем изучи devices и ожидающие discovered_flows. Это наблюдение ограничено тем, что видит сам Home Assistant: результат может быть неполным; оно не сканирует список Wi-Fi сетей (SSID), не предполагает наличие Windows-адаптера и не меняет сеть или настройки хоста. Не обещай найти SSID через это действие. При явном запросе владельца выбери только flow, чей домен и описание соответствуют нужному устройству, и явно прими его через adopt_discovered_flow. Продолжай только flow ID из результата принятия. Не принимай flow наугад и не используй занятые или пользовательские подключения. Продолжай только показанные варианты меню или пустое подтверждение. Непустую форму владелец заполняет в защищённой карточке; значения полей не придумывай.
 Выбирай только реальные ID из результатов. После завершения проверь integrations, devices и доступные states.
 Если шаг требует пароль/API-ключ/OAuth/нажатие кнопки на устройстве, объясни, что
-владелец должен продолжить его в защищённом интерфейсе Home Assistant. Карточки и
+владелец должен продолжить его в защищённой карточке этого веб-чата Home Assistant. Карточки и
 защищённые поля доступны только в веб-интерфейсе; в Telegram сообщай, что нужно
 открыть веб-чат HA. Никогда не обещай карточку внутри Telegram и не проси присылать
 ключи, пароли или коды подтверждения в Telegram или другой чат.
@@ -93,15 +112,10 @@ class SetupAgent:
         self.fingerprint = None
         self.lock = asyncio.Lock()
         self.active = None
-        self.owners = {}
-        self.store = Store(hass, 1, "habab_home.agent_sessions", private=True)
-        self.telegram_store = Store(hass, 1, "habab_home.telegram_sessions", private=True)
-        self.telegram_sessions = {}
+        self.diagnostics = AgentDiagnostics()
         self.root = Path(hass.config.path(".habab-opencode"))
 
     async def setup(self):
-        self.owners = await self.store.async_load() or {}
-        self.telegram_sessions = await self.telegram_store.async_load() or {}
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self.close)
 
     def settings(self):
@@ -214,56 +228,7 @@ class SetupAgent:
                 result.append({"role": role, "text": self.clean(text)})
         return result[-60:]
 
-    async def session(self, owner, new=False):
-        if self.lock.locked():
-            raise AgentError("busy")
-        async with self.lock:
-            await self.ensure()
-            if new or owner not in self.owners:
-                session = await self.request("POST", "session", {"title": "Home Assistant"})
-                self.owners[owner] = session["id"]
-                await self.store.async_save(self.owners)
-            session_id = self.owners[owner]
-            messages = await self.request("GET", f"session/{session_id}/message?limit=60")
-            return {"session_id": session_id, "messages": self.visible(messages)}
-
-    async def telegram_session(self, owner, entry_id, chat_id, new=False):
-        """Return a session private to one owner's Telegram bot and chat."""
-        key = f"{owner}:{entry_id}:{chat_id}"
-        if self.lock.locked():
-            raise AgentError("busy")
-        async with self.lock:
-            await self.ensure()
-            if new or key not in self.telegram_sessions:
-                created = await self.request("POST", "session", {"title": "Telegram Home Assistant"})
-                self.telegram_sessions[key] = created["id"]
-                await self.telegram_store.async_save(self.telegram_sessions)
-            session_id = self.telegram_sessions[key]
-            messages = await self.request("GET", f"session/{session_id}/message?limit=60")
-            return {"session_id": session_id, "messages": self.visible(messages)}
-
-    async def telegram_reset(self, owner, entry_id, chat_id):
-        key = f"{owner}:{entry_id}:{chat_id}"
-        self.telegram_sessions.pop(key, None)
-        await self.telegram_store.async_save(self.telegram_sessions)
-        return await self.telegram_session(owner, entry_id, chat_id, new=True)
-
-    async def telegram_forget(self, owner, entry_id, chat_id):
-        """Remove one Telegram chat's session mapping after its active work stops."""
-        key = f"{owner}:{entry_id}:{chat_id}"
-        session_id = self.telegram_sessions.pop(key, None)
-        await self.telegram_store.async_save(self.telegram_sessions)
-        return session_id
-
-    def _owns_session(self, owner, session_id):
-        return self.owners.get(owner) == session_id or any(
-            key.startswith(f"{owner}:") and value == session_id
-            for key, value in getattr(self, "telegram_sessions", {}).items()
-        )
-
     async def run(self, owner, session_id, text):
-        if not self._owns_session(owner, session_id):
-            raise AgentError("not_found")
         if self.lock.locked():
             raise AgentError("busy")
         async with self.lock:
@@ -275,11 +240,14 @@ class SetupAgent:
                     "parts": [{"type": "text", "text": text}],
                 }, timeout=180)
                 if response.get("info", {}).get("error"):
+                    self.diagnostics.record(
+                        owner, session_id, response.get("info", {}).get("error"))
                     raise AgentError("model_error")
                 messages = await self.request("GET", f"session/{session_id}/message?limit=60")
                 visible = self.visible(messages)
                 if not visible or visible[-1]["role"] != "assistant":
                     raise AgentError("model_error")
+                self.diagnostics.clear(owner, session_id)
                 return {"session_id": session_id, "messages": visible}
             except (AgentError, asyncio.CancelledError):
                 await self.abort(owner, session_id)
@@ -288,8 +256,6 @@ class SetupAgent:
                 self.active = None
 
     async def abort(self, owner, session_id):
-        if not self._owns_session(owner, session_id):
-            raise AgentError("not_found")
         if self.active == (owner, session_id):
             try:
                 await self.request("POST", f"session/{session_id}/abort")

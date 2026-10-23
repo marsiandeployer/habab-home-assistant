@@ -134,13 +134,10 @@ class TelegramManager:
         if turn and not turn.done():
             turn.cancel()
             await asyncio.gather(turn, return_exceptions=True)
-        agent = self.hass.data.get("habab_home", {}).get("setup_agent")
-        if agent is not None:
-            key = f"{entry.data['owner_id']}:{entry.entry_id}:{chat_id}"
-            session_id = agent.telegram_sessions.get(key)
-            if session_id and agent.active == (entry.data["owner_id"], session_id):
-                await agent.abort(entry.data["owner_id"], session_id)
-            await agent.telegram_forget(entry.data["owner_id"], entry.entry_id, chat_id)
+        data = self.hass.data.get("habab_home", {})
+        assistant = data.get("assistant")
+        if assistant is not None:
+            await assistant.telegram_forget(entry.data["owner_id"], entry.entry_id, chat_id)
 
     async def async_setup_entry(self, entry):
         env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE") if k in os.environ}
@@ -414,19 +411,28 @@ class TelegramManager:
             if current and not current.done():
                 await self.send(entry.entry_id, chat_id, "Сначала остановите задачу командой /cancel.")
                 return
-            await self.hass.data["habab_home"]["setup_agent"].telegram_reset(
+            assistant = self.hass.data.get("habab_home", {}).get("assistant")
+            if assistant is None:
+                await self.send(entry.entry_id, chat_id, "Помощник запускается. Повторите команду позже.")
+                return
+            await assistant.telegram_reset(
                 entry.data["owner_id"], entry.entry_id, chat_id)
             await self.send(entry.entry_id, chat_id, "Начат новый диалог.")
         elif text == "/cancel":
-            agent = self.hass.data["habab_home"]["setup_agent"]
-            mapped = agent.telegram_sessions.get(f"{entry.data['owner_id']}:{entry.entry_id}:{chat_id}")
             current = self.turn_tasks.get(entry.entry_id)
             if current and not current.done():
                 current.cancel()
                 await asyncio.gather(current, return_exceptions=True)
                 stopped = True
             else:
-                stopped = await agent.abort(entry.data["owner_id"], mapped) if mapped else False
+                assistant = self.hass.data.get("habab_home", {}).get("assistant")
+                if assistant is None:
+                    await self.send(entry.entry_id, chat_id, "Помощник запускается. Повторите команду позже.")
+                    return
+                mapped = assistant.telegram_sessions.get(
+                    f"{entry.data['owner_id']}:{entry.entry_id}:{chat_id}")
+                stopped = await assistant.abort(
+                    entry.data["owner_id"], "telegram", mapped, entry.entry_id, chat_id) if mapped else False
             await self.send(entry.entry_id, chat_id, "Остановлено." if stopped else "Активной задачи нет.")
         elif text:
             current = self.turn_tasks.get(entry.entry_id)
@@ -438,10 +444,14 @@ class TelegramManager:
 
     async def _run_message(self, entry, chat_id, text):
         try:
-            agent = self.hass.data["habab_home"]["setup_agent"]
-            session = await agent.telegram_session(entry.data["owner_id"], entry.entry_id, chat_id)
+            assistant = self.hass.data.get("habab_home", {}).get("assistant")
+            if assistant is None:
+                await self.send(entry.entry_id, chat_id, "Помощник запускается. Повторите запрос позже.")
+                return
+            session = await assistant.telegram_session(entry.data["owner_id"], entry.entry_id, chat_id)
             await self.typing(entry.entry_id, chat_id)
-            result = await agent.run(entry.data["owner_id"], session["session_id"], text)
+            result = await assistant.run(entry.data["owner_id"], "telegram", session["session_id"],
+                                         text, entry.entry_id, chat_id)
             await self.send(entry.entry_id, chat_id, result["messages"][-1]["text"])
         except Exception:
             await self.send(entry.entry_id, chat_id, "Не удалось выполнить запрос. Попробуйте позже.")
@@ -498,7 +508,13 @@ class TelegramManager:
     async def unlink(self, owner):
         entry = self.entry_for_owner(owner)
         if entry:
+            binding = self.bindings.get(entry.entry_id, {})
+            state = self.entries.get(entry.entry_id, {})
+            chat_id = binding.get("chat_id", state.get("chat_id"))
             await self.close_entry(entry.entry_id)
+            assistant = self.hass.data.get("habab_home", {}).get("assistant")
+            if assistant is not None and chat_id is not None:
+                await assistant.telegram_forget(owner, entry.entry_id, str(chat_id))
             self.bindings.pop(entry.entry_id, None)
             await self.bindings_store.async_save(self.bindings)
             await self.hass.config_entries.async_remove(entry.entry_id)

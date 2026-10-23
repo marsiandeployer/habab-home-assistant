@@ -1,0 +1,8 @@
+{
+  "failures": [],
+  "recorder_requests": 0,
+  "target": "isolated_qa",
+  "frontend_version": "20260930.4+habab.3",
+  "recorder_enabled": false,
+  "configuration_changed_for_test": false
+}

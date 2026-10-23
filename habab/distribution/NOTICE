@@ -1,4 +1,4 @@
-Habab Home 0.1.0
+Habab Home 0.3.0
 
 This distribution contains Home Assistant Core 2026.10.2 from
 https://github.com/home-assistant/core, licensed under Apache License 2.0.
@@ -6,6 +6,12 @@ The upstream source is identified by the immutable image digest in release.json.
 The upstream license and copyright notices are available in the Home Assistant
 Core source tree and are included in the upstream image. This NOTICE is supplied
 with the downstream integration, configuration, and packaging changes.
+
+The Core-matched Home Assistant Frontend 20260930.4 is built from the upstream
+tag with a downstream patch. Its source commit, artifact SHA-256 and version
+are pinned in native-frontend-release.json. The patch and reproducible build
+instructions are in habab/native-frontend in the public source repository.
+The frontend and the downstream modifications are licensed under Apache 2.0.
 
 Copyright 2026 Habab contributors. The changes in this directory are licensed
 under Apache License 2.0; see LICENSE.

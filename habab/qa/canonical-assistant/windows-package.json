@@ -1,0 +1,10 @@
+{
+  "filename": "habab-home-windows-79ce5e3d0865.zip",
+  "sha256": "79ce5e3d086550ed94b7b93dd4b58f83f64071a79a8afbfb143ba0c6a9f02058",
+  "bytes": 139517,
+  "files": 71,
+  "public_body_sha_verified": true,
+  "core_version": "2026.10.2",
+  "product_version": "0.3.0",
+  "frontend": "20260930.4+habab.3"
+}

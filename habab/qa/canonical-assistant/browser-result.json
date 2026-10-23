@@ -1,0 +1,14 @@
+{
+  "target": "isolated_qa",
+  "cases": [
+    "one_russian_launcher_bottom_right",
+    "ai_settings_open_same_chat_without_duplicate_composer",
+    "native_assist_keyboard_routes_to_canonical_chat",
+    "real_deepseek_creates_native_form_inside_chat",
+    "native_selector_submit_creates_loaded_real_time_sensor",
+    "synthetic_selector_context_matrix_without_submission",
+    "mobile_modal_and_closed_chat_does_not_block_page"
+  ],
+  "pageErrors": [],
+  "status": "PASS"
+}

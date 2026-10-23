@@ -1,0 +1,2 @@
+# Unified diff context lines must retain their single-space prefix.
+bridge.patch whitespace=-blank-at-eol

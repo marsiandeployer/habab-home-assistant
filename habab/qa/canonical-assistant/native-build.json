@@ -1,0 +1,63 @@
+{
+  "source": {
+    "repository": "https://github.com/home-assistant/frontend",
+    "tag": "20260930.4",
+    "commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
+    "bridge_patch_sha256": "b4f82672cd8ba145fa0a1b0739a81d38983139fe61fe17fc7b9faaf0ea0db76f"
+  },
+  "changes": [
+    "Removed the unconditional recorder/info preload from core startup and its preloads type.",
+    "Database migration check now requests recorder info only when hass.config.components includes recorder; no recorder sets migration false without a request.",
+    "Enabled-recorder request failures propagate unchanged."
+  ],
+  "translations": {
+    "source_image": "ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4",
+    "source_frontend_version": "20260930.4",
+    "catalog_fingerprint_sha256": "154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce",
+    "russian_hash": "b27f4a665b84ba27560f1d90c56bfd6a",
+    "metadata_hashes_and_fragment_paths_verified": true
+  },
+  "build": {
+    "node": "24.21.0",
+    "pnpm": "11.28.0",
+    "command": "bash habab/native-frontend/build-wheel.sh",
+    "pipeline": "pnpm install --frozen-lockfile; focused eslint/prettier/vitest; gulp gather-gallery-pages; pnpm lint:types; gulp clean; upstream asset/catalog generation; reconcile pinned catalog metadata; Rspack modern+legacy; pages/service worker; compression; gulp gather-gallery-pages; pnpm lint:types; Python wheel packaging",
+    "source_asset_version": "20260930.4",
+    "wheel_version": "20260930.4+habab.3"
+  },
+  "artifact": {
+    "path": "habab/public/downloads/native-frontend/fd39da4a4cd3a36573100681636edbb5f81825850265a5df203fa550b61ae79b/home_assistant_frontend-20260930.4+habab.3-py3-none-any.whl",
+    "sha256": "fd39da4a4cd3a36573100681636edbb5f81825850265a5df203fa550b61ae79b",
+    "bytes": 110859038,
+    "requires_python": ">=3.14.0",
+    "entries": 14797,
+    "modern_assets": true,
+    "legacy_assets": true,
+    "russian_app_and_config_catalogs": true
+  },
+  "checks": {
+    "focused_eslint": "PASS",
+    "focused_prettier": "PASS",
+    "focused_vitest": "PASS (10 tests: 6 existing + 4 recorder guard tests)",
+    "frontend_production_build": "PASS (modern and legacy)",
+    "translation_catalog_and_metadata": "PASS (pinned Russian catalog fingerprint; declared locale and fragment paths exist)",
+    "wheel_metadata_and_contents": "PASS (version, Python requirement, 14,797 entries, RU app/config)",
+    "prebuild_lint_types": "PASS",
+    "postbuild_lint_types_before_packaging": "PASS",
+    "home_assistant_install_and_browser_qa": "PENDING_PARENT"
+  },
+  "superseded_attempts": [
+    {
+      "wheel_version": "20260930.4+habab.2",
+      "sha256": "621e0fff519f2fd468d7729a764bcf3f8d7ffaaf567a99b013b3b30451ff03da",
+      "status": "DO_NOT_USE",
+      "reason": "TypeScript gate found a missing shared Lovelace preload declaration; replaced by .3 and preserved as an immutable artifact."
+    }
+  ],
+  "build_notes": [
+    "The pinned upstream source contains English catalogs only; Russian and other stock locale catalogs came from the pinned public Home Assistant 2026.10.2 image.",
+    "Generated translation metadata was reconciled before Rspack and every declared locale/fragment hash was verified against an existing catalog.",
+    "Known upstream asset-size and service-worker Roboto-font glob warnings were emitted; production compilation and packaging succeeded.",
+    "The build script gates packaging on typecheck both before and after compiled asset generation."
+  ]
+}

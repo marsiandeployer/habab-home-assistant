@@ -3,49 +3,31 @@ import asyncio
 from itertools import islice
 import json
 import logging
-import re
 import secrets
 
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.config_entries import DISCOVERY_SOURCES, SOURCE_USER
+from homeassistant.config_entries import DISCOVERY_SOURCES
 from homeassistant.core import Context
 from homeassistant.helpers import device_registry, entity_registry
-from homeassistant.helpers.selector import SelectSelector
-
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def flow_result(result):
-    """Expose next field names, never config-entry data/defaults or credentials."""
-    schema = getattr(result.get("data_schema"), "schema", {})
-    fields = []
-    if isinstance(schema, dict):
-        for key, validator in schema.items():
-            field_type = getattr(validator, "selector_type", None)
-            if not isinstance(field_type, str):
-                validator_type = validator if isinstance(validator, type) else type(validator)
-                field_type = validator_type.__name__.lower()
-            field = {
-                "name": str(getattr(key, "schema", key)),
-                "type": field_type,
-            }
-            if isinstance(validator, SelectSelector):
-                options = validator.config.get("options", [])
-                field["options"] = [
-                    option if isinstance(option, str) else {
-                        "value": option["value"], "label": option.get("label", option["value"]),
-                    }
-                    for option in options
-                    if isinstance(option, str) or (
-                        isinstance(option, dict)
-                        and isinstance(option.get("value"), str)
-                        and isinstance(option.get("label", option["value"]), str)
-                    )
-                ]
-            fields.append(field)
-    return {key: result[key] for key in ("type", "flow_id", "step_id", "errors", "menu_options") if key in result} | {"fields": fields}
+    """Return only the flow control summary allowed in model context."""
+    result_type = result.get("type")
+    phase = {"form": "form", "menu": "menu", "progress": "progress",
+             "progress_done": "progress", "external": "external",
+             "create_entry": "progress", "abort": "abort"}.get(result_type, "error")
+    summary = {"phase": phase}
+    for key in ("flow_id", "step_id"):
+        if isinstance(result.get(key), str):
+            summary[key] = result[key]
+    options = result.get("menu_options")
+    if isinstance(options, (list, tuple)) and all(isinstance(item, str) for item in options):
+        summary["menu_options"] = list(options)
+    return summary
 
 
 def discovered_flows(hass, manager):
@@ -121,45 +103,9 @@ async def execute(hass, manager, owner, body):
             await hass.services.async_call(domain, service, data, target=target, blocking=True,
                                            context=Context(user_id=owner))
         return {"called": f"{domain}.{service}", "verification": "Read the affected entity with states to verify the result."}
-    if action == "adopt_discovered_flow":
-        flow_id = body.get("flow_id")
-        if not isinstance(flow_id, str) or flow_id in manager.flow_owners:
-            raise ValueError("unknown_flow")
-        flow = next((item for item in hass.config_entries.flow.async_progress()
-                     if item.get("flow_id") == flow_id), None)
-        context = flow.get("context") if flow else None
-        if not isinstance(context, dict) or context.get("source") not in DISCOVERY_SOURCES:
-            raise ValueError("unknown_flow")
-        manager.flow_owners[flow_id] = (owner, "config")
-        return flow_result(flow)
-    if action in {"start_integration", "options_start"}:
-        if action == "start_integration":
-            domain = body.get("domain", "")
-            if not isinstance(domain, str) or not re.fullmatch(r"[a-z0-9_]{1,80}", domain):
-                raise ValueError("invalid_domain")
-            result = await hass.config_entries.flow.async_init(domain, context={"source": SOURCE_USER})
-            kind = "config"
-        else:
-            entry_id = body.get("entry_id")
-            if not isinstance(entry_id, str) or not hass.config_entries.async_get_entry(entry_id):
-                raise ValueError("unknown_entry")
-            result = await hass.config_entries.options.async_init(entry_id)
-            kind = "options"
-        if result.get("flow_id"):
-            manager.flow_owners[result["flow_id"]] = (owner, kind)
-        return flow_result(result)
-    if action in {"continue_integration", "options_continue"}:
-        flow_id, data = body.get("flow_id"), body.get("input", {})
-        kind = "options" if action == "options_continue" else "config"
-        if not isinstance(flow_id, str) or manager.flow_owners.get(flow_id) != (owner, kind):
-            raise ValueError("unknown_flow")
-        if not isinstance(data, dict):
-            raise ValueError("invalid_input")
-        flows = hass.config_entries.options if kind == "options" else hass.config_entries.flow
-        result = await flows.async_configure(flow_id, data)
-        if result["type"] in {"create_entry", "abort"}:
-            manager.flow_owners.pop(flow_id, None)
-        return flow_result(result)
+    if action in {"integration_setup_status", "adopt_discovered_flow", "start_integration",
+                  "options_start", "continue_integration", "options_continue"}:
+        return await hass.data[DOMAIN]["integration_setup"].agent_action(owner, action, body)
     raise ValueError("unknown_action")
 
 

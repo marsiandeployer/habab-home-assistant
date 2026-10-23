@@ -1,0 +1,13 @@
+{
+  "frontend_version": "20260930.4+habab.1",
+  "target": "isolated_qa",
+  "recorder_enabled": false,
+  "failed_requests": [
+    {
+      "type": "recorder/info",
+      "code": "unknown_command"
+    }
+  ],
+  "cause": "Native frontend preloaded recorder/info before checking enabled integrations.",
+  "configuration_changed_for_test": false
+}

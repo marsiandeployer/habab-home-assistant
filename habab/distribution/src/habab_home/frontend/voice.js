@@ -1,4 +1,4 @@
-// Native Assist WebSocket streaming. HA owns VAD, STT, intents and speech output.
+// Native Assist WebSocket streaming for speech input and optional TTS-only output.
 export class AssistVoice {
   constructor(hass, pipeline, onEvent) {
     this.hass = hass;
@@ -8,6 +8,9 @@ export class AssistVoice {
   }
 
   async start() {
+    if (!this.pipeline || typeof this.pipeline.id !== "string" || !this.pipeline.id || !this.pipeline.stt_engine) {
+      throw { code: "speechRequired" };
+    }
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       throw { code: "secure_context" };
     }
@@ -39,18 +42,12 @@ export class AssistVoice {
         } else if (event.type === "stt-vad-end" || event.type === "stt-end") {
           this.handler = undefined;
           this.stopMicrophone();
-        } else if (event.type === "tts-end") {
-          const url = event.data.tts_output?.url;
-          if (url?.startsWith("/api/")) {
-            this.audio = new Audio(url);
-            this.audio.play().catch(() => this.onEvent({ type: "playback-blocked" }));
-          }
         }
         this.onEvent(event);
         if (event.type === "run-end" || event.type === "error") this.close(false);
       }, {
         type: "assist_pipeline/run", pipeline: this.pipeline.id,
-        start_stage: "stt", end_stage: this.pipeline.tts_engine ? "tts" : "intent",
+        start_stage: "stt", end_stage: "stt",
         input: { sample_rate: this.context.sampleRate },
       });
       // Covers a terminal event arriving before the subscription Promise resolves.
@@ -64,8 +61,72 @@ export class AssistVoice {
       }
     } catch (error) {
       this.close();
-      throw { code: error?.name === "NotAllowedError" ? "microphone_denied" : (error.code || "microphone_failed") };
+      const code = error?.name === "NotAllowedError" ? "microphone_denied"
+        : ["secure_context", "speechRequired", "microphone_denied"].includes(error?.code) ? error.code
+          : "microphone_failed";
+      throw { code };
     }
+  }
+
+  async speak(text) {
+    if (!this.pipeline || typeof this.pipeline.id !== "string" || !this.pipeline.id || !this.pipeline.tts_engine || typeof text !== "string" || !text.trim()) {
+      throw { code: "tts_unavailable" };
+    }
+    this.closed = false;
+    let resolveSpeech;
+    let rejectSpeech;
+    this.speakingPromise = new Promise((resolve, reject) => {
+      resolveSpeech = resolve;
+      rejectSpeech = reject;
+    });
+    this.resolveSpeech = resolveSpeech;
+    this.rejectSpeech = rejectSpeech;
+    this.finishSpeech = (value, error) => {
+      if (!this.resolveSpeech && !this.rejectSpeech) return;
+      const resolve = this.resolveSpeech;
+      const reject = this.rejectSpeech;
+      this.resolveSpeech = undefined;
+      this.rejectSpeech = undefined;
+      if (error) reject?.(error);
+      else resolve?.(value);
+    };
+    try {
+      this.unsubscribe = await this.hass.connection.subscribeMessage((event) => {
+        if (this.closed) return;
+        if (event.type === "tts-end") {
+          const url = event.data?.tts_output?.url;
+          if (typeof url !== "string" || !url.startsWith("/api/")) {
+            this.onEvent({ type: "error", data: { code: "tts_unavailable" } });
+          } else {
+            this.audio = new Audio(this.hass.hassUrl(url));
+            this.audio.play().catch(() => this.onEvent({ type: "playback-blocked" }));
+            this.audio.addEventListener("ended", () => this.onEvent({ type: "playback-ended" }), {once: true});
+            this.audio.addEventListener("error", () => this.onEvent({ type: "error", data: {code: "tts_unavailable"} }), {once: true});
+          }
+        }
+        this.onEvent(event);
+        if (event.type === "run-end") {
+          this.finishSpeech?.(true);
+          this.close(false);
+        } else if (event.type === "error") {
+          this.finishSpeech?.(undefined, {code: "tts_unavailable"});
+          this.close(false);
+        }
+      }, {
+        type: "assist_pipeline/run", pipeline: this.pipeline.id,
+        start_stage: "tts", end_stage: "tts", input: { text },
+      });
+      if (this.closed) this.releaseSubscription();
+      else this.runTimer = setTimeout(() => {
+        this.finishSpeech?.(undefined, {code: "timeout"});
+        this.onEvent({type: "error", data: {code: "timeout"}});
+        this.close();
+      }, 120000);
+    } catch (_) {
+      this.close();
+      throw { code: "tts_unavailable" };
+    }
+    return this.speakingPromise;
   }
 
   send(chunk) {
@@ -85,15 +146,22 @@ export class AssistVoice {
 
   stopMicrophone() {
     clearTimeout(this.micTimer);
-    this.stream?.getTracks().forEach((track) => track.stop());
+    this.micTimer = undefined;
+    const stream = this.stream;
+    this.stream = undefined;
+    stream?.getTracks().forEach((track) => track.stop());
     if (this.recorder) this.recorder.port.onmessage = null;
-    this.source?.disconnect();
-    this.context?.close();
+    this.recorder = undefined;
+    try { this.source?.disconnect(); } catch (_) { /* Already disconnected while closing a finished run. */ }
+    this.source = undefined;
+    const context = this.context;
     this.context = undefined;
+    context?.close().catch(() => {});
   }
 
   close(stopPlayback = true) {
     this.closed = true;
+    this.finishSpeech?.(false);
     this.stopMicrophone();
     this.pending = [];
     this.releaseSubscription();

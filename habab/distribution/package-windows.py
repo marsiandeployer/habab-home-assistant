@@ -14,6 +14,7 @@ names = ['Dockerfile', '.dockerignore', 'docker-entrypoint.sh', 'habab-ha.py', '
          'start-xiaomi-home.bat', 'install-xiaomi-home.py', 'xiaomi-home-release.json',
          'support_tunnel.bat', 'support_tunnel.ps1', 'support-relay.json',
          'diagnose-assistant.bat', 'diagnose-assistant.ps1', 'diagnose-assistant.py',
+         'install-native-frontend.py', 'native-frontend-release.json',
          'install-opencode-volume.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
          'config/configuration.yaml']
 for directory in ('src/habab_home', 'src/habab_telegram', 'telegram-agent'):

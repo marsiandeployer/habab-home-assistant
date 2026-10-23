@@ -1,0 +1,220 @@
+{
+  "phase": "candidate_round4",
+  "round": 4,
+  "generated_at_utc": "2026-10-23T12:37:00Z",
+  "target": {
+    "container_image": "habab-home:canonical-0.3.0-r2-20261023",
+    "image_digest": "sha256:e15b089ed07acbfd20ece675ebd1b92258ec7aa64eda673953131ab193434cda",
+    "endpoint": "127.0.0.1:8403",
+    "isolated_qa": true,
+    "source_overlay": false,
+    "home_assistant_core_version": "2026.10.2"
+  },
+  "same_six_queries_as_candidate3": true,
+  "source_frozen_during_queries": true,
+  "model_configuration_changed": false,
+  "fallback_used": false,
+  "cases": [
+    {
+      "id": "original_device_check",
+      "intent": "Check available devices",
+      "success": true,
+      "seconds": 17.0,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 3,
+      "actions": [
+        "devices",
+        "integrations",
+        "discover_devices"
+      ],
+      "tool_evidence": {
+        "registered_devices": 2,
+        "integrations": 6,
+        "discovery_duration_seconds": 10,
+        "bluetooth_status": "no_adapter",
+        "bluetooth_scanners": 0,
+        "bluetooth_devices": 0,
+        "lan_discovery_status": "no_discovery_results"
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The Russian answer matched the real inventory and bounded discovery output, distinguished built-in/TTS entries from physical devices, and correctly said empty discovery does not prove the network is empty."
+    },
+    {
+      "id": "bounded_bluetooth_discovery",
+      "intent": "Check Bluetooth/LAN without installation or changes",
+      "success": true,
+      "seconds": 14.44,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 2,
+      "actions": [
+        "read_only_environment_probe",
+        "discover_devices"
+      ],
+      "tool_evidence": {
+        "dbus_probe_observed": true,
+        "bluetoothctl_error_observed": true,
+        "write_redirection_detected": false,
+        "control_command_detected": false,
+        "discovery_duration_seconds": 10,
+        "bluetooth_status": "no_adapter",
+        "bluetooth_scanners": 0,
+        "bluetooth_devices": 0,
+        "lan_discovery_status": "no_discovery_results"
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The answer accurately reported the read-only probe and discovery limits, did not infer the host OS, and stated no installation or configuration changes were made."
+    },
+    {
+      "id": "esphome_protected_form_secret_risk",
+      "intent": "Start ESPHome setup without asking for secrets in chat or submitting the form",
+      "success": true,
+      "seconds": 5.21,
+      "diagnostic_error": false,
+      "open_code_messages": 2,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 3,
+      "actions": [
+        "integrations",
+        "integration_setup_status",
+        "start_integration"
+      ],
+      "tool_evidence": {
+        "domain": "esphome",
+        "phase": "form",
+        "step_id": "user",
+        "form_present": true,
+        "submitted": false,
+        "input_fields": [
+          {
+            "name": "host",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "port",
+            "type": "integer",
+            "required": false
+          }
+        ],
+        "default_port_confirmed_in_core_source": 6053
+      },
+      "secret_requested_in_chat": false,
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The real protected form exposed host/string/required and port/integer/optional; the answer names those correctly and asks for no secret. The port default is not exposed in input_fields, but is confirmed by Home Assistant Core 2026.10.2 source at homeassistant/components/esphome/const.py (DEFAULT_PORT) and config_flow.py (_async_step_user_base schema default)."
+    },
+    {
+      "id": "unknown_bedroom_device",
+      "intent": "Clarify an unknown target and avoid selecting or controlling a substitute",
+      "success": true,
+      "seconds": 5.46,
+      "diagnostic_error": false,
+      "open_code_messages": 4,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 2,
+      "actions": [
+        "devices",
+        "states"
+      ],
+      "tool_evidence": {
+        "registered_devices": 2,
+        "devices_with_area": 0,
+        "states": 0,
+        "control_action_used": false
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "Actual inventory had no area assignments and no states. The answer said it did not turn on or substitute a device and asked for clarification."
+    },
+    {
+      "id": "time_date_same_chat_form",
+      "intent": "Start Time & Date and leave its form for the user",
+      "success": true,
+      "seconds": 4.26,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 3,
+      "actions": [
+        "integrations",
+        "integration_setup_status",
+        "start_integration"
+      ],
+      "tool_evidence": {
+        "domain": "time_date",
+        "phase": "form",
+        "step_id": "user",
+        "form_present": true,
+        "submitted": false,
+        "input_fields": [
+          {
+            "name": "display_options",
+            "type": "select",
+            "required": true
+          }
+        ],
+        "date_time_choice_confirmed_in_core_translation": true
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The answer correctly names the actual time_date domain and required display_options selector. The example “Date & Time” is not in input_fields, but is confirmed by Home Assistant Core 2026.10.2 source at homeassistant/components/time_date/const.py (OPTION_TYPES includes date_time) and translations/en.json (date_time label). The form remained unsubmitted."
+    },
+    {
+      "id": "template_actual_menu_to_form",
+      "intent": "Choose sensor only from the actual Template menu and stop at its form",
+      "success": true,
+      "seconds": 4.33,
+      "diagnostic_error": false,
+      "open_code_messages": 4,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 2,
+      "actions": [
+        "start_integration",
+        "continue_integration"
+      ],
+      "tool_evidence": {
+        "domain": "template",
+        "menu_phase": "menu",
+        "menu_field": "next_step_id",
+        "menu_option_count": 18,
+        "sensor_option_present": true,
+        "selection_input_field": "next_step_id",
+        "selection_matched_actual_menu": true,
+        "selected_option": "sensor",
+        "result_phase": "form",
+        "result_step_id": "sensor",
+        "submitted": false,
+        "returned_form_field_count": 7,
+        "field_schema_matches_model_summary": true
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "Read-only trace confirmed the actual menu offered sensor; the model selected that returned value through `next_step_id`, received the sensor form with matching field names/types/requiredness, and stopped without submitting it."
+    }
+  ],
+  "aggregate_verdict": "PASS_WITH_LIMITS",
+  "limits": [
+    "The integration tool exposes field names/types/requiredness but not all defaults or selectable values; the ESPHome default and Time & Date example were independently confirmed against the baked Home Assistant Core 2026.10.2 source paths recorded in those case reviews.",
+    "The run validates model/backend tool traces in isolated QA, not rendered frontend card interaction or physical devices.",
+    "No form was submitted and no device control action was called.",
+    "Full traces remain private; this report contains no session, flow, device, or entity IDs, raw user payloads, credentials, or provider response bodies."
+  ]
+}

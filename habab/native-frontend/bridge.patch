@@ -1,0 +1,1606 @@
+diff --git a/src/data/preloads.ts b/src/data/preloads.ts
+index 26b33b1f2..520090f74 100644
+--- a/src/data/preloads.ts
++++ b/src/data/preloads.ts
+@@ -1,9 +1,7 @@
+ import type { LovelaceRawConfig } from "./lovelace/config/types";
+ import type { LovelaceResource } from "./lovelace/resource";
+-import type { RecorderInfo } from "./recorder";
+ 
+ export interface WindowWithPreloads extends Window {
+   llConfProm?: Promise<LovelaceRawConfig>;
+   llResProm?: Promise<LovelaceResource[]>;
+-  recorderInfoProm?: Promise<RecorderInfo>;
+ }
+diff --git a/src/data/recorder.ts b/src/data/recorder.ts
+index ac5650ae7..c3567ace5 100644
+--- a/src/data/recorder.ts
++++ b/src/data/recorder.ts
+@@ -145,6 +145,13 @@ export const getRecorderInfo = (conn: Connection) =>
+     type: "recorder/info",
+   });
+ 
++export const getRecorderInfoIfAvailable = (
++  hass: Pick<HomeAssistant, "config" | "connection">
++): Promise<RecorderInfo | undefined> =>
++  hass.config.components.includes("recorder")
++    ? getRecorderInfo(hass.connection)
++    : Promise.resolve(undefined);
++
+ export type EntityRecordingDisabler = "user";
+ 
+ export interface RecorderEntityOptions {
+diff --git a/src/dialogs/config-flow/show-dialog-config-flow.ts b/src/dialogs/config-flow/show-dialog-config-flow.ts
+index 44b4acd4b..953cb9bd9 100644
+--- a/src/dialogs/config-flow/show-dialog-config-flow.ts
++++ b/src/dialogs/config-flow/show-dialog-config-flow.ts
+@@ -6,7 +6,10 @@ import {
+   handleConfigFlowStep,
+ } from "../../data/config_flow";
+ import { domainToName } from "../../data/integration";
+-import type { DataEntryFlowDialogParams } from "./show-dialog-data-entry-flow";
++import type {
++  DataEntryFlowDialogParams,
++  FlowConfig,
++} from "./show-dialog-data-entry-flow";
+ import {
+   loadDataEntryFlowDialog,
+   loadFlowStepTranslations,
+@@ -15,282 +18,293 @@ import {
+ 
+ export const loadConfigFlowDialog = loadDataEntryFlowDialog;
+ 
+-export const showConfigFlowDialog = (
+-  element: HTMLElement,
+-  dialogParams: Omit<DataEntryFlowDialogParams, "flowConfig"> & {
++export const createConfigFlowConfig = (
++  dialogParams: Pick<DataEntryFlowDialogParams, "startFlowHandler"> & {
+     entryId?: string;
+-  }
+-): void =>
+-  showFlowDialog(element, dialogParams, {
+-    flowType: "config_flow",
+-    showDevices: true,
+-    createFlow: async (hass, handler) => {
+-      const [step] = await Promise.all([
+-        createConfigFlow(hass, handler, dialogParams.entryId),
+-        hass.loadFragmentTranslation("config"),
+-        hass.loadBackendTranslation("config", handler),
+-        hass.loadBackendTranslation("selector", handler),
+-        // Used as fallback if no header defined for step
+-        hass.loadBackendTranslation("title", handler),
+-      ]);
+-      await loadFlowStepTranslations(hass, step);
+-      return step;
+-    },
+-    fetchFlow: async (hass, flowId) => {
+-      const [step] = await Promise.all([
+-        fetchConfigFlow(hass, flowId),
+-        hass.loadFragmentTranslation("config"),
+-      ]);
+-      await Promise.all([
+-        hass.loadBackendTranslation("config", step.handler),
+-        hass.loadBackendTranslation("selector", step.handler),
+-        // Used as fallback if no header defined for step
+-        hass.loadBackendTranslation("title", step.handler),
+-      ]);
+-      await loadFlowStepTranslations(hass, step);
+-      return step;
+-    },
+-    handleFlowStep: async (hass, flowId, data) => {
+-      const step = await handleConfigFlowStep(hass, flowId, data);
+-      await loadFlowStepTranslations(hass, step);
+-      return step;
+-    },
+-    deleteFlow: deleteConfigFlow,
++  },
++  handleFlowStepOverride?: FlowConfig["handleFlowStep"]
++): FlowConfig => ({
++  flowType: "config_flow",
++  showDevices: true,
++  createFlow: async (hass, handler) => {
++    const [step] = await Promise.all([
++      createConfigFlow(hass, handler, dialogParams.entryId),
++      hass.loadFragmentTranslation("config"),
++      hass.loadBackendTranslation("config", handler),
++      hass.loadBackendTranslation("selector", handler),
++      // Used as fallback if no header defined for step
++      hass.loadBackendTranslation("title", handler),
++    ]);
++    await loadFlowStepTranslations(hass, step);
++    return step;
++  },
++  fetchFlow: async (hass, flowId) => {
++    const [step] = await Promise.all([
++      fetchConfigFlow(hass, flowId),
++      hass.loadFragmentTranslation("config"),
++    ]);
++    await Promise.all([
++      hass.loadBackendTranslation("config", step.handler),
++      hass.loadBackendTranslation("selector", step.handler),
++      // Used as fallback if no header defined for step
++      hass.loadBackendTranslation("title", step.handler),
++    ]);
++    await loadFlowStepTranslations(hass, step);
++    return step;
++  },
++  handleFlowStep: async (hass, flowId, data) => {
++    const step = await (handleFlowStepOverride ?? handleConfigFlowStep)(
++      hass,
++      flowId,
++      data
++    );
++    await loadFlowStepTranslations(hass, step);
++    return step;
++  },
++  deleteFlow: deleteConfigFlow,
+ 
+-    renderAbortDescription(hass, step) {
+-      const description = hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.abort.${step.reason}`,
+-        step.description_placeholders
+-      );
++  renderAbortDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || step.handler}.config.abort.${step.reason}`,
++      step.description_placeholders
++    );
+ 
+-      return description
+-        ? html`
+-            <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
+-          `
+-        : step.reason;
+-    },
++    return description
++      ? html`
++          <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
++        `
++      : step.reason;
++  },
+ 
+-    renderShowFormStepHeader(hass, step) {
+-      return (
+-        hass.localize(
+-          `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.title`,
+-          step.description_placeholders
+-        ) || hass.localize(`component.${step.handler}.title`)
+-      );
+-    },
+-
+-    renderShowFormStepDescription(hass, step) {
+-      const description = hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.description`,
++  renderShowFormStepHeader(hass, step) {
++    return (
++      hass.localize(
++        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.title`,
+         step.description_placeholders
+-      );
+-      return description
+-        ? html`
+-            <ha-markdown
+-              .allowDataUrl=${step.handler === "zwave_js"}
+-              allow-svg
+-              breaks
+-              .content=${description}
+-            ></ha-markdown>
+-          `
+-        : "";
+-    },
+-
+-    renderShowFormStepFieldLabel(hass, step, field, options) {
+-      if (field.type === "expandable") {
+-        return (
+-          hass.localize(
+-            `component.${step.handler}.config.step.${step.step_id}.sections.${field.name}.name`,
+-            step.description_placeholders
+-          ) || field.name
+-        );
+-      }
++      ) || hass.localize(`component.${step.handler}.title`)
++    );
++  },
+ 
+-      const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
++  renderShowFormStepDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.description`,
++      step.description_placeholders
++    );
++    return description
++      ? html`
++          <ha-markdown
++            .allowDataUrl=${step.handler === "zwave_js"}
++            allow-svg
++            breaks
++            .content=${description}
++          ></ha-markdown>
++        `
++      : "";
++  },
+ 
++  renderShowFormStepFieldLabel(hass, step, field, options) {
++    if (field.type === "expandable") {
+       return (
+         hass.localize(
+-          `component.${step.handler}.config.step.${step.step_id}.${prefix}data.${field.name}`,
++          `component.${step.handler}.config.step.${step.step_id}.sections.${field.name}.name`,
+           step.description_placeholders
+         ) || field.name
+       );
+-    },
++    }
+ 
+-    renderShowFormStepFieldHelper(hass, step, field, options) {
+-      if (field.type === "expandable") {
+-        return hass.localize(
+-          `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.sections.${field.name}.description`,
+-          step.description_placeholders
+-        );
+-      }
++    const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
+ 
+-      const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
++    return (
++      hass.localize(
++        `component.${step.handler}.config.step.${step.step_id}.${prefix}data.${field.name}`,
++        step.description_placeholders
++      ) || field.name
++    );
++  },
+ 
+-      const description = hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.${prefix}data_description.${field.name}`,
++  renderShowFormStepFieldHelper(hass, step, field, options) {
++    if (field.type === "expandable") {
++      return hass.localize(
++        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.sections.${field.name}.description`,
+         step.description_placeholders
+       );
++    }
+ 
+-      return description
+-        ? html`<ha-markdown breaks .content=${description}></ha-markdown>`
+-        : "";
+-    },
++    const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
+ 
+-    renderShowFormStepFieldError(hass, step, error) {
+-      return (
+-        hass.localize(
+-          `component.${step.translation_domain || step.translation_domain || step.handler}.config.error.${error}`,
+-          step.description_placeholders
+-        ) || error
+-      );
+-    },
++    const description = hass.localize(
++      `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.${prefix}data_description.${field.name}`,
++      step.description_placeholders
++    );
+ 
+-    renderShowFormStepFieldLocalizeValue(hass, step, key) {
+-      return hass.localize(`component.${step.handler}.selector.${key}`);
+-    },
++    return description
++      ? html`<ha-markdown breaks .content=${description}></ha-markdown>`
++      : "";
++  },
+ 
+-    renderShowFormStepSubmitButton(hass, step) {
+-      return (
+-        hass.localize(
+-          `component.${step.handler}.config.step.${step.step_id}.submit`
+-        ) ||
+-        hass.localize(
+-          `ui.panel.config.integrations.config_flow.${
+-            step.last_step === false ? "next" : "submit"
+-          }`
+-        )
+-      );
+-    },
++  renderShowFormStepFieldError(hass, step, error) {
++    return (
++      hass.localize(
++        `component.${step.translation_domain || step.translation_domain || step.handler}.config.error.${error}`,
++        step.description_placeholders
++      ) || error
++    );
++  },
+ 
+-    renderExternalStepHeader(hass, step) {
+-      return (
+-        hass.localize(
+-          `component.${step.handler}.config.step.${step.step_id}.title`
+-        ) ||
+-        hass.localize(
+-          "ui.panel.config.integrations.config_flow.external_step.open_site"
+-        )
+-      );
+-    },
++  renderShowFormStepFieldLocalizeValue(hass, step, key) {
++    return hass.localize(`component.${step.handler}.selector.${key}`);
++  },
+ 
+-    renderExternalStepDescription(hass, step) {
+-      const description = hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.description`,
+-        step.description_placeholders
+-      );
++  renderShowFormStepSubmitButton(hass, step) {
++    return (
++      hass.localize(
++        `component.${step.handler}.config.step.${step.step_id}.submit`
++      ) ||
++      hass.localize(
++        `ui.panel.config.integrations.config_flow.${
++          step.last_step === false ? "next" : "submit"
++        }`
++      )
++    );
++  },
+ 
+-      return html`
+-        <p>
+-          ${hass.localize(
+-            "ui.panel.config.integrations.config_flow.external_step.description"
+-          )}
+-        </p>
+-        ${
+-          description
+-            ? html`
+-                <ha-markdown
+-                  allow-svg
+-                  breaks
+-                  .content=${description}
+-                ></ha-markdown>
+-              `
+-            : ""
+-        }
+-      `;
+-    },
++  renderExternalStepHeader(hass, step) {
++    return (
++      hass.localize(
++        `component.${step.handler}.config.step.${step.step_id}.title`
++      ) ||
++      hass.localize(
++        "ui.panel.config.integrations.config_flow.external_step.open_site"
++      )
++    );
++  },
+ 
+-    renderCreateEntryDescription(hass, step) {
+-      const description = hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.create_entry.${
+-          step.description || "default"
+-        }`,
+-        step.description_placeholders
+-      );
++  renderExternalStepDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.description`,
++      step.description_placeholders
++    );
+ 
+-      return html`
+-        ${
+-          description
+-            ? html`
+-                <ha-markdown
+-                  allow-svg
+-                  breaks
+-                  .content=${description}
+-                ></ha-markdown>
+-              `
+-            : nothing
+-        }
+-      `;
+-    },
++    return html`
++      <p>
++        ${hass.localize(
++          "ui.panel.config.integrations.config_flow.external_step.description"
++        )}
++      </p>
++      ${
++        description
++          ? html`
++              <ha-markdown
++                allow-svg
++                breaks
++                .content=${description}
++              ></ha-markdown>
++            `
++          : ""
++      }
++    `;
++  },
+ 
+-    renderShowFormProgressHeader(hass, step) {
+-      return (
+-        hass.localize(
+-          `component.${step.handler}.config.step.${step.step_id}.title`
+-        ) || hass.localize(`component.${step.handler}.title`)
+-      );
+-    },
++  renderCreateEntryDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || step.handler}.config.create_entry.${
++        step.description || "default"
++      }`,
++      step.description_placeholders
++    );
+ 
+-    renderShowFormProgressDescription(hass, step) {
+-      const description = hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.progress.${step.progress_action}`,
+-        step.description_placeholders
+-      );
+-      return description
+-        ? html`
+-            <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
+-          `
+-        : "";
+-    },
++    return html`
++      ${
++        description
++          ? html`
++              <ha-markdown
++                allow-svg
++                breaks
++                .content=${description}
++              ></ha-markdown>
++            `
++          : nothing
++      }
++    `;
++  },
+ 
+-    renderMenuHeader(hass, step) {
+-      return (
+-        hass.localize(
+-          `component.${step.handler}.config.step.${step.step_id}.title`
+-        ) || hass.localize(`component.${step.handler}.title`)
+-      );
+-    },
++  renderShowFormProgressHeader(hass, step) {
++    return (
++      hass.localize(
++        `component.${step.handler}.config.step.${step.step_id}.title`
++      ) || hass.localize(`component.${step.handler}.title`)
++    );
++  },
+ 
+-    renderMenuDescription(hass, step) {
+-      const description = hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.description`,
+-        step.description_placeholders
+-      );
+-      return description
+-        ? html`
+-            <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
+-          `
+-        : "";
+-    },
++  renderShowFormProgressDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || step.handler}.config.progress.${step.progress_action}`,
++      step.description_placeholders
++    );
++    return description
++      ? html`
++          <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
++        `
++      : "";
++  },
+ 
+-    renderMenuOption(hass, step, option) {
+-      return hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.menu_options.${option}`,
+-        step.description_placeholders
+-      );
+-    },
++  renderMenuHeader(hass, step) {
++    return (
++      hass.localize(
++        `component.${step.handler}.config.step.${step.step_id}.title`
++      ) || hass.localize(`component.${step.handler}.title`)
++    );
++  },
+ 
+-    renderMenuOptionDescription(hass, step, option) {
+-      return hass.localize(
+-        `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.menu_option_descriptions.${option}`,
+-        step.description_placeholders
+-      );
+-    },
++  renderMenuDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.description`,
++      step.description_placeholders
++    );
++    return description
++      ? html`
++          <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
++        `
++      : "";
++  },
++
++  renderMenuOption(hass, step, option) {
++    return hass.localize(
++      `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.menu_options.${option}`,
++      step.description_placeholders
++    );
++  },
+ 
+-    renderLoadingDescription(hass, reason, handler, step) {
+-      if (reason !== "loading_flow" && reason !== "loading_step") {
+-        return "";
++  renderMenuOptionDescription(hass, step, option) {
++    return hass.localize(
++      `component.${step.translation_domain || step.handler}.config.step.${step.step_id}.menu_option_descriptions.${option}`,
++      step.description_placeholders
++    );
++  },
++
++  renderLoadingDescription(hass, reason, handler, step) {
++    if (reason !== "loading_flow" && reason !== "loading_step") {
++      return "";
++    }
++    const domain = step?.handler || handler;
++    return hass.localize(
++      `ui.panel.config.integrations.config_flow.loading.${reason}`,
++      {
++        integration: domain
++          ? domainToName(hass.localize, domain)
++          : // when we are continuing a config flow, we only know the ID and not the domain
++            hass.localize(
++              "ui.panel.config.integrations.config_flow.loading.fallback_title"
++            ),
+       }
+-      const domain = step?.handler || handler;
+-      return hass.localize(
+-        `ui.panel.config.integrations.config_flow.loading.${reason}`,
+-        {
+-          integration: domain
+-            ? domainToName(hass.localize, domain)
+-            : // when we are continuing a config flow, we only know the ID and not the domain
+-              hass.localize(
+-                "ui.panel.config.integrations.config_flow.loading.fallback_title"
+-              ),
+-        }
+-      );
+-    },
+-  });
++    );
++  },
++});
++
++export const showConfigFlowDialog = (
++  element: HTMLElement,
++  dialogParams: Omit<DataEntryFlowDialogParams, "flowConfig"> & {
++    entryId?: string;
++  }
++): void =>
++  showFlowDialog(element, dialogParams, createConfigFlowConfig(dialogParams));
+diff --git a/src/dialogs/config-flow/show-dialog-options-flow.ts b/src/dialogs/config-flow/show-dialog-options-flow.ts
+index d4bef1892..7bbd6ad58 100644
+--- a/src/dialogs/config-flow/show-dialog-options-flow.ts
++++ b/src/dialogs/config-flow/show-dialog-options-flow.ts
+@@ -7,7 +7,10 @@ import {
+   fetchOptionsFlow,
+   handleOptionsFlowStep,
+ } from "../../data/options_flow";
+-import type { DataEntryFlowDialogParams } from "./show-dialog-data-entry-flow";
++import type {
++  DataEntryFlowDialogParams,
++  FlowConfig,
++} from "./show-dialog-data-entry-flow";
+ import {
+   loadDataEntryFlowDialog,
+   showFlowDialog,
+@@ -15,6 +18,212 @@ import {
+ 
+ export const loadOptionsFlowDialog = loadDataEntryFlowDialog;
+ 
++export const createOptionsFlowConfig = (
++  configEntry: Pick<ConfigEntry, "entry_id" | "domain">,
++  handleFlowStepOverride?: FlowConfig["handleFlowStep"]
++): FlowConfig => ({
++  flowType: "options_flow",
++  showDevices: false,
++  createFlow: async (hass, handler) => {
++    const [step] = await Promise.all([
++      createOptionsFlow(hass, handler),
++      hass.loadFragmentTranslation("config"),
++      hass.loadBackendTranslation("options", configEntry.domain),
++      hass.loadBackendTranslation("selector", configEntry.domain),
++    ]);
++    return step;
++  },
++  fetchFlow: async (hass, flowId) => {
++    const [step] = await Promise.all([
++      fetchOptionsFlow(hass, flowId),
++      hass.loadFragmentTranslation("config"),
++      hass.loadBackendTranslation("options", configEntry.domain),
++      hass.loadBackendTranslation("selector", configEntry.domain),
++    ]);
++    return step;
++  },
++  handleFlowStep: handleFlowStepOverride ?? handleOptionsFlowStep,
++  deleteFlow: deleteOptionsFlow,
++
++  renderAbortDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || configEntry.domain}.options.abort.${step.reason}`,
++      step.description_placeholders
++    );
++
++    return description
++      ? html`
++          <ha-markdown breaks allow-svg .content=${description}></ha-markdown>
++        `
++      : step.reason;
++  },
++
++  renderShowFormStepHeader(hass, step) {
++    return (
++      hass.localize(
++        `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.title`,
++        step.description_placeholders
++      ) || hass.localize(`ui.dialogs.options_flow.form.header`)
++    );
++  },
++
++  renderShowFormStepDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.description`,
++      step.description_placeholders
++    );
++    return description
++      ? html`
++          <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
++        `
++      : "";
++  },
++
++  renderShowFormStepFieldLabel(hass, step, field, options) {
++    if (field.type === "expandable") {
++      return (
++        hass.localize(
++          `component.${configEntry.domain}.options.step.${step.step_id}.sections.${field.name}.name`,
++          step.description_placeholders
++        ) || field.name
++      );
++    }
++
++    const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
++
++    return (
++      hass.localize(
++        `component.${configEntry.domain}.options.step.${step.step_id}.${prefix}data.${field.name}`,
++        step.description_placeholders
++      ) || field.name
++    );
++  },
++
++  renderShowFormStepFieldHelper(hass, step, field, options) {
++    if (field.type === "expandable") {
++      return hass.localize(
++        `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.sections.${field.name}.description`,
++        step.description_placeholders
++      );
++    }
++
++    const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
++
++    const description = hass.localize(
++      `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.${prefix}data_description.${field.name}`,
++      step.description_placeholders
++    );
++    return description
++      ? html`<ha-markdown breaks .content=${description}></ha-markdown>`
++      : "";
++  },
++
++  renderShowFormStepFieldError(hass, step, error) {
++    return (
++      hass.localize(
++        `component.${step.translation_domain || configEntry.domain}.options.error.${error}`,
++        step.description_placeholders
++      ) || error
++    );
++  },
++
++  renderShowFormStepFieldLocalizeValue(hass, _step, key) {
++    return hass.localize(`component.${configEntry.domain}.selector.${key}`);
++  },
++
++  renderShowFormStepSubmitButton(hass, step) {
++    return (
++      hass.localize(
++        `component.${configEntry.domain}.options.step.${step.step_id}.submit`
++      ) ||
++      hass.localize(
++        `ui.panel.config.integrations.config_flow.${
++          step.last_step === false ? "next" : "submit"
++        }`
++      )
++    );
++  },
++
++  renderExternalStepHeader(_hass, _step) {
++    return "";
++  },
++
++  renderExternalStepDescription(_hass, _step) {
++    return "";
++  },
++
++  renderCreateEntryDescription(hass, _step) {
++    return html`
++      <p>${hass.localize(`ui.dialogs.options_flow.success.description`)}</p>
++    `;
++  },
++
++  renderShowFormProgressHeader(hass, step) {
++    return (
++      hass.localize(
++        `component.${configEntry.domain}.options.step.${step.step_id}.title`
++      ) || hass.localize(`component.${configEntry.domain}.title`)
++    );
++  },
++
++  renderShowFormProgressDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || configEntry.domain}.options.progress.${step.progress_action}`,
++      step.description_placeholders
++    );
++    return description
++      ? html`
++          <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
++        `
++      : "";
++  },
++
++  renderMenuHeader(hass, step) {
++    return (
++      hass.localize(
++        `component.${configEntry.domain}.options.step.${step.step_id}.title`
++      ) || hass.localize(`component.${configEntry.domain}.title`)
++    );
++  },
++
++  renderMenuDescription(hass, step) {
++    const description = hass.localize(
++      `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.description`,
++      step.description_placeholders
++    );
++    return description
++      ? html`
++          <ha-markdown allow-svg breaks .content=${description}></ha-markdown>
++        `
++      : "";
++  },
++
++  renderMenuOption(hass, step, option) {
++    return hass.localize(
++      `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.menu_options.${option}`,
++      step.description_placeholders
++    );
++  },
++
++  renderMenuOptionDescription(hass, step, option) {
++    return hass.localize(
++      `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.menu_option_descriptions.${option}`,
++      step.description_placeholders
++    );
++  },
++
++  renderLoadingDescription(hass, reason) {
++    return (
++      hass.localize(`component.${configEntry.domain}.options.loading`) ||
++      (reason === "loading_flow" || reason === "loading_step"
++        ? hass.localize(`ui.dialogs.options_flow.loading.${reason}`, {
++            integration: domainToName(hass.localize, configEntry.domain),
++          })
++        : "")
++    );
++  },
++});
++
+ export const showOptionsFlowDialog = (
+   element: HTMLElement,
+   configEntry: ConfigEntry,
+@@ -27,222 +236,5 @@ export const showOptionsFlowDialog = (
+       domain: configEntry.domain,
+       ...dialogParams,
+     },
+-    {
+-      flowType: "options_flow",
+-      showDevices: false,
+-      createFlow: async (hass, handler) => {
+-        const [step] = await Promise.all([
+-          createOptionsFlow(hass, handler),
+-          hass.loadFragmentTranslation("config"),
+-          hass.loadBackendTranslation("options", configEntry.domain),
+-          hass.loadBackendTranslation("selector", configEntry.domain),
+-        ]);
+-        return step;
+-      },
+-      fetchFlow: async (hass, flowId) => {
+-        const [step] = await Promise.all([
+-          fetchOptionsFlow(hass, flowId),
+-          hass.loadFragmentTranslation("config"),
+-          hass.loadBackendTranslation("options", configEntry.domain),
+-          hass.loadBackendTranslation("selector", configEntry.domain),
+-        ]);
+-        return step;
+-      },
+-      handleFlowStep: handleOptionsFlowStep,
+-      deleteFlow: deleteOptionsFlow,
+-
+-      renderAbortDescription(hass, step) {
+-        const description = hass.localize(
+-          `component.${step.translation_domain || configEntry.domain}.options.abort.${step.reason}`,
+-          step.description_placeholders
+-        );
+-
+-        return description
+-          ? html`
+-              <ha-markdown
+-                breaks
+-                allow-svg
+-                .content=${description}
+-              ></ha-markdown>
+-            `
+-          : step.reason;
+-      },
+-
+-      renderShowFormStepHeader(hass, step) {
+-        return (
+-          hass.localize(
+-            `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.title`,
+-            step.description_placeholders
+-          ) || hass.localize(`ui.dialogs.options_flow.form.header`)
+-        );
+-      },
+-
+-      renderShowFormStepDescription(hass, step) {
+-        const description = hass.localize(
+-          `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.description`,
+-          step.description_placeholders
+-        );
+-        return description
+-          ? html`
+-              <ha-markdown
+-                allow-svg
+-                breaks
+-                .content=${description}
+-              ></ha-markdown>
+-            `
+-          : "";
+-      },
+-
+-      renderShowFormStepFieldLabel(hass, step, field, options) {
+-        if (field.type === "expandable") {
+-          return (
+-            hass.localize(
+-              `component.${configEntry.domain}.options.step.${step.step_id}.sections.${field.name}.name`,
+-              step.description_placeholders
+-            ) || field.name
+-          );
+-        }
+-
+-        const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
+-
+-        return (
+-          hass.localize(
+-            `component.${configEntry.domain}.options.step.${step.step_id}.${prefix}data.${field.name}`,
+-            step.description_placeholders
+-          ) || field.name
+-        );
+-      },
+-
+-      renderShowFormStepFieldHelper(hass, step, field, options) {
+-        if (field.type === "expandable") {
+-          return hass.localize(
+-            `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.sections.${field.name}.description`,
+-            step.description_placeholders
+-          );
+-        }
+-
+-        const prefix = options?.path?.[0] ? `sections.${options.path[0]}.` : "";
+-
+-        const description = hass.localize(
+-          `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.${prefix}data_description.${field.name}`,
+-          step.description_placeholders
+-        );
+-        return description
+-          ? html`<ha-markdown breaks .content=${description}></ha-markdown>`
+-          : "";
+-      },
+-
+-      renderShowFormStepFieldError(hass, step, error) {
+-        return (
+-          hass.localize(
+-            `component.${step.translation_domain || configEntry.domain}.options.error.${error}`,
+-            step.description_placeholders
+-          ) || error
+-        );
+-      },
+-
+-      renderShowFormStepFieldLocalizeValue(hass, _step, key) {
+-        return hass.localize(`component.${configEntry.domain}.selector.${key}`);
+-      },
+-
+-      renderShowFormStepSubmitButton(hass, step) {
+-        return (
+-          hass.localize(
+-            `component.${configEntry.domain}.options.step.${step.step_id}.submit`
+-          ) ||
+-          hass.localize(
+-            `ui.panel.config.integrations.config_flow.${
+-              step.last_step === false ? "next" : "submit"
+-            }`
+-          )
+-        );
+-      },
+-
+-      renderExternalStepHeader(_hass, _step) {
+-        return "";
+-      },
+-
+-      renderExternalStepDescription(_hass, _step) {
+-        return "";
+-      },
+-
+-      renderCreateEntryDescription(hass, _step) {
+-        return html`
+-          <p>${hass.localize(`ui.dialogs.options_flow.success.description`)}</p>
+-        `;
+-      },
+-
+-      renderShowFormProgressHeader(hass, step) {
+-        return (
+-          hass.localize(
+-            `component.${configEntry.domain}.options.step.${step.step_id}.title`
+-          ) || hass.localize(`component.${configEntry.domain}.title`)
+-        );
+-      },
+-
+-      renderShowFormProgressDescription(hass, step) {
+-        const description = hass.localize(
+-          `component.${step.translation_domain || configEntry.domain}.options.progress.${step.progress_action}`,
+-          step.description_placeholders
+-        );
+-        return description
+-          ? html`
+-              <ha-markdown
+-                allow-svg
+-                breaks
+-                .content=${description}
+-              ></ha-markdown>
+-            `
+-          : "";
+-      },
+-
+-      renderMenuHeader(hass, step) {
+-        return (
+-          hass.localize(
+-            `component.${configEntry.domain}.options.step.${step.step_id}.title`
+-          ) || hass.localize(`component.${configEntry.domain}.title`)
+-        );
+-      },
+-
+-      renderMenuDescription(hass, step) {
+-        const description = hass.localize(
+-          `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.description`,
+-          step.description_placeholders
+-        );
+-        return description
+-          ? html`
+-              <ha-markdown
+-                allow-svg
+-                breaks
+-                .content=${description}
+-              ></ha-markdown>
+-            `
+-          : "";
+-      },
+-
+-      renderMenuOption(hass, step, option) {
+-        return hass.localize(
+-          `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.menu_options.${option}`,
+-          step.description_placeholders
+-        );
+-      },
+-
+-      renderMenuOptionDescription(hass, step, option) {
+-        return hass.localize(
+-          `component.${step.translation_domain || configEntry.domain}.options.step.${step.step_id}.menu_option_descriptions.${option}`,
+-          step.description_placeholders
+-        );
+-      },
+-
+-      renderLoadingDescription(hass, reason) {
+-        return (
+-          hass.localize(`component.${configEntry.domain}.options.loading`) ||
+-          (reason === "loading_flow" || reason === "loading_step"
+-            ? hass.localize(`ui.dialogs.options_flow.loading.${reason}`, {
+-                integration: domainToName(hass.localize, configEntry.domain),
+-              })
+-            : "")
+-        );
+-      },
+-    }
++    createOptionsFlowConfig(configEntry)
+   );
+diff --git a/src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts b/src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts
+index 5be85357f..58d0ad70d 100644
+--- a/src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts
++++ b/src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts
+@@ -15,6 +15,12 @@ export const showVoiceCommandDialog = (
+   hass: HomeAssistant,
+   dialogParams: VoiceCommandDialogParams
+ ): void => {
++  if (
++    hass.user?.is_admin &&
++    window.hababAssistant?.open(dialogParams, element) === true
++  ) {
++    return;
++  }
+   if (hass.auth.external?.config.hasAssist) {
+     hass.auth.external!.fireMessage({
+       type: "assist/show",
+diff --git a/src/entrypoints/core.ts b/src/entrypoints/core.ts
+index d6eb603a6..deb70626b 100644
+--- a/src/entrypoints/core.ts
++++ b/src/entrypoints/core.ts
+@@ -15,7 +15,6 @@ import { fetchConfig } from "../data/lovelace/config/types";
+ import { fetchResources } from "../data/lovelace/resource";
+ import { MAIN_WINDOW_NAME } from "../data/main_window";
+ import type { WindowWithPreloads } from "../data/preloads";
+-import { getRecorderInfo } from "../data/recorder";
+ import { subscribeRepairsIssueRegistry } from "../data/repairs";
+ import { subscribeAreaRegistry } from "../data/ws-area_registry";
+ import { subscribeDeviceRegistry } from "../data/ws-device_registry";
+@@ -25,6 +24,7 @@ import { subscribePanels } from "../data/ws-panels";
+ import { subscribeThemes } from "../data/ws-themes";
+ import { subscribeUser } from "../data/ws-user";
+ import type { ExternalAuth } from "../external_app/external_auth";
++import "../habab/native-ui-bridge";
+ 
+ window.name = MAIN_WINDOW_NAME;
+ (window as any).frontendVersion = __VERSION__;
+@@ -138,8 +138,6 @@ window.hassConnection.then(({ conn }) => {
+   subscribeRepairsIssueRegistry(conn, noop);
+ 
+   const preloadWindow = window as WindowWithPreloads;
+-  preloadWindow.recorderInfoProm = getRecorderInfo(conn);
+-
+   if (location.pathname === "/" || location.pathname.startsWith("/lovelace/")) {
+     preloadWindow.llConfProm = fetchConfig(conn, null, false);
+     preloadWindow.llConfProm.catch(() => {
+diff --git a/src/habab/native-ui-bridge.ts b/src/habab/native-ui-bridge.ts
+new file mode 100644
+index 000000000..fae089b36
+--- /dev/null
++++ b/src/habab/native-ui-bridge.ts
+@@ -0,0 +1,210 @@
++import { ContextProvider } from "@lit/context";
++import type { PropertyValues } from "lit";
++import { html } from "lit";
++import { customElement, property } from "lit/decorators";
++import type { HaForm } from "../components/ha-form/ha-form";
++import { narrowViewportContext } from "../data/context";
++import type { DataEntryFlowStep } from "../data/data_entry_flow";
++import type { FlowConfig } from "../dialogs/config-flow/show-dialog-data-entry-flow";
++import type { VoiceCommandDialogParams } from "../dialogs/voice-command-dialog/show-ha-voice-command-dialog";
++import { contextMixin } from "../state/context-mixin";
++import { HassBaseEl } from "../state/hass-base-mixin";
++import type { HomeAssistant } from "../types";
++
++interface NativeFlowFormOptionsBase {
++  hass: HomeAssistant;
++  handler: string;
++  domain: string;
++  step: DataEntryFlowStep;
++  submit: (
++    hass: HomeAssistant,
++    interactionId: string,
++    data: Record<string, unknown>
++  ) => Promise<DataEntryFlowStep>;
++}
++
++interface NativeFlowFormOptionsConfig extends NativeFlowFormOptionsBase {
++  flowType: "config_flow";
++  entryId?: string;
++}
++
++interface NativeFlowFormOptionsOptions extends NativeFlowFormOptionsBase {
++  flowType: "options_flow";
++  entryId: string;
++}
++
++type NativeFlowFormOptions =
++  NativeFlowFormOptionsConfig | NativeFlowFormOptionsOptions;
++
++interface NativeFlowFormResult {
++  tag: "step-flow-form";
++  contextTag: "habab-native-form-context";
++  flowConfig: FlowConfig;
++}
++
++export interface HababAssistantBridge {
++  readonly available?: boolean;
++  open(params: VoiceCommandDialogParams, opener: HTMLElement): boolean;
++}
++
++export interface HababNativeUiBridge {
++  readonly version: 1;
++  loadForm(): Promise<{ HaForm: typeof HaForm }>;
++  loadFlowForm(options: NativeFlowFormOptions): Promise<NativeFlowFormResult>;
++}
++
++class NativeFormContextHost extends HassBaseEl {
++  protected override _updateHass(_obj: Partial<HomeAssistant>): void {
++    // The context mixin publishes this data; the addon owns the hass property.
++  }
++}
++
++@customElement("habab-native-form-context")
++export class HababNativeFormContext extends contextMixin(
++  NativeFormContextHost
++) {
++  @property({ type: Boolean }) public narrow = false;
++
++  private _contextConnection?: HomeAssistant["connection"];
++
++  private _narrowViewportProvider = new ContextProvider(this, {
++    context: narrowViewportContext,
++    initialValue: this.narrow,
++  });
++
++  public connectedCallback(): void {
++    super.connectedCallback();
++    if (this.hass) {
++      this._syncContexts();
++    }
++  }
++
++  public disconnectedCallback(): void {
++    super.disconnectedCallback();
++    this._contextConnection = undefined;
++  }
++
++  protected willUpdate(changedProperties: PropertyValues<this>): void {
++    super.willUpdate(changedProperties);
++    if (changedProperties.has("narrow")) {
++      this._narrowViewportProvider.setValue(this.narrow);
++    }
++    if (changedProperties.has("hass") && this.hass) {
++      this._syncContexts();
++    }
++  }
++
++  protected render() {
++    return html`<slot></slot>`;
++  }
++
++  private _syncContexts(): void {
++    if (!this.hass) {
++      return;
++    }
++    if (this._contextConnection !== this.hass.connection) {
++      this.hassConnected();
++      this._contextConnection = this.hass.connection;
++    }
++    this._updateHass(this.hass);
++  }
++}
++
++declare global {
++  interface Window {
++    hababAssistant?: HababAssistantBridge;
++    hababNativeUi?: HababNativeUiBridge;
++  }
++}
++
++export const shouldHideAssistToolbarButton = (
++  isAdmin: boolean,
++  assistantAvailable: boolean | undefined
++): boolean => isAdmin && assistantAvailable === true;
++
++const loadNativeHaForm: HababNativeUiBridge["loadForm"] = async () => {
++  const form = await import("../components/ha-form/ha-form");
++  await Promise.all(
++    ["ha-form", "ha-selector"].map((tag) => customElements.whenDefined(tag))
++  );
++  return form;
++};
++
++const loadNativeFlowForm: HababNativeUiBridge["loadFlowForm"] = async ({
++  hass,
++  flowType,
++  handler,
++  domain,
++  entryId,
++  step,
++  submit,
++}) => {
++  await Promise.all([
++    import("../dialogs/config-flow/step-flow-form"),
++    customElements.whenDefined("habab-native-form-context"),
++  ]);
++
++  if (flowType === "config_flow") {
++    await Promise.all([
++      hass.loadFragmentTranslation("config"),
++      hass.loadBackendTranslation("config", handler),
++      hass.loadBackendTranslation("selector", handler),
++      hass.loadBackendTranslation("title", handler),
++    ]);
++  } else {
++    await Promise.all([
++      hass.loadFragmentTranslation("config"),
++      hass.loadBackendTranslation("options", domain),
++      hass.loadBackendTranslation("selector", domain),
++    ]);
++  }
++
++  const handleFlowStep = async (
++    currentHass: HomeAssistant,
++    interactionId: string,
++    data: Record<string, unknown>
++  ) => {
++    const nextStep = await submit(currentHass, interactionId, data);
++    const { loadFlowStepTranslations } =
++      await import("../dialogs/config-flow/show-dialog-data-entry-flow");
++    await loadFlowStepTranslations(currentHass, nextStep);
++    return nextStep;
++  };
++
++  let flowConfig: FlowConfig;
++  if (flowType === "config_flow") {
++    const { createConfigFlowConfig } =
++      await import("../dialogs/config-flow/show-dialog-config-flow");
++    flowConfig = createConfigFlowConfig(
++      { startFlowHandler: handler, entryId },
++      handleFlowStep
++    );
++  } else {
++    const { createOptionsFlowConfig } =
++      await import("../dialogs/config-flow/show-dialog-options-flow");
++    flowConfig = createOptionsFlowConfig(
++      { entry_id: entryId, domain },
++      handleFlowStep
++    );
++  }
++
++  const { loadFlowStepTranslations } =
++    await import("../dialogs/config-flow/show-dialog-data-entry-flow");
++  await loadFlowStepTranslations(hass, step);
++  await Promise.all([
++    customElements.whenDefined("step-flow-form"),
++    customElements.whenDefined("habab-native-form-context"),
++  ]);
++
++  return {
++    tag: "step-flow-form",
++    contextTag: "habab-native-form-context",
++    flowConfig,
++  };
++};
++
++window.hababNativeUi = Object.freeze({
++  version: 1,
++  loadForm: loadNativeHaForm,
++  loadFlowForm: loadNativeFlowForm,
++});
+diff --git a/src/layouts/home-assistant.ts b/src/layouts/home-assistant.ts
+index e8e6e0e20..d7b6e0e50 100644
+--- a/src/layouts/home-assistant.ts
++++ b/src/layouts/home-assistant.ts
+@@ -11,9 +11,7 @@ import { extractSearchParamsObject } from "../common/url/search-params";
+ import { afterNextRender } from "../common/util/render-status";
+ import { fetchHttpConfig } from "../data/http";
+ import type { HttpConfigState } from "../data/http";
+-import type { WindowWithPreloads } from "../data/preloads";
+-import type { RecorderInfo } from "../data/recorder";
+-import { getRecorderInfo } from "../data/recorder";
++import { getRecorderInfoIfAvailable } from "../data/recorder";
+ import { showHttpPendingConfigDialog } from "../dialogs/http-pending-config/show-dialog-http-pending-config";
+ import { showMoreInfoDialog } from "../dialogs/more-info/show-ha-more-info-dialog";
+ import "../resources/custom-card-support";
+@@ -341,21 +339,11 @@ export class HomeAssistantAppEl extends QuickBarMixin(HassElement) {
+       return;
+     }
+ 
+-    let recorderInfoProm: Promise<RecorderInfo> | undefined;
+-    const preloadWindow = window as WindowWithPreloads;
+-    // On first load, we speed up loading page by having recorderInfoProm ready
+-    if (preloadWindow.recorderInfoProm) {
+-      recorderInfoProm = preloadWindow.recorderInfoProm;
+-      preloadWindow.recorderInfoProm = undefined;
++    const info = await getRecorderInfoIfAvailable(this.hass!);
++    if (!info) {
++      this._databaseMigration = false;
++      return;
+     }
+-    const info = await (
+-      recorderInfoProm || getRecorderInfo(this.hass!.connection)
+-    ).catch((err) => {
+-      // If the command failed with code unknown_command, recorder is not enabled,
+-      // otherwise re-throw the error
+-      if (err.code !== "unknown_command") throw err;
+-      return { migration_in_progress: false, migration_is_live: false };
+-    });
+     this._databaseMigration =
+       info.migration_in_progress && !info.migration_is_live;
+     if (this._databaseMigration) {
+diff --git a/src/panels/lovelace/hui-root.ts b/src/panels/lovelace/hui-root.ts
+index e60b7d436..9ad2558f0 100644
+--- a/src/panels/lovelace/hui-root.ts
++++ b/src/panels/lovelace/hui-root.ts
+@@ -38,6 +38,7 @@ import {
+   removeSearchParam,
+ } from "../../common/url/search-params";
+ import { afterNextRender } from "../../common/util/render-status";
++import { shouldHideAssistToolbarButton } from "../../habab/native-ui-bridge";
+ import "../../components/ha-button";
+ import type { HaDropdownSelectEvent } from "../../components/ha-dropdown";
+ import "../../components/ha-dropdown";
+@@ -309,7 +310,12 @@ class HUIRoot extends LitElement {
+         suffix:
+           this.hass.enableShortcuts && !isMobileClient ? "(A)" : undefined,
+         visible:
+-          !this._editMode && this._conversation(this.hass.config.components),
++          !this._editMode &&
++          this._conversation(this.hass.config.components) &&
++          !shouldHideAssistToolbarButton(
++            this.hass.user?.is_admin === true,
++            window.hababAssistant?.available
++          ),
+         overflow: this.narrow,
+       },
+       {
+@@ -694,6 +700,10 @@ class HUIRoot extends LitElement {
+     });
+     window.addEventListener("popstate", this._handlePopState);
+     window.addEventListener("location-changed", this._locationChanged);
++    window.addEventListener(
++      "habab-assistant-availability",
++      this._handleAssistantAvailability
++    );
+     // Disable history scroll restoration because it is managed manually here
+     window.history.scrollRestoration = "manual";
+   }
+@@ -703,11 +713,17 @@ class HUIRoot extends LitElement {
+     window.removeEventListener("scroll", this._handleWindowScroll);
+     window.removeEventListener("popstate", this._handlePopState);
+     window.removeEventListener("location-changed", this._locationChanged);
++    window.removeEventListener(
++      "habab-assistant-availability",
++      this._handleAssistantAvailability
++    );
+     this.toggleAttribute("scrolled", window.scrollY !== 0);
+     // Re-enable history scroll restoration when leaving the page
+     window.history.scrollRestoration = "auto";
+   }
+ 
++  private _handleAssistantAvailability = () => this.requestUpdate();
++
+   private _handleUrlChanged() {
+     // Check for requested edit mode
+     const searchParams = extractSearchParamsObject();
+diff --git a/test/data/recorder-info.test.ts b/test/data/recorder-info.test.ts
+new file mode 100644
+index 000000000..0ac8567e1
+--- /dev/null
++++ b/test/data/recorder-info.test.ts
+@@ -0,0 +1,59 @@
++import { describe, expect, it, vi } from "vitest";
++import type { HomeAssistant } from "../../src/types";
++import { getRecorderInfoIfAvailable } from "../../src/data/recorder";
++
++const createHass = (components: string[]) => {
++  const response = {
++    backlog: 0,
++    db_in_default_location: true,
++    max_backlog: 0,
++    migration_in_progress: false,
++    migration_is_live: false,
++    recording: true,
++    thread_running: true,
++  };
++  const sendMessagePromise = vi.fn().mockResolvedValue(response);
++  return {
++    hass: {
++      config: { components },
++      connection: { sendMessagePromise },
++    } as unknown as HomeAssistant,
++    response,
++    sendMessagePromise,
++  };
++};
++
++describe("getRecorderInfoIfAvailable", () => {
++  it("does not request recorder info when recorder is absent", async () => {
++    const { hass, sendMessagePromise } = createHass([]);
++
++    await expect(getRecorderInfoIfAvailable(hass)).resolves.toBeUndefined();
++    expect(sendMessagePromise).not.toHaveBeenCalled();
++  });
++
++  it("keeps the recorder info response when recorder is enabled", async () => {
++    const { hass, response, sendMessagePromise } = createHass(["recorder"]);
++
++    await expect(getRecorderInfoIfAvailable(hass)).resolves.toBe(response);
++    expect(sendMessagePromise).toHaveBeenCalledWith({ type: "recorder/info" });
++  });
++
++  it("checks updated config so a late recorder load can request info", async () => {
++    const { hass, response, sendMessagePromise } = createHass([]);
++
++    await expect(getRecorderInfoIfAvailable(hass)).resolves.toBeUndefined();
++    expect(sendMessagePromise).not.toHaveBeenCalled();
++
++    hass.config.components.push("recorder");
++    await expect(getRecorderInfoIfAvailable(hass)).resolves.toBe(response);
++    expect(sendMessagePromise).toHaveBeenCalledTimes(1);
++  });
++
++  it("preserves errors from an enabled recorder request", async () => {
++    const { hass, sendMessagePromise } = createHass(["recorder"]);
++    const error = new Error("recorder request failed");
++    sendMessagePromise.mockRejectedValue(error);
++
++    await expect(getRecorderInfoIfAvailable(hass)).rejects.toBe(error);
++  });
++});
+diff --git a/test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts b/test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts
+index 263d948b8..f46a101fe 100644
+--- a/test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts
++++ b/test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts
+@@ -1,4 +1,4 @@
+-import { beforeEach, describe, expect, it, vi } from "vitest";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { showVoiceCommandDialog } from "../../../src/dialogs/voice-command-dialog/show-ha-voice-command-dialog";
+ import type { HomeAssistant } from "../../../src/types";
+ 
+@@ -7,6 +7,11 @@ describe("showVoiceCommandDialog", () => {
+ 
+   beforeEach(() => {
+     element = document.createElement("div");
++    window.hababAssistant = undefined;
++  });
++
++  afterEach(() => {
++    window.hababAssistant = undefined;
+   });
+ 
+   it("passes an initial prompt to the web dialog", () => {
+@@ -56,4 +61,52 @@ describe("showVoiceCommandDialog", () => {
+       },
+     });
+   });
++
++  it("forwards the original parameters and opener to the active admin assistant", () => {
++    const open = vi.fn(() => true);
++    window.hababAssistant = { available: true, open };
++    const hass = {
++      user: { is_admin: true },
++      auth: { external: undefined },
++    } as HomeAssistant;
++    const params = {
++      pipeline_id: "preferred",
++      start_listening: true,
++      prompt: "Turn on the lights",
++      submit: true,
++    };
++    const listener = vi.fn();
++    element.addEventListener("show-dialog", listener);
++
++    showVoiceCommandDialog(element, hass, params);
++
++    expect(open).toHaveBeenCalledOnce();
++    expect(open).toHaveBeenCalledWith(params, element);
++    expect(listener).not.toHaveBeenCalled();
++  });
++
++  it("keeps the native dialog for non-admins and when the assistant declines", () => {
++    const open = vi.fn(() => true);
++    window.hababAssistant = { available: true, open };
++    const hass = {
++      user: { is_admin: false },
++      auth: { external: undefined },
++    } as HomeAssistant;
++    const listener = vi.fn();
++    element.addEventListener("show-dialog", listener);
++
++    showVoiceCommandDialog(element, hass, { pipeline_id: "last_used" });
++
++    expect(open).not.toHaveBeenCalled();
++    expect(listener).toHaveBeenCalledOnce();
++
++    open.mockReturnValue(false);
++    hass.user!.is_admin = true;
++    listener.mockClear();
++
++    showVoiceCommandDialog(element, hass, { pipeline_id: "last_used" });
++
++    expect(open).toHaveBeenCalledOnce();
++    expect(listener).toHaveBeenCalledOnce();
++  });
+ });
+diff --git a/test/habab/native-ui-bridge.test.ts b/test/habab/native-ui-bridge.test.ts
+new file mode 100644
+index 000000000..619fa155b
+--- /dev/null
++++ b/test/habab/native-ui-bridge.test.ts
+@@ -0,0 +1,62 @@
++import { describe, expect, it, vi } from "vitest";
++import type { DataEntryFlowStep } from "../../src/data/data_entry_flow";
++import type { HomeAssistant } from "../../src/types";
++import { shouldHideAssistToolbarButton } from "../../src/habab/native-ui-bridge";
++
++describe("native Assist toolbar handoff", () => {
++  it("hides only for an admin when the assistant declares itself available", () => {
++    expect(shouldHideAssistToolbarButton(false, true)).toBe(false);
++    expect(shouldHideAssistToolbarButton(true, false)).toBe(false);
++    expect(shouldHideAssistToolbarButton(true, undefined)).toBe(false);
++    expect(shouldHideAssistToolbarButton(true, true)).toBe(true);
++  });
++
++  it("loads the native translated flow form and delegates its protected submit", async () => {
++    const loadBackendTranslation = vi.fn(async () => undefined);
++    const hass = {
++      loadFragmentTranslation: vi.fn(async () => undefined),
++      loadBackendTranslation,
++    } as unknown as HomeAssistant;
++    const initialStep = {
++      type: "form",
++      flow_id: "interaction-1",
++      handler: "example",
++      step_id: "user",
++      data_schema: [],
++    } as unknown as DataEntryFlowStep;
++    const nextStep = {
++      ...initialStep,
++      translation_domain: "shared",
++    } as DataEntryFlowStep;
++    const submit = vi.fn(
++      async (
++        _hass: HomeAssistant,
++        _interactionId: string,
++        _data: Record<string, unknown>
++      ) => nextStep
++    );
++
++    const result = await window.hababNativeUi!.loadFlowForm({
++      hass,
++      flowType: "config_flow",
++      handler: "example",
++      domain: "example",
++      step: initialStep,
++      submit,
++    });
++
++    expect(result.tag).toBe("step-flow-form");
++    expect(result.contextTag).toBe("habab-native-form-context");
++    expect(result.flowConfig.flowType).toBe("config_flow");
++    expect(customElements.get("step-flow-form")).toBeDefined();
++
++    await result.flowConfig.handleFlowStep(hass, "interaction-1", {
++      example_value: "safe",
++    });
++
++    expect(submit).toHaveBeenCalledWith(hass, "interaction-1", {
++      example_value: "safe",
++    });
++    expect(loadBackendTranslation).toHaveBeenCalledWith("config", "shared");
++  });
++});

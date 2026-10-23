@@ -1,0 +1,6 @@
+{
+  "target": "isolated_qa",
+  "native_form_disconnects_on_status_refresh_before": 1,
+  "native_form_disconnects_on_status_refresh_after": 0,
+  "submitted": false
+}

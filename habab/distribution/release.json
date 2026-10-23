@@ -1,6 +1,6 @@
 {
   "product": "Habab Home",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "home_assistant": {
     "version": "2026.10.2",
     "image": "ghcr.io/home-assistant/home-assistant:2026.10.2",
@@ -19,6 +19,9 @@
     "read-only executable sharing and optional Bluetooth D-Bus Compose overrides",
     "global bottom-right setup chat with route-independent draft and session state",
     "administrator Telegram pairing and separate chat context over the same private OpenCode runtime",
-    "bounded native discovery observations and registry-backed robot vacuum dashboard"
+    "bounded native discovery observations and registry-backed robot vacuum dashboard",
+    "shared assistant service for web, Telegram and restricted native Assist",
+    "Core-matched frontend bridge for one administrator assistant window and native integration forms",
+    "protected owner-scoped integration setup forms inside the assistant conversation"
   ]
 }

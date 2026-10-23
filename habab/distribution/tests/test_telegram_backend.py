@@ -6,31 +6,22 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from homeassistant.components.habab_home.setup_agent import AgentError, SetupAgent
 from homeassistant.components.habab_telegram import TelegramManager
 from homeassistant.components.habab_telegram.config_flow import get_bot
 
 
-class SetupAgentTelegramTests(unittest.IsolatedAsyncioTestCase):
-    def test_web_history_is_unchanged_and_telegram_mapping_is_separate(self):
-        agent = object.__new__(SetupAgent)
-        agent.owners = {"alice": "web-session"}
-        agent.telegram_sessions = {"alice:bot-a:chat-1": "tg-session"}
-        self.assertTrue(agent._owns_session("alice", "web-session"))
-        self.assertTrue(agent._owns_session("alice", "tg-session"))
-        self.assertFalse(agent._owns_session("bob", "tg-session"))
-        self.assertFalse(agent._owns_session("alice", "someone-elses-session"))
+class SessionBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    def test_web_and_telegram_sessions_are_channel_scoped(self):
+        from homeassistant.components.habab_home.assistant import AssistantService
 
-    async def test_cancel_requires_owner_and_mapped_session(self):
-        agent = object.__new__(SetupAgent)
-        agent.owners = {"alice": "web-session"}
-        agent.telegram_sessions = {"alice:bot-a:chat-1": "tg-session"}
-        agent.active = ("alice", "tg-session")
-        agent.request = AsyncMock()
-        with self.assertRaises(AgentError):
-            await agent.abort("bob", "tg-session")
-        await agent.abort("alice", "web-session")
-        agent.request.assert_not_awaited()
+        service = object.__new__(AssistantService)
+        service.web_sessions = {"alice": "web-session"}
+        service.telegram_sessions = {"alice:bot-a:chat-1": "tg-session"}
+        self.assertTrue(service._mapped_session("alice", "web", "web-session"))
+        self.assertTrue(service._mapped_session("alice", "telegram", "tg-session", "bot-a", "chat-1"))
+        self.assertFalse(service._mapped_session("bob", "web", "web-session"))
+        self.assertFalse(service._mapped_session("alice", "web", "tg-session"))
+        self.assertFalse(service._mapped_session("alice", "telegram", "tg-session", "other", "chat-1"))
 
 
 class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
@@ -38,9 +29,13 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager = object.__new__(TelegramManager)
         manager.hass = SimpleNamespace(
             auth=SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(is_active=True, is_admin=True))),
-            data={"habab_home": {"setup_agent": SimpleNamespace(
-                telegram_sessions={}, active=None, telegram_forget=AsyncMock(),
-            )}},
+            data={"habab_home": {
+                "setup_agent": SimpleNamespace(active=None),
+                "assistant": SimpleNamespace(
+                    telegram_sessions={}, telegram_forget=AsyncMock(), abort=AsyncMock(),
+                    telegram_reset=AsyncMock(), telegram_session=AsyncMock(), run=AsyncMock(),
+                ),
+            }},
             async_create_task=asyncio.create_task,
         )
         manager.entries = {"entry": {"chat_id": "10", "user_id": "20", "username": "testbot"}}
@@ -86,6 +81,54 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         await manager.handle_one(entry, {"chat_type": "private", "chat_id": 10, "user_id": 20, "message_id": 4, "text": "/help"})
         manager.send.assert_awaited_once_with("entry", "10", "Доступ отозван.")
 
+    async def test_unlink_forgets_only_bound_chat_after_worker_stops(self):
+        manager = self.manager()
+        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice"})
+        manager.hass.config_entries = SimpleNamespace(
+            async_entries=lambda domain: [entry], async_remove=AsyncMock())
+        manager.bindings = {
+            "entry": {"chat_id": "10", "user_id": "20"},
+            "other-entry": {"chat_id": "30", "user_id": "40"},
+        }
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        assistant.telegram_sessions = {
+            "alice:entry:10": "entry-session",
+            "alice:other-entry:30": "other-session",
+            "bob:entry:10": "other-owner-session",
+        }
+        events = []
+
+        async def close_entry(entry_id):
+            events.append(("close", entry_id))
+
+        async def forget(owner, entry_id, chat_id):
+            events.append(("forget", owner, entry_id, chat_id))
+            return assistant.telegram_sessions.pop(f"{owner}:{entry_id}:{chat_id}", None)
+
+        manager.close_entry = AsyncMock(side_effect=close_entry)
+        assistant.telegram_forget = AsyncMock(side_effect=forget)
+        await manager.unlink("alice")
+
+        self.assertEqual(events, [
+            ("close", "entry"), ("forget", "alice", "entry", "10"),
+        ])
+        self.assertEqual(assistant.telegram_sessions, {
+            "alice:other-entry:30": "other-session",
+            "bob:entry:10": "other-owner-session",
+        })
+        manager.bindings_store.async_save.assert_awaited_once_with({
+            "other-entry": {"chat_id": "30", "user_id": "40"},
+        })
+        manager.hass.config_entries.async_remove.assert_awaited_once_with("entry")
+
+    async def test_home_assistant_load_order_reports_retry_instead_of_losing_turn_silently(self):
+        manager = self.manager()
+        manager.hass.data["habab_home"].pop("assistant")
+        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice"})
+        await manager._run_message(entry, "10", "read integrations")
+        manager.send.assert_awaited_once_with(
+            "entry", "10", "Помощник запускается. Повторите запрос позже.")
+
     async def test_inactive_owner_cannot_create_or_complete_pairing(self):
         manager = self.manager()
         manager.hass.auth.async_get_user.return_value = SimpleNamespace(is_active=False, is_admin=True)
@@ -127,14 +170,13 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.entries["entry"].update(chat_id="10", user_id="20")
         agent = manager.hass.data["habab_home"]["setup_agent"]
         agent.active = ("alice", "session-old")
-        agent.telegram_sessions = {"alice:entry:10": "session-old"}
-        agent.abort = AsyncMock(return_value=True)
-        agent.telegram_forget = AsyncMock(return_value="session-old")
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        assistant.telegram_sessions = {"alice:entry:10": "session-old"}
+        assistant.telegram_forget = AsyncMock(return_value="session-old")
         await manager.pair("alice")
         self.assertIsNone(manager.entries["entry"]["chat_id"])
         self.assertNotIn("entry", manager.bindings)
-        agent.abort.assert_awaited_once_with("alice", "session-old")
-        agent.telegram_forget.assert_awaited_once_with("alice", "entry", "10")
+        assistant.telegram_forget.assert_awaited_once_with("alice", "entry", "10")
 
     async def test_configure_uses_trusted_owner_context_and_returns_pairable_status(self):
         manager = self.manager()
@@ -200,7 +242,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
             async def telegram_session(self, owner, entry_id, chat_id):
                 return {"session_id": "session"}
 
-            async def run(self, owner, session_id, text):
+            async def run(self, owner, channel, session_id, text, entry_id, chat_id):
                 self.calls.append(text)
                 self.active = (owner, session_id)
                 if text == "do work":
@@ -244,7 +286,11 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         ], control_gate)
         manager.queues["entry"] = asyncio.Queue(maxsize=5)
         agent = Agent()
-        manager.hass.data["habab_home"]["setup_agent"] = agent
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        assistant.telegram_sessions = agent.telegram_sessions
+        assistant.telegram_session = agent.telegram_session
+        assistant.run = agent.run
+        assistant.abort = agent.abort
         manager.typing = AsyncMock(return_value=True)
         consumer = asyncio.create_task(manager._consume(entry))
         reader = asyncio.create_task(manager._reader(entry, manager.entries["entry"]))
@@ -308,7 +354,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager = self.manager()
         manager.entries["entry"]["chat_id"] = None
         manager.entries["entry"]["user_id"] = None
-        manager.hass.data["habab_home"]["setup_agent"].telegram_forget = AsyncMock()
+        manager.hass.data["habab_home"]["assistant"].telegram_forget = AsyncMock()
         entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_id": 7, "bot_username": "testbot"})
         manager.hass.config_entries = SimpleNamespace(async_entries=lambda domain: [entry])
         result = await manager.pair("alice")

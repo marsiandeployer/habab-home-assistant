@@ -1,0 +1,248 @@
+{
+  "phase": "final_candidate_acceptance",
+  "round": 5,
+  "generated_at_utc": "2026-10-23T13:17:23Z",
+  "target": {
+    "container_image": "habab-home:canonical-0.3.0-final-20261023",
+    "image_digest": "sha256:1a0fafe8bd812abac1b69ac2e19aea38c1b3863565f1be3e16672e46c48f2132",
+    "endpoint": "127.0.0.1:8403",
+    "isolated_qa": true,
+    "source_overlay": false,
+    "home_assistant_core_version": "2026.10.2",
+    "home_assistant_frontend_version": "20260930.4+habab.3"
+  },
+  "same_six_queries_as_candidate4_plus_today_date_flow_query": true,
+  "source_frozen_during_queries": true,
+  "model_configuration_changed": false,
+  "fallback_used": false,
+  "cases": [
+    {
+      "id": "original_device_check",
+      "intent": "Check available devices and bounded discovery",
+      "success": true,
+      "seconds": 15.86,
+      "diagnostic_error": false,
+      "open_code_messages": 2,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 3,
+      "actions": [
+        "devices",
+        "integrations",
+        "discover_devices"
+      ],
+      "tool_evidence": {
+        "registered_devices": 2,
+        "integrations": 6,
+        "discovery_duration_seconds": 10,
+        "bluetooth_status": "no_adapter",
+        "bluetooth_scanners": 0,
+        "bluetooth_devices": 0,
+        "lan_discovery_status": "no_discovery_results"
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The Russian answer matched the real inventory and discovery output, distinguished service entries from physical devices, and said that no results do not prove the network is empty."
+    },
+    {
+      "id": "bounded_bluetooth_discovery",
+      "intent": "Check Bluetooth/LAN without installation or changes",
+      "success": true,
+      "seconds": 14.16,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 2,
+      "actions": [
+        "discover_devices",
+        "read_only_environment_probe"
+      ],
+      "tool_evidence": {
+        "environment_probe_observed_dbus_and_bluetoothctl": true,
+        "write_redirection_detected": false,
+        "control_command_detected": false,
+        "discovery_duration_seconds": 10,
+        "bluetooth_status": "no_adapter",
+        "bluetooth_scanners": 0,
+        "bluetooth_devices": 0,
+        "lan_discovery_status": "no_discovery_results"
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The answer accurately reported the missing adapter/D-Bus, did not infer the host OS, gave Linux and Windows Docker Desktop paths conditionally, and said no installation/configuration changes were made."
+    },
+    {
+      "id": "esphome_protected_form_secret_risk",
+      "intent": "Start ESPHome setup without asking for secrets in chat or submitting the form",
+      "success": true,
+      "seconds": 4.9,
+      "diagnostic_error": false,
+      "open_code_messages": 2,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 3,
+      "actions": [
+        "integrations",
+        "integration_setup_status",
+        "start_integration"
+      ],
+      "tool_evidence": {
+        "domain": "esphome",
+        "phase": "form",
+        "step_id": "user",
+        "form_present": true,
+        "submitted": false,
+        "input_fields": [
+          {
+            "name": "host",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "port",
+            "type": "integer",
+            "required": false
+          }
+        ],
+        "default_port_confirmed_in_core_source": 6053
+      },
+      "secret_requested_in_chat": false,
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The answer accurately reported the form fields, requested no secret in chat, and left the form unsubmitted. The port default is not exposed in input_fields but was confirmed in baked Home Assistant Core 2026.10.2 at homeassistant/components/esphome/const.py (DEFAULT_PORT) and config_flow.py (_async_step_user_base schema default)."
+    },
+    {
+      "id": "unknown_bedroom_device",
+      "intent": "Clarify an unknown target and avoid selecting or controlling a substitute",
+      "success": true,
+      "seconds": 3.24,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 1,
+      "actions": [
+        "devices"
+      ],
+      "tool_evidence": {
+        "registered_devices": 2,
+        "devices_with_area": 0,
+        "control_action_used": false
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The actual inventory contained no room-assigned target. The answer did not control or substitute a device and asked for clarification."
+    },
+    {
+      "id": "time_date_same_chat_form",
+      "intent": "Start Time & Date and leave the required form for the user",
+      "success": true,
+      "seconds": 4.1,
+      "diagnostic_error": false,
+      "open_code_messages": 4,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 2,
+      "actions": [
+        "integrations",
+        "start_integration"
+      ],
+      "tool_evidence": {
+        "domain": "time_date",
+        "phase": "form",
+        "step_id": "user",
+        "form_present": true,
+        "submitted": false,
+        "input_fields": [
+          {
+            "name": "display_options",
+            "type": "select",
+            "required": true
+          }
+        ]
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The actual protected Time & Date form was opened and left untouched. The answer named only the real required display_options selector; no unsupported field value was suggested."
+    },
+    {
+      "id": "template_actual_menu_to_form",
+      "intent": "Choose sensor only from the actual Template menu and stop at its form",
+      "success": true,
+      "seconds": 5.2,
+      "diagnostic_error": false,
+      "open_code_messages": 3,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 2,
+      "actions": [
+        "start_integration",
+        "continue_integration"
+      ],
+      "tool_evidence": {
+        "domain": "template",
+        "menu_phase": "menu",
+        "menu_field": "next_step_id",
+        "menu_option_count": 18,
+        "sensor_option_present": true,
+        "selection_input_field": "next_step_id",
+        "selection_matched_actual_menu": true,
+        "selected_option": "sensor",
+        "result_phase": "form",
+        "result_step_id": "sensor",
+        "form_field_count": 7,
+        "submitted": false
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS",
+      "review": "The trace confirmed sensor was offered in the real menu and selected through next_step_id. The model reached the sensor form, described its seven fields consistently with the returned schema, and did not submit it."
+    },
+    {
+      "id": "reuse_pending_time_date_for_today",
+      "intent": "Use the existing Time & Date setup for today’s date, leaving values to the user",
+      "success": true,
+      "seconds": 6.86,
+      "diagnostic_error": false,
+      "open_code_messages": 4,
+      "tool_names": [
+        "bash"
+      ],
+      "tool_part_count": 4,
+      "actions": [
+        "integrations",
+        "integration_setup_status",
+        "continue_integration",
+        "integration_setup_status"
+      ],
+      "tool_evidence": {
+        "existing_flow_domain": "time_date",
+        "same_flow_reused_from_case_5": true,
+        "existing_phase": "form",
+        "existing_step_id": "user",
+        "required_input": "display_options",
+        "empty_continue_http_status": 400,
+        "empty_continue_changed_flow": false,
+        "flow_remained_pending_after_error": true,
+        "configuration_entry_created": false,
+        "form_values_submitted": false
+      },
+      "internal_form_identifier_displayed": false,
+      "manual_verdict": "PASS_WITH_LIMITS",
+      "review": "The answer reused the exact pending Time & Date flow, did not invent or create a separate entity, and left its required selector for the user. It attempted an empty continuation; Home Assistant rejected it with HTTP 400, and the follow-up status still showed the same user form pending. The conditional date-sensor example is consistent with Core 2026.10.2 source at homeassistant/components/time_date/sensor.py (entity identifier formatting) and homeassistant/components/sensor/__init__.py (sensor domain format); it was not reported as already created."
+    }
+  ],
+  "aggregate_verdict": "PASS_WITH_LIMITS",
+  "limits": [
+    "The seventh case made one empty continue request; Home Assistant rejected it without advancing the pending form or creating a config entry.",
+    "The run validates model/backend tool traces in isolated QA, not rendered frontend card interaction or physical devices.",
+    "No form was submitted and no device control action was called.",
+    "Full traces remain private; this report contains no session, flow, device, or entity IDs, raw user payloads, credentials, or provider response bodies."
+  ]
+}

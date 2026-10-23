@@ -6,6 +6,41 @@ export function visibleTextMessages(messages) {
   );
 }
 
+export function mountStableElement(parent, element) {
+  if (parent && element && element.parentNode !== parent) parent.append(element);
+}
+
+export function integrationVerificationPrompt(detail, language) {
+  const domain = detail?.domain;
+  if (typeof domain !== "string" || !/^[a-z0-9_]{1,80}$/.test(domain)) return undefined;
+  return language === "ru"
+    ? `Проверь подключение интеграции ${domain} и доступные устройства через Home Assistant. Не управляй устройствами.`
+    : `Check the ${domain} integration and available devices through Home Assistant. Do not control devices.`;
+}
+
+export function chooseAssistPipeline(requestedId, pipelines, preferredId, lastUsedId) {
+  if (!Array.isArray(pipelines)) return undefined;
+  let id = requestedId === "preferred" ? preferredId
+    : requestedId === "last_used" || !requestedId ? lastUsedId || preferredId
+      : requestedId;
+  let selected = pipelines.find((pipeline) => pipeline?.id === id);
+  if (!selected && preferredId) selected = pipelines.find((pipeline) => pipeline?.id === preferredId);
+  return selected;
+}
+
+export function assistantDiagnosticMessage(diagnostic, copy) {
+  if (!diagnostic || typeof diagnostic !== "object") return "";
+  const flags = diagnostic.flags && typeof diagnostic.flags === "object" ? diagnostic.flags : diagnostic;
+  if (flags.invalid_model || diagnostic.name === "InvalidModelError" || diagnostic.name === "ModelNotFoundError") return copy.diagnosticInvalidModel;
+  if (flags.quota || diagnostic.http_status === 429 || diagnostic.name === "RateLimitError") return copy.diagnosticQuota;
+  if ([401, 403].includes(diagnostic.http_status) || ["AuthenticationError", "ProviderAuthError"].includes(diagnostic.name)) return copy.diagnosticAuth;
+  if (flags.mentions_context_limit || diagnostic.name === "ContextOverflowError") return copy.diagnosticContext;
+  if (flags.mentions_timeout || diagnostic.name === "TimeoutError") return copy.diagnosticTimeout;
+  if (flags.missing_reasoning_content || flags.mentions_reasoning_content) return copy.diagnosticReasoning;
+  if (flags.mentions_tool_calls) return copy.diagnosticTools;
+  return copy.diagnosticGeneric;
+}
+
 function installChat() {
   // HA installs its scoped registry polyfill before defining home-assistant.
   // Registering earlier loses the extension when that registry is replaced.
@@ -29,6 +64,24 @@ function installChat() {
       openingDevices: "Готовлю страницу устройств…", devicesReady: "Страница «Мои устройства» открыта.",
       noVacuumDevices: "Страница открыта. Подключённые роботы-пылесосы появятся здесь, когда Home Assistant добавит их в реестр устройств.",
       devicesFailed: "Не удалось подготовить страницу устройств. Проверьте права администратора и конфигурацию Lovelace.",
+      diagnosticInvalidModel: " Проверьте имя модели в настройках провайдера.",
+      diagnosticQuota: " Проверьте баланс и лимиты запросов у провайдера.",
+      diagnosticAuth: " Проверьте API-ключ и доступ к модели в настройках провайдера.",
+      diagnosticContext: " Сократите запрос или начните новый чат.",
+      diagnosticTimeout: " Проверьте состояние дома перед повтором команды.",
+      diagnosticReasoning: " Проверьте, что выбранная модель совместима с OpenCode.",
+      diagnosticTools: " Выберите модель с поддержкой инструментов.",
+      diagnosticGeneric: " Проверьте подключение и настройки провайдера.",
+      noAssistPipeline: "Голосовой помощник недоступен. Настройте его в Home Assistant и повторите попытку.",
+      speechRequired: "Выбранный голосовой помощник не настроен для распознавания речи. Выберите другой в настройках голосовых помощников.",
+      transcriptEmpty: "Не удалось распознать речь. Попробуйте ещё раз или введите запрос.",
+      voiceReplyFailed: "Не удалось воспроизвести голосовой ответ. Ответ остался в чате.",
+      mic: "Сказать запрос помощнику", stopVoice: "Завершить запись", listening: "Слушаю. Завершу запись после паузы в речи.",
+      speechStart: "Слышу речь…", speechEnd: "Пауза определена. Распознаю речь…", speechNotFound: "Голосовой помощник недоступен.",
+      secure_context: "Микрофону нужен HTTPS или localhost. Откройте Home Assistant через защищённое соединение.",
+      microphone_denied: "Доступ к микрофону запрещён. Разрешите его в настройках браузера.",
+      microphone_failed: "Не удалось включить микрофон. Проверьте устройство и повторите.",
+      timeout: "Время ожидания истекло. Проверьте состояние дома перед повтором команды.",
     },
     en: {
       title: "Assistant", open: "Open assistant chat", close: "Close", fresh: "New chat",
@@ -48,6 +101,24 @@ function installChat() {
       openingDevices: "Preparing your devices page…", devicesReady: "The My devices page is open.",
       noVacuumDevices: "The page is open. Vacuums will appear when Home Assistant adds them to the device registry.",
       devicesFailed: "Could not prepare the devices page. Check administrator access and the Lovelace configuration.",
+      diagnosticInvalidModel: " Check the model name in provider settings.",
+      diagnosticQuota: " Check your provider balance and request limits.",
+      diagnosticAuth: " Check the API key and model access in provider settings.",
+      diagnosticContext: " Shorten the request or start a new chat.",
+      diagnosticTimeout: " Check the home state before repeating the command.",
+      diagnosticReasoning: " Check that the selected model works with OpenCode.",
+      diagnosticTools: " Choose a model that supports tools.",
+      diagnosticGeneric: " Check your connection and provider settings.",
+      noAssistPipeline: "A voice assistant is unavailable. Configure one in Home Assistant and try again.",
+      speechRequired: "The selected voice assistant is not configured for speech recognition. Choose another in Voice assistant settings.",
+      transcriptEmpty: "Speech could not be recognized. Try again or enter a request.",
+      voiceReplyFailed: "The spoken reply could not play. The response is still in chat.",
+      mic: "Send a voice request to the assistant", stopVoice: "Finish recording", listening: "Listening. Recording ends after a pause in speech.",
+      speechStart: "Speech detected…", speechEnd: "Pause detected. Transcribing…", speechNotFound: "A voice assistant is unavailable.",
+      secure_context: "Microphone access requires HTTPS or localhost. Open Home Assistant using a secure connection.",
+      microphone_denied: "Microphone access was denied. Allow access in your browser settings.",
+      microphone_failed: "The microphone could not start. Check your device and try again.",
+      timeout: "The request timed out. Check the home state before repeating the command.",
     },
   };
 
@@ -57,6 +128,8 @@ function installChat() {
       this.attachShadow({mode: "open"});
       this.messages = [];
       this.busy = false;
+      this.voiceBusy = false;
+      this.voiceGeneration = 0;
     }
 
     get hass() { return this._hass; }
@@ -69,15 +142,17 @@ function installChat() {
         this.updateLanguage();
       }
       if (this.setupCard) this.setupCard.hass = value;
+      if (this.integrationCard) this.integrationCard.hass = value;
     }
 
     get t() { return copy[this.language || "en"]; }
     q(selector) { return this.shadowRoot.querySelector(selector); }
 
-    async loadSetup() {
+    async loadSetup(afterTurn = false) {
       if (this.demo) return;
       try {
         await import("/habab-home/xiaomi-setup.js?v=2");
+        await import("/habab-home/integration-setup.js?v=1");
         if (!this.setupCard) {
           this.setupCard = document.createElement("habab-xiaomi-setup");
           this.setupCard.addEventListener("habab-setup-verify", () => {
@@ -108,9 +183,23 @@ function installChat() {
             }
           });
         }
+        if (!this.integrationCard) {
+          this.integrationCard = document.createElement("habab-integration-setup");
+          this.integrationCard.addEventListener("habab-setup-verify", ({detail}) => {
+            const prompt = integrationVerificationPrompt(detail, this.language);
+            if (this.busy || !prompt) return;
+            this.q("textarea").value = prompt;
+            this.send();
+          });
+        }
         this.setupCard.hass = this.hass;
-        this.q("#log").append(this.setupCard);
+        mountStableElement(this.q("#setup-cards"), this.setupCard);
         await this.setupCard.load();
+        this.integrationCard.hass = this.hass;
+        this.integrationCard.active = this.q("dialog").open;
+        mountStableElement(this.q("#setup-cards"), this.integrationCard);
+        if (afterTurn && typeof this.integrationCard.refresh === "function") await this.integrationCard.refresh();
+        else await this.integrationCard.load();
         this.setupCard.scrollIntoView({block: "nearest"});
       } catch (_) { this.status(this.t.setup_ui_unavailable, true); }
     }
@@ -134,12 +223,13 @@ function installChat() {
         @media(prefers-reduced-motion:no-preference){dialog[open]{animation:arrive 160ms cubic-bezier(.16,1,.3,1)}@keyframes arrive{from{transform:translateY(10px);opacity:.7}to{transform:translateY(0);opacity:1}}}
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
-      <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div id="log" role="log" aria-live="polite" aria-label="${t.title}"></div><footer><p id="status" role="status"></p><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
+      <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><p id="status" role="status"></p><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
-      this.q("dialog").addEventListener("close", () => this.q(".launcher").focus());
+      this.q("dialog").addEventListener("close", () => this.onClose());
+      this.q(".mic").onclick = () => this.voiceBusy ? this.voice?.finishRecording() : this.startVoice("last_used");
       this.q(".fresh").onclick = () => this.connect(true);
       this.q(".retry").onclick = () => this.connect();
       this.q("form").onsubmit = (event) => {event.preventDefault(); this.send();};
@@ -159,7 +249,9 @@ function installChat() {
       this.q("#chat-title").textContent = t.title;
       this.q(".fresh").textContent = t.fresh;
       this.q(".close").setAttribute("aria-label", t.close);
-      this.q("#log").setAttribute("aria-label", t.title);
+      this.q(".mic").title = t.mic;
+      this.q(".mic").setAttribute("aria-label", t.mic);
+      this.q("#messages").setAttribute("aria-label", t.title);
       const textarea = this.q("textarea");
       textarea.placeholder = t.placeholder;
       textarea.setAttribute("aria-label", t.placeholder);
@@ -171,12 +263,44 @@ function installChat() {
       this.draw();
     }
 
-    async open() {
+    open(params = {}, opener = null) {
+      if (!this.isConnected || (!this.demo && !this.hass?.user?.is_admin) || !params || typeof params !== "object") return false;
+      this.openParams = {
+        ...params,
+        pipeline_id: typeof params.pipeline_id === "string" ? params.pipeline_id : "last_used",
+        invalid_pipeline_id: params.pipeline_id !== undefined && (typeof params.pipeline_id !== "string" || !params.pipeline_id || params.pipeline_id.length > 256),
+        start_listening: params.start_listening === true,
+        initial_prompt: typeof params.prompt === "string" && params.prompt.length <= 4000 ? params.prompt : undefined,
+        submit_prompt: params.submit === true && typeof params.prompt === "string" && params.prompt.length <= 4000,
+      };
+      if (this.openParams.initial_prompt !== undefined) this.q("textarea").value = this.openParams.initial_prompt;
+      this.returnFocus = opener || this.q(".launcher");
       const dialog = this.q("dialog");
-      if (matchMedia("(max-width: 600px)").matches) dialog.showModal();
-      else dialog.show();
+      if (!dialog.open) {
+        if (matchMedia("(max-width: 600px)").matches) dialog.showModal();
+        else dialog.show();
+      }
+      if (this.integrationCard) this.integrationCard.active = true;
       this.q("textarea").focus();
-      if (!this.sessionId && !this.busy) await this.connect();
+      if (!this.sessionId && !this.busy) void this.connect();
+      else if (this.sessionId && !this.busy) this.startPendingAssist();
+      return true;
+    }
+
+    onClose() {
+      this.voiceGeneration += 1;
+      if (this.integrationCard) this.integrationCard.active = false;
+      if (this.voice) this.voice.close();
+      this.voice = undefined;
+      if (this.voiceBusy) {
+        this.voiceBusy = false;
+        this.busy = false;
+        this.controls();
+      }
+      const target = this.returnFocus;
+      this.returnFocus = null;
+      if (target?.isConnected && typeof target.focus === "function") target.focus();
+      else this.q(".launcher").focus();
     }
 
     status(text, error = false) {
@@ -188,6 +312,10 @@ function installChat() {
 
     controls() {
       this.q("textarea").disabled = !this.sessionId || this.busy || this.setupRestarting;
+      this.q(".mic").disabled = this.demo || !this.sessionId || (this.busy && !this.voiceBusy) || this.setupRestarting;
+      this.q(".mic").hidden = this.demo;
+      this.q(".mic").title = this.voiceBusy ? this.t.stopVoice : this.t.mic;
+      this.q(".mic").setAttribute("aria-label", this.voiceBusy ? this.t.stopVoice : this.t.mic);
       this.q(".send").disabled = !this.sessionId || this.busy || this.setupRestarting;
       this.q(".send").hidden = this.busy;
       this.q(".stop").hidden = !this.running || this.demo;
@@ -210,7 +338,11 @@ function installChat() {
         this.status(this.demo ? this.t.demo : "");
         await this.loadSetup();
       } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
-      finally { this.busy = false; this.controls(); if (this.q("dialog").open) this.q("textarea").focus(); }
+      finally {
+        this.busy = false; this.controls();
+        if (this.q("dialog").open) this.q("textarea").focus();
+        this.startPendingAssist();
+      }
     }
 
     async demoRequest(suffix = "", method = "GET", text) {
@@ -223,15 +355,144 @@ function installChat() {
       return {session_id: "public-demo", messages: result.messages.map(item => ({role: item.role, text: item.content}))};
     }
 
+    startPendingAssist() {
+      if (!this.sessionId || this.busy || this.demo || !this.q("dialog").open || !this.openParams) return;
+      if (this.openParams.submit_prompt && this.openParams.initial_prompt) {
+        const prompt = this.openParams.initial_prompt;
+        this.openParams.submit_prompt = false;
+        void this.send(prompt, {clearDraft: true});
+        return;
+      }
+      if (this.openParams.start_listening) {
+        this.openParams.start_listening = false;
+        void this.startVoice(this.openParams.pipeline_id, this.openParams.invalid_pipeline_id);
+      }
+    }
+
+    async errorMessage(error) {
+      if (this.demo || !this.sessionId) return this.t[error?.code] || this.t.failed;
+      try {
+        const result = await this.hass.callWS({type: "habab_home/agent/diagnostics", session_id: this.sessionId});
+        const hint = assistantDiagnosticMessage(result?.error, this.t);
+        return hint ? `${this.t.failed}${hint}` : (this.t[error?.code] || this.t.failed);
+      } catch (_) {
+        return this.t[error?.code] || this.t.failed;
+      }
+    }
+
+    async pipelines() {
+      if (this.assistPipelines) return this.assistPipelines;
+      const result = await this.hass.callWS({type: "assist_pipeline/pipeline/list"});
+      if (!Array.isArray(result?.pipelines)) throw {code: "invalid_pipeline_list"};
+      this.assistPipelines = result.pipelines;
+      this.preferredPipelineId = result.preferred_pipeline;
+      return this.assistPipelines;
+    }
+
+    async startVoice(requestedId = "last_used", invalidId = false) {
+      if (this.demo || this.busy || !this.sessionId) return;
+      const generation = ++this.voiceGeneration;
+      this.voiceBusy = true;
+      this.busy = true;
+      this.pendingVoiceText = undefined;
+      this.controls();
+      try {
+        if (invalidId) throw {code: "noAssistPipeline"};
+        const pipelines = await this.pipelines();
+        if (generation !== this.voiceGeneration || !this.q("dialog").open) return;
+        let lastUsedId;
+        try { lastUsedId = JSON.parse(localStorage.getItem("AssistPipelineId")); } catch (_) { lastUsedId = undefined; }
+        const pipeline = chooseAssistPipeline(requestedId, pipelines, this.preferredPipelineId, lastUsedId);
+        if (!pipeline) throw {code: "noAssistPipeline"};
+        if (!pipeline.stt_engine) throw {code: "speechRequired"};
+        this.voiceReplyPipeline = pipeline.tts_engine ? pipeline : undefined;
+        this.status(this.t.listening);
+        this.voice = new AssistVoice(this.hass, pipeline, (event) => this.onVoiceEvent(event));
+        await this.voice.start();
+      } catch (error) {
+        if (generation !== this.voiceGeneration) return;
+        this.voice?.close();
+        this.voice = undefined;
+        this.voiceBusy = false;
+        this.busy = false;
+        const code = typeof error?.code === "string" && this.t[error.code] ? error.code : "failed";
+        this.status(this.t[code], true);
+        this.controls();
+      }
+    }
+
+    onVoiceEvent(event) {
+      if (event.type === "stt-vad-start") this.status(this.t.speechStart);
+      if (event.type === "stt-vad-end" || event.type === "recording-ended") this.status(this.t.speechEnd);
+      if (event.type === "stt-end") {
+        const text = event.data?.stt_output?.text;
+        this.pendingVoiceText = typeof text === "string" ? text.trim() : "";
+      }
+      if (event.type === "playback-blocked") this.status(this.t.voiceReplyFailed, true);
+      if (event.type === "error") {
+        this.pendingVoiceText = undefined;
+        this.status(this.t[this.voiceErrorCode(event.data?.code)] || this.t.failed, true);
+      }
+      if (event.type === "run-end" || event.type === "error") {
+        const transcript = this.pendingVoiceText;
+        this.pendingVoiceText = undefined;
+        this.voice?.close(false);
+        this.voice = undefined;
+        this.voiceBusy = false;
+        this.busy = false;
+        this.controls();
+        if (event.type === "run-end") {
+          if (transcript) void this.send(transcript, {voiceReply: true});
+          else this.status(this.t.transcriptEmpty, true);
+        }
+      }
+    }
+
+    voiceErrorCode(code) {
+      if (code === "microphone_denied" || code === "microphone_failed" || code === "secure_context" || code === "timeout") return code;
+      if (code === "not_found") return "noAssistPipeline";
+      return "failed";
+    }
+
+    async speakReply(messages) {
+      if (!this.q("dialog").open) return;
+      const message = Array.isArray(messages) ? [...messages].reverse().find((item) => item?.role === "assistant" && typeof item.text === "string" && item.text.trim()) : undefined;
+      const pipeline = this.voiceReplyPipeline;
+      this.voiceReplyPipeline = undefined;
+      if (!message || !pipeline?.tts_engine) return;
+      const voice = new AssistVoice(this.hass, pipeline, (event) => {
+        if (event.type === "playback-blocked" || event.type === "error") {
+          this.status(this.t.voiceReplyFailed, true);
+          voice.close();
+          if (this.voice === voice) this.voice = undefined;
+        }
+        if (event.type === "playback-ended" && this.voice === voice) this.voice = undefined;
+      });
+      this.voice = voice;
+      try { await voice.speak(message.text); }
+      catch (_) {
+        this.status(this.t.voiceReplyFailed, true);
+        voice.close();
+        if (this.voice === voice) this.voice = undefined;
+      }
+      finally {
+        if (!voice.audio && this.voice === voice) {
+          voice.close(false);
+          this.voice = undefined;
+        }
+      }
+    }
+
     draw() {
       const log = this.q("#log");
-      log.replaceChildren();
+      const messageContainer = this.q("#messages");
+      messageContainer.replaceChildren();
       const visibleMessages = visibleTextMessages(this.messages);
       if (!visibleMessages.length) {
         const empty = document.createElement("div"); empty.className = "empty";
         const title = document.createElement("h3"); title.textContent = this.t.intro;
         const help = document.createElement("p"); help.textContent = this.t.help;
-        empty.append(title, help); log.append(empty);
+        empty.append(title, help); messageContainer.append(empty);
       }
       for (const message of visibleMessages) {
         const row = document.createElement("div"); row.className = `message ${message.role}`;
@@ -240,29 +501,34 @@ function installChat() {
         const text = document.createElement(markdown ? "ha-markdown" : "p");
         if (markdown) {text.content = message.text; text.breaks = true;}
         else text.textContent = message.text;
-        row.append(name, text); log.append(row);
+        row.append(name, text); messageContainer.append(row);
       }
-      if (this.setupCard) log.append(this.setupCard);
       log.scrollTop = log.scrollHeight;
       const tail = log.lastChild;
-      Promise.allSettled([...log.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
+      Promise.allSettled([...messageContainer.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
         if (log.lastChild === tail) log.scrollTop = log.scrollHeight;
       });
     }
 
-    async send() {
-      const text = this.q("textarea").value.trim();
+    async send(textValue, {voiceReply = false, clearDraft = false} = {}) {
+      const text = (typeof textValue === "string" ? textValue : this.q("textarea").value).trim();
       if (!text || !this.sessionId || this.busy || this.setupRestarting) return;
       this.busy = true; this.running = true; this.stopped = false;
-      this.messages.push({role: "user", text}); this.q("textarea").value = "";
+      this.messages.push({role: "user", text});
+      if (typeof textValue !== "string" || clearDraft) this.q("textarea").value = "";
       this.draw(); this.status(this.demo ? this.t.answering : this.t.working); this.controls();
       try {
         const result = this.demo ? await this.demoRequest("", "POST", text)
           : await this.hass.callWS({type: "habab_home/agent/run", session_id: this.sessionId, text});
         this.messages = result.messages; this.draw(); this.status(this.stopped ? this.t.stopped : this.demo ? this.t.demo : "");
-        await this.loadSetup();
-      } catch (error) { this.status(this.stopped ? this.t.stopped : this.t[error.code] || this.t.failed, true); }
-      finally { this.busy = false; this.running = false; this.controls(); if (this.q("dialog").open) this.q("textarea").focus(); }
+        if (voiceReply) await this.speakReply(result.messages);
+      } catch (error) { this.status(this.stopped ? this.t.stopped : await this.errorMessage(error), true); }
+      finally {
+        if (!this.demo) await this.loadSetup(true);
+        this.busy = false; this.running = false; this.controls();
+        if (this.q("dialog").open) this.q("textarea").focus();
+        this.startPendingAssist();
+      }
     }
 
     async stop() {
@@ -287,12 +553,31 @@ function installChat() {
   // A downstream module must also work with the stock Docker frontend. Keep the
   // search off the render loop and reuse the element across dashboard updates.
   let launcher;
+  const assistantHook = {
+    get available() {
+      return !!launcher && launcher.parentNode === document.body && !launcher.demo && launcher.hass?.user?.is_admin === true;
+    },
+    open(params, opener) {
+      if (!this.available || !launcher) return false;
+      return launcher.open(params, opener);
+    },
+  };
+  let lastAssistantAvailability = false;
+  const syncAssistantHook = () => {
+    const available = assistantHook.available;
+    if (available) window.hababAssistant = assistantHook;
+    else if (window.hababAssistant === assistantHook) delete window.hababAssistant;
+    if (available !== lastAssistantAvailability) {
+      lastAssistantAvailability = available;
+      window.dispatchEvent(new Event("habab-assistant-availability"));
+    }
+  };
   const syncLauncher = () => {
     const main = locateMain(document);
     const demo = document.documentElement.dataset.hababDemo === "true";
     const hass = main?.hass;
-    if (!demo && !hass?.user?.is_admin) {launcher?.remove(); launcher = undefined; return;}
-    if (!demo && !main) {launcher?.remove(); launcher = undefined; return;}
+    if (!demo && !hass?.user?.is_admin) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
+    if (!demo && !main) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
     if (!launcher) {
       launcher = document.createElement("habab-setup-chat");
       launcher.demo = demo;
@@ -302,6 +587,7 @@ function installChat() {
     launcher.hass = hass;
     syncThemeVariables(launcher, main);
     if (launcher.parentNode !== document.body) document.body.append(launcher);
+    syncAssistantHook();
   };
   const themeVariables = new WeakMap();
   const themeVariableNames = [

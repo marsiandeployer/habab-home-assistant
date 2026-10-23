@@ -23,7 +23,7 @@ class HababHomeStatusView(HomeAssistantView):
                 "version": VERSION,
                 "home_assistant_version": HA_VERSION,
                 "status": "running",
-                "capabilities": ["global_chat", "xiaomi_setup", "telegram_agent", "native_discovery"],
+                "capabilities": ["global_chat", "xiaomi_setup", "telegram_agent", "native_discovery", "unified_assistant", "integration_setup"],
             }
         )
 
@@ -34,12 +34,21 @@ async def async_setup(hass, config):
     await hass.http.async_register_static_paths([
         StaticPathConfig("/habab-home", str(Path(__file__).parent / "frontend"), False),
     ])
-    frontend.add_extra_js_url(hass, "/habab-home/setup-chat.js?v=5")
+    frontend.add_extra_js_url(hass, "/habab-home/setup-chat.js?v=6")
     from .setup_agent import SetupAgent
 
     agent = SetupAgent(hass)
     await agent.setup()
     hass.data[DOMAIN]["setup_agent"] = agent
+    from .assistant import AssistantService
+
+    assistant = AssistantService(hass, agent)
+    await assistant.setup()
+    hass.data[DOMAIN]["assistant"] = assistant
+    from .integration_setup import IntegrationSetup, async_register_commands as register_integration_setup_commands
+
+    hass.data[DOMAIN]["integration_setup"] = IntegrationSetup(hass, agent)
+    register_integration_setup_commands(hass)
     from .telemetry import TelemetryManager, async_register_commands as async_register_telemetry_commands
 
     telemetry = TelemetryManager(hass)
@@ -61,7 +70,7 @@ async def async_setup(hass, config):
     await async_register_panel(
         hass, frontend_url_path="habab-ai", webcomponent_name="habab-ai-panel",
         sidebar_title="AI", sidebar_icon="mdi:assistant", require_admin=True,
-        module_url="/habab-home/ai-panel.js?v=2",
+        module_url="/habab-home/ai-panel.js?v=3",
     )
     await async_register_panel(
         hass, frontend_url_path="habab-telegram", webcomponent_name="habab-telegram-panel",

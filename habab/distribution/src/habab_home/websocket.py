@@ -21,6 +21,7 @@ def async_register_commands(hass):
     websocket_api.async_register_command(hass, agent_session)
     websocket_api.async_register_command(hass, agent_run)
     websocket_api.async_register_command(hass, agent_abort)
+    websocket_api.async_register_command(hass, agent_diagnostics)
 
 
 @websocket_api.websocket_command({
@@ -31,7 +32,7 @@ def async_register_commands(hass):
 @websocket_api.async_response
 async def agent_session(hass, connection, msg):
     try:
-        result = await hass.data[DOMAIN]["setup_agent"].session(connection.user.id, msg["new"])
+        result = await hass.data[DOMAIN]["assistant"].web_session(connection.user.id, msg["new"])
         connection.send_result(msg["id"], result)
     except AgentError as error:
         connection.send_error(msg["id"], error.code, error.code)
@@ -48,7 +49,8 @@ async def agent_run(hass, connection, msg):
     try:
         if not msg["text"].strip():
             raise AgentError("empty_message")
-        result = await hass.data[DOMAIN]["setup_agent"].run(connection.user.id, msg["session_id"], msg["text"])
+        result = await hass.data[DOMAIN]["assistant"].run(
+            connection.user.id, "web", msg["session_id"], msg["text"])
         connection.send_result(msg["id"], result)
     except AgentError as error:
         connection.send_error(msg["id"], error.code, error.code)
@@ -62,8 +64,24 @@ async def agent_run(hass, connection, msg):
 @websocket_api.async_response
 async def agent_abort(hass, connection, msg):
     try:
-        stopped = await hass.data[DOMAIN]["setup_agent"].abort(connection.user.id, msg["session_id"])
+        stopped = await hass.data[DOMAIN]["assistant"].abort(
+            connection.user.id, "web", msg["session_id"])
         connection.send_result(msg["id"], {"stopped": stopped})
+    except AgentError as error:
+        connection.send_error(msg["id"], error.code, error.code)
+
+
+@websocket_api.websocket_command({
+    probatio.Required("type"): "habab_home/agent/diagnostics",
+    probatio.Required("session_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def agent_diagnostics(hass, connection, msg):
+    try:
+        result = await hass.data[DOMAIN]["assistant"].diagnostics_for_web(
+            connection.user.id, msg["session_id"])
+        connection.send_result(msg["id"], result)
     except AgentError as error:
         connection.send_error(msg["id"], error.code, error.code)
 

@@ -1,10 +1,15 @@
 FROM ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4
 
 LABEL org.opencontainers.image.title="Habab Home" \
-      org.opencontainers.image.version="0.2.0" \
+      org.opencontainers.image.version="0.3.0" \
       org.opencontainers.image.description="Local Home Assistant Core distribution maintained by Habab"
 
 RUN apk add --no-cache nodejs=24.18.1-r0
+
+# Same upstream frontend version as Core, with the downstream Assist entry and
+# native-form bridge. The installer verifies the complete public wheel first.
+COPY install-native-frontend.py native-frontend-release.json /opt/habab-frontend/
+RUN python3 /opt/habab-frontend/install-native-frontend.py
 
 # The custom integration is part of the downstream Core tree, so HA's normal
 # integration loader imports it as product code rather than as a sidecar.

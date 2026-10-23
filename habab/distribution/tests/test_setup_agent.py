@@ -1,43 +1,33 @@
-"""Protect owner boundaries, secret filtering and executable integrity checks."""
+"""Protect the isolated OpenCode runtime, active capability tuple, and secrets."""
 import asyncio
 import hashlib
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from homeassistant.components.habab_home.setup_agent import AgentError, SetupAgent, verify_binary
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
     def agent(self):
-        # Avoid constructing a HA Store: these checks exercise pure ownership
-        # and serialization logic, not HA's already-tested storage machinery.
         agent = object.__new__(SetupAgent)
-        agent.owners = {"alice": "ses_alice"}
         agent.lock = asyncio.Lock()
         agent.ensure = AsyncMock()
-        agent.request = AsyncMock()
-        agent.active = ("alice", "ses_alice")
+        agent.request = AsyncMock(side_effect=[
+            {"info": {"role": "assistant"}},
+            [{"info": {"role": "assistant"}, "parts": [{"type": "text", "text": "OK"}]}],
+        ])
+        agent.active = None
         agent.password = "private-runtime-password"
         agent.control_token = "private-action-token"
-        entry = SimpleNamespace(data={"api_key": "private-provider-key"})
+        agent.diagnostics = SimpleNamespace(record=Mock(), clear=Mock())
+        entry = SimpleNamespace(data={
+            "provider": "deepseek", "api_key": "private-provider-key", "model": "deepseek-flash",
+        })
         agent.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: [entry]))
         return agent
-
-    async def test_other_administrator_cannot_run_or_abort_session(self):
-        agent = self.agent()
-        operations = (
-            lambda: agent.run("bob", "ses_alice", "test"),
-            lambda: agent.abort("bob", "ses_alice"),
-        )
-        for operation in operations:
-            with self.assertRaises(AgentError) as error:
-                await operation()
-            self.assertEqual(error.exception.code, "not_found")
-        agent.ensure.assert_not_awaited()
-        agent.request.assert_not_awaited()
 
     async def test_busy_does_not_start_another_root_command(self):
         agent = self.agent()
@@ -46,6 +36,28 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 await agent.run("alice", "ses_alice", "test")
             self.assertEqual(error.exception.code, "busy")
         agent.ensure.assert_not_awaited()
+
+    async def test_run_preserves_active_capability_tuple_and_clears_old_diagnostic(self):
+        agent = self.agent()
+        result = await agent.run("alice", "ses_alice", "test")
+        self.assertEqual(result["session_id"], "ses_alice")
+        self.assertEqual(agent.active, None)
+        self.assertEqual(agent.request.await_args_list[0].args[:2],
+                         ("POST", "session/ses_alice/message"))
+        self.assertEqual(agent.request.await_args_list[1].args[:2],
+                         ("GET", "session/ses_alice/message?limit=60"))
+        agent.diagnostics.clear.assert_called_once_with("alice", "ses_alice")
+
+    async def test_model_error_is_not_hidden_and_safe_diagnostic_is_recorded(self):
+        agent = self.agent()
+        agent.request.side_effect = [{"info": {"error": {
+            "name": "APIError", "message": "provider response includes private-key",
+            "data": {"statusCode": 400},
+        }} }, None]
+        with self.assertRaises(AgentError) as error:
+            await agent.run("alice", "ses_alice", "test")
+        self.assertEqual(error.exception.code, "model_error")
+        agent.diagnostics.record.assert_called_once()
 
     def test_history_omits_tool_outputs_reasoning_and_synthetic_secrets(self):
         agent = self.agent()

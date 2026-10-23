@@ -10,9 +10,8 @@ from homeassistant.helpers.device_registry import (
     DeviceRegistry,
     _DeprecatedDeviceRegistryItemsView,
 )
-from homeassistant.helpers.selector import SelectSelector
 from homeassistant.components.habab_home.setup_actions import execute, flow_result
-from probatio import Required
+from homeassistant.components.habab_home.const import DOMAIN
 
 
 class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -20,22 +19,17 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
         result = flow_result({"type": "create_entry", "flow_id": "flow-one", "title": "Private",
             "data": {"api_key": "fixture-private-key"}, "result": object(),
             "description_placeholders": {"token": "fixture-private-token"}})
-        self.assertEqual(result, {"type": "create_entry", "flow_id": "flow-one", "fields": []})
+        self.assertEqual(result, {"phase": "progress", "flow_id": "flow-one"})
 
-    def test_flow_result_exposes_field_types_and_select_options_without_defaults(self):
+    def test_flow_result_never_exposes_generic_form_schema_or_external_urls(self):
         result = flow_result({"type": "form", "flow_id": "flow-one", "step_id": "user",
-            "data_schema": SimpleNamespace(schema={
-                Required("api_key", default="fixture-schema-secret"): str,
-                "transport": SelectSelector({"options": ["serial", "wifi"]}),
-            }),
+            "data_schema": {"api_key": "fixture-schema-secret"},
             "data": {"api_key": "fixture-entry-secret"},
-            "description_placeholders": {"secret": "fixture-placeholder-secret"}})
-        self.assertEqual(result["fields"], [
-            {"name": "api_key", "type": "str"},
-            {"name": "transport", "type": "select", "options": ["serial", "wifi"]},
-        ])
+            "description_placeholders": {"secret": "fixture-placeholder-secret"},
+            "url": "https://example.invalid/oauth?state=fixture-url-secret"})
+        self.assertEqual(result, {"phase": "form", "flow_id": "flow-one", "step_id": "user"})
         serialized = json.dumps(result)
-        for secret in ("fixture-schema-secret", "fixture-entry-secret", "fixture-placeholder-secret"):
+        for secret in ("fixture-schema-secret", "fixture-entry-secret", "fixture-placeholder-secret", "fixture-url-secret"):
             self.assertNotIn(secret, serialized)
 
     async def test_devices_uses_iterable_device_entries_and_resolves_entities(self):
@@ -82,43 +76,28 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("fixture-flow-secret", json.dumps(result))
 
     async def test_owner_must_explicitly_adopt_unowned_discovered_flow(self):
-        flow = {"flow_id": "discover-one", "handler": "test_integration", "type": "form",
-            "step_id": "user", "context": {"source": "zeroconf", "secret": "fixture-secret"},
-            "data": {"password": "fixture-entry-secret"}}
-        flow_results = [flow,
-            {"flow_id": "foreign-flow", "context": {"source": "dhcp"}},
-            {"flow_id": "user-flow", "context": {"source": "user"}}]
-        hass = SimpleNamespace(config_entries=SimpleNamespace(flow=SimpleNamespace(
-            async_progress=lambda: flow_results)))
-        manager = SimpleNamespace(flow_owners={})
-        result = await execute(hass, manager, "alice", {
+        result = {"interaction_id": "interaction-one", "flow_id": "discover-one", "phase": "form"}
+        controller = SimpleNamespace(agent_action=AsyncMock(return_value=result))
+        hass = SimpleNamespace(data={DOMAIN: {"integration_setup": controller}})
+        manager = SimpleNamespace()
+        actual = await execute(hass, manager, "alice", {
             "action": "adopt_discovered_flow", "flow_id": "discover-one"})
-        self.assertEqual(manager.flow_owners, {"discover-one": ("alice", "config")})
-        self.assertEqual(result, {"type": "form", "flow_id": "discover-one", "step_id": "user", "fields": []})
-        self.assertNotIn("fixture-secret", json.dumps(result))
-        self.assertNotIn("fixture-entry-secret", json.dumps(result))
-
-        with self.assertRaises(ValueError):
-            await execute(hass, manager, "bob", {
-                "action": "adopt_discovered_flow", "flow_id": "discover-one"})
-        self.assertEqual(manager.flow_owners, {"discover-one": ("alice", "config")})
-
-        manager.flow_owners["foreign-flow"] = ("bob", "config")
-        for flow_id in ("foreign-flow", "user-flow"):
-            with self.subTest(flow_id=flow_id), self.assertRaises(ValueError):
-                await execute(hass, manager, "alice", {
-                    "action": "adopt_discovered_flow", "flow_id": flow_id})
-        self.assertEqual(manager.flow_owners, {
-            "discover-one": ("alice", "config"), "foreign-flow": ("bob", "config")})
+        self.assertEqual(actual, result)
+        controller.agent_action.assert_awaited_once_with("alice", "adopt_discovered_flow", {
+            "action": "adopt_discovered_flow", "flow_id": "discover-one"})
 
     async def test_another_owner_cannot_continue_a_configuration_flow(self):
-        configure = AsyncMock()
-        hass = SimpleNamespace(config_entries=SimpleNamespace(flow=SimpleNamespace(async_configure=configure)))
-        manager = SimpleNamespace(flow_owners={"flow-one": ("alice", "config")})
-        with self.assertRaises(ValueError):
-            await execute(hass, manager, "bob", {"action": "continue_integration", "flow_id": "flow-one", "input": {}})
-        configure.assert_not_awaited()
+        controller = SimpleNamespace(agent_action=AsyncMock(side_effect=ValueError("unknown_flow")))
+        hass = SimpleNamespace(data={DOMAIN: {"integration_setup": controller}})
+        with self.assertRaisesRegex(ValueError, "unknown_flow"):
+            await execute(hass, None, "bob", {
+                "action": "continue_integration", "flow_id": "flow-one", "input": {}})
+        controller.agent_action.assert_awaited_once()
 
     async def test_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):
             await execute(None, None, "alice", {"action": "shell", "command": "anything"})
+
+
+if __name__ == "__main__":
+    unittest.main()
