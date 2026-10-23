@@ -19,7 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .agent_diagnostics import AgentDiagnostics
 from .const import DOMAIN
-from .openai_transport import base_url as openai_base_url
+from .providers import PROVIDERS, provider_api_base
 from .runtime_context import (
     DOCKER_RUNTIME_KIND,
     RUNTIME_KIND_ENV,
@@ -127,12 +127,26 @@ class SetupAgent:
 
     def settings(self):
         entries = self.hass.config_entries.async_entries(DOMAIN)
+        supported = set(PROVIDERS)
+        for entry in entries:
+            if (entry.data.get("provider") in supported
+                    and getattr(entry, "options", {}).get("assistant_selected")):
+                return entry.data
         # Preserve the established provider when both are configured.
-        for provider in ("deepseek", "openai"):
+        for provider in ("deepseek", "openai", "habab", "gemini"):
             for entry in entries:
                 if entry.data.get("provider") == provider:
                     return entry.data
         raise AgentError("provider_required")
+
+    def select_provider(self, provider):
+        """Persist an explicit UI selection without removing voice connections."""
+        entries = self.hass.config_entries.async_entries(DOMAIN)
+        if not any(entry.data.get("provider") == provider for entry in entries):
+            raise AgentError("provider_required")
+        for entry in entries:
+            options = {**entry.options, "assistant_selected": entry.data.get("provider") == provider}
+            self.hass.config_entries.async_update_entry(entry, options=options)
 
     async def request(self, method, route, body=None, timeout=15):
         session = async_get_clientsession(self.hass)
@@ -162,9 +176,10 @@ class SetupAgent:
             raise AgentError("unsupported_runtime") from error
 
         settings = self.settings()
-        is_openai = settings.get("provider") == "openai"
-        provider_id = "habab-openai" if is_openai else "habab-deepseek"
-        key_name = "HABAB_OPENAI_KEY" if is_openai else "HABAB_DEEPSEEK_KEY"
+        provider = settings["provider"]
+        is_deepseek = provider == "deepseek"
+        provider_id = "habab-" + provider
+        key_name = "HABAB_" + provider.upper() + "_KEY"
         fingerprint = runtime_fingerprint(settings, runtime_kind)
         if self.process and self.process.returncode is None and fingerprint == self.fingerprint:
             return
@@ -183,12 +198,12 @@ class SetupAgent:
                            "edit": "allow", "glob": "allow", "grep": "allow",
                            "external_directory": "allow"},
             "provider": {provider_id: {
-                "npm": "@ai-sdk/openai-compatible", "name": "OpenAI" if is_openai else "DeepSeek",
-                "options": {"baseURL": openai_base_url() if is_openai else "https://api.deepseek.com",
+                "npm": "@ai-sdk/openai-compatible", "name": PROVIDERS[provider]["name"],
+                "options": {"baseURL": provider_api_base(provider),
                             "apiKey": "{env:" + key_name + "}"},
                 "models": {settings["model"]: {"name": settings["model"],
                     "limit": {"context": 131072, "output": 4096},
-                    "options": {} if is_openai else {"thinking": {"type": "disabled"}}}},
+                    "options": {"thinking": {"type": "disabled"}} if is_deepseek else {}}},
             }},
             "agent": {"build": {"prompt": prompt, "steps": 12}},
         }
@@ -253,11 +268,12 @@ class SetupAgent:
         if self.lock.locked():
             raise AgentError("busy")
         async with self.lock:
+            settings = self.settings()
             await self.ensure()
             self.active = (owner, session_id)
             try:
                 response = await self.request("POST", f"session/{session_id}/message", {
-                    "agent": "build", "model": {"providerID": "habab-deepseek", "modelID": self.settings()["model"]},
+                    "agent": "build", "model": {"providerID": "habab-" + settings["provider"], "modelID": settings["model"]},
                     "parts": [{"type": "text", "text": text}],
                 }, timeout=180)
                 if response.get("info", {}).get("error"):

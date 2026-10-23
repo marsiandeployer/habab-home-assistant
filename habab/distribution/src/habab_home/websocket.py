@@ -101,6 +101,7 @@ async def list_connections(hass, connection, msg):
         entries.append({
             "entry_id": entry.entry_id, "provider": entry.data["provider"],
             "model": entry.data["model"], "state": entry.state.value,
+            "assistant_selected": bool(entry.options.get("assistant_selected")),
             "entities": entities,
         })
     connection.send_result(msg["id"], {"connections": entries})
@@ -131,6 +132,11 @@ async def save_connection(hass, connection, msg):
             return
         if result["type"] == "abort" and result.get("reason") != "reconfigured":
             connection.send_error(msg["id"], "setup_failed", "setup_failed")
+            return
+        try:
+            hass.data[DOMAIN]["setup_agent"].select_provider(msg["provider"])
+        except AgentError as error:
+            connection.send_error(msg["id"], error.code, error.code)
             return
     # Do not send the flow result: it contains a ConfigEntry with the key.
     connection.send_result(msg["id"], {"saved": True, "tool_call_verified": True})

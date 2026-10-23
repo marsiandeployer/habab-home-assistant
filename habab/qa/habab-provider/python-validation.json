@@ -1,0 +1,19 @@
+{
+  "base_commit": "748ba238ab9e957a3f63eb5d77f4638ce9c3d652",
+  "source_overlay": true,
+  "foreign_realtime_wip_excluded": true,
+  "deployed": false,
+  "real_service_e2e": false,
+  "network": "none",
+  "exit_code": 0,
+  "output": "LAN alias homeassistant.local is already used by another host; not publishing\n.........................................................................................................................................\n----------------------------------------------------------------------\nRan 137 tests in 0.478s\n\nOK\n",
+  "sha256": {
+    "src/habab_home/providers.py": "b5c63221279259b4c0fa35d5735d43ddf41049b92fd8df358326ddf666a16321",
+    "src/habab_home/setup_agent.py": "0786272954fb534853d43b535a560ab989639c8380061b0893a8c4d930e79a6a",
+    "src/habab_home/websocket.py": "cc0c4bb1fbf86cf93b71d4d6c593ce8b906ed9dd23cf0e8617577283c1a7dae3",
+    "src/habab_home/frontend/ai-panel.js": "01cd5eb83491df0bd121c65f4cbee4d499c0851c1f3e8dfcaaf0c948d49f0591",
+    "src/habab_home/frontend/strings.js": "fd3b451466e8baae9cc2f4d0a23ad1ccca8345ca27109a14d513fc1e223d05cf",
+    "tests/test_setup_agent.py": "7e0c21f43a0102933bf4a23385cf393f52bcca08a7a9cfec1cd23f62871b34a0",
+    "tests/test_voice.py": "b75f146b77508bfeaac98f5a5dadefb77fbeb5b68c7e8c931f5e24156578564a"
+  }
+}

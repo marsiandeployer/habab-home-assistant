@@ -1,5 +1,8 @@
 export const strings = {
   ru: {
+    hababOpen: "Открыть Habab",
+    savedForAssistant: "Подключение сохранено и выбрано для чата",
+    hababGuide: ["Получите ключ доступа у администратора сервиса Habab. Это отдельный ключ, не ключ OpenAI или DeepSeek.", "При выборе Habab запросы отправляются на сервер Habab. Он выбирает внешнего провайдера.", "Введите выданный ключ и модель, затем нажмите «Проверить и сохранить»."],
     telegramTitle: "Telegram",
     telegramIntro: "Подключите отдельного бота для общения с помощником. Он использует ту же локальную установку OpenCode внутри Home Assistant, но ведёт отдельный контекст Telegram.",
     telegramSecurity: "Создайте бота через @BotFather и вставьте его токен. Токен сохранит интеграция Home Assistant; он не показывается после подключения.",
@@ -69,6 +72,9 @@ export const strings = {
     geminiGuide: ["Откройте Google AI Studio и раздел API keys.", "Выберите или создайте проект, получите ключ Gemini API. Проверьте ограничения ключа и квоты проекта.", "Вставьте ключ и имя модели, затем нажмите «Проверить и сохранить»."],
   },
   en: {
+    hababOpen: "Open Habab",
+    savedForAssistant: "Connection saved and selected for chat",
+    hababGuide: ["Get an access key from the Habab service administrator. This is a separate key, not an OpenAI or DeepSeek key.", "Selecting Habab sends requests to the Habab server, which chooses the upstream provider.", "Enter the issued key and model, then select Check and save."],
     telegramTitle: "Telegram",
     telegramIntro: "Connect a separate bot to chat with your assistant. It uses the same local OpenCode installation inside Home Assistant, with a separate Telegram context.",
     telegramSecurity: "Create a bot with @BotFather and enter its token. The Home Assistant integration stores the token; it is not shown after connecting.",

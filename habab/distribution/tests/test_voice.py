@@ -9,7 +9,7 @@ import unittest
 import asyncio
 import inspect
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.habab_home.assist_adapter import parse_calls
 from homeassistant.components.habab_home.providers import (
@@ -61,13 +61,21 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
     def settings(self, provider="deepseek"):
         return {"provider": provider, "api_key": "fixture-not-a-real-key", "model": PROVIDERS[provider]["model"]}
 
-    async def test_all_three_fixed_endpoints_and_tool_checks(self):
+    async def test_all_fixed_endpoints_and_tool_checks(self):
         for provider in PROVIDERS:
             session = Session(Response(payload=message()))
             await ProviderClient(session, self.settings(provider)).check()
             self.assertEqual(session.request["url"], PROVIDERS[provider]["url"])
             self.assertFalse(session.request["allow_redirects"])
             self.assertEqual(session.request["json"]["tool_choice"]["function"]["name"], "habab_connection_test")
+
+    async def test_old_openai_relay_environment_cannot_reroute_direct_providers(self):
+        with patch.dict("os.environ", {"HABAB_OPENAI_BASE_URL": "https://old-relay.test/v1"}):
+            for provider in ("openai", "deepseek", "habab"):
+                session = Session(Response(payload=message()))
+                await ProviderClient(session, self.settings(provider)).check()
+                self.assertEqual(session.request["url"], PROVIDERS[provider]["url"])
+                self.assertEqual(session.request["headers"]["Authorization"], "Bearer fixture-not-a-real-key")
 
     async def test_rejected_auth_quota_and_redirect_do_not_become_success(self):
         for status, code in [(401, "invalid_auth"), (403, "invalid_auth"),
@@ -102,6 +110,31 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         })
         flow.async_abort.assert_called_once_with("failed-flow")
         connection.send_error.assert_called_once_with(1, "invalid_auth", "invalid_auth")
+        connection.send_result.assert_not_called()
+
+    async def test_successful_save_selects_provider_without_returning_flow_credentials(self):
+        flow = SimpleNamespace(async_init=AsyncMock(return_value={"type": "create_entry", "data": {"api_key": "fixture-secret"}}))
+        agent = SimpleNamespace(select_provider=Mock())
+        hass = SimpleNamespace(data={"habab_home": {"settings_lock": asyncio.Lock(), "setup_agent": agent}},
+                               config_entries=SimpleNamespace(flow=flow))
+        connection = Mock()
+        await inspect.unwrap(save_connection)(hass, connection, {
+            "id": 1, "provider": "habab", "api_key": "fixture-secret", "model": "gpt-4.1-mini",
+        })
+        agent.select_provider.assert_called_once_with("habab")
+        connection.send_result.assert_called_once_with(1, {"saved": True, "tool_call_verified": True})
+
+    async def test_provider_removed_during_save_returns_safe_error(self):
+        from homeassistant.components.habab_home.setup_agent import AgentError
+        flow = SimpleNamespace(async_init=AsyncMock(return_value={"type": "create_entry"}))
+        agent = SimpleNamespace(select_provider=Mock(side_effect=AgentError("provider_required")))
+        hass = SimpleNamespace(data={"habab_home": {"settings_lock": asyncio.Lock(), "setup_agent": agent}},
+                               config_entries=SimpleNamespace(flow=flow))
+        connection = Mock()
+        await inspect.unwrap(save_connection)(hass, connection, {
+            "id": 1, "provider": "habab", "api_key": "fixture-secret", "model": "gpt-4.1-mini",
+        })
+        connection.send_error.assert_called_once_with(1, "provider_required", "provider_required")
         connection.send_result.assert_not_called()
 
 

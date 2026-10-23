@@ -68,6 +68,41 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                          ("GET", "session/ses_alice/message?limit=60"))
         agent.diagnostics.clear.assert_called_once_with("alice", "ses_alice")
 
+    async def test_actual_message_uses_selected_provider_instead_of_hardcoded_deepseek(self):
+        for provider in ("openai", "habab"):
+            agent = self.agent()
+            agent.settings = Mock(return_value={"provider": provider, "model": "gpt-4.1-mini", "api_key": "fixture-key"})
+            await agent.run("alice", "ses_alice", "test")
+            self.assertEqual(agent.request.await_args_list[0].args[2]["model"],
+                             {"providerID": "habab-" + provider, "modelID": "gpt-4.1-mini"})
+
+    async def test_selection_changed_during_startup_applies_to_next_turn(self):
+        agent = self.agent()
+        old = {"provider": "deepseek", "model": "deepseek-flash", "api_key": "fixture-key"}
+        agent.settings = Mock(return_value=old)
+        async def change_selection():
+            agent.settings.return_value = {"provider": "habab", "model": "gpt-4.1-mini", "api_key": "fixture-new-key"}
+        agent.ensure = change_selection
+        await agent.run("alice", "ses_alice", "test")
+        self.assertEqual(agent.request.await_args_list[0].args[2]["model"],
+                         {"providerID": "habab-deepseek", "modelID": "deepseek-flash"})
+
+    def test_selection_survives_new_runtime_without_deleting_other_connections(self):
+        entries = [SimpleNamespace(data={"provider": p}, options={}) for p in ("deepseek", "habab", "openai")]
+        def update(entry, *, options):
+            entry.options = options
+        agent = object.__new__(SetupAgent)
+        agent.hass = SimpleNamespace(config_entries=SimpleNamespace(
+            async_entries=lambda _: entries, async_update_entry=update))
+        agent.select_provider("habab")
+        restarted = object.__new__(SetupAgent)
+        restarted.hass = agent.hass
+        self.assertIs(restarted.settings(), entries[1].data)
+        restarted.select_provider("openai")
+        self.assertIs(restarted.settings(), entries[2].data)
+        self.assertEqual(sum(bool(e.options["assistant_selected"]) for e in entries), 1)
+        self.assertEqual(len(entries), 3)
+
     async def test_model_error_is_not_hidden_and_safe_diagnostic_is_recorded(self):
         agent = self.agent()
         agent.request.side_effect = [{"info": {"error": {
@@ -162,23 +197,24 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
             runtime_fingerprint(settings, ANDROID_PROOT_RUNTIME_KIND),
         )
 
-    async def test_openai_uses_selected_endpoint_and_only_its_private_key(self):
-        agent = object.__new__(SetupAgent)
-        agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
-        agent.password = "private-password"; agent.control_token = "private-control"
-        agent.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
-        agent.settings = Mock(return_value={"provider": "openai", "model": "gpt-4.1-mini", "api_key": "test-openai-key"})
-        agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
-        with patch.dict("os.environ", {"HABAB_OPENAI_BASE_URL": "https://voice.example.test/v1"}):
-            with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
-                await agent.ensure()
-        env = spawn.await_args.kwargs["env"]
-        config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
-        self.assertEqual(config["enabled_providers"], ["habab-openai"])
-        self.assertEqual(config["provider"]["habab-openai"]["options"]["baseURL"], "https://voice.example.test/v1")
-        self.assertEqual(env["HABAB_OPENAI_KEY"], "test-openai-key")
-        self.assertNotIn("HABAB_DEEPSEEK_KEY", env)
-        self.assertNotIn("test-openai-key", env["OPENCODE_CONFIG_CONTENT"])
+    async def test_selected_provider_fixed_route_and_private_key_despite_old_relay_env(self):
+        for provider, expected_base in (("openai", "https://api.openai.com/v1"), ("habab", "https://habab-voice.wpmix.net/v1")):
+            agent = object.__new__(SetupAgent)
+            agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
+            agent.password = "private-password"; agent.control_token = "private-control"
+            agent.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
+            agent.settings = Mock(return_value={"provider": provider, "model": "gpt-4.1-mini", "api_key": "fixture-selected-key"})
+            agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
+            with patch.dict("os.environ", {"HABAB_OPENAI_BASE_URL": "https://voice.example.test/v1"}):
+                with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
+                    await agent.ensure()
+            env = spawn.await_args.kwargs["env"]
+            config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+            self.assertEqual(config["enabled_providers"], ["habab-" + provider])
+            self.assertEqual(config["provider"]["habab-" + provider]["options"]["baseURL"], expected_base)
+            self.assertEqual(env["HABAB_" + provider.upper() + "_KEY"], "fixture-selected-key")
+            self.assertNotIn("HABAB_DEEPSEEK_KEY", env)
+            self.assertNotIn("fixture-selected-key", env["OPENCODE_CONFIG_CONTENT"])
 
     async def test_unknown_runtime_fails_before_settings_or_process_spawn(self):
         agent = object.__new__(SetupAgent)

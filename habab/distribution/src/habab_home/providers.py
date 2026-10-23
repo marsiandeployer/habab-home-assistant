@@ -1,4 +1,4 @@
-"""Bounded server-side transports for the three explicitly selected providers."""
+"""Bounded server-side transports for explicitly selected providers."""
 
 import asyncio
 import json
@@ -6,9 +6,13 @@ import re
 from typing import Any
 
 import aiohttp
-from .openai_transport import endpoint as openai_endpoint
 
 PROVIDERS = {
+    "habab": {
+        "name": "Habab",
+        "url": "https://habab-voice.wpmix.net/v1/chat/completions",
+        "model": "gpt-4.1-mini",
+    },
     "openai": {
         "name": "OpenAI",
         "url": "https://api.openai.com/v1/chat/completions",
@@ -27,6 +31,11 @@ PROVIDERS = {
 }
 MAX_RESPONSE_BYTES = 1024 * 1024
 REQUEST_TIMEOUT = 25
+
+
+def provider_api_base(provider: str) -> str:
+    """Return the explicitly selected provider's API; never infer a relay."""
+    return PROVIDERS[provider]["url"].removesuffix("/chat/completions")
 
 
 class ProviderError(Exception):
@@ -89,7 +98,7 @@ class ProviderClient:
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):
                 async with self.session.post(
-                    openai_endpoint("chat/completions") if provider == "openai" else PROVIDERS[provider]["url"],
+                    PROVIDERS[provider]["url"],
                     headers={"Authorization": f"Bearer {self.settings['api_key']}"},
                     json=body,
                     allow_redirects=False,

@@ -2,6 +2,7 @@ import { strings } from "./strings.js";
 import "./telemetry-panel.js";
 
 const providers = {
+  habab: { name: "Habab", model: "gpt-4.1-mini", keyUrl: "https://habab.ru/" },
   openai: { name: "OpenAI", model: "gpt-4.1-mini", keyUrl: "https://platform.openai.com/api-keys" },
   deepseek: { name: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
   gemini: { name: "Google Gemini", model: "gemini-3.8-flash", keyUrl: "https://aistudio.google.com/api-keys" },
@@ -106,6 +107,7 @@ class HababAIPanel extends HTMLElement {
     const provider = providers[this.provider];
     this.q("#provider-title").textContent = provider.name;
     this.q("#key-link").href = provider.keyUrl;
+    this.q("#key-link").textContent = this.t(this.provider === "habab" ? "hababOpen" : "getKey");
     this.q("#model").value = this.entry()?.model || provider.model;
     this.q("#key").value = "";
     this.q("#key").type = "password";
@@ -138,7 +140,7 @@ class HababAIPanel extends HTMLElement {
     const entry = this.entry();
     this.shadowRoot.querySelectorAll("button,input,textarea").forEach((item) => { item.disabled = !!this.busy; });
     this.q("#check").disabled = !!this.busy || !entry;
-    this.q("#connection-status").textContent = this.t(entry ? "saved" : "disconnected");
+    this.q("#connection-status").textContent = this.t(entry?.assistant_selected ? "savedForAssistant" : entry ? "saved" : "disconnected");
     const openAssistant = this.q("#open-assistant");
     openAssistant.disabled = !!this.busy || window.hababAssistant?.available !== true;
     this.q("#assistant-status").textContent = window.hababAssistant?.available === true
