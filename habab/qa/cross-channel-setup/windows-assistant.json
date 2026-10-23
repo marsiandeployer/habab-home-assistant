@@ -1,0 +1,34 @@
+{
+  "scope": "Read-only assistant request in own user Windows background tab",
+  "settings_or_device_writes_requested": false,
+  "inventory": {
+    "states": 12,
+    "vacuums": 0,
+    "integration_domains": [
+      "analytics",
+      "backup",
+      "google_translate",
+      "habab_home",
+      "met",
+      "radio_browser",
+      "shopping_list"
+    ]
+  },
+  "start": {
+    "session_ready": true,
+    "status": ""
+  },
+  "turn": {
+    "status": "",
+    "last_role": "assistant",
+    "answer": "Связь работает.\n\nПылесоса нет. Интеграций 7 (analytics, backup, shopping_list, radio_browser, google_translate, met, habab_home), устройств 3 — все служебные (Backup, Google TTS, Met.no Forecast). Вакуумных устройств/сущностей не обнаружено.",
+    "diagnostics": {
+      "active": false,
+      "runtime_status": "running",
+      "error": null
+    }
+  },
+  "verdict": "READ_ONLY_TURN_RETURNED",
+  "own_tabs_closed": true,
+  "recorded_at_utc": "2026-10-23T16:47:18.876148+00:00"
+}

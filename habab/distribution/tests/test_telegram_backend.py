@@ -55,6 +55,42 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.pending_sends = {}
         return manager
 
+    async def test_setup_completion_rechecks_active_owner_exact_bot_and_current_private_binding(self):
+        manager = self.manager()
+        entry = SimpleNamespace(entry_id="entry", data={
+            "owner_id": "alice", "bot_username": "testbot", "bot_id": 99,
+        })
+        manager.hass.config_entries = SimpleNamespace(async_entries=lambda _domain: [entry])
+        manager.bindings = {"entry": {"chat_id": "10", "user_id": "20", "bot_id": 99}}
+        manager.entries["entry"].update(ready=True, username="testbot")
+        manager.send = AsyncMock(return_value=True)
+        origin = {"channel": "telegram", "owner": "alice", "entry_id": "entry",
+                  "chat_id": "10", "bot_id": 99}
+        self.assertTrue(await manager.notify_setup_complete(origin, "fixture"))
+        manager.send.assert_awaited_once_with(
+            "entry", "10", "Настройка fixture завершена: интеграция загружена в Home Assistant.")
+        manager.send.reset_mock()
+        entry.data["bot_id"] = 100
+        entry.data["bot_username"] = "replacementbot"
+        manager.bindings["entry"]["bot_id"] = 100
+        manager.entries["entry"]["username"] = "replacementbot"
+        self.assertFalse(await manager.notify_setup_complete(origin, "fixture"))
+        manager.send.assert_not_awaited()
+        entry.data["bot_id"] = 99
+        entry.data["bot_username"] = "testbot"
+        manager.bindings["entry"]["bot_id"] = 99
+        manager.entries["entry"]["username"] = "testbot"
+        manager.bindings["entry"]["chat_id"] = "11"
+        self.assertFalse(await manager.notify_setup_complete(origin, "fixture"))
+        manager.bindings["entry"]["chat_id"] = "10"
+        manager.send.return_value = False
+        self.assertFalse(await manager.notify_setup_complete(origin, "fixture"))
+        manager.send.reset_mock()
+        manager.hass.auth.async_get_user.return_value = SimpleNamespace(is_active=False, is_admin=True)
+        self.assertFalse(await manager.notify_setup_complete(
+            {**origin, "chat_id": "11"}, "fixture"))
+        manager.send.assert_not_awaited()
+
     async def test_identity_and_private_chat_are_enforced(self):
         manager = self.manager()
         entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_username": "testbot"})

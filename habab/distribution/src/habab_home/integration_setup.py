@@ -9,11 +9,17 @@ from urllib.parse import urlsplit
 import probatio
 
 from homeassistant.components import websocket_api
-from homeassistant.config_entries import DISCOVERY_SOURCES, SOURCE_USER
+from homeassistant.config_entries import (
+    DISCOVERY_SOURCES,
+    SIGNAL_CONFIG_ENTRY_CHANGED,
+    SOURCE_USER,
+)
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
 from homeassistant.data_entry_flow import InvalidData, UnknownFlow
 from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry, entity_registry
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.translation import async_get_translations
 
 from .const import DOMAIN
@@ -161,6 +167,89 @@ class IntegrationSetup:
         self._flow_locks = {}
         self._flow_lock_refs = {}
         self._creation_locks = {}
+        self._completion_tasks = set()
+        self._unsubscribe_entry_changes = lambda: None
+        if hasattr(hass, "data") and hasattr(hass, "bus"):
+            self._unsubscribe_entry_changes = async_dispatcher_connect(
+                hass, SIGNAL_CONFIG_ENTRY_CHANGED, self._entry_changed
+            )
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, self._startup_entries_loaded)
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._stop_listener)
+
+    @callback
+    def _stop_listener(self, _event):
+        self.hass.async_create_task(self.close())
+
+    @callback
+    def _startup_entries_loaded(self, _event):
+        for entry in self.hass.config_entries.async_entries():
+            if entry.state.value == "loaded":
+                self._entry_changed(None, entry)
+
+    async def close(self):
+        """Unregister the native entry-state watcher during unload."""
+        self._unsubscribe_entry_changes()
+        tasks = tuple(self._completion_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._completion_tasks.clear()
+
+    @callback
+    def _entry_changed(self, _change, entry):
+        if entry.state.value != "loaded":
+            return
+        xiaomi = self.hass.data.get(DOMAIN, {}).get("xiaomi_setup")
+        if xiaomi is not None and entry.domain == "xiaomi_home":
+            task = self.hass.async_create_task(xiaomi.entry_loaded(entry))
+            self._completion_tasks.add(task)
+            task.add_done_callback(self._completion_tasks.discard)
+        for record in tuple(self.interactions.values()):
+            if record.get("entry_id") != entry.entry_id or record.get("kind") != "config":
+                continue
+            if record.get("phase") == "progress":
+                self._add_entry_state(record, entry.entry_id)
+            if record.get("phase") == "done":
+                self._schedule_completion(record)
+
+    def _schedule_completion(self, record):
+        origin = record.get("trusted_origin")
+        if not origin or origin.get("channel") != "telegram" or record.get("completion_delivered"):
+            return
+        task = record.get("completion_task")
+        if task and not task.done():
+            return
+        if not hasattr(self.hass, "async_create_task"):
+            return
+        task = self.hass.async_create_task(self._notify_completion(record))
+        record["completion_task"] = task
+        self._completion_tasks.add(task)
+        task.add_done_callback(self._completion_tasks.discard)
+
+    def retry_pending_completions(self):
+        for record in tuple(self.interactions.values()):
+            entry = self.hass.config_entries.async_get_entry(record.get("entry_id"))
+            if (record.get("phase") == "done" and entry is not None
+                    and entry.state.value == "loaded"):
+                self._schedule_completion(record)
+
+    async def _notify_completion(self, record):
+        try:
+            await self._require_active_admin(record["owner"])
+            entry = self.hass.config_entries.async_get_entry(record.get("entry_id"))
+            if (entry is None or entry.state.value != "loaded"
+                    or entry.domain != record.get("domain")):
+                return
+            manager = self.hass.data.get("habab_telegram")
+            if manager is None:
+                return
+            if await manager.notify_setup_complete(record["trusted_origin"], record["domain"]):
+                record["completion_delivered"] = True
+        except Exception:
+            return
+        finally:
+            record.pop("completion_task", None)
 
     @property
     def flow_owners(self):
@@ -174,6 +263,11 @@ class IntegrationSetup:
         if not record or record["owner"] != owner:
             raise ValueError("unknown_interaction")
         return record
+
+    async def _require_active_admin(self, owner):
+        user = await self.hass.auth.async_get_user(owner)
+        if not user or not user.is_active or not user.is_admin:
+            raise ValueError("not_allowed")
 
     def _language(self, language):
         if not isinstance(language, str) or len(language) > 20 or not LANGUAGE_PATTERN.fullmatch(language):
@@ -385,6 +479,8 @@ class IntegrationSetup:
                     "errors", "menu_field", "menu_options", "url", "entry_state", "entity_count", "progress"):
             record.pop(key, None)
         record.update(view)
+        if record.get("phase") == "done":
+            self._schedule_completion(record)
 
     async def status(self, owner, language="en"):
         language = self._language(language)
@@ -417,10 +513,12 @@ class IntegrationSetup:
                     continue
             elif record["phase"] == "progress" and record.get("entry_id"):
                 self._add_entry_state(record, record["entry_id"])
+            if record.get("phase") == "done":
+                self._schedule_completion(record)
             result.append(self._public_view(record))
         return {"interactions": result}
 
-    async def start(self, owner, domain, language="en"):
+    async def start(self, owner, domain, language="en", trusted_origin=None):
         language = self._language(language)
         if not isinstance(domain, str) or not DOMAIN_PATTERN.fullmatch(domain):
             raise ValueError("invalid_domain")
@@ -440,10 +538,12 @@ class IntegrationSetup:
                 record.update(phase="error", errors={"base": "setup_failed"})
                 return self._public_view(record)
             record = self._make_record(owner, result.get("flow_id"), domain, "config")
+            if trusted_origin and trusted_origin.get("owner") == owner:
+                record["trusted_origin"] = dict(trusted_origin)
             await self._apply_result(record, result, language)
             return self._public_view(record)
 
-    async def adopt(self, owner, flow_id, language="en"):
+    async def adopt(self, owner, flow_id, language="en", trusted_origin=None):
         language = self._language(language)
         if not isinstance(flow_id, str) or not flow_id or len(flow_id) > 256:
             raise ValueError("unknown_flow")
@@ -458,6 +558,8 @@ class IntegrationSetup:
                     or domain == "xiaomi_home"):
                 raise ValueError("unknown_flow")
             record = self._make_record(owner, flow_id, domain, "config")
+            if trusted_origin and trusted_origin.get("owner") == owner:
+                record["trusted_origin"] = dict(trusted_origin)
         async with self._locked_flow(flow_id):
             if self.interactions.get(record["id"]) is not record or record.get("flow_id") != flow_id:
                 raise ValueError("unknown_interaction")
@@ -577,7 +679,7 @@ class IntegrationSetup:
                 self._flow_locks.pop(flow_id, None)
         return {"dismissed": True}
 
-    async def agent_action(self, owner, action, body):
+    async def agent_action(self, owner, action, body, trusted_origin=None):
         language = getattr(self.hass.config, "language", "en")
         if action == "integration_setup_status":
             state = await self.status(owner, language)
@@ -597,11 +699,11 @@ class IntegrationSetup:
                 summaries.append(summary)
             return {"interactions": summaries}
         if action == "start_integration":
-            view = await self.start(owner, body.get("domain", ""), language)
+            view = await self.start(owner, body.get("domain", ""), language, trusted_origin)
         elif action == "options_start":
             view = await self.options_start(owner, body.get("entry_id"), language)
         elif action == "adopt_discovered_flow":
-            view = await self.adopt(owner, body.get("flow_id"), language)
+            view = await self.adopt(owner, body.get("flow_id"), language, trusted_origin)
         elif action in {"continue_integration", "options_continue"}:
             flow_id = body.get("flow_id")
             kind = "options" if action == "options_continue" else "config"

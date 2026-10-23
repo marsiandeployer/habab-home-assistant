@@ -83,6 +83,44 @@ class AssistantService:
             return self.telegram_sessions.get(key) == session_id
         return False
 
+    async def trusted_origin(self, owner, session_id):
+        """Resolve private setup origin from the active, mapped runtime session."""
+        if self.runtime.active != (owner, session_id):
+            return None
+        await self._require_active_admin(owner)
+        if self.runtime.active != (owner, session_id):
+            return None
+        if self.web_sessions.get(owner) == session_id:
+            return None
+        prefix = f"{owner}:"
+        matches = []
+        for key, mapped in self.telegram_sessions.items():
+            if mapped != session_id or not key.startswith(prefix):
+                continue
+            parts = key[len(prefix):].split(":")
+            if len(parts) == 2 and all(parts):
+                matches.append(parts)
+        if len(matches) != 1:
+            return None
+        entry_id, chat_id = matches[0]
+        if (len(entry_id) > 128 or ":" in entry_id or len(chat_id) > 32
+                or not chat_id.lstrip("-").isdigit()):
+            return None
+        telegram = self.hass.data.get("habab_telegram")
+        if telegram is None:
+            return None
+        entry = telegram.entry_for_owner(owner)
+        binding = telegram.bindings.get(entry_id)
+        state = telegram.entries.get(entry_id)
+        bot_id = entry.data.get("bot_id") if entry is not None and entry.entry_id == entry_id else None
+        if (type(bot_id) is not int or bot_id <= 0 or not binding or not state
+                or binding.get("bot_id") != bot_id or str(binding.get("chat_id")) != chat_id
+                or not state.get("ready") or state.get("chat_id") != chat_id
+                or state.get("user_id") != binding.get("user_id")):
+            return None
+        return {"channel": "telegram", "owner": owner,
+                "entry_id": entry_id, "chat_id": chat_id, "bot_id": bot_id}
+
     async def run(self, owner, channel, session_id, text, entry_id=None, chat_id=None):
         await self._require_active_admin(owner)
         if not self._mapped_session(owner, channel, session_id, entry_id, chat_id):

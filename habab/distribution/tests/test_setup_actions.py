@@ -86,6 +86,17 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
         controller.agent_action.assert_awaited_once_with("alice", "adopt_discovered_flow", {
             "action": "adopt_discovered_flow", "flow_id": "discover-one"})
 
+    async def test_model_body_cannot_supply_completion_origin(self):
+        controller = SimpleNamespace(agent_action=AsyncMock(return_value={"phase": "form"}))
+        hass = SimpleNamespace(data={DOMAIN: {"integration_setup": controller}})
+        forged = {"channel": "telegram", "owner": "mallory", "entry_id": "other", "chat_id": "9"}
+        await execute(hass, None, "alice", {
+            "action": "start_integration", "domain": "fixture", "trusted_origin": forged,
+        })
+        controller.agent_action.assert_awaited_once_with("alice", "start_integration", {
+            "action": "start_integration", "domain": "fixture", "trusted_origin": forged,
+        })
+
     async def test_another_owner_cannot_continue_a_configuration_flow(self):
         controller = SimpleNamespace(agent_action=AsyncMock(side_effect=ValueError("unknown_flow")))
         hass = SimpleNamespace(data={DOMAIN: {"integration_setup": controller}})

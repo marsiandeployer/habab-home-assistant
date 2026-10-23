@@ -1,0 +1,21 @@
+{
+  "base_commit": "7e1cc2fd194cb1eaf1ea027237a34eb3dfc65cdb",
+  "image": "habab-home:shared-chat-0.3.1-20261023",
+  "network": "none",
+  "source_overlay": true,
+  "foreign_voice_wip_excluded": true,
+  "frozen_sha256": {
+    "src/habab_home/assistant.py": "a856c3f30d7c92f85b61439cc6f11a66959f06e5d4132660dc8112677605ad48",
+    "src/habab_home/setup_actions.py": "8357d995987ca84672d0ec6f64ad0efdd339b223ceaa508788acdec646d00f01",
+    "src/habab_home/integration_setup.py": "214fe0392b90765e2177f6489ab3abf553f5ef1297ccb475d2bc781d892eee4b",
+    "src/habab_home/xiaomi_setup.py": "210f38b846ef8bd02927bf15a0394a565a06b1b901d0f5e10013fb31925819d7",
+    "src/habab_telegram/__init__.py": "403c1e5c30c2db345a47c646c07b4077dbd0881f0faa2eb7151eaaeff779b1ea",
+    "tests/test_assistant_service.py": "c7f6d19f3f5f29ddb5467d07ddfaa886b67e31b4981fcb9d8c1d548bad6dd3ea",
+    "tests/test_setup_actions.py": "4f5498311d75aa0cc7825e167d39ee48f103aa18cbd35c5029b58ded37847100",
+    "tests/test_integration_setup.py": "9707c03fbb32bb91b47ce1873e2d410ecf2b0463918f93b682cd2e915d824ad1",
+    "tests/test_xiaomi_setup.py": "55c74bb1262add09c3ac7f6ba79371460c6d98a96ec63fc6b1d37b9e6b99087b",
+    "tests/test_telegram_backend.py": "8ee7ecd3fc028f1b5add252ea339da1d203393e97a63a564684df7d91e0dd1a2"
+  },
+  "exit_code": 0,
+  "test_output": "................................................................................................................\n----------------------------------------------------------------------\nRan 112 tests in 0.487s\n\nOK\n"
+}

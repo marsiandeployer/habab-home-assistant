@@ -1,0 +1,52 @@
+{
+  "goal": "Seamless Telegram and web setup of Home Assistant and devices, including Xiaomi vacuum display",
+  "verified_now": {
+    "windows": {
+      "product_version": "0.3.0",
+      "native_authenticated_admin": true,
+      "real_readonly_web_assistant_turn": "READ_ONLY_TURN_RETURNED",
+      "response_matches_native_integration_domains": true,
+      "integration_domains": [
+        "analytics",
+        "backup",
+        "google_translate",
+        "habab_home",
+        "met",
+        "radio_browser",
+        "shopping_list"
+      ],
+      "vacuum_state_count": 0,
+      "settings_device_provider_changes": 0,
+      "owned_background_tabs_closed": true,
+      "native_registry_device_count": 3,
+      "assistant_device_count_matches_registry": true
+    },
+    "shared_completion_bridge": {
+      "status": "implemented_in_source_not_yet_packaged",
+      "broad_python_tests": 112,
+      "focused_python_tests": 73,
+      "network": "none",
+      "source_overlay": true,
+      "independent_review": "clean_after_two_confirmed_fixes",
+      "original_bot_identity_bound": true,
+      "native_loaded_event_without_web_polling_covered": true,
+      "real_bot_delivery_test": false
+    }
+  },
+  "unverified_or_incomplete": [
+    "Physical Telegram→assistant→HA action→reply on same current installation",
+    "Automatic completion implemented and SDK-tested; real P30 bot delivery remains unverified.",
+    "Windows0.3.1 shared panel UI not yet installed",
+    "Xiaomi connected on this Windows instance: absent integration and vacuum entities",
+    "Physical vacuum presentation on this Windows instance cannot be checked until connected"
+  ],
+  "current_ownership": {
+    "root_worker": "trusted setup completion bridge in shared service/generic/Xiaomi/TG manager",
+    "android_owner": "P30 Realtime/VAD, OpenAI opt-in and real Pyrogram bot QA; separate runtime release"
+  },
+  "proof_limits": [
+    "Correct factual reply is not full command trace attestation.",
+    "Unit transport tests are not a real Telegram delivery test.",
+    "Previous isolated Linux Xiaomi import does not prove this Windows installation."
+  ]
+}

@@ -59,7 +59,7 @@ def discovered_flows(hass, manager):
     return flows[:100]
 
 
-async def execute(hass, manager, owner, body):
+async def execute(hass, manager, owner, body, trusted_origin=None):
     action = body.get("action")
     if action == "discover_devices":
         from .discovery import observe
@@ -69,7 +69,12 @@ async def execute(hass, manager, owner, body):
             raise ValueError("invalid_duration")
         return await observe(hass, manager, duration)
     if action == "xiaomi_setup":
-        return {"setup": await hass.data[DOMAIN]["xiaomi_setup"].request(owner),
+        xiaomi = hass.data[DOMAIN]["xiaomi_setup"]
+        if trusted_origin is None:
+            setup = await xiaomi.request(owner)
+        else:
+            setup = await xiaomi.request(owner, trusted_origin)
+        return {"setup": setup,
                 "instruction": "The owner's setup card is shown inside this Home Assistant chat. It installs the pinned official component, asks before restarting, opens Xiaomi sign-in, and imports devices from the selected homes (a single home is automatic). There is no device-picker or password field in the card. Passwords and verification codes are entered only on the official Xiaomi website. A failed local redirect can be pasted only into the card's protected callback field, never chat messages. Explain only controls for the returned phase."}
     if action == "integrations":
         return {"integrations": [{"entry_id": e.entry_id, "domain": e.domain, "title": e.title,
@@ -105,7 +110,10 @@ async def execute(hass, manager, owner, body):
         return {"called": f"{domain}.{service}", "verification": "Read the affected entity with states to verify the result."}
     if action in {"integration_setup_status", "adopt_discovered_flow", "start_integration",
                   "options_start", "continue_integration", "options_continue"}:
-        return await hass.data[DOMAIN]["integration_setup"].agent_action(owner, action, body)
+        controller = hass.data[DOMAIN]["integration_setup"]
+        if trusted_origin is None:
+            return await controller.agent_action(owner, action, body)
+        return await controller.agent_action(owner, action, body, trusted_origin=trusted_origin)
     raise ValueError("unknown_action")
 
 
@@ -134,7 +142,10 @@ class SetupActionsView(HomeAssistantView):
             body = json.loads(raw)
             if not isinstance(body, dict):
                 raise ValueError("invalid")
-            result = await execute(hass, manager, manager.active[0], body)
+            assistant = hass.data.get(DOMAIN, {}).get("assistant")
+            trusted_origin = (await assistant.trusted_origin(*manager.active)
+                              if assistant is not None else None)
+            result = await execute(hass, manager, manager.active[0], body, trusted_origin)
             # Config flow result data/defaults are deliberately excluded above.
             return self.json(result)
         except Exception as error:

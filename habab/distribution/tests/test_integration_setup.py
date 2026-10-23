@@ -56,6 +56,76 @@ def setup_controller(flow=None, options=None, entries=None):
 
 
 class IntegrationSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_telegram_origin_is_private_and_completion_is_acknowledged_once(self):
+        class Bus:
+            def async_listen_once(self, *_args):
+                return None
+
+        entry = SimpleNamespace(entry_id="entry-one", domain="fixture", state=SimpleNamespace(value="loaded"))
+        telegram = SimpleNamespace(notify_setup_complete=AsyncMock(return_value=True))
+        hass = SimpleNamespace(
+            config=SimpleNamespace(language="en"),
+            config_entries=SimpleNamespace(async_get_entry=lambda entry_id: entry if entry_id == "entry-one" else None),
+            auth=SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(is_active=True, is_admin=True))),
+            data={"habab_telegram": telegram}, bus=Bus(), async_create_task=asyncio.create_task,
+        )
+        runtime = SimpleNamespace(flow_owners={})
+        controller = IntegrationSetup(hass, runtime)
+        record = controller._make_record("alice", None, "fixture", "config")
+        record.update(phase="progress", entry_id="entry-one", trusted_origin={
+            "channel": "telegram", "owner": "alice", "entry_id": "bot-one", "chat_id": "42", "bot_id": 99,
+        })
+        public = controller._public_view(record)
+        self.assertNotIn("trusted_origin", public)
+        with patch.object(setup_module.entity_registry, "async_get", return_value=object()), \
+                patch.object(setup_module.entity_registry, "async_entries_for_config_entry", return_value=[]):
+            controller._entry_changed(None, entry)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertEqual(record["phase"], "done")
+        self.assertTrue(record["completion_delivered"])
+        telegram.notify_setup_complete.assert_awaited_once_with(record["trusted_origin"], "fixture")
+        await controller.close()
+
+    async def test_completion_retries_after_negative_send_ack(self):
+        class Bus:
+            def async_listen_once(self, *_args):
+                return None
+
+        entry = SimpleNamespace(entry_id="entry-one", domain="fixture", state=SimpleNamespace(value="loaded"))
+        telegram = SimpleNamespace(notify_setup_complete=AsyncMock(side_effect=[False, True]))
+        hass = SimpleNamespace(
+            config=SimpleNamespace(language="en"),
+            config_entries=SimpleNamespace(async_get_entry=lambda _entry_id: entry),
+            auth=SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(is_active=True, is_admin=True))),
+            data={"habab_telegram": telegram}, bus=Bus(), async_create_task=asyncio.create_task,
+        )
+        controller = IntegrationSetup(hass, SimpleNamespace(flow_owners={}))
+        record = controller._make_record("alice", None, "fixture", "config")
+        record.update(phase="done", entry_id="entry-one", trusted_origin={"channel": "telegram"})
+        controller._schedule_completion(record)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertNotIn("completion_delivered", record)
+        controller._schedule_completion(record)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertTrue(record["completion_delivered"])
+        self.assertEqual(telegram.notify_setup_complete.await_count, 2)
+        await controller.close()
+
+    async def test_preexisting_web_flow_is_not_relabelled_as_telegram_origin(self):
+        controller, _, _ = setup_controller(flow=FlowManager(initial={
+            "type": "form", "flow_id": "web-flow", "step_id": "user", "data_schema": None,
+        }))
+        record = controller._make_record("alice", "web-flow", "fixture", "config")
+        record.update(phase="form", step_id="user")
+        result = await controller.agent_action("alice", "start_integration", {
+            "domain": "fixture",
+        }, trusted_origin={"channel": "telegram", "owner": "alice", "entry_id": "bot", "chat_id": "42"})
+        self.assertEqual(result["interaction_id"], record["id"])
+        self.assertNotIn("trusted_origin", record)
+
     async def test_uses_native_core_schema_serializer_and_strips_all_defaults(self):
         controller, _, _ = setup_controller()
         schema = vol.Schema({

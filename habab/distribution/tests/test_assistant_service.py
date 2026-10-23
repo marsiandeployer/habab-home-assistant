@@ -64,6 +64,34 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.code, "not_found")
         self.assertEqual(self.runtime.run.await_count, 2)
 
+    async def test_trusted_origin_comes_only_from_active_mapped_session(self):
+        await self.service.setup()
+        self.hass.data = {"habab_telegram": SimpleNamespace(
+            entry_for_owner=Mock(return_value=SimpleNamespace(
+                entry_id="bot-entry", data={"bot_id": 123})),
+            bindings={"bot-entry": {"bot_id": 123, "chat_id": "42", "user_id": "7"}},
+            entries={"bot-entry": {"ready": True, "chat_id": "42", "user_id": "7"}},
+        )}
+        self.service.web_sessions = {"alice": "web-session"}
+        self.service.telegram_sessions = {"alice:bot-entry:42": "tg-session"}
+        self.runtime.active = ("alice", "tg-session")
+        origin = await self.service.trusted_origin("alice", "tg-session")
+        self.assertEqual(origin, {
+            "channel": "telegram", "owner": "alice",
+            "entry_id": "bot-entry", "chat_id": "42", "bot_id": 123,
+        })
+        self.assertIsNone(await self.service.trusted_origin("alice", "web-session"))
+        self.assertIsNone(await self.service.trusted_origin("bob", "tg-session"))
+        self.service.telegram_sessions["alice:other-bot:other-chat"] = "tg-session"
+        self.assertIsNone(await self.service.trusted_origin("alice", "tg-session"))
+        self.service.telegram_sessions.pop("alice:other-bot:other-chat")
+        self.runtime.active = ("alice", "another-session")
+        self.assertIsNone(await self.service.trusted_origin("alice", "tg-session"))
+        self.user.is_active = False
+        self.runtime.active = ("alice", "tg-session")
+        with self.assertRaises(AgentError):
+            await self.service.trusted_origin("alice", "tg-session")
+
     async def test_inactive_or_non_admin_owner_is_rejected_before_runtime(self):
         self.service.web_sessions = {"alice": "web-session"}
         self.user.is_active = False

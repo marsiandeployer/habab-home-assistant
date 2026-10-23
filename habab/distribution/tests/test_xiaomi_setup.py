@@ -150,6 +150,35 @@ class XiaomiSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['phase'],'configuring')
         manager.hass.config_entries.flow.async_init.assert_not_awaited()
 
+    async def test_telegram_origin_survives_restart_and_acknowledges_only_loaded_entry(self):
+        manager = self.manager()
+        origin = {"channel": "telegram", "owner": "alice", "entry_id": "bot-one",
+                  "chat_id": "42", "bot_id": 99}
+        requested = await manager.request("alice", origin)
+        self.assertNotIn("trusted_origin", requested)
+        self.assertEqual(manager.store.data["alice"]["trusted_origin"], origin)
+
+        entry = SimpleNamespace(entry_id="xiaomi-one", state=SimpleNamespace(value="loaded"))
+        manager.hass.config_entries.async_get_entry = lambda entry_id: entry if entry_id == entry.entry_id else None
+        telegram = SimpleNamespace(notify_setup_complete=AsyncMock(return_value=True))
+        manager.hass.data = {"habab_telegram": telegram}
+        manager.records["alice"].update(
+            phase="configuring", entry_id=entry.entry_id, boot_id="previous-boot")
+        stored = deepcopy(manager.records)
+        with patch.object(module, "Store", return_value=MemoryStore(stored)):
+            restarted = XiaomiSetup(manager.hass)
+        await restarted.setup()
+        self.assertEqual(restarted.records["alice"]["trusted_origin"], origin)
+        not_loaded = SimpleNamespace(entry_id="xiaomi-one", state=SimpleNamespace(value="setup_in_progress"))
+        self.assertFalse(await restarted.entry_loaded(not_loaded))
+        self.assertFalse(telegram.notify_setup_complete.await_count)
+        self.assertFalse(await restarted.entry_loaded(
+            SimpleNamespace(entry_id="foreign-entry", state=SimpleNamespace(value="loaded"))))
+        self.assertTrue(await restarted.entry_loaded(entry))
+        self.assertFalse(await restarted.entry_loaded(entry))
+        telegram.notify_setup_complete.assert_awaited_once_with(origin, "xiaomi_home")
+        self.assertTrue(restarted.records["alice"]["completion_delivered"])
+
     async def test_failed_restart_returns_to_retry_and_preserves_no_exception_text(self):
         manager=self.manager();manager.records['alice']={'phase':'restart_required','region':'ru'}
         tasks=[]

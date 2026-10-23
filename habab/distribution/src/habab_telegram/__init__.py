@@ -116,6 +116,58 @@ class TelegramManager:
         user = await self.hass.auth.async_get_user(owner)
         return bool(user and user.is_active and user.is_admin)
 
+    async def notify_setup_complete(self, origin, domain):
+        """Send a completion only to the exact currently bound private origin."""
+        if not isinstance(origin, dict) or origin.get("channel") != "telegram":
+            return False
+        owner, entry_id, chat_id = (origin.get("owner"), origin.get("entry_id"),
+                                    origin.get("chat_id"))
+        origin_bot_id = origin.get("bot_id")
+        if not all(isinstance(value, str) and value for value in (owner, entry_id, chat_id)):
+            return False
+        if type(origin_bot_id) is not int or origin_bot_id <= 0:
+            return False
+        if not await self._owner_is_active_admin(owner):
+            return False
+        entry = self.entry_for_owner(owner)
+        if entry is None or entry.entry_id != entry_id:
+            return False
+        binding = self.bindings.get(entry_id)
+        state = self.entries.get(entry_id)
+        expected_bot = entry.data.get("bot_username")
+        if (not binding or str(binding.get("chat_id")) != chat_id or not state
+                or not state.get("ready") or state.get("chat_id") != chat_id
+                or state.get("user_id") != binding.get("user_id")
+                or entry.data.get("bot_id") != origin_bot_id
+                or binding.get("bot_id") != origin_bot_id
+                or binding.get("bot_id") != entry.data.get("bot_id")
+                or not isinstance(expected_bot, str) or not expected_bot
+                or str(state.get("username", "")).casefold() != expected_bot.casefold()):
+            return False
+        if not isinstance(domain, str) or not domain:
+            return False
+        sent = await self.send(entry_id, chat_id,
+                               f"Настройка {domain} завершена: интеграция загружена в Home Assistant.")
+        if not sent:
+            return False
+        # Recheck after the acknowledged send. A stale binding is never treated as
+        # a successful completion delivery by the originating flow.
+        if (not await self._owner_is_active_admin(owner)
+                or self.entry_for_owner(owner) is None
+                or self.entry_for_owner(owner).entry_id != entry_id
+                or self.bindings.get(entry_id) != binding):
+            return False
+        return True
+
+    async def _retry_setup_notifications(self):
+        data = self.hass.data.get("habab_home", {})
+        integration_setup = data.get("integration_setup")
+        xiaomi_setup = data.get("xiaomi_setup")
+        if integration_setup is not None:
+            integration_setup.retry_pending_completions()
+        if xiaomi_setup is not None:
+            await xiaomi_setup.retry_pending_completions()
+
     async def _clear_binding(self, entry):
         """Revoke the current chat, stop its turn, and discard its session mapping."""
         state = self.entries.get(entry.entry_id)
@@ -256,6 +308,7 @@ class TelegramManager:
                     state["username"] = payload.get("username", state["username"])
                     state["ready"] = True
                     state.pop("error", None)
+                    self.hass.async_create_task(self._retry_setup_notifications())
                 elif kind == "error":
                     request_id = payload.get("request_id")
                     pending = self.pending_sends.pop(request_id, None) if isinstance(request_id, str) else None

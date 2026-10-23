@@ -1,0 +1,24 @@
+{
+  "scope": "Read-only user Windows browser; own background tab only",
+  "configuration_writes": 0,
+  "profile_mode": "main-profile",
+  "state": {
+    "registered_device_count": 3,
+    "registered_vacuum_count": 0,
+    "product_version": "0.3.0",
+    "assistant_modules": [
+      "/habab-home/setup-chat.js"
+    ],
+    "states_count": 12,
+    "route": "/home/overview",
+    "authenticated": true,
+    "admin": true,
+    "core_version": "2026.10.2",
+    "assistant_widgets": 1,
+    "assistant_open": false,
+    "vacuum_entities": 0
+  },
+  "verdict": "READ_ONLY_ACCESS_CONFIRMED",
+  "own_tabs_closed": true,
+  "recorded_at_utc": "2026-10-23T16:52:56.421744+00:00"
+}
