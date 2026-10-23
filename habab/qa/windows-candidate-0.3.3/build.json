@@ -1,0 +1,111 @@
+{
+  "source": {
+    "commit": "0f340bd88a72b95fbeb728c2af20c00982a45592",
+    "archive_export": "/root/.local/share/habab-canonical-qa/build-0f340bd88",
+    "distribution_context": "/root/.local/share/habab-canonical-qa/build-0f340bd88",
+    "ui_file": "src/habab_home/frontend/setup-chat.js",
+    "ui_sha256_expected_and_baked": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0",
+    "ui_bytes": 53773
+  },
+  "image": {
+    "tag": "habab-home:candidate-0.3.3-0f340bd88",
+    "id": "sha256:ad6be86c5c80219f9dfc26159af3d79c9dd775a41d454ef725af38570acc3b14",
+    "size_bytes": 2667387594,
+    "product_version": "0.3.3",
+    "home_assistant_core": "2026.10.2",
+    "base_image_digest": "sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4",
+    "node": "v24.22.1",
+    "native_frontend": "20260930.4+habab.3",
+    "native_frontend_wheel_sha256": "fd39da4a4cd3a36573100681636edbb5f81825850265a5df203fa550b61ae79b"
+  },
+  "build": {
+    "command": "docker build -t habab-home:candidate-0.3.3-0f340bd88 /root/.local/share/habab-canonical-qa/build-0f340bd88",
+    "result": "PASS",
+    "context_archive_only": true,
+    "no_source_edits": true
+  },
+  "baked_validation": {
+    "container": "ephemeral --rm --network none with Python entrypoint",
+    "mounts": "read-only QA tests and frontend source only; no Home Assistant user config or credentials",
+    "baked_metadata_and_ui_sha": "PASS",
+    "python_tests": {
+      "passed": 39,
+      "failed": 0,
+      "suites": [
+        "test_telegram_backend.py",
+        "test_assistant_service.py",
+        "test_setup_actions.py",
+        "test_assist_adapter.py"
+      ]
+    },
+    "provider_calls_or_telegram_messages": 0,
+    "node_chat_lifecycle": {
+      "file": "habab/distribution/tests/test-chat-lifecycle.mjs",
+      "passed": 9,
+      "failed": 0
+    }
+  },
+  "limits": [
+    "No browser QA in this task; archive export is retained for the root browser pass.",
+    "No Windows or Android installation was performed.",
+    "No user Home Assistant configuration, API keys, or provider calls were used.",
+    "Only the x86_64 candidate image was built; no ARM image build is claimed.",
+    "Windows ZIP build context was validated and baked into a Linux image; no Windows kit installation was performed.",
+    "Windows-kit full Python discovery passed 141 tests. npm CLI is absent from the image; all 12 telegram-agent Node tests passed by invoking its package test script directly under baked Node."
+  ],
+  "windows_kit": {
+    "zip_path": "/root/.local/share/habab-canonical-qa/windows-0f340bd88/habab/public/downloads/habab-home-windows-cb1ffc67434c.zip",
+    "zip_sha256": "cb1ffc67434c8c8f0b038ada0c42f3a51f2fe0e4db1c7f68306ee89222405223",
+    "zip_bytes": 157732,
+    "member_count": 76,
+    "zip_integrity": "PASS",
+    "path_traversal_check": "PASS",
+    "dockerfile_copy_inputs": "PASS (all COPY sources exist in extracted ZIP)",
+    "extracted_context": "/root/.local/share/habab-canonical-qa/windows-0f340bd88/kit-extract-0f340bd88",
+    "image": {
+      "tag": "habab-home:windows-kit-0.3.3-cb1ffc67434c",
+      "id": "sha256:e49dd2b78deca8a7e809f3c54dd22ee22cd2bab5e225d559eb2df9acf372e614",
+      "size_bytes": 2667372340,
+      "product_version": "0.3.3",
+      "home_assistant_core": "2026.10.2",
+      "node": "v24.22.1",
+      "native_frontend": "20260930.4+habab.3",
+      "baked_setup_chat_sha256": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0"
+    },
+    "build_command": "docker build --cache-from habab-home:candidate-0.3.3-0f340bd88 -t habab-home:windows-kit-0.3.3-cb1ffc67434c <extracted ZIP context>",
+    "baked_validation": {
+      "method": "ephemeral --rm --network none Python container; production code baked; read-only tests/frontend mounted from clean Git export",
+      "metadata_and_source_sha": "PASS",
+      "node_chat_lifecycle": {
+        "passed": 9,
+        "failed": 0
+      },
+      "python_tests": {
+        "passed": 39,
+        "failed": 0
+      },
+      "provider_calls_or_telegram_messages": 0,
+      "python_unittest_discover": {
+        "command": "python3 -m unittest discover -s /diagnostics/tests -p test*.py",
+        "discovered": 141,
+        "passed": 141,
+        "failed": 0,
+        "errors": 0
+      },
+      "telegram_transport": {
+        "requested_command": "npm test --prefix /diagnostics/telegram-agent",
+        "npm_status": "UNAVAILABLE: npm executable is not installed in the baked image",
+        "npm_executable_present": false,
+        "equivalent_script_command": "node --test (the package.json test script), executed with cwd=/diagnostics/telegram-agent",
+        "equivalent_script_result": {
+          "passed": 12,
+          "failed": 0
+        },
+        "test_sources": "read-only from accepted export; relay-fetch and vendor resolve to baked /opt/habab-telegram files",
+        "network": "none"
+      },
+      "scope_note": "The exact npm command could not run because npm is absent. The package test script itself passed by direct invocation with baked Node; this is recorded separately, not as npm success."
+    },
+    "harness_note": "Initial Node test attempt omitted the read-only frontend test source mount and failed imports; rerun with the mount passed all 9 tests. No image/code defect was involved."
+  }
+}

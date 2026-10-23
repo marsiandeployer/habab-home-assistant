@@ -2,7 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const puppeteer=require('../../node_modules/puppeteer-core');
 const privateMode=process.env.HABAB_QA_MODE==='private';
 const base=privateMode?'http://127.0.0.1:8403':'https://habab-demo.wpmix.net';
-const report={base,private_source_overlay:false,private_baked_image:privateMode?'sha256:9efca5c859862be84723b9ce299df0b41be43377e2b9e1c3a53c7699645fe8d1':undefined,errors:[],cases:[],limitations:['Mobile keyboard space is emulated by viewport resize.']};
+const report={base,private_source_overlay:false,private_baked_image:privateMode?(process.env.HABAB_QA_IMAGE_ID||'sha256:9efca5c859862be84723b9ce299df0b41be43377e2b9e1c3a53c7699645fe8d1'):undefined,errors:[],cases:[],limitations:['Mobile keyboard space is emulated by viewport resize.']};
 const suffix=privateMode?'private':'public';
 const outputDir=process.env.HABAB_QA_OUTPUT?path.resolve(process.env.HABAB_QA_OUTPUT):__dirname;
 fs.mkdirSync(outputDir,{recursive:true});

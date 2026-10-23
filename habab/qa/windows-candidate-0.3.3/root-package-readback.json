@@ -1,0 +1,14 @@
+{
+  "sourceCommit": "0f340bd88a72b95fbeb728c2af20c00982a45592",
+  "zipSha256": "cb1ffc67434c8c8f0b038ada0c42f3a51f2fe0e4db1c7f68306ee89222405223",
+  "verifiedAgainstGitMembers": 76,
+  "batCRLF": [
+    "diagnose-assistant.bat",
+    "start-windows.bat",
+    "start-xiaomi-home.bat",
+    "support_tunnel.bat"
+  ],
+  "physicalWindows": false,
+  "publiclyPublished": false,
+  "verdict": "PASS_EXACT_TRACKED_PAYLOAD"
+}

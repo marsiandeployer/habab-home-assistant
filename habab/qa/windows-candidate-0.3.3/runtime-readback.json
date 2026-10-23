@@ -1,0 +1,14 @@
+{
+  "sourceCommit": "0f340bd88a72b95fbeb728c2af20c00982a45592",
+  "physicalWindowsInstall": false,
+  "imageId": "sha256:e49dd2b78deca8a7e809f3c54dd22ee22cd2bab5e225d559eb2df9acf372e614",
+  "sourceOverlay": false,
+  "bakedUIsha256": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0",
+  "fontHTTP": {
+    "Regular": 404,
+    "Medium": 404,
+    "Bold": 404
+  },
+  "verdict": "PARTIAL_MISSING_NATIVE_FONT_ASSETS",
+  "stableDownloadChanged": false
+}
