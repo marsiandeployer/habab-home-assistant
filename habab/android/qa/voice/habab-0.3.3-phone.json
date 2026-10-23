@@ -5,11 +5,12 @@
   "runtime": "ca6eea9923d375b3",
   "hababVersion": "0.3.3",
   "sourceCommit": "c49657165867987745da1ab4c6b891e5b90821de",
-  "nativeBuild": 9,
+  "nativeBuild": 11,
   "nativeTests": {
     "tests": 19,
     "failures": 0,
-    "skipped": 0
+    "skipped": 0,
+    "scope": "Full19-test gate on build9 same Java and runtime payload; build10 manifest-only fix rebuilt/linted and actual permission read back"
   },
   "providerUi": {
     "coreHababVersion": "0.3.3",
@@ -52,7 +53,7 @@
     "registryDevices": 4
   },
   "limitations": {
-    "physicalWakeAndAudibleReply": "AWAITING_USER_COMMAND",
+    "physicalWakeAndAudibleReply": "USER_CONFIRMED_ON_BUILD9; SPEAKER_FIX_BUILD10_RETEST_PENDING",
     "telegramFreshReply": "PASS_THROUGH_TEMPORARY_QA_TRANSPORT",
     "telegramAndWebHistory": "SEPARATE; same assistant service, voice uses web history",
     "gatewayRestart": "Upstream credential is RAM only; re-enrollment needed after restart"
@@ -113,7 +114,63 @@
       "coreRestarted": false
     },
     "temporaryNetworkHelpers": "ALL_TERMINAL_STOPPED",
-    "scope": "Empty QA list; not real device actuation"
+    "scope": "Empty QA list; not real device actuation",
+    "evidenceImages": [
+      "habab/android/qa/voice/tg-native-form.png",
+      "habab/android/qa/voice/tg-native-done.png"
+    ]
   },
-  "serviceCredentialTemporaryPhoneFileRemoved": true
+  "serviceCredentialTemporaryPhoneFileRemoved": true,
+  "nativeVoiceUserReport": {
+    "audibleAnswerConfirmed": true,
+    "buildAtConfirmation": 9,
+    "wakeCount": 1,
+    "replies": 1,
+    "uploadedPcmBytes": 1935358,
+    "screenOnAtReadback": true,
+    "sharedWebHistoryReplyObserved": true,
+    "speakerRouteUserConcern": "Earpiece suspected; user unsure"
+  },
+  "speakerRouteFix": {
+    "permission": "android.permission.MODIFY_AUDIO_SETTINGS",
+    "previouslyMissing": true,
+    "build10Installed": true,
+    "packageManagerGranted": true,
+    "assembleDebug": "PASS",
+    "lintDebug": "PASS",
+    "audibleLoudspeakerRetest": "PENDING",
+    "postRestart": {
+      "ownerLogin": "PASS",
+      "core": "RUNNING",
+      "hababVersion": "0.3.3",
+      "hababProvider": "loaded",
+      "selected": true,
+      "phoneRealtimeSessionHttp": 200
+    },
+    "androidForceSpeakerObserved": true,
+    "actualEvent": "FOR_COMMUNICATION FORCE_SPEAKER from own app during build10 wake"
+  },
+  "currentNativeChecks": {
+    "build": 11,
+    "assembleDebug": "PASS",
+    "lintDebug": "PASS",
+    "unitTests": 19,
+    "failures": 0,
+    "skipped": 1,
+    "skipReason": "Unchanged full archive extraction not rerun; prior build9 full19 gate passed without skips"
+  },
+  "voiceRetakeBuild10": {
+    "wakeWhileScreenOffObserved": true,
+    "speakingPhaseObserved": true,
+    "completedReplies": 0,
+    "terminalError": "invalid_realtime_event",
+    "diagnosticsAddedInBuild11": "Strict event type whitelist and exception class only, no event bodies or messages"
+  },
+  "activationBeep": {
+    "build": 11,
+    "stream": "STREAM_MUSIC",
+    "durationMs": 120,
+    "timing": "Immediately after local wake detection, before network session request",
+    "audibleRetest": "PENDING"
+  }
 }
