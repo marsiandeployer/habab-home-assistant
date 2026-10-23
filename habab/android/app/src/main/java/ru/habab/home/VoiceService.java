@@ -157,7 +157,8 @@ public final class VoiceService extends Service {
                 if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("microphone_unavailable");
                 if (AcousticEchoCanceler.isAvailable()) { echo = AcousticEchoCanceler.create(recorder.getAudioSessionId()); if (echo != null) echo.setEnabled(true); }
                 if (NoiseSuppressor.isAvailable()) { noise = NoiseSuppressor.create(recorder.getAudioSessionId()); if (noise != null) noise.setEnabled(true); }
-                tones = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60);
+                // Activation is part of the voice interaction, even when notifications are silent.
+                tones = new ToneGenerator(AudioManager.STREAM_MUSIC, 60);
                 recorder.startRecording();
                 short[] samples = new short[320];
                 ArrayDeque<short[]> pending = new ArrayDeque<>();

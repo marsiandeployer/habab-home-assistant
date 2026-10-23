@@ -51,8 +51,21 @@ final class RealtimeVoice implements AutoCloseable {
                 .header("Authorization", "Bearer " + connection.getString("value")).build();
         socket = client.newWebSocket(request, new WebSocketListener() {
             @Override public void onMessage(WebSocket ws, String text) {
-                try { event(new JSONObject(text)); }
-                catch (Exception error) { fail("invalid_realtime_event"); }
+                JSONObject received = null;
+                try { received = new JSONObject(text); event(received); }
+                catch (Exception error) {
+                    String kind = received == null ? "invalid_json" : received.optString("type");
+                    switch (kind) {
+                        case "session.created": case "input_audio_buffer.speech_started":
+                        case "input_audio_buffer.speech_stopped": case "response.output_audio.delta":
+                        case "response.output_audio.done": case "response.function_call_arguments.done":
+                        case "response.done": case "error": break;
+                        default: kind = "other";
+                    }
+                    // Never log the event body, exception message, transcript, or audio.
+                    android.util.Log.w("HababVoice", "Event failure: " + kind + " / " + error.getClass().getSimpleName());
+                    fail("invalid_realtime_event");
+                }
             }
             @Override public void onFailure(WebSocket ws, Throwable error, Response response) { fail("realtime_connection_failed"); }
             @Override public void onClosed(WebSocket ws, int code, String reason) { if (!closed) fail("realtime_connection_closed"); }
