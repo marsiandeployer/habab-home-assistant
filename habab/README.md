@@ -4,7 +4,7 @@
 
 - public/ — опубликованная сборка и независимые формы в public/integrations/.
 - app.py, habab_demo/ — Flask API состояния виртуальных устройств с PostgreSQL и изоляцией сессий.
-- distribution/ — Docker-пакет Habab Home 0.3.1 на Home Assistant Core 2026.10.2, без OS/Supervisor.
+- distribution/ — исходный кандидат Habab Home 0.3.3 на Home Assistant Core 2026.10.2, без OS/Supervisor. Публичный Windows-архив пока 0.3.1.
 - build/ — русский перевод, publisher и архив исходного patch.
 - deploy/, ecosystem.config.cjs — пример deployment нашего сервера, адаптируйте пути и роли PostgreSQL.
 - qa/, tests/ — браузерные проверки и тесты API.

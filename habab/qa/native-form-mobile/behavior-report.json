@@ -1,0 +1,136 @@
+{
+  "created_at": "2026-10-23T20:26:40.365Z",
+  "fixture": "current setup-chat.js loaded with a mocked public history request and nested ha-config-flow/ha-form shadow roots",
+  "environment": {
+    "viewport_mobile": "390x844",
+    "viewport_desktop": "1280x800",
+    "physical_android_keyboard": false,
+    "live_home_assistant": false,
+    "auth_or_form_submission": false
+  },
+  "checks": [
+    {
+      "check": "mobile initial split",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 422,
+      "chatTop": 422,
+      "chatHeight": 422,
+      "expanded": false,
+      "inert": false
+    },
+    {
+      "check": "composer focus expands",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 0,
+      "chatTop": 0,
+      "chatHeight": 844,
+      "expanded": true,
+      "inert": true
+    },
+    {
+      "check": "collapse control focus stays collapsed",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 422,
+      "chatTop": 422,
+      "chatHeight": 422,
+      "expanded": false,
+      "inert": false
+    },
+    {
+      "check": "native ha-form input focus expands",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 0,
+      "chatTop": 0,
+      "chatHeight": 844,
+      "expanded": true,
+      "inert": true
+    },
+    {
+      "check": "native ha-form textarea focus expands",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 0,
+      "chatTop": 0,
+      "chatHeight": 844,
+      "expanded": true,
+      "inert": true
+    },
+    {
+      "check": "native ha-form select focus expands",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 0,
+      "chatTop": 0,
+      "chatHeight": 844,
+      "expanded": true,
+      "inert": true
+    },
+    {
+      "check": "native editable content focus expands",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 0,
+      "chatTop": 0,
+      "chatHeight": 844,
+      "expanded": true,
+      "inert": true
+    },
+    {
+      "check": "readonly input focus stays collapsed",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 422,
+      "chatTop": 422,
+      "chatHeight": 422,
+      "expanded": false,
+      "inert": false
+    },
+    {
+      "check": "submit button focus stays collapsed",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 422,
+      "chatTop": 422,
+      "chatHeight": 422,
+      "expanded": false,
+      "inert": false
+    },
+    {
+      "check": "disabled input cannot expand",
+      "result": "PASS",
+      "innerHeight": 844,
+      "dashboardHeight": 422,
+      "chatTop": 422,
+      "chatHeight": 422,
+      "expanded": false,
+      "inert": false
+    },
+    {
+      "check": "ha-markdown registration rerenders history and preserves draft, focus, scroll",
+      "result": "PASS",
+      "markdownTag": "HA-MARKDOWN",
+      "draft": "draft survives markdown upgrade",
+      "composerFocused": true,
+      "scrollTop": 50
+    },
+    {
+      "check": "stale ha-markdown completion cannot overwrite newer draw scroll",
+      "result": "PASS",
+      "staleCount": 9,
+      "expectedScrollTop": 200,
+      "newerDrawScrollTop": 200,
+      "afterStaleCompletion": 200
+    },
+    {
+      "check": "desktop split geometry remains intact",
+      "result": "PASS",
+      "viewportWidth": 1265,
+      "dashboardWidth": 609,
+      "chatWidth": 640
+    }
+  ]
+}

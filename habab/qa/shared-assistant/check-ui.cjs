@@ -4,6 +4,8 @@ const privateMode=process.env.HABAB_QA_MODE==='private';
 const base=privateMode?'http://127.0.0.1:8403':'https://habab-demo.wpmix.net';
 const report={base,private_source_overlay:false,private_baked_image:privateMode?'sha256:9efca5c859862be84723b9ce299df0b41be43377e2b9e1c3a53c7699645fe8d1':undefined,errors:[],cases:[],limitations:['Mobile keyboard space is emulated by viewport resize.']};
 const suffix=privateMode?'private':'public';
+const outputDir=process.env.HABAB_QA_OUTPUT?path.resolve(process.env.HABAB_QA_OUTPUT):__dirname;
+fs.mkdirSync(outputDir,{recursive:true});
 
 async function ready(page){
   await page.waitForFunction(()=>{
@@ -34,12 +36,12 @@ async function click(page,selector){const h=await page.evaluateHandle(selector=>
       const tokens=JSON.parse(fs.readFileSync(path.join(process.env.HABAB_QA_PRIVATE,'tokens.json'),'utf8'));
       await page.evaluateOnNewDocument(tokens=>{if(location.origin==='http://127.0.0.1:8403'){localStorage.setItem('hassTokens',JSON.stringify({...tokens,hassUrl:tokens.base_url,clientId:tokens.client_id,expires:Date.now()+tokens.expires_in*1000}));localStorage.setItem('selectedLanguage',JSON.stringify('ru'));}},tokens);
     }
-    for(const route of privateMode?['/config/dashboard','/habab-ai','/lovelace/0']:['/','/?habab-preview=onboarding','/demos/home-assistant/']){
+    for(const route of privateMode?['/config/dashboard','/habab-ai','/lovelace/0']:['/','/?habab-preview=onboarding','/demos/home-assistant/','/#/lovelace']){
       await page.setViewport({width:1280,height:800});
       await page.goto(base+route,{waitUntil:'networkidle2',timeout:45000});await ready(page);
       const s=await state(page);report.cases.push({route,view:'desktop',...s});
       assert.equal(s.duplicate_rows,0);assert.ok(s.dashboard.right<=s.chat.x+1);assert.equal(s.open,true);assert.equal(s.hook,privateMode);
-      await page.screenshot({path:path.join(__dirname,`${suffix}-desktop.png`)});
+      await page.screenshot({path:path.join(outputDir,`${suffix}-desktop.png`)});
       if(!report.stock_assist){
         report.stock_assist=await page.evaluate(async()=>{
           const find=root=>{for(const n of root.querySelectorAll('*')){if(n.localName==='home-assistant-main')return n;if(n.shadowRoot){const x=find(n.shadowRoot);if(x)return x;}}};
@@ -62,16 +64,16 @@ async function click(page,selector){const h=await page.evaluateHandle(selector=>
     await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true});await ready(page);
     let s=await state(page);report.cases.push({view:'mobile-stacked',...s});
     assert.ok(Math.abs(s.chat.y-422)<2);assert.ok(s.dashboard.bottom<=s.chat.y+1);assert.equal(s.expanded,false);assert.equal(s.inert,false);assert.ok(s.input.bottom<=844);
-    await page.screenshot({path:path.join(__dirname,`${suffix}-mobile-stacked.png`)});
+    await page.screenshot({path:path.join(outputDir,`${suffix}-mobile-stacked.png`)});
     await click(page,'textarea');await page.waitForFunction(()=>document.querySelector('habab-setup-chat').mobileExpanded);
     const input=await page.evaluateHandle(()=>document.querySelector('habab-setup-chat').shadowRoot.querySelector('textarea'));
     await input.asElement().type('Черновик для проверки');await input.dispose();
     s=await state(page);report.cases.push({view:'mobile-expanded',...s});assert.ok(s.chat.y<2);assert.equal(s.inert,true);
-    await page.screenshot({path:path.join(__dirname,`${suffix}-mobile-expanded.png`)});
+    await page.screenshot({path:path.join(outputDir,`${suffix}-mobile-expanded.png`)});
     await page.setViewport({width:390,height:420,isMobile:true,hasTouch:true});
     await page.waitForFunction(()=>document.querySelector('habab-setup-chat').shadowRoot.querySelector('textarea').getBoundingClientRect().bottom<=420);
     s=await state(page);report.cases.push({view:'mobile-keyboard-space',...s});assert.ok(s.input.bottom<=420);assert.ok(s.chat.y<2);
-    await page.screenshot({path:path.join(__dirname,`${suffix}-mobile-keyboard-space.png`)});
+    await page.screenshot({path:path.join(outputDir,`${suffix}-mobile-keyboard-space.png`)});
     await page.setViewport({width:390,height:844,isMobile:true,hasTouch:true});await click(page,'.collapse');
     s=await state(page);report.cases.push({view:'mobile-return-to-dashboard',...s});assert.equal(s.expanded,false);assert.equal(s.inert,false);assert.ok(Math.abs(s.chat.y-422)<2);
     report.draft_preserved=await page.evaluate(()=>document.querySelector('habab-setup-chat').shadowRoot.querySelector('textarea').value==='Черновик для проверки');assert.equal(report.draft_preserved,true);
@@ -82,7 +84,7 @@ async function click(page,selector){const h=await page.evaluateHandle(selector=>
   }finally{
     await context.close();report.context_closed=true;
     report.existing_pages_preserved=(await browser.pages()).filter(p=>initial.includes(p.target()._targetId)).length===initial.length;
-    await browser.disconnect();fs.writeFileSync(path.join(__dirname,`${suffix}-ui.json`),JSON.stringify(report,null,2)+'\n');
+    await browser.disconnect();fs.writeFileSync(path.join(outputDir,`${suffix}-ui.json`),JSON.stringify(report,null,2)+'\n');
   }
   process.stdout.write(JSON.stringify(report)+'\n');
 })().catch(e=>{process.stderr.write(e.stack+'\n');process.exitCode=1;});

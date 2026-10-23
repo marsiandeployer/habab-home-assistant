@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-23T19:36:33.022Z",
+  "baseCommit": "c49657165",
+  "sourceOverlay": true,
+  "realNativeForm": true,
+  "physicalAndroidKeyboard": false,
+  "errors": [],
+  "initial": {
+    "markdownDefined": true,
+    "markdownCount": 3,
+    "plainAssistantCount": 0
+  },
+  "markdown": {
+    "defined": true,
+    "rendered": 3,
+    "plainAssistantCount": 0
+  },
+  "focus": {
+    "expanded": true,
+    "inert": true,
+    "chatTop": 0,
+    "chatHeight": 844,
+    "dashboardHeight": 0,
+    "viewportHeight": 844
+  },
+  "collapsed": {
+    "expanded": false,
+    "inert": false,
+    "dashboardHeight": 422
+  },
+  "verdict": "PASS_NATIVE_FORM_FOCUS",
+  "testFlowCancelled": true,
+  "runtimeReadback": {
+    "core": "2026.10.2",
+    "nativeFrontend": "20260930.4+habab.3",
+    "uiSha256": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0"
+  }
+}

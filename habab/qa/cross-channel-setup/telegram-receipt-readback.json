@@ -1,0 +1,36 @@
+{
+  "scope": "Independent read-only Telegram channel reader; provided QA bot only",
+  "new_messages_sent": 0,
+  "bot_api_pollers_started": 0,
+  "reader_exit_code": 0,
+  "reader_connected": true,
+  "request_64753_present": true,
+  "ready_64758_present": true,
+  "completion_64759_present": true,
+  "exact_completion_text_present": true,
+  "raw_chat_or_credentials_saved": false,
+  "verdict": "PASS_EXTERNAL_BOT_RECEIPTS_WITH_SENDER",
+  "sender_metadata_verified": [
+    {
+      "message_id": 64753,
+      "expected_chat": true,
+      "outgoing": true,
+      "from_expected_bot": false,
+      "completion_text_matches": true
+    },
+    {
+      "message_id": 64758,
+      "expected_chat": true,
+      "outgoing": false,
+      "from_expected_bot": true,
+      "completion_text_matches": true
+    },
+    {
+      "message_id": 64759,
+      "expected_chat": true,
+      "outgoing": false,
+      "from_expected_bot": true,
+      "completion_text_matches": true
+    }
+  ]
+}

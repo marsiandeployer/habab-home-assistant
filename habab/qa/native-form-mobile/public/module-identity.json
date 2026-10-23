@@ -1,0 +1,23 @@
+{
+  "source_sha256": "b565aebcc7976cf9c6bdfa956c027197f98070095746fca318dc59dae73dd9b0",
+  "module_url": "/demos/home-assistant/assistant/releases/b565aebcc7976cf9/setup-chat.js",
+  "routes": [
+    {
+      "route": "/",
+      "status": 200,
+      "body_sha256": "9cdb848baec9b3d8e6f6820d37b03378f276b71396e6021803e698d8e9086ccb"
+    },
+    {
+      "route": "/?habab-preview=onboarding",
+      "status": 200,
+      "body_sha256": "9cdb848baec9b3d8e6f6820d37b03378f276b71396e6021803e698d8e9086ccb"
+    },
+    {
+      "route": "/demos/home-assistant/",
+      "status": 200,
+      "body_sha256": "9cdb848baec9b3d8e6f6820d37b03378f276b71396e6021803e698d8e9086ccb"
+    }
+  ],
+  "module_bytes": 53773,
+  "verdict": "PASS_LIVE_MODULE_IDENTITY"
+}

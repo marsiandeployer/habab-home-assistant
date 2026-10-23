@@ -24,6 +24,21 @@ export function integrationVerificationPrompt(detail, language) {
     : `Check the ${domain} integration and available devices through Home Assistant. Do not control devices.`;
 }
 
+function isEditableFocusTarget(target) {
+  if (target instanceof HTMLInputElement) {
+    return !target.matches(":disabled") && !target.readOnly &&
+      target.getAttribute("aria-disabled") !== "true" && target.getAttribute("aria-readonly") !== "true" &&
+      !["button", "submit", "reset", "image", "hidden"].includes(target.type);
+  }
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    return !target.matches(":disabled") && !target.readOnly &&
+      target.getAttribute("aria-disabled") !== "true" && target.getAttribute("aria-readonly") !== "true";
+  }
+  return target instanceof HTMLElement && target.isContentEditable &&
+    target.getAttribute("aria-disabled") !== "true" &&
+    target.getAttribute("aria-readonly") !== "true";
+}
+
 export function chooseAssistPipeline(requestedId, pipelines, preferredId, lastUsedId) {
   if (!Array.isArray(pipelines)) return undefined;
   let id = requestedId === "preferred" ? preferredId
@@ -185,6 +200,9 @@ function installChat() {
       this.autoOpenStarted = false;
       this.mobileExpanded = false;
       this.layoutLifecycleInstalled = false;
+      this.markdownUpgradePending = false;
+      this.markdownUpgradeLifecycle = 0;
+      this.drawGeneration = 0;
     }
 
     get hass() { return this._hass; }
@@ -286,6 +304,9 @@ function installChat() {
       if (this.shadowRoot.firstChild) {
         this.installLayoutLifecycle();
         if (this.q("dialog").open) this.setAssistantOpen(true);
+        if (visibleTextMessages(this.messages).some((message) => message.role === "assistant")) {
+          this.draw({preserveScroll: true});
+        }
         return;
       }
       this.language = this.demo || this.hass?.locale.language.startsWith("ru") ? "ru" : "en";
@@ -325,7 +346,16 @@ function installChat() {
       this.q("textarea").onkeydown = (event) => {
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {event.preventDefault(); this.send();}
       };
-      this.q("textarea").onfocus = () => this.setMobileExpanded(true);
+      this.shadowRoot.addEventListener("focusin", (event) => {
+        if (!this.q("dialog").open) return;
+        const path = event.composedPath();
+        const target = path.find(isEditableFocusTarget);
+        if (!target) return;
+        if (target === this.q("textarea") ||
+            [...(this.integrationCard?.cards?.values?.() || [])].some((card) => card.form && path.includes(card.form))) {
+          this.setMobileExpanded(true);
+        }
+      });
       this.q(".stop").onclick = () => this.stop();
       this.shadowRoot.addEventListener("click", (event) => {
         const target = event.composedPath().find((item) => item?.classList);
@@ -351,6 +381,9 @@ function installChat() {
     }
 
     disconnectedCallback() {
+      this.markdownUpgradeLifecycle += 1;
+      this.markdownUpgradePending = false;
+      this.drawGeneration += 1;
       this.historyConnection = undefined;
       this.historyAttempt = undefined;
       this.historyUnsubscribe?.();
@@ -702,9 +735,26 @@ function installChat() {
       return quickReplies;
     }
 
-    draw() {
+    waitForMarkdownUpgrade() {
+      if (this.markdownUpgradePending || customElements.get("ha-markdown")) return;
+      this.markdownUpgradePending = true;
+      const lifecycle = this.markdownUpgradeLifecycle;
+      customElements.whenDefined("ha-markdown").then(() => {
+        if (lifecycle !== this.markdownUpgradeLifecycle) return;
+        this.markdownUpgradePending = false;
+        if (!this.isConnected ||
+            !visibleTextMessages(this.messages).some((message) => message.role === "assistant")) return;
+        this.draw({preserveScroll: true});
+      });
+    }
+
+    draw({preserveScroll = false} = {}) {
+      const drawGeneration = ++this.drawGeneration;
       const log = this.q("#log");
       const messageContainer = this.q("#messages");
+      const previousScrollTop = log.scrollTop;
+      const wasAtBottom = log.scrollHeight - log.clientHeight - previousScrollTop <= 1;
+      const keepScrollPosition = preserveScroll && !wasAtBottom;
       messageContainer.replaceChildren();
       const visibleMessages = visibleTextMessages(this.messages);
       if (!visibleMessages.length) {
@@ -717,15 +767,20 @@ function installChat() {
         const row = document.createElement("div"); row.className = `message ${message.role}`;
         const name = document.createElement("div"); name.className = "name"; name.textContent = message.role === "user" ? this.t.you : this.t.assistant;
         const markdown = message.role === "assistant" && customElements.get("ha-markdown");
+        if (message.role === "assistant" && !markdown) this.waitForMarkdownUpgrade();
         const text = document.createElement(markdown ? "ha-markdown" : "p");
         if (markdown) {text.content = message.text; text.breaks = true;}
         else text.textContent = message.text;
         row.append(name, text); messageContainer.append(row);
       }
-      log.scrollTop = visibleMessages.length ? log.scrollHeight : 0;
+      log.scrollTop = visibleMessages.length
+        ? keepScrollPosition ? previousScrollTop : log.scrollHeight
+        : 0;
       const tail = log.lastChild;
       Promise.allSettled([...messageContainer.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
-        if (log.lastChild === tail && visibleMessages.length) log.scrollTop = log.scrollHeight;
+        if (this.isConnected && this.drawGeneration === drawGeneration && log.lastChild === tail && visibleMessages.length) {
+          log.scrollTop = keepScrollPosition ? previousScrollTop : log.scrollHeight;
+        }
       });
     }
 
