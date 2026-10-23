@@ -188,6 +188,32 @@ def check_target(port):
         connection.close()
 
 
+def loopback_listener_present(port, proc_path='/proc/net/tcp'):
+    """Check the SSH remote-forward listener without touching the HA target."""
+    try:
+        with open(proc_path, encoding='ascii') as proc_net:
+            rows = proc_net.read().splitlines()
+    except (OSError, UnicodeError):
+        raise ValueError('Cannot inspect the SSH loopback listener') from None
+    if not rows or rows[0].split()[:4] != ['sl', 'local_address', 'rem_address', 'st']:
+        raise ValueError('Cannot parse the SSH loopback listener table')
+    wanted_port = f'{port:04X}'
+    for row in rows[1:]:
+        fields = row.split()
+        if len(fields) < 4:
+            raise ValueError('Cannot parse the SSH loopback listener table')
+        try:
+            address, hex_port = fields[1].split(':', 1)
+            state = int(fields[3], 16)
+            int(address, 16)
+            int(hex_port, 16)
+        except ValueError:
+            raise ValueError('Cannot parse the SSH loopback listener table') from None
+        if address.upper() == '0100007F' and hex_port.upper() == wanted_port and state == 0x0A:
+            return True
+    return False
+
+
 def serve(session, deadline):
     username, port = session_values(session)
     account = pwd.getpwnam(username)
@@ -202,11 +228,17 @@ def serve(session, deadline):
         except BlockingIOError:
             raise ValueError('This support session is already connected') from None
         try:
+            if not loopback_listener_present(port):
+                raise ValueError('SSH loopback listener is not active')
             version = check_target(port)
+            if not loopback_listener_present(port):
+                raise ValueError('SSH loopback listener closed during startup')
             atomic_json(connection_file, {'session_id': session, 'url': f'http://127.0.0.1:{port}',
                         'websocket_url': f'ws://127.0.0.1:{port}/api/websocket', 'ha_version': version,
                         'expires_utc': datetime.fromtimestamp(deadline, timezone.utc).isoformat(),
                         'authentication': 'Native Home Assistant login required'})
+            if not loopback_listener_present(port):
+                raise ValueError('SSH loopback listener closed before READY')
             print(f'READY: Home Assistant {version}; support session {session}', flush=True)
             print('Native HA login is still required. Close the Windows support window to disconnect.', flush=True)
             def stop(_signal, _frame):
@@ -214,6 +246,8 @@ def serve(session, deadline):
             for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
                 signal.signal(signum, stop)
             while time.time() < deadline:
+                if not loopback_listener_present(port):
+                    raise ValueError('SSH loopback listener closed')
                 time.sleep(min(1, max(0, deadline - time.time())))
         finally:
             connection_file.unlink(missing_ok=True)
