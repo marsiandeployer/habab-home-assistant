@@ -1,0 +1,26 @@
+{
+  "source_overlay": true,
+  "deployed_to_phone": false,
+  "real_bot_e2e": false,
+  "image": "habab-home:shared-chat-0.3.1-20261023",
+  "python_tests": 131,
+  "python_result": "PASS",
+  "node_tests": 12,
+  "node_result": "PASS",
+  "test_network": "none; loopback only",
+  "secrets_scan": "PASS (owned scope)",
+  "review": "No confirmed findings in owned proxy diff; native voice work excluded.",
+  "sha256": {
+    "habab/distribution/src/habab_home/frontend/strings.js": "78fe0b61f213d402564880ac423175abdc0ffb5d7a9cd9ff7cecf043f00f3094",
+    "habab/distribution/src/habab_home/frontend/telegram-panel.js": "72dd2650daecf17a0537f408d9cca51d0928e35c1866378f90a2de9a0d6d7481",
+    "habab/distribution/src/habab_telegram/__init__.py": "efd98a6cb72fa1e8c594c73ad992a2754faaa44feb522366034448fc5499715e",
+    "habab/distribution/src/habab_telegram/config_flow.py": "87d353dd7eb46804d1c3aa568953e9b8a6dd0f5cab97989882fac9b8f628512e",
+    "habab/distribution/src/habab_telegram/transport.py": "37fc801e82c6ac71e2740a41527cbd5b16494068d6a6a9a479b9f1940f3d3ed8",
+    "habab/distribution/src/habab_telegram/websocket.py": "5b23658b5e4b4cffab662efc43babb9f0080ef066044934de71088cc2490b604",
+    "habab/distribution/tests/test_telegram_backend.py": "a498128e8077f126e47890dfb818adb2fe91d98aa9bd9d21cce9c4fdb1c92efc",
+    "habab/distribution/tests/test_telegram_proxy.py": "aef0fc728d324fab5ef4f565283d22bd008af58277de4bb32c5ce6a4e92afc21",
+    "habab/distribution/telegram-agent/test/proxy-env.test.mjs": "345d8129c3edb8e8150300c1daec634bd233e8f47b582fb356e93e027fbac4dd",
+    "habab/docs/SETUP-ASSISTANT.md": "5fdfd283195df0ec4928a81e5b761023691587247d924f07a665cf98535c9cb3"
+  },
+  "additional_proxy_assertions": "PASS: 22 targeted tests after adding HTTP502 versus401 classification"
+}

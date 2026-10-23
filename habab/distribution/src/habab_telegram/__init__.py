@@ -12,6 +12,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, MAX_LINE, PAIR_TTL
 from .websocket import async_register_commands
+from .transport import worker_proxy_env
 
 
 class TelegramManager:
@@ -74,13 +75,13 @@ class TelegramManager:
             result["error"] = state["error"]
         return result
 
-    async def configure(self, owner, token):
+    async def configure(self, owner, token, proxy_url=""):
         if not token.strip() or len(token) > 256:
             raise ValueError("invalid_token")
         from homeassistant.config_entries import SOURCE_USER
         result = await self.hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER, "habab_owner_id": owner},
-            data={"token": token.strip()},
+            data={"token": token.strip(), "proxy_url": proxy_url},
         )
         if result.get("type") == "form":
             code = result.get("errors", {}).get("base", "invalid_token")
@@ -194,6 +195,10 @@ class TelegramManager:
     async def async_setup_entry(self, entry):
         env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE", "HABAB_TELEGRAM_RELAY") if k in os.environ}
         env.update({"HOME": "/config/.habab-telegram", "NODE_NO_WARNINGS": "1"})
+        proxy_env = worker_proxy_env(entry.data.get("proxy_url"))
+        if proxy_env:
+            env.pop("HABAB_TELEGRAM_RELAY", None)
+            env.update(proxy_env)
         proc = await asyncio.create_subprocess_exec(
             "node", "/opt/habab-telegram/worker.mjs", stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,

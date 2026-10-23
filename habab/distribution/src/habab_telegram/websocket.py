@@ -25,12 +25,13 @@ async def status(hass, connection, msg):
 @websocket_api.websocket_command({
     probatio.Required("type"): "habab_telegram/configure",
     probatio.Required("token"): probatio.All(str, probatio.Length(min=1, max=256)),
+    probatio.Optional("proxy_url", default=""): probatio.All(str, probatio.Length(max=2048)),
 })
 @websocket_api.require_admin
 @websocket_api.async_response
 async def configure(hass, connection, msg):
     try:
-        await hass.data[DOMAIN].configure(connection.user.id, msg["token"])
+        await hass.data[DOMAIN].configure(connection.user.id, msg["token"], msg.get("proxy_url", ""))
     except ValueError as err:
         connection.send_error(msg["id"], str(err), str(err))
         return

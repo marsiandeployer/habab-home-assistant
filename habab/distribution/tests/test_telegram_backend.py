@@ -228,7 +228,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         flow.async_init.assert_awaited_once_with(
             "habab_telegram",
             context={"source": "user", "habab_owner_id": "alice"},
-            data={"token": "123456:abcdefghijklmnopqrstuvwxyz"},
+            data={"token": "123456:abcdefghijklmnopqrstuvwxyz", "proxy_url": ""},
         )
         status = await manager.status("alice")
         self.assertEqual(status["phase"], "pairing")

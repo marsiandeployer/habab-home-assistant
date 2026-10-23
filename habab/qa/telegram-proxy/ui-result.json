@@ -1,0 +1,26 @@
+{
+  "sourceOverlay": true,
+  "realHomeAssistant": false,
+  "realBot": false,
+  "cases": [
+    {
+      "width": 1280,
+      "overflow": false,
+      "proxySent": true,
+      "tokenSent": true,
+      "fieldsCleared": true,
+      "masked": true,
+      "help": "HTTP/HTTPS-адрес, например http://user:password@host:port. Нужен, если Telegram недоступен из вашей сети. Пустое поле при подключении означает прямой доступ. Адрес сохранится только в настройках вашего Home Assistant."
+    },
+    {
+      "width": 390,
+      "overflow": false,
+      "proxySent": true,
+      "tokenSent": true,
+      "fieldsCleared": true,
+      "masked": true,
+      "help": "HTTP/HTTPS-адрес, например http://user:password@host:port. Нужен, если Telegram недоступен из вашей сети. Пустое поле при подключении означает прямой доступ. Адрес сохранится только в настройках вашего Home Assistant."
+    }
+  ],
+  "verdict": "PASS"
+}

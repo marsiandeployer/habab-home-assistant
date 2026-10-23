@@ -31,6 +31,8 @@ class HababTelegramPanel extends HTMLElement {
     clearTimeout(this.statusTimer);
     const input = this.q("#token");
     if (input) input.value = "";
+    const proxy = this.q("#proxy");
+    if (proxy) proxy.value = "";
   }
 
   t(key) {
@@ -56,6 +58,7 @@ class HababTelegramPanel extends HTMLElement {
     <header><ha-menu-button></ha-menu-button><h1>${this.t("telegramTitle")}</h1></header>
     <main><p class="intro">${this.t("telegramIntro")}</p><p class="help" id="telegram-security">${this.t("telegramSecurity")}</p>
       <form><label for="token">${this.t("telegramToken")}</label><input id="token" name="token" type="password" required maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="telegram-security">
+        <label for="proxy">${this.t("telegramProxy")}</label><input id="proxy" name="proxy" type="password" maxlength="2048" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="telegram-proxy-help"><p class="help" id="telegram-proxy-help">${this.t("telegramProxyHelp")}</p>
         <div class="actions"><button class="primary" type="submit">${this.t("telegramConnect")}</button><button type="button" id="refresh">${this.t("telegramRefresh")}</button><button type="button" id="unlink">${this.t("telegramUnlink")}</button></div>
       </form>
       <h2>${this.t("telegramTitle")}</h2><p class="status" id="status" role="status" aria-live="polite"></p><p id="username" hidden></p><p><a id="pairing" target="_blank" rel="noopener noreferrer" hidden>${this.t("telegramOpenPairing")}</a></p>
@@ -74,6 +77,8 @@ class HababTelegramPanel extends HTMLElement {
     const key = { not_configured: "telegramNotConfigured", pairing: "telegramPairing", connected: "telegramConnected", error: "telegramError" }[this.state.phase] || "telegramError";
     const errorCopy = {
       invalid_token: "telegramInvalidToken",
+      invalid_proxy: "telegramInvalidProxy",
+      cannot_validate: "telegramCannotValidate",
       setup_failed: "telegramWorkerFailed",
       worker_error: "telegramWorkerFailed",
       worker_stopped: "telegramWorkerFailed",
@@ -148,8 +153,11 @@ class HababTelegramPanel extends HTMLElement {
     const input = this.q("#token");
     const token = input.value.trim();
     if (!token) { input.focus(); return; }
+    const proxy = this.q("#proxy");
+    const proxy_url = proxy.value.trim();
     input.value = "";
-    await this.run(() => this._hass.callWS({ type: "habab_telegram/configure", token }));
+    proxy.value = "";
+    await this.run(() => this._hass.callWS({ type: "habab_telegram/configure", token, proxy_url }));
   }
 
   async pair() {
