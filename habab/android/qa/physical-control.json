@@ -1,0 +1,16 @@
+{
+  "ownerLogin": "PASS",
+  "websocket": "PASS",
+  "states": [
+    "off",
+    "on",
+    "off"
+  ],
+  "cleanup": true,
+  "stateEvents": [
+    "off",
+    "on",
+    "off"
+  ],
+  "control": "PASS"
+}

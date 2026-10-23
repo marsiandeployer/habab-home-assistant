@@ -1,6 +1,6 @@
 {
-  "recordedAt": "2026-10-23T15:19:21.460054+00:00",
-  "status": "PHYSICAL_BASE_PASS_CURRENT_UPDATE_PENDING",
+  "recordedAt": "2026-10-23T15:34:16.029445+00:00",
+  "status": "PASS_PHYSICAL_BASE_WITH_LIMITS",
   "delivery": {
     "apk": "habab-home-0.1.4-preview-f2279f478606.apk",
     "sha256": "f2279f478606bb7db0ff1f982017a825a76cd5dc77caefa72396c78533de0b2c",
@@ -13,7 +13,7 @@
       "sha256": "75c65146d6c8e883e2f30601680f682622fd368393f5836a90d608016e09e8e5",
       "bytes": 11623283
     },
-    "status": "APK_0_1_4_INSTALLED_CURRENT_RUNTIME_UPDATE_PENDING"
+    "status": "PREVIEW_PHYSICAL_CORE_AND_CONTROL_VERIFIED"
   },
   "runtimeVerification": {
     "result": "PASS",
@@ -42,66 +42,104 @@
     "arm64OpenCode": "PASS_ON_P30: version and authenticated service health; actual AI response NOT_PASSED without owner provider configuration",
     "adb": "PASS: native Windows ADB18537, serial selected VOG-L29 authorized; model VOG-L29 read back",
     "physicalDeviceModel": "PASS: VOG-L29, Android 10 SDK 29, ARM64, EMUI 12",
-    "physicalInstallation": "PASS: initial manual installation, then APK0.1.1 update via non-streamed ADB install returned Success",
-    "physicalCoreStartup": "PASS: actual Python3.14/Core2026.10.2 process on P30; onboarding HTTP200 and protected Habab status401",
+    "physicalInstallation": "PASS: APK0.1.4/versionCode5 non-streamed ADB update returned Success; owner login retained",
+    "physicalCoreStartup": "PASS: Core2026.10.2 on VOG-L29, authenticated API state RUNNING and owner WebSocket control verified",
     "physicalOpenCodeToolExecution": "NOT_PASSED: isolated real public prompt reached provider but free-tier API returned403; CLI exit0 was not treated as success; no owner provider credentials configured",
-    "physicalLanAndHttps": "NOT_VERIFIED: WiFi192.168.3.70 observed; Windows browser CDP connection unavailable; no public phone endpoint provisioned",
+    "physicalLanAndHttps": "LAN NOT_VERIFIED: shared Chrome blocked phone LAN navigation with ERR_BLOCKED_BY_CLIENT before authenticated API/WS checks; permanent public HTTPS NOT_CONFIGURED",
     "physicalRestartAndBackupRestore": "App restart PASS; encrypted backup restore and whole-phone reboot NOT_RUN",
     "screenOff48Hours": "NOT_RUN",
     "nativePreflightBuild": "PASS: packaged proot 5.1.107.99 executed on P30 and wrote native-check.json",
-    "physicalRuntimeExtraction": "PASS: APK0.1.1 extracted signed runtime d2d21c615cda45b6; maintenance-status.json recorded done",
+    "physicalRuntimeExtraction": "PASS: APK0.1.4 installed signed336af archive; maintenance done;49/49 source hashes match accepted0712457 snapshot",
     "nativeProotGuestExecution": "PASS: packaged proot --kill-on-exit -0 successfully executed /system/bin/echo inside guest root on P30",
     "physicalBrowserOnboarding": "PASS: own Chromium1280x800 through USB TCP bridge rendered onboarding.html, title Home Assistant, no pageerrors",
     "physicalOpenCodeBinary": "PASS: ARM64 OpenCode1.14.21 --version and native authenticated serve --pure health; unauthenticated health401",
     "screenOffShortCheck": "PASS: screen Asleep/OFF and habab:server partial wake lock held >32min; Core stayed reachable; 48-hour test NOT_RUN",
     "physicalControl": {
-      "result": "PASS",
-      "ownerLogin": true,
-      "websocketAuthenticated": true,
-      "helperStates": [
+      "ownerLogin": "PASS",
+      "websocket": "PASS",
+      "states": [
         "off",
         "on",
         "off"
       ],
+      "cleanup": true,
       "stateEvents": [
         "off",
         "on",
         "off"
       ],
-      "temporaryHelperDeleted": true
+      "control": "PASS"
     },
     "physicalBrowserAuthenticated": {
-      "result": "PASS",
-      "coreState": "RUNNING",
-      "isOwner": true,
-      "routes": [
-        "dashboard",
+      "owner": true,
+      "core": "2026.10.2",
+      "state": "RUNNING",
+      "nativeBridge": 1,
+      "formLoader": "function",
+      "chatCount": 1,
+      "panels": [
         "habab-ai",
         "habab-telegram"
       ],
-      "pageErrors": 0
+      "routes": [
+        {
+          "route": "habab-ai",
+          "http": 200,
+          "path": "/habab-ai",
+          "rendered": true,
+          "ownerPanel": true
+        },
+        {
+          "route": "habab-telegram",
+          "http": 200,
+          "path": "/habab-telegram",
+          "rendered": true,
+          "ownerPanel": true
+        }
+      ],
+      "nativeAssistSameChat": true,
+      "syntheticSelectorMatrix": "PASS_NO_SUBMISSION",
+      "errors": []
     },
     "physicalAppRestart": "PASS: force-stop/relaunch created new Core process; authenticated API state RUNNING and owner login retained; recorder recovered unclean session as expected",
     "batteryOptimizationExemption": "PASS: own package whitelist entry read back after granting exemption",
-    "currentPhysicalRuntime": "8dcd701d01d14740 / Habab0.3.0, owner/control/native frontend habab.3 verified; 336af update pending",
+    "currentPhysicalRuntime": "336af6656a17a15a / Habab0.3.0",
     "unprivilegedDeletionRegression": {
       "baseline": "ACCESS_DENIED_REPRODUCED",
       "fixed": "PASS",
       "symlinkTargetPreserved": true
-    }
+    },
+    "physicalRuntimeContext": {
+      "result": "PASS",
+      "pid": 29387,
+      "runtimeKind": "android_proot"
+    },
+    "windowsLan": {
+      "result": "NOT_VERIFIED_BROWSER_BLOCKED",
+      "navigationError": "net::ERR_BLOCKED_BY_CLIENT",
+      "phoneLan": "192.168.3.70:8123",
+      "profileMode": "main-profile",
+      "authenticatedApi": "NOT_RUN",
+      "websocket": "NOT_RUN",
+      "credentialsStoredInBrowser": false,
+      "platform": "Win32"
+    },
+    "publicRuntimePhysicalDownload": "PASS: phone installer downloaded complete signed336af archive and verified SHA before successful extraction",
+    "currentDownloadApkSha256Readback": "PASS: Downloads/HababHome-preview.apk matches current0.1.4 delivery SHA"
   },
   "changeScope": [
     "habab/android/",
     ".gitignore generated Android download exclusion"
   ],
   "limitations": [
-    "Private ARM64 preview APK, targetSdkVersion28; not a Play Store/general Android release.",
-    "Physical base Core/API/WebSocket/UI/control/relaunch verified. Real AI reply awaits owner provider configuration; a public free-tier probe returned403.",
+    "Private ARM64 preview APK targetSdkVersion28; tested on Huawei P30 Pro VOG-L29 Android10 only. Not a Play Store/general Android or HAOS/Supervisor release.",
+    "Physical Core/API/WebSocket/UI/virtual control/owner persistence verified through USB TCP bridge. Independent LAN access was blocked in shared Chrome by ERR_BLOCKED_BY_CLIENT and remains NOT_VERIFIED. Physical smart-home device pairing was not tested.",
+    "OpenCode binary and authenticated native serve health verified. Real AI reply awaits owner provider configuration; a public free-tier prompt returned403 and was not accepted as success.",
     "Telegram panels and long-polling transport are packaged; no real bot token configured and no Telegram command-to-entity E2E claimed.",
-    "LAN address observed but independent Windows-LAN browser unavailable. Permanent public HTTPS/tunnel not provisioned; no public onboarding exposed.",
-    "Rootless Android denies passive DHCP packet capture; physical LAN integrations remain to be checked.",
-    "Whole-phone reboot/autostart, encrypted backup/restore on phone, Huawei OEM launch policy and48-hour stability NOT_RUN.",
-    "No owner passwords, provider keys, bot tokens or private signing keys are included in deliverables or QA record."
+    "Permanent public HTTPS/tunnel not provisioned. No public onboarding exposed.",
+    "Android denies passive DHCP packet capture. No verified Android Bluetooth/USB permission bridge is included.",
+    "Screen-off short check >32min and app restart passed on prior base; whole-phone reboot/autostart, encrypted backup restore, Huawei OEM launch policy and48-hour stability NOT_RUN.",
+    "No owner passwords, provider keys, bot tokens or private signing keys included in deliverables or QA record."
   ],
   "transportRecovery": {
     "oldLinuxAdb": "28.0.2-debian",
@@ -113,12 +151,12 @@
     "windowsExecution": "PASS: SSH18537 live; selected phone authorized; shell echo/getprop succeed"
   },
   "frontendCompatibility": {
-    "status": "MATCHED_FRONTEND_HABAB_3_BASE_VERIFIED",
+    "status": "MATCHED_NATIVE_FRONTEND_ACCEPTED_ON_PHYSICAL_CORE",
     "version": "20260930.4+habab.3",
     "wheelSha256": "fd39da4a4cd3a36573100681636edbb5f81825850265a5df203fa550b61ae79b",
-    "currentPhysicalBase": "Habab0.3.0 with canonical chat and synthetic selector matrix; no actual integration submitted",
+    "currentPhysicalBase": "Habab0.3.0 + native frontend habab.3; canonical chat and rendered AI/TG panels; selector matrix synthetic without submission",
     "acceptedSharedSourceCommit": "0712457f04bd59d207b46919d73ace990d530d3e",
-    "latestRuntime": "336af6656a17a15a still installing"
+    "latestRuntime": "336af6656a17a15a"
   },
   "physicalInstallAttempts": {
     "date": "2026-10-23",
@@ -174,6 +212,7 @@
     "cause": "PRoot bind placeholder directory system has mode000; old Files.walk cannot enter it",
     "dataPreserved": true,
     "currentCoreRestarted": true,
-    "fix": "APK0.1.4 restores owner directory traversal without following symlinks; host full archive and nonroot regression PASS; phone repeat pending"
+    "fix": "RESOLVED: APK0.1.4 owner traversal restoration passed real repeated phone installation; no symlink traversal; configuration retained",
+    "resolved": true
   }
 }

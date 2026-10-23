@@ -1,0 +1,10 @@
+{
+  "result": "NOT_VERIFIED_BROWSER_BLOCKED",
+  "navigationError": "net::ERR_BLOCKED_BY_CLIENT",
+  "phoneLan": "192.168.3.70:8123",
+  "profileMode": "main-profile",
+  "authenticatedApi": "NOT_RUN",
+  "websocket": "NOT_RUN",
+  "credentialsStoredInBrowser": false,
+  "platform": "Win32"
+}

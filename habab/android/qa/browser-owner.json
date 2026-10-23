@@ -1,0 +1,31 @@
+{
+  "owner": true,
+  "core": "2026.10.2",
+  "state": "RUNNING",
+  "nativeBridge": 1,
+  "formLoader": "function",
+  "chatCount": 1,
+  "panels": [
+    "habab-ai",
+    "habab-telegram"
+  ],
+  "routes": [
+    {
+      "route": "habab-ai",
+      "http": 200,
+      "path": "/habab-ai",
+      "rendered": true,
+      "ownerPanel": true
+    },
+    {
+      "route": "habab-telegram",
+      "http": 200,
+      "path": "/habab-telegram",
+      "rendered": true,
+      "ownerPanel": true
+    }
+  ],
+  "nativeAssistSameChat": true,
+  "syntheticSelectorMatrix": "PASS_NO_SUBMISSION",
+  "errors": []
+}

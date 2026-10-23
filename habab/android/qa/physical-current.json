@@ -1,0 +1,19 @@
+{
+  "model": "VOG-L29",
+  "apkVersion": "0.1.4-preview",
+  "apkVersionCode": 5,
+  "maintenance": "PASS",
+  "runtime": "336af6656a17a15a",
+  "sourceCommit": "0712457f04bd59d207b46919d73ace990d530d3e",
+  "hababVersion": "0.3.0",
+  "nativeFrontend": "20260930.4+habab.3",
+  "sourceChecksums": {
+    "matched": 49,
+    "expected": 49
+  },
+  "runtimeContext": {
+    "result": "PASS",
+    "pid": 29387,
+    "runtimeKind": "android_proot"
+  }
+}

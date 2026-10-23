@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-10-23T14:25:21.535965+00:00",
+  "recordedAt": "2026-10-23T15:36:37.352528+00:00",
   "ownerSession": "01a167cc-714b-7970-9b17-c3e42c4cfe47",
   "deletionPolicy": "No further parallel project/profile cleanup after relay20351f0f; project LEAD63ff owns coordination",
   "alreadyDeletedBeforeRelay": {
@@ -7,7 +7,14 @@
     "completedLocalTime": "2026-10-23 17:12:59 +0300",
     "relayCreatedLocalTime": "2026-10-23 17:15:28 +0300"
   },
-  "newCandidates": [],
+  "newCandidates": [
+    {
+      "path": "/var/tmp/habab-android-permission-z_5a8_ya",
+      "ownerSession": "01a167cc-714b-7970-9b17-c3e42c4cfe47",
+      "reason": "Finished unprivileged permission regression harness and copied test dependencies; no active Java process",
+      "cleanupOwner": "project LEAD01a163ff-2768-76e2-a135-d8cb14d7e9c6"
+    }
+  ],
   "protectedPaths": [
     "/root/homeassistent/habab/android/",
     "/root/homeassistent/habab/public/downloads/android/",
@@ -15,17 +22,12 @@
     "/opt/android-sdk/",
     "/opt/gradle/"
   ],
-  "reason": "Android task active; source not committed, physical0.2 active,0.3 signed candidate/evidence and build dependencies required",
+  "reason": "APK0.1.4/current336af and rollback8dcd are verified; source committed; signed delivery and QA evidence retained",
   "chromeProfiles": {
     "/root/snap/chromium/common/habab-p30-qa-*": 0,
     "/root/snap/chromium/common/habab-p30-owner-qa-*": 0
   },
-  "activeQaConsumers": [
-    {
-      "script": "/root/.cache/habab-android/adb-http-bridge.py",
-      "listen": "127.0.0.1:18124",
-      "purpose": "active phone HTTP/WS testing through native ADB18537"
-    }
-  ],
-  "freeBytes": 8468262912
+  "activeQaConsumers": [],
+  "freeBytes": 8468262912,
+  "ownQaBridgeClosed": true
 }
