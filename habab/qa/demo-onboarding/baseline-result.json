@@ -1,0 +1,36 @@
+{
+  "url": "https://habab-demo.wpmix.net/",
+  "stamp": "baseline",
+  "errors": [],
+  "existing_pages": 4,
+  "desktop": {
+    "dialog_open": false,
+    "composer": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0,
+      "hidden": false,
+      "disabled": false
+    },
+    "send": {
+      "x": 0,
+      "y": 0,
+      "width": 0,
+      "height": 0,
+      "hidden": false,
+      "disabled": false
+    },
+    "text": "Что подключим к вашему дому?Помогу найти устройство, проверить подключение и настроить Home Assistant.",
+    "private_hook": false
+  },
+  "mobile": {
+    "dialog_open": false,
+    "composer_bottom": 0,
+    "viewport_height": 844,
+    "page_width": 390,
+    "viewport_width": 390
+  },
+  "cleanup_context_closed": true,
+  "existing_pages_preserved": true
+}

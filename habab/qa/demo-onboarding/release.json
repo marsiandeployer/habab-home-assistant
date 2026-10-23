@@ -1,0 +1,22 @@
+{
+  "published": false,
+  "bundle_sha256": "3fcf44727098d4407b1c98153a8b22239a61ec4449eaee4f4a534bc5825f794c",
+  "module_url": "/previews/assistant/3fcf44727098d440/setup-chat.js",
+  "preview_url": "https://habab-demo.wpmix.net/?habab-preview=onboarding",
+  "files": {
+    "setup-chat.js": "82db73aa782d89564d86ad3429a6724125c062ee1316c479ffe88b266f8c5ca8"
+  },
+  "entrypoint_before_sha256": "25dc7365bafe56ed021cd205f538e2d0cdc75c8892d068daabf119db0205174e",
+  "entrypoint_after_sha256": "25dc7365bafe56ed021cd205f538e2d0cdc75c8892d068daabf119db0205174e",
+  "public_module_http_status": 200,
+  "public_module_sha256": "82db73aa782d89564d86ad3429a6724125c062ee1316c479ffe88b266f8c5ca8",
+  "legacy_module_sha256": "d8b4b25de6fb93ee46c10e7c0aea28b45f9777bb4f8df229250791801fad2b19",
+  "legacy_module_unchanged": true,
+  "backend_file_sha256": "2329ce34041943e85a0b4e7811370406d5c58af2c724cf4b0d2b4fd388555953",
+  "tests": {
+    "python": 24,
+    "python_subtests": 12,
+    "javascript": 30,
+    "real_model_turns": 5
+  }
+}

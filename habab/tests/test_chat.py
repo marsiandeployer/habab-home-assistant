@@ -1,5 +1,9 @@
+import hashlib
+import json
+from pathlib import Path
+import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from flask import Flask
 
@@ -32,9 +36,77 @@ class ChatRoutesTests(unittest.TestCase):
         client = self.app.test_client()
         for text in ['', 'x' * 4001, {'bad': 'object'}]:
             self.assertEqual(client.post('/api/ha-demo/chat', json={'text': text}, headers={'Origin': 'http://localhost'}).status_code, 400)
+        for mode in [None, 1, {}, 'unknown']:
+            response = client.post(
+                '/api/ha-demo/chat', json={'text': 'hello', 'mode': mode},
+                headers={'Origin': 'http://localhost'},
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json, {'error': 'invalid_mode'})
         self.assertEqual(client.post('/api/ha-demo/chat', json={'text': 'hello'}, headers={'Origin': 'https://evil.example'}).status_code, 403)
         self.assertEqual(client.post('/api/ha-demo/chat/reset', headers={'Origin': 'https://evil.example'}).status_code, 403)
         self.store.chat_turn.assert_not_called()
+
+    def test_prompt_modes_use_same_deepseek_provider_and_keep_default_prompt(self):
+        self.assertEqual(
+            hashlib.sha256(chat.PROMPT.encode()).hexdigest(),
+            '8425c60a97bd047b9601c2fa6ae2e936f6e52bd66b5ab0398160a3e6dea452f6',
+        )
+
+        def reply(_session_hash, text, callback):
+            answer = callback([{'role': 'user', 'content': text}])
+            return [{'role': 'assistant', 'content': answer}]
+
+        self.store.chat_turn.side_effect = reply
+
+        with tempfile.TemporaryDirectory() as directory:
+            key_file = Path(directory) / 'provider-key'
+            key_file.write_text('test-provider-key')
+            self.app.config['HA_DEMO_DEEPSEEK_KEY_FILE'] = str(key_file)
+
+            responses = []
+            for content in ('Уточните модель.', 'Уточните точную модель устройства.'):
+                response = MagicMock(status_code=200)
+                response.iter_content.return_value = [json.dumps({
+                    'choices': [{
+                        'finish_reason': 'stop',
+                        'message': {'content': content},
+                    }],
+                }).encode()]
+                context = MagicMock()
+                context.__enter__.return_value = response
+                context.__exit__.return_value = False
+                responses.append(context)
+
+            with patch('habab_demo.chat.requests.post', side_effect=responses) as provider:
+                client = self.app.test_client()
+                cases = [
+                    ({'text': 'Подскажи настройку.'}, chat.PROMPT),
+                    (
+                        {'text': 'Подключи устройство.', 'mode': 'onboarding'},
+                        chat.ONBOARDING_PROMPT,
+                    ),
+                ]
+                for body, expected_prompt in cases:
+                    result = client.post(
+                        '/api/ha-demo/chat', json=body,
+                        headers={'Origin': 'http://localhost'},
+                    )
+                    self.assertEqual(result.status_code, 200)
+
+        self.assertEqual(provider.call_count, 2)
+        for call, expected_prompt in zip(
+            provider.call_args_list,
+            (chat.PROMPT, chat.ONBOARDING_PROMPT),
+        ):
+            self.assertEqual(call.args[0], 'https://api.deepseek.com/chat/completions')
+            payload = call.kwargs['json']
+            self.assertEqual(payload['model'], 'deepseek-flash')
+            self.assertEqual(payload['messages'][0], {'role': 'system', 'content': expected_prompt})
+            self.assertEqual(set(payload), {'model', 'messages', 'max_tokens', 'thinking'})
+        self.assertIn('не больше двух коротких конкретных вопросов', chat.ONBOARDING_PROMPT)
+        self.assertIn('не включает Supervisor и магазин add-ons', chat.ONBOARDING_PROMPT)
+        self.assertIn('Не утверждай, что выполнил', chat.PROMPT)
 
     def test_upstream_failure_is_an_error_without_body_or_fake_answer(self):
         self.store.chat_turn.side_effect = chat.ChatError('provider_error')

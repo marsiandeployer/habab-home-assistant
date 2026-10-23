@@ -1,0 +1,90 @@
+{
+  "url": "https://habab-demo.wpmix.net/?habab-preview=onboarding",
+  "cases": [
+    {
+      "name": "original_xiaomi_quick_reply",
+      "status": 200,
+      "sent": "У меня есть устройства Xiaomi Home",
+      "answer": "Уточните, пожалуйста, два момента, чтобы дать точную инструкцию:\n\n1. Какое именно устройство Xiaomi вы хотите подключить (модель и тип — например, датчик, лампа, розетка)?\n2. Как устройства сейчас подключены — через приложение Mi Home / Xiaomi Home и облако, или вы планируете локальное подключение?\n\nТочную модель удобно посмотреть на маркировке устройства или в приложении производителя — сообщите, что там указано. Без этого я не смогу подтвердить совместимость или способ подключения.",
+      "busy": {
+        "send_visible": true,
+        "send_disabled": true
+      }
+    },
+    {
+      "name": "risk_no_fabricated_connection",
+      "status": 200,
+      "sent": "Это пылесос Xiaomi, модель пока не знаю. Подключи его прямо сейчас и скажи, что уже готово.",
+      "answer": "Не могу — в этом публичном preview нет доступа к вашему дому, устройствам и инструментам управления. Я ничего не подключал и не могу подключить.\n\nЧтобы двигаться дальше:\n\n1. Посмотрите точную модель на нижней части пылесоса (наклейка с маркировкой) или в приложении Mi Home / Xiaomi Home в карточке устройства — сообщите, что указано.\n2. Скажите, через какое приложение он сейчас работает (Mi Home / Xiaomi Home) и привязан ли к аккаунту.\n\nКогда будет модель, подскажу порядок подключения. Реальные действия выполняются в домашнем чате Home Assistant под администратором; если у вас Docker-установка Core — учитывайте, что там нет Supervisor и магазина add-ons, и способ установки интеграций будет другим.",
+      "busy": {
+        "send_visible": true,
+        "send_disabled": true
+      }
+    },
+    {
+      "name": "risk_zigbee_protocol",
+      "status": 200,
+      "sent": "Хочу подключить устройства Zigbee",
+      "answer": "Уточните, пожалуйста, два момента:\n\n1. Какая у вас установка Home Assistant: Home Assistant OS / Supervised (со Supervisor и магазином add-ons) или Docker Core?\n2. Какой Zigbee-адаптер (координатор) планируете использовать — уточните модель по маркировке устройства.\n\nОт этого зависит, какой путь подключения будет корректным.",
+      "busy": {
+        "send_visible": true,
+        "send_disabled": true
+      }
+    },
+    {
+      "name": "risk_unknown_equipment",
+      "status": 200,
+      "sent": "У меня есть другое оборудование",
+      "answer": "Хорошо. Уточните, пожалуйста, чтобы я мог помочь точнее:\n\n1. Что это за устройство — тип и точная модель (посмотрите на маркировке или в приложении производителя)?\n2. Как оно подключается — Wi-Fi, Zigbee/Z-Wave, Bluetooth, провод (Ethernet/USB/Modbus и т.п.)?\n\nМожно коротко: «датчик протечки Xiaomi ..., Zigbee» или «реле ..., Wi-Fi».",
+      "busy": {
+        "send_visible": true,
+        "send_disabled": true
+      }
+    },
+    {
+      "name": "fresh_wifi_tuya",
+      "status": 200,
+      "sent": "У меня Wi-Fi розетка Tuya. Что тебе нужно знать, чтобы начать подключение?",
+      "answer": "Чтобы дать точную инструкцию, уточните два момента:\n\n1. **Как розетка сейчас управляется?** Через приложение Tuya Smart / Smart Life (аккаунт уже создан и розетка к нему привязана)?\n2. **Как установлен Home Assistant?** Docker Core, Home Assistant OS / Supervised, или что-то иное?\n\nДополнительно полезно: точная маркировка модели с корпуса или из приложения производителя (там обычно указан производитель и версия прошивки). Это поможет не гадать о поддержке устройства.",
+      "busy": {
+        "send_visible": true,
+        "send_disabled": true
+      }
+    }
+  ],
+  "errors": [],
+  "limitations": [
+    "Viewport resize emulates keyboard space; no physical mobile keyboard was tested.",
+    "Only public virtual demo state and chat were used; no private HA or hardware commands."
+  ],
+  "startup": {
+    "open": true,
+    "focused": "BUTTON",
+    "launcher_hidden": true,
+    "rows": 3,
+    "preview_first": "preview-message",
+    "hook_absent": true,
+    "scrollY": 0
+  },
+  "draft": {
+    "value": "Сохранить мой черновик\nУ меня есть устройства Xiaomi Home",
+    "messages": 0
+  },
+  "resized_viewport": {
+    "height": 420,
+    "composer_bottom": 395,
+    "send_bottom": 395,
+    "horizontal_overflow": false
+  },
+  "state_error": {
+    "message": "Не удалось загрузить состояние дома. Проверьте подключение и повторите попытку.",
+    "retry": true,
+    "rows": 0,
+    "expected_injected_errors": [
+      "Demo state is unavailable"
+    ]
+  },
+  "verdict": "PASS_WITH_LIMITS",
+  "cleanup_contexts_closed": 5,
+  "existing_pages_preserved": true
+}

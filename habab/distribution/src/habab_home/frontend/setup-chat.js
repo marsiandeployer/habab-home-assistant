@@ -6,6 +6,38 @@ export function visibleTextMessages(messages) {
   );
 }
 
+export function isOnboardingPreview(demoEnabled, previewMarker) {
+  return demoEnabled === true && previewMarker === "onboarding";
+}
+
+export function appendQuickReplyToDraft(draft, prompt) {
+  return typeof draft === "string" && draft.trim()
+    ? `${draft.replace(/\s+$/, "")}\n${prompt}`
+    : prompt;
+}
+
+export function demoChatRequestBody(text, onboarding = false) {
+  return JSON.stringify(onboarding ? {text, mode: "onboarding"} : {text});
+}
+
+export function buildPreviewRows(states, language = "ru") {
+  if (!states || typeof states !== "object" || Array.isArray(states)) return [];
+  const labels = language === "ru" ? {
+    "light.living_room_floor_lamp": "Напольная лампа",
+    "light.living_room_spotlights": "Точечный свет",
+    "climate.living_room": "Климат в гостиной",
+  } : {
+    "light.living_room_floor_lamp": "Living room floor lamp",
+    "light.living_room_spotlights": "Living room spotlights",
+    "climate.living_room": "Living room climate",
+  };
+  return Object.entries(labels).flatMap(([entityId, label]) => {
+    const entry = states[entityId];
+    if (!entry || typeof entry !== "object" || typeof entry.state !== "string") return [];
+    return [{entityId, label, state: entry.state}];
+  });
+}
+
 export function mountStableElement(parent, element) {
   if (parent && element && element.parentNode !== parent) parent.append(element);
 }
@@ -49,6 +81,11 @@ function installChat() {
     ru: {
       title: "Помощник", open: "Открыть чат с помощником", close: "Закрыть", fresh: "Новый чат",
       intro: "Что подключим к вашему дому?", help: "Помогу найти устройство, проверить подключение и настроить Home Assistant.",
+      previewQuestion: "Что подключим к дому? Какое оборудование у вас уже есть?",
+      previewDashboard: "Дом сейчас", dashboardLoading: "Загружаю состояние дома…", dashboardFailed: "Не удалось загрузить состояние дома. Проверьте подключение и повторите попытку.", dashboardRetry: "Повторить загрузку", dashboardEmpty: "Состояние устройств пока недоступно.",
+      quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Другое оборудование",
+      previewPlaceholder: "Например: хочу подключить пылесос Xiaomi",
+      stateOn: "Включено", stateOff: "Выключено", stateHeat: "Обогрев", stateUnavailable: "Нет данных",
       placeholder: "Например: проверь Bluetooth и найди устройства", send: "Отправить", stop: "Остановить",
       working: "Проверяю и выполняю…", loading: "Подключаю помощника…", you: "Вы", assistant: "Помощник",
       demo: "DeepSeek помогает с настройкой. Реальные устройства подключаются в вашей домашней установке Home Assistant.",
@@ -86,6 +123,11 @@ function installChat() {
     en: {
       title: "Assistant", open: "Open assistant chat", close: "Close", fresh: "New chat",
       intro: "What shall we connect?", help: "Find devices, check connections and set up Home Assistant.",
+      previewQuestion: "What should we connect to your home? What equipment do you already have?",
+      previewDashboard: "Home right now", dashboardLoading: "Loading home state…", dashboardFailed: "Could not load the home state. Check your connection and try again.", dashboardRetry: "Retry loading", dashboardEmpty: "Device state is not available yet.",
+      quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Other equipment",
+      previewPlaceholder: "For example: I want to connect a Xiaomi vacuum",
+      stateOn: "On", stateOff: "Off", stateHeat: "Heating", stateUnavailable: "Unavailable",
       placeholder: "For example: check Bluetooth and scan for devices", send: "Send", stop: "Stop",
       working: "Checking and working…", loading: "Connecting…", you: "You", assistant: "Assistant",
       demo: "DeepSeek can help with setup. Connect real devices in your own Home Assistant installation.",
@@ -130,6 +172,10 @@ function installChat() {
       this.busy = false;
       this.voiceBusy = false;
       this.voiceGeneration = 0;
+      this.previewState = {status: "idle"};
+      this.previewOpened = false;
+      this.previewHistoryPositioned = false;
+      this.previewFocusComposer = true;
     }
 
     get hass() { return this._hass; }
@@ -205,7 +251,10 @@ function installChat() {
     }
 
     connectedCallback() {
-      if (this.shadowRoot.firstChild) return;
+      if (this.shadowRoot.firstChild) {
+        if (this.preview) this.installPreviewLifecycle();
+        return;
+      }
       this.language = this.demo || this.hass?.locale.language.startsWith("ru") ? "ru" : "en";
       const t = this.t;
       this.shadowRoot.innerHTML = `<style>
@@ -219,7 +268,10 @@ function installChat() {
         .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
         footer{padding:12px 20px 20px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
+        .preview-message{max-width:none;padding:0 0 20px}.preview-message h3{font-size:23px;line-height:1.3;font-weight:500;margin:0 0 16px}.preview-dashboard{margin:0 0 18px;padding:14px 0;border-block:1px solid var(--divider-color,#e3e6e8)}.preview-dashboard h4{font-size:14px;font-weight:600;margin:0 0 10px}.preview-rows{display:grid;gap:4px}.preview-row{display:flex;justify-content:space-between;gap:12px;padding:7px 0}.preview-label{color:var(--secondary-text-color,#5f6368)}.preview-value{font-weight:500;text-align:end}.preview-state{color:var(--secondary-text-color,#5f6368);margin:0}.preview-state.error{color:var(--error-color,#b3261e)}.preview-retry{padding-inline:0;text-decoration:underline;color:var(--primary-color,#007a9e)}.quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
+        :host([data-preview="onboarding"]){inset:0;z-index:10;pointer-events:none}:host([data-preview="onboarding"]:not([data-preview-open])) .launcher{display:grid;position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));pointer-events:auto}:host([data-preview="onboarding"][data-preview-open]) .launcher{display:none}:host([data-preview="onboarding"]) dialog{inset:0 0 0 auto;width:min(440px,46vw);height:100dvh;border-radius:0;border-block:0;border-inline-end:0;box-shadow:-8px 0 28px #0002}:host([data-preview="onboarding"]) dialog:not([open]){display:none}:host([data-preview="onboarding"]) dialog::backdrop{background:transparent}:host([data-preview="onboarding"]) #log{padding:24px 22px}:host([data-preview="onboarding"]) footer{padding:12px 18px max(16px,env(safe-area-inset-bottom))}
         @media(max-width:600px){:host{inset:0;z-index:1000}.launcher{position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom))}dialog{inset:0;width:100vw;height:100dvh;border-radius:0;margin:0}header{padding:8px 12px}#log{padding:20px 16px}footer{padding:12px 12px max(16px,env(safe-area-inset-bottom))}.empty h3{font-size:24px}.fresh{padding-inline:8px}.message.user{max-width:92%}}
+        @media(max-width:720px){:host([data-preview="onboarding"]){z-index:1000}:host([data-preview="onboarding"]) dialog{inset-inline:0;inset-block-start:var(--preview-viewport-offset-top,0px);inset-block-end:auto;width:100vw;height:var(--preview-viewport-height,100dvh);max-height:var(--preview-viewport-height,100dvh);border-radius:0}:host([data-preview="onboarding"]) .launcher{position:fixed}}
         @media(prefers-reduced-motion:no-preference){dialog[open]{animation:arrive 160ms cubic-bezier(.16,1,.3,1)}@keyframes arrive{from{transform:translateY(10px);opacity:.7}to{transform:translateY(0);opacity:1}}}
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
@@ -228,7 +280,10 @@ function installChat() {
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
-      this.q("dialog").addEventListener("close", () => this.onClose());
+      this.q("dialog").addEventListener("close", () => {
+        this.removeAttribute("data-preview-open");
+        this.onClose();
+      });
       this.q(".mic").onclick = () => this.voiceBusy ? this.voice?.finishRecording() : this.startVoice("last_used");
       this.q(".fresh").onclick = () => this.connect(true);
       this.q(".retry").onclick = () => this.connect();
@@ -237,7 +292,71 @@ function installChat() {
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {event.preventDefault(); this.send();}
       };
       this.q(".stop").onclick = () => this.stop();
+      if (this.preview) {
+        this.q("textarea").placeholder = t.previewPlaceholder;
+        this.q("textarea").setAttribute("aria-label", t.previewPlaceholder);
+      }
+      this.shadowRoot.addEventListener("click", (event) => {
+        const target = event.composedPath().find((item) => item?.classList);
+        if (target?.classList.contains("quick-reply")) this.chooseQuickReply(target.dataset.prompt);
+        if (target?.classList.contains("preview-retry")) void this.loadPreviewDashboard();
+      });
+      if (this.preview) this.installPreviewLifecycle();
       this.draw();
+      if (this.preview && !this.previewOpened) {
+        this.previewOpened = true;
+        void this.loadPreviewDashboard();
+        this.open({}, null, {focus: false});
+      }
+    }
+
+    installPreviewLifecycle() {
+      if (!this.preview || this.previewViewport) return;
+      this.previewViewport = window.visualViewport;
+      this.onPreviewViewportResize = () => this.updatePreviewViewport();
+      this.previewViewport?.addEventListener("resize", this.onPreviewViewportResize);
+      this.previewViewport?.addEventListener("scroll", this.onPreviewViewportResize);
+      this.updatePreviewViewport();
+    }
+
+    disconnectedCallback() {
+      this.previewViewport?.removeEventListener("resize", this.onPreviewViewportResize);
+      this.previewViewport?.removeEventListener("scroll", this.onPreviewViewportResize);
+      this.previewViewport = undefined;
+    }
+
+    updatePreviewViewport() {
+      if (!this.preview || !this.previewViewport) return;
+      this.style.setProperty("--preview-viewport-height", `${Math.max(240, this.previewViewport.height)}px`);
+      this.style.setProperty("--preview-viewport-offset-top", `${Math.max(0, this.previewViewport.offsetTop)}px`);
+    }
+
+    async loadPreviewDashboard() {
+      if (!this.preview) return;
+      this.previewState = {status: "loading"};
+      this.draw({preserveScroll: true});
+      try {
+        const response = await fetch("/api/ha-demo/state", {credentials: "same-origin", cache: "no-store"});
+        if (!response.ok) throw new Error("state unavailable");
+        const result = await response.json();
+        if (!result || !result.states || typeof result.states !== "object" || Array.isArray(result.states)) throw new Error("state invalid");
+        this.previewState = {status: "ready", states: result.states};
+      } catch (_) {
+        this.previewState = {status: "error"};
+      }
+      this.draw({preserveScroll: true});
+    }
+
+    chooseQuickReply(prompt) {
+      if (!this.preview || typeof prompt !== "string" || this.busy || !this.sessionId) return;
+      const textarea = this.q("textarea");
+      const draft = textarea.value;
+      if (draft.trim()) {
+        textarea.value = appendQuickReplyToDraft(draft, prompt);
+        textarea.focus();
+        return;
+      }
+      void this.send(prompt, {clearDraft: true});
     }
 
     updateLanguage() {
@@ -253,8 +372,8 @@ function installChat() {
       this.q(".mic").setAttribute("aria-label", t.mic);
       this.q("#messages").setAttribute("aria-label", t.title);
       const textarea = this.q("textarea");
-      textarea.placeholder = t.placeholder;
-      textarea.setAttribute("aria-label", t.placeholder);
+      textarea.placeholder = this.preview ? t.previewPlaceholder : t.placeholder;
+      textarea.setAttribute("aria-label", this.preview ? t.previewPlaceholder : t.placeholder);
       this.q(".recovery a").textContent = t.settings;
       this.q(".retry").textContent = t.retry;
       this.q(".send").title = t.send;
@@ -263,8 +382,9 @@ function installChat() {
       this.draw();
     }
 
-    open(params = {}, opener = null) {
+    open(params = {}, opener = null, options = {}) {
       if (!this.isConnected || (!this.demo && !this.hass?.user?.is_admin) || !params || typeof params !== "object") return false;
+      this.previewFocusComposer = !(options && typeof options === "object" && options.focus === false);
       this.openParams = {
         ...params,
         pipeline_id: typeof params.pipeline_id === "string" ? params.pipeline_id : "last_used",
@@ -275,13 +395,15 @@ function installChat() {
       };
       if (this.openParams.initial_prompt !== undefined) this.q("textarea").value = this.openParams.initial_prompt;
       this.returnFocus = opener || this.q(".launcher");
+      if (this.preview) this.setAttribute("data-preview-open", "");
       const dialog = this.q("dialog");
       if (!dialog.open) {
-        if (matchMedia("(max-width: 600px)").matches) dialog.showModal();
+        if (matchMedia(this.preview ? "(max-width: 720px)" : "(max-width: 600px)").matches) dialog.showModal();
         else dialog.show();
       }
       if (this.integrationCard) this.integrationCard.active = true;
-      this.q("textarea").focus();
+      if (this.previewFocusComposer) this.q("textarea").focus({preventScroll: true});
+      else if (this.preview) this.q(".close").focus({preventScroll: true});
       if (!this.sessionId && !this.busy) void this.connect();
       else if (this.sessionId && !this.busy) this.startPendingAssist();
       return true;
@@ -317,10 +439,11 @@ function installChat() {
       this.q(".mic").title = this.voiceBusy ? this.t.stopVoice : this.t.mic;
       this.q(".mic").setAttribute("aria-label", this.voiceBusy ? this.t.stopVoice : this.t.mic);
       this.q(".send").disabled = !this.sessionId || this.busy || this.setupRestarting;
-      this.q(".send").hidden = this.busy;
+      this.q(".send").hidden = this.busy && !this.preview;
       this.q(".stop").hidden = !this.running || this.demo;
       this.q(".fresh").disabled = this.busy || !this.sessionId;
       this.q(".retry").disabled = this.busy;
+      for (const button of this.shadowRoot.querySelectorAll(".quick-reply")) button.disabled = this.busy || !this.sessionId;
     }
 
     async connect(fresh = false) {
@@ -340,7 +463,7 @@ function installChat() {
       } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
       finally {
         this.busy = false; this.controls();
-        if (this.q("dialog").open) this.q("textarea").focus();
+        if (this.q("dialog").open && this.previewFocusComposer) this.q("textarea").focus({preventScroll: true});
         this.startPendingAssist();
       }
     }
@@ -348,7 +471,7 @@ function installChat() {
     async demoRequest(suffix = "", method = "GET", text) {
       const response = await fetch(`/api/ha-demo/chat${suffix}`, {
         method, credentials: "same-origin", headers: {"Content-Type": "application/json"},
-        ...(text !== undefined ? {body: JSON.stringify({text})} : {}),
+        ...(text !== undefined ? {body: demoChatRequestBody(text, this.preview === true)} : {}),
       });
       const result = await response.json();
       if (!response.ok) throw {code: result.error};
@@ -483,12 +606,14 @@ function installChat() {
       }
     }
 
-    draw() {
+    draw({preserveScroll = false} = {}) {
       const log = this.q("#log");
+      const previousScrollTop = log.scrollTop;
       const messageContainer = this.q("#messages");
       messageContainer.replaceChildren();
       const visibleMessages = visibleTextMessages(this.messages);
-      if (!visibleMessages.length) {
+      if (this.preview) messageContainer.append(this.renderPreviewMessage());
+      if (!visibleMessages.length && !this.preview) {
         const empty = document.createElement("div"); empty.className = "empty";
         const title = document.createElement("h3"); title.textContent = this.t.intro;
         const help = document.createElement("p"); help.textContent = this.t.help;
@@ -503,11 +628,91 @@ function installChat() {
         else text.textContent = message.text;
         row.append(name, text); messageContainer.append(row);
       }
-      log.scrollTop = log.scrollHeight;
+      const keepPreviewIntroVisible = this.preview && this.sessionId && !this.previewHistoryPositioned;
+      log.scrollTop = preserveScroll ? previousScrollTop : keepPreviewIntroVisible ? 0 : log.scrollHeight;
+      if (keepPreviewIntroVisible) this.previewHistoryPositioned = true;
       const tail = log.lastChild;
       Promise.allSettled([...messageContainer.querySelectorAll("ha-markdown")].map(item => item.updateComplete)).then(() => {
-        if (log.lastChild === tail) log.scrollTop = log.scrollHeight;
+        if (log.lastChild === tail && !keepPreviewIntroVisible && !preserveScroll) log.scrollTop = log.scrollHeight;
       });
+    }
+
+    renderPreviewMessage() {
+      const section = document.createElement("section");
+      section.className = "preview-message";
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = this.t.assistant;
+      const question = document.createElement("h3");
+      question.textContent = this.t.previewQuestion;
+      section.append(name, question);
+
+      const dashboard = document.createElement("div");
+      dashboard.className = "preview-dashboard";
+      const heading = document.createElement("h4");
+      heading.textContent = this.t.previewDashboard;
+      dashboard.append(heading);
+      if (this.previewState.status === "loading" || this.previewState.status === "idle") {
+        const message = document.createElement("p");
+        message.className = "preview-state";
+        message.textContent = this.t.dashboardLoading;
+        dashboard.append(message);
+      } else if (this.previewState.status === "error") {
+        const message = document.createElement("p");
+        message.className = "preview-state error";
+        message.textContent = this.t.dashboardFailed;
+        const retry = document.createElement("button");
+        retry.className = "preview-retry";
+        retry.type = "button";
+        retry.textContent = this.t.dashboardRetry;
+        dashboard.append(message, retry);
+      } else {
+        const rows = buildPreviewRows(this.previewState.states, this.language);
+        if (!rows.length) {
+          const message = document.createElement("p");
+          message.className = "preview-state";
+          message.textContent = this.t.dashboardEmpty;
+          dashboard.append(message);
+        } else {
+          const rowList = document.createElement("div");
+          rowList.className = "preview-rows";
+          for (const item of rows) {
+            const row = document.createElement("div");
+            row.className = "preview-row";
+            const label = document.createElement("span");
+            label.className = "preview-label";
+            label.textContent = item.label;
+            const value = document.createElement("span");
+            value.className = "preview-value";
+            value.textContent = item.state === "on" ? this.t.stateOn
+              : item.state === "off" ? this.t.stateOff
+                : item.state === "heat" ? this.t.stateHeat : this.t.stateUnavailable;
+            row.append(label, value);
+            rowList.append(row);
+          }
+          dashboard.append(rowList);
+        }
+      }
+      section.append(dashboard);
+
+      const quickReplies = document.createElement("div");
+      quickReplies.className = "quick-replies";
+      const choices = [
+        [this.t.quickXiaomi, this.language === "ru" ? "У меня есть устройства Xiaomi Home" : "I have Xiaomi Home devices"],
+        [this.t.quickZigbee, this.language === "ru" ? "Хочу подключить устройства Zigbee" : "I want to connect Zigbee devices"],
+        [this.t.quickOther, this.language === "ru" ? "У меня есть другое оборудование" : "I have other equipment"],
+      ];
+      for (const [label, prompt] of choices) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "quick-reply";
+        button.textContent = label;
+        button.dataset.prompt = prompt;
+        button.disabled = this.busy || !this.sessionId;
+        quickReplies.append(button);
+      }
+      section.append(quickReplies);
+      return section;
     }
 
     async send(textValue, {voiceReply = false, clearDraft = false} = {}) {
@@ -526,7 +731,7 @@ function installChat() {
       finally {
         if (!this.demo) await this.loadSetup(true);
         this.busy = false; this.running = false; this.controls();
-        if (this.q("dialog").open) this.q("textarea").focus();
+        if (this.q("dialog").open && this.previewFocusComposer) this.q("textarea").focus({preventScroll: true});
         this.startPendingAssist();
       }
     }
@@ -575,15 +780,22 @@ function installChat() {
   const syncLauncher = () => {
     const main = locateMain(document);
     const demo = document.documentElement.dataset.hababDemo === "true";
+    const preview = isOnboardingPreview(demo, document.documentElement.dataset.hababDemoPreview);
     const hass = main?.hass;
     if (!demo && !hass?.user?.is_admin) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
     if (!demo && !main) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
     if (!launcher) {
       launcher = document.createElement("habab-setup-chat");
       launcher.demo = demo;
+      launcher.preview = preview;
+      if (preview) launcher.setAttribute("data-preview", "onboarding");
       launcher.hass = hass;
       document.body.append(launcher);
     }
+    launcher.demo = demo;
+    launcher.preview = preview;
+    if (preview) launcher.setAttribute("data-preview", "onboarding");
+    else launcher.removeAttribute("data-preview");
     launcher.hass = hass;
     syncThemeVariables(launcher, main);
     if (launcher.parentNode !== document.body) document.body.append(launcher);
