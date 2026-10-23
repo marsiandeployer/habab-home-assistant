@@ -1,0 +1,13 @@
+{
+  "apk": "habab-home-0.1.4-preview-f2279f478606.apk",
+  "sha256": "f2279f478606bb7db0ff1f982017a825a76cd5dc77caefa72396c78533de0b2c",
+  "bytes": 1790538,
+  "versionCode": 5,
+  "versionName": "0.1.4-preview",
+  "runtimeManifest": "release-336af6656a17a15a.json",
+  "sourceBundle": {
+    "name": "habab-android-sources.tar.gz",
+    "sha256": "75c65146d6c8e883e2f30601680f682622fd368393f5836a90d608016e09e8e5",
+    "bytes": 11623283
+  }
+}

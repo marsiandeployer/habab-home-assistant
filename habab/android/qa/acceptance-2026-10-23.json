@@ -1,0 +1,179 @@
+{
+  "recordedAt": "2026-10-23T15:19:21.460054+00:00",
+  "status": "PHYSICAL_BASE_PASS_CURRENT_UPDATE_PENDING",
+  "delivery": {
+    "apk": "habab-home-0.1.4-preview-f2279f478606.apk",
+    "sha256": "f2279f478606bb7db0ff1f982017a825a76cd5dc77caefa72396c78533de0b2c",
+    "bytes": 1790538,
+    "versionCode": 5,
+    "versionName": "0.1.4-preview",
+    "runtimeManifest": "release-336af6656a17a15a.json",
+    "sourceBundle": {
+      "name": "habab-android-sources.tar.gz",
+      "sha256": "75c65146d6c8e883e2f30601680f682622fd368393f5836a90d608016e09e8e5",
+      "bytes": 11623283
+    },
+    "status": "APK_0_1_4_INSTALLED_CURRENT_RUNTIME_UPDATE_PENDING"
+  },
+  "runtimeVerification": {
+    "result": "PASS",
+    "release": "336af6656a17a15a",
+    "files": 155807,
+    "symlinks": 1634,
+    "regularBytes": 2525009057,
+    "hababSourceFiles": 49
+  },
+  "checks": {
+    "apkBuild": "PASS",
+    "apkSignatureV2": "PASS",
+    "androidLint": "PASS_WITH_WARNINGS",
+    "javaTests": {
+      "passed": 11,
+      "skipped": 0
+    },
+    "pythonTests": {
+      "passed": 14
+    },
+    "actualRuntimeJavaExtraction": "PASS",
+    "publicApkSha256Readback": "PASS",
+    "publicRuntimeRangeReadback": "PASS",
+    "arm64CoreHababImport": "PASS_UNDER_QEMU",
+    "arm64NodeWorkerSyntax": "PASS_UNDER_QEMU",
+    "arm64OpenCode": "PASS_ON_P30: version and authenticated service health; actual AI response NOT_PASSED without owner provider configuration",
+    "adb": "PASS: native Windows ADB18537, serial selected VOG-L29 authorized; model VOG-L29 read back",
+    "physicalDeviceModel": "PASS: VOG-L29, Android 10 SDK 29, ARM64, EMUI 12",
+    "physicalInstallation": "PASS: initial manual installation, then APK0.1.1 update via non-streamed ADB install returned Success",
+    "physicalCoreStartup": "PASS: actual Python3.14/Core2026.10.2 process on P30; onboarding HTTP200 and protected Habab status401",
+    "physicalOpenCodeToolExecution": "NOT_PASSED: isolated real public prompt reached provider but free-tier API returned403; CLI exit0 was not treated as success; no owner provider credentials configured",
+    "physicalLanAndHttps": "NOT_VERIFIED: WiFi192.168.3.70 observed; Windows browser CDP connection unavailable; no public phone endpoint provisioned",
+    "physicalRestartAndBackupRestore": "App restart PASS; encrypted backup restore and whole-phone reboot NOT_RUN",
+    "screenOff48Hours": "NOT_RUN",
+    "nativePreflightBuild": "PASS: packaged proot 5.1.107.99 executed on P30 and wrote native-check.json",
+    "physicalRuntimeExtraction": "PASS: APK0.1.1 extracted signed runtime d2d21c615cda45b6; maintenance-status.json recorded done",
+    "nativeProotGuestExecution": "PASS: packaged proot --kill-on-exit -0 successfully executed /system/bin/echo inside guest root on P30",
+    "physicalBrowserOnboarding": "PASS: own Chromium1280x800 through USB TCP bridge rendered onboarding.html, title Home Assistant, no pageerrors",
+    "physicalOpenCodeBinary": "PASS: ARM64 OpenCode1.14.21 --version and native authenticated serve --pure health; unauthenticated health401",
+    "screenOffShortCheck": "PASS: screen Asleep/OFF and habab:server partial wake lock held >32min; Core stayed reachable; 48-hour test NOT_RUN",
+    "physicalControl": {
+      "result": "PASS",
+      "ownerLogin": true,
+      "websocketAuthenticated": true,
+      "helperStates": [
+        "off",
+        "on",
+        "off"
+      ],
+      "stateEvents": [
+        "off",
+        "on",
+        "off"
+      ],
+      "temporaryHelperDeleted": true
+    },
+    "physicalBrowserAuthenticated": {
+      "result": "PASS",
+      "coreState": "RUNNING",
+      "isOwner": true,
+      "routes": [
+        "dashboard",
+        "habab-ai",
+        "habab-telegram"
+      ],
+      "pageErrors": 0
+    },
+    "physicalAppRestart": "PASS: force-stop/relaunch created new Core process; authenticated API state RUNNING and owner login retained; recorder recovered unclean session as expected",
+    "batteryOptimizationExemption": "PASS: own package whitelist entry read back after granting exemption",
+    "currentPhysicalRuntime": "8dcd701d01d14740 / Habab0.3.0, owner/control/native frontend habab.3 verified; 336af update pending",
+    "unprivilegedDeletionRegression": {
+      "baseline": "ACCESS_DENIED_REPRODUCED",
+      "fixed": "PASS",
+      "symlinkTargetPreserved": true
+    }
+  },
+  "changeScope": [
+    "habab/android/",
+    ".gitignore generated Android download exclusion"
+  ],
+  "limitations": [
+    "Private ARM64 preview APK, targetSdkVersion28; not a Play Store/general Android release.",
+    "Physical base Core/API/WebSocket/UI/control/relaunch verified. Real AI reply awaits owner provider configuration; a public free-tier probe returned403.",
+    "Telegram panels and long-polling transport are packaged; no real bot token configured and no Telegram command-to-entity E2E claimed.",
+    "LAN address observed but independent Windows-LAN browser unavailable. Permanent public HTTPS/tunnel not provisioned; no public onboarding exposed.",
+    "Rootless Android denies passive DHCP packet capture; physical LAN integrations remain to be checked.",
+    "Whole-phone reboot/autostart, encrypted backup/restore on phone, Huawei OEM launch policy and48-hour stability NOT_RUN.",
+    "No owner passwords, provider keys, bot tokens or private signing keys are included in deliverables or QA record."
+  ],
+  "transportRecovery": {
+    "oldLinuxAdb": "28.0.2-debian",
+    "failure": "USB/IP virtual USB, adb stuck in usb_kill_urb",
+    "recovery": "Closed only imported USB TCP connection; kernel/adb recovered without reboot",
+    "next": "Windows native ADB 37.0.1 through SSH localhost:18537, one selected Huawei device",
+    "launcher": "kolya/connect-huawei-adb-yubikey.bat",
+    "launcherCommit": "2f1dd1e84dd039b64b2ef2ecc4458c2c0f49a1ed",
+    "windowsExecution": "PASS: SSH18537 live; selected phone authorized; shell echo/getprop succeed"
+  },
+  "frontendCompatibility": {
+    "status": "MATCHED_FRONTEND_HABAB_3_BASE_VERIFIED",
+    "version": "20260930.4+habab.3",
+    "wheelSha256": "fd39da4a4cd3a36573100681636edbb5f81825850265a5df203fa550b61ae79b",
+    "currentPhysicalBase": "Habab0.3.0 with canonical chat and synthetic selector matrix; no actual integration submitted",
+    "acceptedSharedSourceCommit": "0712457f04bd59d207b46919d73ace990d530d3e",
+    "latestRuntime": "336af6656a17a15a still installing"
+  },
+  "physicalInstallAttempts": {
+    "date": "2026-10-23",
+    "apkSha256": "e24cd553f7cf81807a8839d9599ccca96da9304177c61169bc8ee6bd02ec0019",
+    "method": "adb install --no-streaming -r",
+    "attempts": 2,
+    "result": "INSTALL_FAILED_VERIFICATION_FAILURE",
+    "observations": [
+      "User reported confirming installation; independent pm/run-as readback did not find ru.habab.home.",
+      "Filtered phone log contained unfinished Play Protect APK Analysis scan for ru.habab.home.",
+      "After second attempt dumpsys power reported mWakefulness=Asleep, Display state=OFF."
+    ],
+    "next": "Historical initial verification block resolved by owner; later APK updates install through authorized ADB.",
+    "securitySettingsChanged": false,
+    "manualRoute": {
+      "apkOnPhone": "/sdcard/Download/HababHome-preview.apk",
+      "phoneSha256": "e24cd553f7cf81807a8839d9599ccca96da9304177c61169bc8ee6bd02ec0019",
+      "sha256Readback": "PASS",
+      "packageReadback": "PASS: package installed after owner confirmed warning in manual installer",
+      "ui": "Keyguard resource IDs observed; wake key sent, PIN/unlock not bypassed.",
+      "installerIntent": "VIEW file URI and INSTALL_PACKAGE did not resolve; owner can open APK from Files/Downloads."
+    }
+  },
+  "observedCoreLimitations": [
+    "First custom HTTP YAML config auto-reverted after5min without owner confirmation; second process remains running on stable config.",
+    "Android denied passive DHCP packet capture; other LAN protocols require actual device checks."
+  ],
+  "previousPhysicalBaselines": [
+    {
+      "delivery": {
+        "status": "PREVIEW_PHYSICAL_CORE_AND_CONTROL_VERIFIED",
+        "applicationId": "ru.habab.home",
+        "apk": "habab-home-0.1.1-preview-743ee4d1adf2.apk",
+        "sha256": "743ee4d1adf293bdfbb33df909d63abef7bba2c8440504bef75bdf39e76b4a1a",
+        "bytes": 1790406,
+        "runtimeManifest": "release-d2d21c615cda45b6.json",
+        "sourceBundle": "habab-android-sources.tar.gz"
+      },
+      "runtimeVerification": {
+        "result": "PASS",
+        "release": "d2d21c615cda45b6",
+        "files": 155689,
+        "symlinks": 1634,
+        "regularBytes": 2523833467,
+        "hababSourceFiles": 43
+      },
+      "status": "PASS_PHYSICAL_BASE_WITH_LIMITS"
+    }
+  ],
+  "physicalUpdateFailure": {
+    "apk": "0.1.3-preview",
+    "result": "ACCESS_DENIED_DELETING_PREVIOUS_RUNTIME",
+    "cause": "PRoot bind placeholder directory system has mode000; old Files.walk cannot enter it",
+    "dataPreserved": true,
+    "currentCoreRestarted": true,
+    "fix": "APK0.1.4 restores owner directory traversal without following symlinks; host full archive and nonroot regression PASS; phone repeat pending"
+  }
+}

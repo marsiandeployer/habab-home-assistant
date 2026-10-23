@@ -1,0 +1,21 @@
+{
+  "mode": "clean-own-generated-cache",
+  "deleted": [
+    "/root/homeassistent/habab/android/build/runtime/rootfs.tar",
+    "/root/homeassistent/habab/android/build/runtime/rootfs"
+  ],
+  "beforeAvailableBytes": 759758848,
+  "afterAvailableBytes": 6189948928,
+  "netAvailableBytesDelta": 5430190080,
+  "seconds": 4.79,
+  "checks": {
+    "producer": "pinned ARM64 build/export",
+    "activeProcesses": 0,
+    "openFiles": 0,
+    "mappedFiles": 0,
+    "mounts": 0,
+    "dockerMounts": 0,
+    "serviceConfigReferences": 0,
+    "sourceAndPublicArtifactsPreserved": true
+  }
+}

@@ -1,0 +1,53 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'ru.habab.home'
+    compileSdk 34
+    buildFeatures { buildConfig true }
+    defaultConfig {
+        applicationId 'ru.habab.home'
+        minSdk 26
+        // Private Huawei prototype. Target 29+ prohibits exec from app data.
+        // Raising this requires a different runtime, not just changing a number.
+        targetSdk 28
+        versionCode 5
+        versionName '0.1.4-preview'
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+            keepDebugSymbols += ['**/*.so']
+        }
+    }
+    buildTypes { release { minifyEnabled false } }
+    lint { disable 'ExpiredTargetSdkVersion', 'OldTargetApi' }
+}
+
+dependencies {
+    implementation 'org.apache.commons:commons-compress:1.27.1'
+    implementation 'com.github.mwiede:jsch:0.2.21'
+    implementation 'net.i2p.crypto:eddsa:0.3.0'
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.withType(Test).configureEach {
+    def archive = providers.environmentVariable('HABAB_RUNTIME_ARCHIVE')
+    inputs.property('runtimeArchive', archive.orElse(''))
+    if (archive.isPresent()) inputs.file(archive.get())
+}
+
+tasks.register('verifyRuntimeInputs') {
+    doLast {
+        ['src/main/assets/release/trusted-key.der', 'src/main/assets/release/default-url.txt',
+         'src/main/jniLibs/arm64-v8a/libproot.so', 'src/main/jniLibs/arm64-v8a/libproot-loader.so',
+         'src/main/jniLibs/arm64-v8a/libtalloc.so', 'src/main/jniLibs/arm64-v8a/libandroid-shmem.so'].each { path ->
+            if (!file(path).isFile()) throw new GradleException('Missing runtime input: ' + path + '. Run prepare_native.py and package_runtime.py first.')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyRuntimeInputs' }

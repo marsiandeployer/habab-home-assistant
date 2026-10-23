@@ -79,3 +79,6 @@ test/benchmarks/results/
 # Habab build scripts and pinned translation are source, not compiler output.
 !habab/build/
 !habab/build/**
+
+# Generated Android delivery files; source lives in habab/android/.
+/habab/public/downloads/android/

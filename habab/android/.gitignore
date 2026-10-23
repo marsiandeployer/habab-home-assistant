@@ -1,0 +1,13 @@
+.gradle/
+**/build/
+local.properties
+dist/
+app/src/main/jniLibs/
+app/src/main/assets/release/
+*.jks
+*.keystore
+*.key
+*.pem
+.env*
+secrets/
+__pycache__/

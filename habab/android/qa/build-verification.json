@@ -1,0 +1,31 @@
+{
+  "recordedAt": "2026-10-23T15:18:16.667419+00:00",
+  "apkBuild": "PASS",
+  "apkSignature": "PASS",
+  "androidLint": "PASS_WITH_WARNINGS",
+  "javaTests": {
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "fullJavaExtractionArchive": "336af6656a17a15a",
+  "pythonTests": {
+    "passed": 14
+  },
+  "runtimeVerification": {
+    "result": "PASS",
+    "release": "336af6656a17a15a",
+    "files": 155807,
+    "symlinks": 1634,
+    "regularBytes": 2525009057,
+    "hababSourceFiles": 49
+  },
+  "publicApkSha256Readback": "PASS",
+  "publicManifestReadback": "PASS",
+  "unprivilegedDeletionRegression": {
+    "baseline": "ACCESS_DENIED_REPRODUCED",
+    "fixed": "PASS",
+    "symlinkTargetPreserved": true
+  }
+}
