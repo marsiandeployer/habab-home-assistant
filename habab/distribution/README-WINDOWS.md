@@ -132,6 +132,40 @@ docker compose --env-file .env.opencode-windows -p habab-home-windows -f compose
 
 Проверены синтаксис PowerShell, целостность скачиваемого OpenCode, установка Linux-бинарника в volume и запуск этого бинарника в образе HA. Чат, native-действия HA и root-команды проверяются в отдельном Linux Docker QA. Полный запуск Docker Desktop/WSL на физическом Windows-компьютере в этой сессии не выполнялся.
 
-Windows Bluetooth и USB не передаются в Linux-контейнер автоматически. Для проверки аппаратного подключения нужен отдельно доступный адаптер или сетевой Bluetooth proxy. Настройка callback-адреса в режиме Xiaomi описана выше.
+## Bluetooth на Windows
+
+Встроенный Bluetooth Windows не передаётся в Linux-контейнер Docker Desktop
+автоматически. Отсутствие `/sys/class/bluetooth`, сокета
+`/run/dbus/system_bus_socket` и HCI подтверждает, что в этом контейнере нет
+доступного локального Bluetooth-пути. Установка `bluetoothctl` и root-права
+сами по себе адаптер не добавляют.
+
+`compose.bluetooth.yaml` предназначен для Linux-хоста с работающими BlueZ и
+D-Bus. Добавление этого override к Windows Compose само по себе не пробрасывает
+Bluetooth Windows. Его не нужно включать как универсальное исправление.
+
+Для BLE-устройств Home Assistant поддерживает сетевой ESPHome Bluetooth proxy:
+
+1. Подключите совместимый ESP32 с proxy-прошивкой к домашней сети. Готовые варианты
+   и web-установщик доступны на [официальной странице ESPHome](https://esphome.io/projects/).
+2. В Home Assistant откройте **Настройки → Устройства и службы → Добавить интеграцию → ESPHome**.
+   При отсутствии автоматического обнаружения укажите IP proxy. Ключ шифрования,
+   если он настроен, вводите в защищённую форму интеграции.
+3. Проверьте появление удалённого сканера в **Настройки → Подключения → Bluetooth**
+   и подключайте найденные устройства через подходящие интеграции.
+
+Proxy поддерживает BLE, а не Bluetooth Classic. Совместимость конкретного
+устройства проверяется отдельно. Этот аппаратный путь в нашей Windows-проверке
+ещё не выполнен. Подробности: [Home Assistant Bluetooth](https://www.home-assistant.io/integrations/bluetooth/)
+и [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy/).
+
+USB/IP в WSL — отдельная настройка хоста, описанная
+[Microsoft](https://learn.microsoft.com/en-us/windows/wsl/connect-usb). Подключение
+USB к WSL ещё не доказывает доступность адаптера, драйвера BlueZ и D-Bus именно
+контейнеру HA. Для конкретного Windows-адаптера этот способ у нас не проверен.
+
+Для подключения уже добавленного в приложение пылесоса через **Xiaomi Home**
+сначала используйте вход в Xiaomi и импорт устройства; локальный Bluetooth HA
+для этого облачного пути не требуется. Настройка callback-адреса описана выше.
 
 Исходные требования: [Docker Desktop для Windows](https://docs.docker.com/desktop/setup/install/windows-install/), [OpenCode](https://opencode.ai/docs/). Скрипт использует штатные окна установки и не меняет глобальную Execution Policy PowerShell.

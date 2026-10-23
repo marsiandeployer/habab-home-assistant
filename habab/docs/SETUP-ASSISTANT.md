@@ -82,6 +82,8 @@ python3 prepare-opencode.py --binary /absolute/path/to/musl/opencode
 
 Команда `discover_devices` наблюдает от 1 до 15 секунд за результатами штатных zeroconf, SSDP и DHCP обнаружений Home Assistant и за его Bluetooth-сканерами. Список может быть неполным. Эта команда не сканирует Wi-Fi SSID, не проверяет доступность multicast и не меняет сеть. Новый discovery flow нужно явно принять до прохождения его шагов. Bluetooth-адаптер Windows не передаётся в Linux-контейнер Docker Desktop; этот путь не доказывает работу Bluetooth на Windows.
 
+Для Windows Docker Desktop простой Bluetooth override не добавляет адаптер Windows или системный D-Bus. Для BLE можно использовать сетевой ESPHome proxy; шаги и границы USB/IP описаны в [инструкции Windows](../distribution/README-WINDOWS.md#bluetooth-на-windows).
+
 Для Bluetooth на Linux-хосте должны работать BlueZ и системный D-Bus, а адаптер должен быть доступен хосту. Подключите override:
 
 ```sh

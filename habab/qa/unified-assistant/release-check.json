@@ -5,10 +5,11 @@
   "frontend_tests": 7,
   "transport_tests": 5,
   "windows_contract_tests": 5,
-  "archive": "habab-home-windows-94d288fbe9ae.zip",
-  "sha256": "94d288fbe9ae0921002eec32cfb489747cee6423412e862e77e44b1e2b36803a",
+  "archive": "habab-home-windows-4c1d8e230806.zip",
+  "sha256": "4c1d8e2308066ba848a03b3e22fba838e778f720dcaa3faf39147ea873344343",
   "files": 61,
   "source_and_archive_gitleaks": "PASS",
   "windows_live": "PARTIAL_0.1.0_top_toolbar_chat_real_reply_PASS_0.2_bottom_right_pending",
-  "telegram_live": "NOT_RUN_no_dedicated_bot_configured"
+  "telegram_live": "NOT_RUN_no_dedicated_bot_configured",
+  "archive_change": "README-WINDOWS.md only; runtime sources identical to verified 0.2.0 archive"
 }
