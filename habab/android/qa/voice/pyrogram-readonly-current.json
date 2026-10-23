@@ -1,0 +1,63 @@
+{
+  "pyrogram": "CONNECTED",
+  "botIdentity": "VERIFIED",
+  "botUsername": "manulboxbot",
+  "recentMessages": [
+    {
+      "id": 36325,
+      "outgoing": true,
+      "date": "2026-06-17T12:41:23",
+      "hasText": true,
+      "command": "/start"
+    },
+    {
+      "id": 36324,
+      "outgoing": true,
+      "date": "2026-06-17T12:39:58",
+      "hasText": true,
+      "command": "/start"
+    },
+    {
+      "id": 36314,
+      "outgoing": true,
+      "date": "2026-06-17T12:33:24",
+      "hasText": true,
+      "command": "/start"
+    },
+    {
+      "id": 23629,
+      "outgoing": false,
+      "date": "2026-04-29T11:34:21",
+      "hasText": true,
+      "command": null
+    },
+    {
+      "id": 23628,
+      "outgoing": true,
+      "date": "2026-04-29T11:34:20",
+      "hasText": true,
+      "command": "/start"
+    },
+    {
+      "id": 23627,
+      "outgoing": false,
+      "date": "2026-04-29T11:33:33",
+      "hasText": true,
+      "command": null
+    },
+    {
+      "id": 23626,
+      "outgoing": true,
+      "date": "2026-04-29T11:33:33",
+      "hasText": true,
+      "command": "/start"
+    },
+    {
+      "id": 23621,
+      "outgoing": true,
+      "date": "2026-04-29T11:24:01",
+      "hasText": true,
+      "command": null
+    }
+  ]
+}

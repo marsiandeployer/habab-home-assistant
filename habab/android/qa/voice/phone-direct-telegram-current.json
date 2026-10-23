@@ -1,0 +1,5 @@
+{
+  "probeExit": 0,
+  "result": "{\"kind\": \"telegram\", \"error\": \"URLError\", \"reasonType\": \"OSError\"}",
+  "diagnostic": ""
+}

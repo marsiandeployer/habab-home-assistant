@@ -100,7 +100,7 @@ async def async_setup(hass, config):
 
 async def async_setup_entry(hass, entry):
     platforms = [Platform.CONVERSATION]
-    if entry.data["provider"] == "openai":
+    if entry.data["provider"] in {"openai", "habab"}:
         platforms.extend([Platform.STT, Platform.TTS])
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
     return True
@@ -108,6 +108,6 @@ async def async_setup_entry(hass, entry):
 
 async def async_unload_entry(hass, entry):
     platforms = [Platform.CONVERSATION]
-    if entry.data["provider"] == "openai":
+    if entry.data["provider"] in {"openai", "habab"}:
         platforms.extend([Platform.STT, Platform.TTS])
     return await hass.config_entries.async_unload_platforms(entry, platforms)

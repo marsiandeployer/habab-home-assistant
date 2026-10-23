@@ -18,6 +18,8 @@ import org.json.JSONObject;
 public final class VoiceService extends Service {
     static volatile boolean active;
     static volatile String status = "off";
+    static volatile String lastError;
+    private volatile long lastErrorAt;
     private volatile boolean running;
     private Thread capture;
     private volatile AudioRecord recorder;
@@ -38,6 +40,9 @@ public final class VoiceService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        String saved = getSharedPreferences("voice", 0).getString("last_error", null);
+        lastError = saved == null ? null : VoiceFailure.normalize(saved);
+        lastErrorAt = getSharedPreferences("voice", 0).getLong("last_error_at", 0);
         NotificationManager notifications = getSystemService(NotificationManager.class);
         notifications.createNotificationChannel(new NotificationChannel("voice", getString(R.string.voice_title), NotificationManager.IMPORTANCE_LOW));
         startForeground(3, notification());
@@ -47,8 +52,11 @@ public final class VoiceService extends Service {
     private Notification notification() {
         PendingIntent open = PendingIntent.getActivity(this, 30, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent stop = PendingIntent.getService(this, 31, new Intent(this, VoiceService.class).setAction("stop"), PendingIntent.FLAG_IMMUTABLE);
+        String message = lastError != null && (status.equals("wake") || status.equals("error"))
+                ? failureLabel(this, lastError) : label(status);
         return new Notification.Builder(this, "voice").setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle(getString(R.string.voice_title)).setContentText(label(status))
+                .setContentTitle(getString(R.string.voice_title)).setContentText(message)
+                .setStyle(new Notification.BigTextStyle().bigText(message))
                 .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
                 .addAction(new Notification.Action.Builder(null, getString(R.string.voice_stop), stop).build()).build();
     }
@@ -68,6 +76,36 @@ public final class VoiceService extends Service {
         return context.getString(text);
     }
     private String label(String phase) { return label(this, phase); }
+
+    static String failureLabel(Context context, String code) {
+        int text;
+        switch (VoiceFailure.normalize(code)) {
+            case "openai_required": case "provider_required": case "realtime_provider_required": text = R.string.voice_error_provider; break;
+            case "voice_authorization_required": case "voice_authorization_expired": case "not_allowed":
+            case "invalid_voice_authorization": case "voice_authorization_not_saved": text = R.string.voice_error_auth; break;
+            case "realtime_provider_rejected": text = R.string.voice_error_rejected; break;
+            case "voice_rate_limited": text = R.string.voice_error_limit; break;
+            case "unsupported_wake_word": case "invalid_wake_phrase": text = R.string.voice_error_phrase; break;
+            case "microphone_permission_revoked": text = R.string.voice_error_permission; break;
+            case "voice_model_unavailable": case "voice_model_checksum_mismatch":
+            case "invalid_voice_model": case "incomplete_voice_model": text = R.string.voice_error_model; break;
+            case "voice_assistant_failed": case "empty_assistant_reply": text = R.string.voice_error_assistant; break;
+            case "voice_timeout": case "voice_connection_failed": case "realtime_connection_failed":
+            case "realtime_connection_closed": case "realtime_unavailable": text = R.string.voice_error_connection; break;
+            default: text = R.string.voice_error;
+        }
+        return context.getString(text);
+    }
+
+    private void recordFailure(String code) {
+        lastError = VoiceFailure.normalize(code); lastErrorAt = System.currentTimeMillis();
+        getSharedPreferences("voice", 0).edit().putString("last_error", lastError).putLong("last_error_at", lastErrorAt).apply();
+    }
+
+    private void clearFailure() {
+        lastError = null; lastErrorAt = 0;
+        getSharedPreferences("voice", 0).edit().remove("last_error").remove("last_error_at").apply();
+    }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && "stop".equals(intent.getAction())) {
@@ -99,6 +137,7 @@ public final class VoiceService extends Service {
                     .put("uploadedPcmBytes", audioUploaded).put("screenOn", getSystemService(PowerManager.class).isInteractive())
                     .put("recordedAt", System.currentTimeMillis());
             if (failure != null) result.put("error", failure);
+            if (lastError != null) result.put("lastError", lastError).put("lastErrorAt", lastErrorAt);
             Files.write(new File(getFilesDir(), "voice-status.json").toPath(), result.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) { /* Foreground status still reports failure. */ }
     }
@@ -130,6 +169,7 @@ public final class VoiceService extends Service {
                     frames++; long now = SystemClock.elapsedRealtime();
                     RealtimeVoice client = realtime;
                     if (failure != null) {
+                        recordFailure(failure);
                         endSession(); pending.clear(); detector.reset();
                         phase("error"); writeStatus(true);
                         tones.startTone(ToneGenerator.TONE_PROP_NACK, 180);
@@ -150,8 +190,7 @@ public final class VoiceService extends Service {
             }
         } catch (Exception | LinkageError error) {
             if (running) {
-                failure = error instanceof java.io.IOException && error.getMessage() != null
-                        ? error.getMessage() : error.getClass().getSimpleName();
+                failure = VoiceFailure.code(error); recordFailure(failure);
                 phase("error");
             }
         } finally {
@@ -169,12 +208,12 @@ public final class VoiceService extends Service {
         phase("connecting"); tones.startTone(ToneGenerator.TONE_PROP_BEEP, 120);
         RealtimeVoice client = new RealtimeVoice(this, new RealtimeVoice.Listener() {
             @Override public void phase(String value) { if (running && generation == attempt) { lastActivity = SystemClock.elapsedRealtime(); VoiceService.this.phase(value); } }
-            @Override public void completed() { if (generation == attempt) replies++; }
-            @Override public void failed(String code) { if (generation == attempt) failure = code; }
+            @Override public void completed() { if (generation == attempt) { replies++; clearFailure(); } }
+            @Override public void failed(String code) { if (generation == attempt) failure = VoiceFailure.normalize(code); }
         });
         realtime = client;
         new Thread(() -> { try { client.start(); if (!running || generation != attempt) client.close(); }
-            catch (Exception error) { if (generation == attempt) failure = "voice_connection_failed"; client.close(); } }, "habab-voice-connect").start();
+            catch (Exception error) { if (generation == attempt) failure = VoiceFailure.code(error); client.close(); } }, "habab-voice-connect").start();
     }
 
     private void endSession() {

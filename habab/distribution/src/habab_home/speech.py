@@ -6,8 +6,7 @@ import aiohttp
 
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .providers import ProviderError
-from .openai_transport import endpoint as openai_endpoint
+from .providers import ProviderError, provider_api_base
 
 ENDPOINTS = {
     "transcribe": "https://api.openai.com/v1/audio/transcriptions",
@@ -16,10 +15,13 @@ ENDPOINTS = {
 
 
 async def request_audio(hass, entry, operation, *, data=None, json=None):
+    if entry.data.get("provider") not in {"habab", "openai"}:
+        raise ProviderError("invalid_provider")
+    endpoint = provider_api_base(entry.data["provider"]) + ("/audio/transcriptions" if operation == "transcribe" else "/audio/speech")
     try:
         async with asyncio.timeout(40):
             async with async_get_clientsession(hass).post(
-                openai_endpoint("audio/transcriptions" if operation == "transcribe" else "audio/speech"),
+                endpoint,
                 headers={"Authorization": f"Bearer {entry.data['api_key']}"},
                 data=data, json=json, allow_redirects=False,
             ) as response:

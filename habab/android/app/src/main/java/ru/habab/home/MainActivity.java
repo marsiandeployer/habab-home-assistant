@@ -182,6 +182,9 @@ public final class MainActivity extends Activity {
         LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(28, 8, 28, 8);
         TextView explanation = new TextView(this); explanation.setText(R.string.voice_privacy); form.addView(explanation);
         TextView phase = new TextView(this); phase.setText(VoiceService.label(this, VoiceService.status)); form.addView(phase);
+        if (VoiceService.lastError != null) {
+            TextView error = new TextView(this); error.setText(VoiceService.failureLabel(this, VoiceService.lastError)); form.addView(error);
+        }
         EditText phrase = new EditText(this); phrase.setHint(R.string.voice_phrase);
         phrase.setText(getSharedPreferences("voice", 0).getString("phrase", "эй дом"));
         phrase.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)}); form.addView(phrase);
@@ -234,10 +237,6 @@ public final class MainActivity extends Activity {
                 new VoiceCredentials(this).save(data);
                 boolean enabled = data.optBoolean("enable_voice", false);
                 getSharedPreferences("voice", 0).edit().putString("phrase", "эй дом").putBoolean("enabled", enabled).commit();
-                String endpoint = data.optString("openai_base", "");
-                if (!endpoint.isEmpty()) getSharedPreferences("voice", 0).edit().putString("openai_base", endpoint).commit();
-                String telegram = data.optString("telegram_relay", "");
-                if (!telegram.isEmpty()) getSharedPreferences("voice", 0).edit().putString("telegram_relay", telegram).commit();
                 if (enabled) handler.post(this::startVoice);
             } finally { Files.deleteIfExists(file.toPath()); }
         });

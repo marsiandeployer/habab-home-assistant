@@ -1,0 +1,13 @@
+{
+  "scope": "Local human wake test pending user confirmation; counter alone is not acceptance",
+  "deviceStatus": {
+    "phase": "wake",
+    "active": true,
+    "captureFrames": 24100,
+    "wakeCount": 3,
+    "replies": 0,
+    "uploadedPcmBytes": 0,
+    "screenOn": false,
+    "recordedAt": 1792779620134
+  }
+}

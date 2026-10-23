@@ -1,0 +1,20 @@
+{
+  "scope": "actual P30 before Habab setup",
+  "backendVersion": "0.3.2",
+  "sessionHttp": 400,
+  "sessionCode": "openai_required",
+  "selectedProviders": [
+    {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "state": "loaded"
+    }
+  ],
+  "telegram": "not_configured",
+  "directOpenAi": {
+    "http": 403,
+    "code": "unsupported_country_region_territory"
+  },
+  "pyrogram": "bot identity and history verified; no current phone reply proven",
+  "fix": "safe allowlisted errors now preserved through native HTTP and connection thread; actual successful voice still pending"
+}

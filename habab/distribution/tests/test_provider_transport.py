@@ -2,14 +2,14 @@
 import os
 import unittest
 from unittest.mock import patch
-from homeassistant.components.habab_home import openai_transport
+from homeassistant.components.habab_home.providers import provider_api_base
 from homeassistant.components.habab_telegram import transport
 
 
 class TransportTests(unittest.TestCase):
     def test_default_routes_are_direct(self):
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(openai_transport.endpoint('chat/completions'), 'https://api.openai.com/v1/chat/completions')
+            self.assertEqual(provider_api_base('openai'), 'https://api.openai.com/v1')
             self.assertEqual(transport.get_me_request('synthetic-token'), ('https://api.telegram.org/botsynthetic-token/getMe', {}))
 
     def test_relay_moves_bot_credential_out_of_url(self):
@@ -22,11 +22,7 @@ class TransportTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     transport.relay_base()
 
-    def test_openai_route_and_voice_model_validation(self):
+    def test_provider_base_has_no_environment_redirect(self):
         with patch.dict(os.environ, {'HABAB_OPENAI_BASE_URL': 'https://relay.test/v1'}):
-            self.assertEqual(openai_transport.websocket_url('gpt-realtime-mini'), 'wss://relay.test/v1/realtime?model=gpt-realtime-mini')
-            for value in ['gpt-realtime?key=x', 'other-model']:
-                with self.assertRaises(ValueError):
-                    openai_transport.websocket_url(value)
-            with self.assertRaises(ValueError):
-                openai_transport.endpoint('../files')
+            self.assertEqual(provider_api_base('openai'), 'https://api.openai.com/v1')
+            self.assertEqual(provider_api_base('habab'), 'https://habab-voice.wpmix.net/v1')

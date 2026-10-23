@@ -14,7 +14,7 @@ import probatio
 
 from .const import DOMAIN
 from .setup_agent import AgentError
-from .openai_transport import endpoint as openai_endpoint, websocket_url
+from .providers import provider_api_base
 
 MODELS = {"gpt-realtime", "gpt-realtime-mini", "gpt-realtime-2.1", "gpt-realtime-2.1-mini"}
 INSTRUCTIONS = (
@@ -56,6 +56,13 @@ def active_admin(request):
     return user if user and user.is_active and user.is_admin else None
 
 
+def realtime_base(settings):
+    """Use the explicitly selected provider; never borrow another entry's key."""
+    if settings.get("provider") not in {"habab", "openai"}:
+        raise ValueError("realtime_provider_required")
+    return provider_api_base(settings["provider"])
+
+
 class RealtimeSessionView(HomeAssistantView):
     url = "/api/habab_home/realtime/session"
     name = "api:habab_home:realtime:session"
@@ -75,10 +82,13 @@ class RealtimeSessionView(HomeAssistantView):
         except (ValueError, AttributeError):
             return self.json_message("invalid_voice_settings", status_code=400)
         hass = request.app["hass"]
-        entries = hass.config_entries.async_entries(DOMAIN)
-        entry = next((e for e in entries if e.data.get("provider") == "openai"), None)
-        if entry is None:
-            return self.json_message("openai_required", status_code=400)
+        try:
+            settings = hass.data[DOMAIN]["setup_agent"].settings()
+            base = realtime_base(settings)
+        except AgentError as error:
+            return self.json_message(error.code, status_code=400)
+        except ValueError:
+            return self.json_message("realtime_provider_required", status_code=400)
         async with self.lock:
             now = time.monotonic()
             self.last_started = {key:stamp for key,stamp in self.last_started.items() if now-stamp < 60}
@@ -89,8 +99,8 @@ class RealtimeSessionView(HomeAssistantView):
             chat = await hass.data[DOMAIN]["assistant"].web_session(owner.id)
             client = async_get_clientsession(hass)
             async with client.post(
-                openai_endpoint("realtime/client_secrets"),
-                headers={"Authorization": "Bearer " + entry.data["api_key"],
+                base + "/realtime/client_secrets",
+                headers={"Authorization": "Bearer " + settings["api_key"],
                          "OpenAI-Safety-Identifier": hashlib.sha256(owner.id.encode()).hexdigest()},
                 json={"expires_after": {"anchor": "created_at", "seconds": 60}, "session": config},
                 timeout=ClientTimeout(total=25), allow_redirects=False,
@@ -106,7 +116,7 @@ class RealtimeSessionView(HomeAssistantView):
             return self.json_message("realtime_unavailable", status_code=502)
         result = self.json({"value": secret["value"], "expires_at": secret.get("expires_at"),
                             "session_id": chat["session_id"], "model": config["model"],
-                            "websocket_url": websocket_url(config["model"])})
+                            "websocket_url": "wss://" + base.split("://", 1)[1] + "/realtime?model=" + config["model"]})
         result.headers["Cache-Control"] = "no-store"
         return result
 

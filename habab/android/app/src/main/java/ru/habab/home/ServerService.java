@@ -137,22 +137,6 @@ public final class ServerService extends Service {
                 env.put("TZ", "Europe/Moscow"); env.put("SSL_CERT_FILE", "/etc/ssl/cert.pem");
                 env.put("HABAB_OPENCODE_BINARY", "/opt/habab-opencode/opencode");
                 env.put("HABAB_RUNTIME_KIND", "android_proot");
-                String openaiBase = getSharedPreferences("voice", 0).getString("openai_base", "");
-                if (!openaiBase.isEmpty()) {
-                    java.net.URI endpoint = new java.net.URI(openaiBase);
-                    if (!"https".equals(endpoint.getScheme()) || endpoint.getHost() == null
-                            || endpoint.getUserInfo() != null || endpoint.getQuery() != null || endpoint.getFragment() != null
-                            || !endpoint.getPath().endsWith("/v1")) throw new IOException("Invalid OpenAI HTTPS endpoint");
-                    env.put("HABAB_OPENAI_BASE_URL", openaiBase);
-                }
-                String telegramRelay = getSharedPreferences("voice", 0).getString("telegram_relay", "");
-                if (!telegramRelay.isEmpty()) {
-                    java.net.URI endpoint = new java.net.URI(telegramRelay);
-                    if (!"https".equals(endpoint.getScheme()) || endpoint.getHost() == null || endpoint.getUserInfo() != null
-                            || endpoint.getQuery() != null || endpoint.getFragment() != null || !endpoint.getPath().isEmpty())
-                        throw new IOException("Invalid Telegram HTTPS endpoint");
-                    env.put("HABAB_TELEGRAM_RELAY", telegramRelay);
-                }
                 JSONObject release = new JSONObject(new String(Files.readAllBytes(new File(store.root(), "etc/habab-android-release.json").toPath()), StandardCharsets.UTF_8));
                 env.put("HABAB_OPENCODE_SHA256", release.getString("opencodeSha256"));
                 env.put("PYTHONUNBUFFERED", "1");

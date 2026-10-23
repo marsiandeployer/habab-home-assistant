@@ -83,7 +83,13 @@ final class VoiceCredentials {
         Request request = new Request.Builder().url("http://127.0.0.1:8123/api/habab_home/realtime/" + route)
                 .header("Authorization", "Bearer " + token()).post(RequestBody.create(MediaType.get("application/json"), body.toString())).build();
         try (Response response = http.newCall(request).execute()) {
-            if (!response.isSuccessful() || response.body() == null) throw new IOException("voice_http_" + response.code());
+            if (!response.isSuccessful()) {
+                String code = "";
+                try { code = new JSONObject(response.peekBody(8192).string()).optString("message", ""); }
+                catch (org.json.JSONException ignored) { /* Never expose an upstream body. */ }
+                throw VoiceFailure.fromHttp(response.code(), code);
+            }
+            if (response.body() == null) throw new VoiceFailure("invalid_realtime_response");
             return new JSONObject(response.body().string());
         }
     }

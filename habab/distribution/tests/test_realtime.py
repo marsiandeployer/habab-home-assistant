@@ -1,5 +1,6 @@
 """Voice must use the authenticated owner's canonical chat, never another session."""
 import json
+import os
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -16,6 +17,47 @@ class Request(dict):
 
 
 class RealtimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_selected_provider_controls_both_ephemeral_http_and_native_websocket(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for provider, host in [('habab', 'habab-voice.wpmix.net'), ('openai', 'api.openai.com')]:
+            with self.subTest(provider=provider):
+                assistant = SimpleNamespace(web_session=AsyncMock(return_value={'session_id': 'ses_alice'}))
+                request = Request(owner, assistant=assistant)
+                request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=Mock(return_value={
+                    'provider': provider, 'api_key': 'synthetic-selected-' + provider, 'model': 'gpt-4.1-mini'}))
+                response = SimpleNamespace(status=200, json=AsyncMock(return_value={'value': 'synthetic-ephemeral', 'expires_at': 12345}))
+                class Context:
+                    async def __aenter__(self): return response
+                    async def __aexit__(self, *args): pass
+                client = SimpleNamespace(post=Mock(return_value=Context()))
+                with patch.dict(os.environ, {'HABAB_OPENAI_BASE_URL': 'https://wrong.test/v1'}), \
+                        patch.object(realtime, 'async_get_clientsession', return_value=client):
+                    result = await realtime.RealtimeSessionView().post(request)
+                self.assertEqual(result.status, 200)
+                self.assertEqual(client.post.call_args.args[0], f'https://{host}/v1/realtime/client_secrets')
+                self.assertEqual(client.post.call_args.kwargs['headers']['Authorization'], 'Bearer synthetic-selected-' + provider)
+                self.assertFalse(client.post.call_args.kwargs['allow_redirects'])
+                payload = json.loads(result.body)
+                self.assertEqual(payload['websocket_url'], f'wss://{host}/v1/realtime?model=gpt-realtime-mini')
+                self.assertEqual(payload['session_id'], 'ses_alice')
+                self.assertNotIn('synthetic-selected-', result.body.decode())
+                self.assertEqual(result.headers['Cache-Control'], 'no-store')
+
+    async def test_deepseek_selection_does_not_borrow_another_entries_openai_key(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock())
+        request = Request(owner, assistant=assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=Mock(return_value={
+            'provider': 'deepseek', 'api_key': 'synthetic-deepseek', 'model': 'deepseek-flash'}))
+        request.app['hass'].config_entries = SimpleNamespace(async_entries=Mock(return_value=[
+            SimpleNamespace(data={'provider': 'openai', 'api_key': 'synthetic-unselected-openai'})]))
+        with patch.object(realtime, 'async_get_clientsession') as client:
+            result = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(result.status, 400)
+        self.assertEqual(json.loads(result.body)['message'], 'realtime_provider_required')
+        client.assert_not_called()
+        assistant.web_session.assert_not_awaited()
+
     def test_realtime_config_requires_shared_assistant_tool(self):
         config = realtime.session_config('gpt-realtime-mini')
         self.assertEqual(config['tool_choice'], 'required')

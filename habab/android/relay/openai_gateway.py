@@ -8,23 +8,26 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
+import socket
+import stat
+import struct
 import time
 
 from aiohttp import ClientSession, ClientTimeout, ClientWSTimeout, WSMsgType, web
 
 UPSTREAM = 'https://api.openai.com'
 ROUTES = {'chat/completions', 'audio/speech', 'audio/transcriptions', 'realtime/client_secrets', 'models'}
-TELEGRAM_METHODS = {'getMe', 'getUpdates', 'sendMessage', 'sendChatAction', 'getWebhookInfo'}
 
 
 class Gateway:
-    def __init__(self, key_hash, telegram_hash=None):
+    def __init__(self, key_hash, *, upstream_key=None, control_socket=None):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         self.key_hash = key_hash
-        self.telegram_hash = telegram_hash
-        self.poll_lock = asyncio.Lock()
+        self.upstream_key = upstream_key
+        self.control_socket = Path(control_socket) if control_socket else None
         self.ephemeral = {}
         self.active_voice = 0
         self.inflight = 0
@@ -42,16 +45,56 @@ class Gateway:
 
     async def lifecycle(self, app):
         self.client = ClientSession(timeout=ClientTimeout(total=60), trust_env=False)
-        yield
-        await self.client.close()
+        control = None
+        try:
+            if self.control_socket:
+                if self.control_socket.exists():
+                    info = self.control_socket.stat()
+                    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
+                        raise RuntimeError('Unsafe enrollment socket path')
+                    self.control_socket.unlink()
+                control = await asyncio.start_unix_server(self.enroll, path=str(self.control_socket), limit=4096)
+                self.control_socket.chmod(0o600)
+            yield
+        finally:
+            if control:
+                control.close()
+                await control.wait_closed()
+                self.control_socket.unlink(missing_ok=True)
+            self.upstream_key = None
+            await self.client.close()
+
+    async def enroll(self, reader, writer):
+        """Local operator enrollment: keep the upstream credential only in memory."""
+        try:
+            peer = writer.get_extra_info('socket')
+            _, uid, _ = struct.unpack('3i', peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            if uid != os.getuid():
+                raise ValueError('Wrong enrollment owner')
+            payload = json.loads(await asyncio.wait_for(reader.readline(), 3))
+            key = payload.get('upstream_key')
+            if not isinstance(key, str) or not 8 <= len(key) <= 2048 or any(ord(c) < 33 or ord(c) > 126 for c in key):
+                raise ValueError('Invalid enrollment')
+            self.upstream_key = key
+            writer.write(b'{"enrolled":true}\n')
+        except Exception:
+            writer.write(b'{"enrolled":false}\n')
+        finally:
+            try: await writer.drain()
+            finally:
+                writer.close()
+                await writer.wait_closed()
 
     async def health(self, request):
-        return web.json_response({'service': 'habab-voice-relay', 'ok': True})
+        return web.json_response({'service': 'habab-voice-relay', 'ok': True, 'upstreamReady': self.upstream_key is not None})
 
     async def http(self, request):
         secret, digest = self.authorization(request)
         if not self.owner(digest):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if self.upstream_key is None:
+            return web.json_response({'error': {'code': 'habab_upstream_not_ready'}}, status=503)
+        upstream_key = self.upstream_key
         route = request.match_info['route']
         if route not in ROUTES or request.method != ('GET' if route == 'models' else 'POST'):
             return web.json_response({'error': {'code': 'relay_route_not_allowed'}}, status=404)
@@ -60,7 +103,7 @@ class Gateway:
         self.inflight += 1
         try:
             body = await request.read()
-            headers = {'Authorization': 'Bearer ' + secret}
+            headers = {'Authorization': 'Bearer ' + upstream_key}
             if request.content_type:
                 headers['Content-Type'] = request.headers.get('Content-Type', 'application/json')
             async with self.client.request(request.method, UPSTREAM + '/v1/' + route,
@@ -70,7 +113,7 @@ class Gateway:
                     payload.extend(block)
                     if len(payload) > 8 * 1024 * 1024:
                         return web.json_response({'error': {'code': 'relay_response_too_large'}}, status=502)
-                payload = bytes(payload)
+                payload = bytes(payload).replace(upstream_key.encode(), b'[redacted]')
                 if route == 'realtime/client_secrets' and response.status == 200:
                     session = json.loads(payload)
                     value = session.get('value')
@@ -97,6 +140,8 @@ class Gateway:
         allowed = self.owner(digest) or (ephemeral is not None and ephemeral[0] > time.time() and ephemeral[1] == model)
         if not allowed:
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if self.owner(digest) and self.upstream_key is None:
+            return web.json_response({'error': {'code': 'habab_upstream_not_ready'}}, status=503)
         if not model.startswith('gpt-realtime') or len(model) > 100 or set(request.query) != {'model'}:
             return web.json_response({'error': {'code': 'relay_invalid_model'}}, status=400)
         if self.active_voice >= 2:
@@ -107,7 +152,7 @@ class Gateway:
         downstream = web.WebSocketResponse(max_msg_size=256 * 1024, heartbeat=20)
         try:
             async with self.client.ws_connect(UPSTREAM + '/v1/realtime', params={'model': model},
-                    headers={'Authorization': 'Bearer ' + secret}, max_msg_size=256 * 1024,
+                    headers={'Authorization': 'Bearer ' + (self.upstream_key if self.owner(digest) else secret)}, max_msg_size=256 * 1024,
                     timeout=ClientWSTimeout(ws_receive=60, ws_close=5), heartbeat=20) as upstream:
                 await downstream.prepare(request)
                 async def relay(source, target):
@@ -136,41 +181,10 @@ class Gateway:
             if downstream.prepared: await downstream.close()
         return downstream
 
-    async def telegram(self, request):
-        secret, digest = self.authorization(request)
-        if (digest is None or not isinstance(self.telegram_hash, str)
-                or not hmac.compare_digest(digest, self.telegram_hash)):
-            return web.json_response({'ok': False, 'error_code': 401, 'description': 'Not authorized'}, status=401)
-        method = request.match_info['method']
-        if method not in TELEGRAM_METHODS or request.method not in {'GET', 'POST'}:
-            return web.json_response({'ok': False, 'error_code': 404, 'description': 'Method not available'}, status=404)
-        body = await request.read()
-        async def forward():
-            try:
-                async with self.client.request(request.method, 'https://api.telegram.org/bot' + secret + '/' + method,
-                        data=body or None, headers={'Content-Type': request.headers.get('Content-Type', 'application/json')},
-                        allow_redirects=False) as response:
-                    payload = bytearray()
-                    async for block in response.content.iter_chunked(65536):
-                        payload.extend(block)
-                        if len(payload) > 8 * 1024 * 1024:
-                            return web.json_response({'ok': False, 'error_code': 502, 'description': 'Response too large'}, status=502)
-                    return web.Response(body=bytes(payload), status=response.status,
-                                        headers={'Content-Type': 'application/json', 'Cache-Control': 'no-store'})
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                return web.json_response({'ok': False, 'error_code': 502, 'description': 'Upstream unavailable'}, status=502)
-        if method == 'getUpdates':
-            async with self.poll_lock:
-                return await forward()
-        return await forward()
-
     def app(self):
         app = web.Application(client_max_size=2 * 1024 * 1024)
         app.cleanup_ctx.append(self.lifecycle)
         app.router.add_get('/health', self.health)
-        app.router.add_route('*', '/telegram/{method}', self.telegram)
         app.router.add_get('/v1/realtime', self.voice)
         app.router.add_route('*', '/v1/{route:.*}', self.http)
         return app
@@ -181,7 +195,7 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
-    gateway = Gateway(config['key_sha256'], config.get('telegram_sha256'))
+    gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock')
     web.run_app(gateway.app(), host='127.0.0.1', port=config.get('port', 8326), access_log=None, print=None, handler_cancellation=True)
 
 
