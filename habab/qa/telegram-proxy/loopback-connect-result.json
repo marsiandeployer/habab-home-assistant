@@ -1,0 +1,6 @@
+{
+  "negative_checks": 3,
+  "verified_tls_public_telegram_status": 302,
+  "no_bot_token_used": true,
+  "real_bot_e2e": false
+}

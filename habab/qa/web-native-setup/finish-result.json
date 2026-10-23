@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-23T18:59:42.629Z",
+  "sourceCommit": "66b42e48b",
+  "scope": "Own isolated Home Assistant on8403; actual native form submission",
+  "sourceOverlay": true,
+  "physicalDevice": false,
+  "resumed": true,
+  "errors": [],
+  "result": {
+    "records": [
+      {
+        "phase": "done",
+        "entryState": "loaded",
+        "entityCount": 1
+      }
+    ],
+    "entryExists": true,
+    "entryState": "loaded",
+    "entities": [
+      {
+        "domain": "todo",
+        "state": "0"
+      }
+    ]
+  },
+  "confirmation": {
+    "status": "",
+    "assistant": [
+      "Проверил, ничего не менял.\n\n- **Интеграция:** Local To-do, запись «Habab QA 20261023» — состояние `loaded`, поток подключения завершён (`done`).\n- **Список дел:** сущность `todo.habab_qa_20261023`, состояние `0` (задач нет), поддерживаемые функции — 127."
+    ]
+  },
+  "verdict": "PASS_WEB_NATIVE_SETUP"
+}

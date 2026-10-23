@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-23T18:55:55.732Z",
+  "sourceCommit": "66b42e48b",
+  "image": "habab-home:shared-chat-0.3.1-20261023",
+  "sourceOverlay": true,
+  "scope": "Own isolated Home Assistant on loopback8403",
+  "realModel": true,
+  "physicalDevice": false,
+  "errors": [],
+  "before": {
+    "core": "2026.10.2",
+    "localTodoCount": 0
+  },
+  "turn": {
+    "status": "",
+    "latestAssistant": [
+      "Форма открыта — она ждёт вас в защищённой карточке этого веб-чата.\n\n- Интеграция: **Local To-do** (`local_todo`)\n- Поле: **`todo_list_name`** — название списка дел (строка, обязательное)\n\nВведите название в карточке и отправьте. После этого я проверю статус и созданную сущность."
+    ],
+    "interactions": [
+      {
+        "domain": "local_todo",
+        "phase": "form"
+      }
+    ]
+  },
+  "form": {
+    "tag": "step-flow-form",
+    "context": "habab-native-form-context",
+    "phase": "form",
+    "submitEnabled": true
+  },
+  "verdict": "FORM_READY"
+}

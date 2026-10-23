@@ -1,0 +1,26 @@
+{
+  "at": "2026-10-23T18:57:50.507Z",
+  "sourceCommit": "66b42e48b",
+  "scope": "Own isolated Home Assistant on8403; actual native form submission",
+  "sourceOverlay": true,
+  "physicalDevice": false,
+  "errors": [],
+  "result": {
+    "records": [
+      {
+        "phase": "done",
+        "entryState": "loaded",
+        "entityCount": 1
+      }
+    ],
+    "entryExists": true,
+    "entryState": "loaded",
+    "entities": [
+      {
+        "domain": "todo"
+      }
+    ]
+  },
+  "failure": "The expression evaluated to a falsy value:\n\n  assert.ok(report.result.entities.some(x=>x.domain==='todo'&&x.state==='0'))\n",
+  "verdict": "INCOMPLETE"
+}

@@ -1,0 +1,7 @@
+{
+  "at": "2026-10-23T18:47:08.820Z",
+  "scope": "Windows native HA read-only inventory",
+  "configurationWrites": 0,
+  "ok": false,
+  "error": "Chrome connection failed. Run the selected tunnel BAT again."
+}
