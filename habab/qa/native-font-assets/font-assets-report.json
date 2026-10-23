@@ -1,0 +1,42 @@
+{
+  "source_tree_has_dotted_parent": true,
+  "static_required_fonts": {
+    "Roboto-Bold.woff2": {
+      "bytes": 64740,
+      "magic": "wOF2",
+      "sha256": "8e44376b735dcc9027acbcc8a0df64c3f886a23529eff27b022f344d719e90f2"
+    },
+    "Roboto-Medium.woff2": {
+      "bytes": 65484,
+      "magic": "wOF2",
+      "sha256": "96025fe9db6578d8bc7f4b8be739750b1490e07221c2b1f16acde2ea7669cedf"
+    },
+    "Roboto-Regular.woff2": {
+      "bytes": 64632,
+      "magic": "wOF2",
+      "sha256": "47107401d0adb375ab9aa167f9d62489a849d510e740a307b5a4db60e5db3562"
+    }
+  },
+  "static_woff2_count": 12,
+  "wheel_bytes": 111672769,
+  "wheel_filename": "home_assistant_frontend-20260930.4+habab.4-py3-none-any.whl",
+  "wheel_required_fonts": {
+    "Roboto-Bold.woff2": {
+      "bytes": 64740,
+      "magic": "wOF2",
+      "sha256": "8e44376b735dcc9027acbcc8a0df64c3f886a23529eff27b022f344d719e90f2"
+    },
+    "Roboto-Medium.woff2": {
+      "bytes": 65484,
+      "magic": "wOF2",
+      "sha256": "96025fe9db6578d8bc7f4b8be739750b1490e07221c2b1f16acde2ea7669cedf"
+    },
+    "Roboto-Regular.woff2": {
+      "bytes": 64632,
+      "magic": "wOF2",
+      "sha256": "47107401d0adb375ab9aa167f9d62489a849d510e740a307b5a4db60e5db3562"
+    }
+  },
+  "wheel_sha256": "40d4d8def3c8436069d2f3d88ef0a2a3934f2e31761f1527a9104dc6d6874cb9",
+  "wheel_woff2_count": 12
+}

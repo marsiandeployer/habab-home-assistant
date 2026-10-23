@@ -53,7 +53,7 @@ function copyFonts(staticDir) {
     npmPath("roboto-fontface/fonts/roboto/"),
     staticPath("fonts/roboto/"),
     {
-      filter: (src) => !src.includes(".") || src.endsWith(".woff2"),
+      filter: (src) => fs.statSync(src).isDirectory() || src.endsWith(".woff2"),
     }
   );
 }

@@ -2,13 +2,13 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-frontend-build}"
+worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-frontend-fonts-build}"
 translations="${HABAB_NATIVE_FRONTEND_TRANSLATIONS:-/root/.local/share/habab-native-frontend-translations-official/translations}"
 source_commit="26690e06b0bf64a1487929245c32842ef92c62b5"
 patch_file="$repo_root/habab/native-frontend/bridge.patch"
-patch_sha="b4f82672cd8ba145fa0a1b0739a81d38983139fe61fe17fc7b9faaf0ea0db76f"
+patch_sha="9b6f0ef7cffa348bea55cf6ec3299bc692407533ba86ce5114dfdda42199d3fe"
 catalog_sha="154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce"
-wheel_name="home_assistant_frontend-20260930.4+habab.3-py3-none-any.whl"
+wheel_name="home_assistant_frontend-20260930.4+habab.4-py3-none-any.whl"
 staging="$(mktemp -d /root/.local/share/habab-native-frontend-wheel.XXXXXX)"
 pyproject_backup="$staging/pyproject.toml"
 
@@ -62,6 +62,7 @@ corepack enable pnpm
 
 pnpm install --frozen-lockfile
 pnpm exec eslint \
+  build-scripts/gulp/gather-static.js \
   src/habab/native-ui-bridge.ts \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
@@ -74,6 +75,7 @@ pnpm exec eslint \
   test/data/recorder-info.test.ts \
   --max-warnings=0
 pnpm exec prettier --check \
+  build-scripts/gulp/gather-static.js \
   src/habab/native-ui-bridge.ts \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
@@ -91,7 +93,6 @@ pnpm exec vitest run --config test/vitest.config.ts \
   test/habab/native-ui-bridge.test.ts \
   test/data/recorder-info.test.ts
 pnpm exec gulp gather-gallery-pages
-pnpm lint:types
 pnpm exec gulp clean
 pnpm exec gulp \
   gen-icons-json \
@@ -147,10 +148,13 @@ for language, value in translations.items():
 
 metadata_path.write_text(json.dumps(metadata, separators=(",", ":")))
 PY
+pnpm lint:types
 
 # This is the remainder of upstream build-app, with translation metadata
 # reconciled before Rspack bundles the metadata into modern and legacy assets.
 pnpm exec gulp copy-static-app
+python3 "$repo_root/habab/qa/native-font-assets/check-font-assets.py" \
+  --static-dir "$worktree/hass_frontend/static"
 pnpm exec gulp rspack-prod-app
 pnpm exec gulp gen-pages-app-prod gen-service-worker-app-prod
 pnpm exec gulp compress-app
@@ -165,7 +169,7 @@ from pathlib import Path
 path = Path("pyproject.toml")
 text = path.read_text()
 old = 'version      = "20260930.4"'
-new = 'version      = "20260930.4+habab.3"'
+new = 'version      = "20260930.4+habab.4"'
 if text.count(old) != 1:
     raise SystemExit("Could not locate the pinned package version exactly once")
 path.write_text(text.replace(old, new, 1))
@@ -178,6 +182,10 @@ rm "$pyproject_backup"
   echo "Build did not produce expected wheel $wheel_name" >&2
   exit 1
 }
+python3 "$repo_root/habab/qa/native-font-assets/check-font-assets.py" \
+  --static-dir "$worktree/hass_frontend/static" \
+  --wheel "$staging/wheel/$wheel_name" \
+  --report "$repo_root/habab/qa/native-font-assets/font-assets-report.json"
 artifact_sha="$(sha256sum "$staging/wheel/$wheel_name" | cut -d' ' -f1)"
 artifact_dir="$repo_root/habab/public/downloads/native-frontend/$artifact_sha"
 mkdir -p "$artifact_dir"

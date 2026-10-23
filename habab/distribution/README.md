@@ -10,7 +10,7 @@ upstream-репозиторий Home Assistant.
 
 Habab Home — локальный Docker-дистрибутив на основе Home Assistant Core
 2026.10.2. Полный frontend собран из соответствующего upstream tag
-`20260930.4` с патчем `habab.3` и установлен как SHA-256-закреплённый wheel при
+`20260930.4` с патчем `habab.4` и установлен как SHA-256-закреплённый wheel при
 сборке Docker-образа. Установка проверяет размер, digest и источник артефакта;
 версия Core при этом остаётся 2026.10.2. Интеграция добавляет защищённый
 статусный API, разделы AI и Telegram, один глобальный чат и нативные Assist
@@ -147,7 +147,7 @@ docker compose --profile zigbee up -d
 начальную конфигурацию и безопасное заполнение пустого каталога данных, а также
 метки Habab Home 0.3.3. `NOTICE` указывает на upstream-проект и разъясняет, что
 Habab Home — независимый дистрибутив. Для Docker поставляется полный frontend
-`20260930.4+habab.3`. `install-native-frontend.py` сверяет закреплённые версию,
+`20260930.4+habab.4`. `install-native-frontend.py` сверяет закреплённые версию,
 имя, размер, HTTPS origin и SHA-256 wheel до установки. В той же сборке находятся
 API bridge v1 и native `step-flow-form` с context host на базе HA `contextMixin`;
 они сохраняют штатные callbacks полей, переводы, selectors и валидацию. Core

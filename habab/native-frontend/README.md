@@ -5,7 +5,7 @@ This patch targets Home Assistant frontend tag `20260930.4`, commit
 handoff and the versioned `window.hababNativeUi` bridge while retaining the
 native dialog fallback.
 
-Bridge patch SHA-256: `b4f82672cd8ba145fa0a1b0739a81d38983139fe61fe17fc7b9faaf0ea0db76f`.
+Bridge patch SHA-256: `9b6f0ef7cffa348bea55cf6ec3299bc692407533ba86ce5114dfdda42199d3fe`.
 
 ## Rebuild
 
@@ -20,7 +20,7 @@ git fetch https://github.com/home-assistant/frontend.git \
 test "$(git rev-parse 'refs/tags/20260930.4^{commit}')" = \
   26690e06b0bf64a1487929245c32842ef92c62b5
 git worktree add --detach \
-  /root/.local/share/habab-native-frontend-build \
+  /root/.local/share/habab-native-frontend-fonts-build \
   26690e06b0bf64a1487929245c32842ef92c62b5
 
 cid="$(docker create --entrypoint /bin/true \
@@ -39,7 +39,16 @@ matching translation directory with Russian catalogs, Node `24.21.0`, and pnpm
 matching stock catalogs and hashes into generated translation metadata before
 Rspack bundles it, verifies every declared locale and fragment resolves to a
 stock file, then packages the assets as
-`home_assistant_frontend-20260930.4+habab.3-py3-none-any.whl`.
+`home_assistant_frontend-20260930.4+habab.4-py3-none-any.whl`.
+
+The pinned patch also fixes Roboto copying in `gather-static`: the filter keeps
+directories and `.woff2` files, so absolute source paths under dotted parents
+such as `/root/.local/share/` no longer prune the whole font tree. The wheel
+builder checks Regular, Medium, and Bold files, plus at least 12 WOFF2 assets,
+in the gathered static directory and again in the packaged wheel. The final
+check verifies the WOFF2 signature and byte-for-byte SHA-256/size equality for
+the three required files, then writes a sanitized report to
+`habab/qa/native-font-assets/font-assets-report.json`.
 
 The catalog check fingerprints all 19 `ru-*.json` files by relative path and
 content SHA-256. Expected catalog fingerprint:
@@ -47,11 +56,11 @@ content SHA-256. Expected catalog fingerprint:
 The artifact directory is keyed by the final wheel SHA-256, matching the
 installer URL convention.
 
-The frontend asset version remains `20260930.4`; `+habab.3` is Python wheel
+The frontend asset version remains `20260930.4`; `+habab.4` is Python wheel
 metadata used to distinguish the bridge build while preserving Core version
-compatibility. Output is stored under a directory named for the bridge patch
-SHA-256 in `habab/public/downloads/native-frontend/`; the installer uses the
-final wheel SHA-256 directory published by the build script.
+compatibility. The wheel is stored in `habab/public/downloads/native-frontend/`
+under a directory named for its final SHA-256; the installer uses that digest
+directory.
 
 ## Bridge API
 

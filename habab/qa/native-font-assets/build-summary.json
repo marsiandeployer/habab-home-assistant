@@ -1,0 +1,45 @@
+{
+  "source_commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
+  "bridge_patch_sha256": "9b6f0ef7cffa348bea55cf6ec3299bc692407533ba86ce5114dfdda42199d3fe",
+  "translation_catalog_sha256": "154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce",
+  "build": {
+    "initial_attempt": {
+      "result": "FAILED at lint:types before generated metadata existed",
+      "missing_generated_json": [
+        "build/mdi/iconList.json",
+        "build/mdi/iconMetadata.json",
+        "build/translations/translationMetadata.json"
+      ]
+    },
+    "harness_order_correction": "first lint:types runs after gen-icons-json, build-translations, build-locale-data, gen-licenses, and pinned translation metadata reconciliation",
+    "bounded_continuation": "PASS; reused installed dependencies and completed remaining stages once",
+    "eslint": "PASS for pinned patch source set; changed gather-static.js also passed focused ESLint",
+    "prettier": "PASS for pinned patch source set; changed gather-static.js also passed focused Prettier",
+    "focused_vitest": {
+      "files": 3,
+      "tests": 10,
+      "result": "PASS"
+    },
+    "generated_metadata_typecheck": "PASS after metadata generation",
+    "static_font_gate": "PASS; 12 WOFF2 files under the dotted worktree path",
+    "old_habab_3_wheel_negative_control": "PASS; rejected because Roboto-Regular.woff2 is absent",
+    "no_dot_static_path": "PASS",
+    "rspack_invocations": 1,
+    "rspack": "PASS; compiled successfully in 5.18 minutes",
+    "compression_and_gallery": "PASS",
+    "final_typecheck": "PASS",
+    "wheel_packaging": "PASS",
+    "build_processes_closed": true,
+    "worktree_and_node_modules_preserved": true
+  },
+  "wheel": {
+    "version": "20260930.4+habab.4",
+    "filename": "home_assistant_frontend-20260930.4+habab.4-py3-none-any.whl",
+    "sha256": "40d4d8def3c8436069d2f3d88ef0a2a3934f2e31761f1527a9104dc6d6874cb9",
+    "bytes": 111672769,
+    "roboto_woff2_members": 12,
+    "required_files_match_static_bytes_sha_and_wOF2_magic": true
+  },
+  "release_pins_changed_by_this_build": false,
+  "browser_http_or_font_rendering_qa": "NOT RUN; reserved for root isolated runtime verification"
+}

@@ -1604,3 +1604,16 @@ index 000000000..619fa155b
 +    expect(loadBackendTranslation).toHaveBeenCalledWith("config", "shared");
 +  });
 +});
+diff --git a/build-scripts/gulp/gather-static.js b/build-scripts/gulp/gather-static.js
+--- a/build-scripts/gulp/gather-static.js
++++ b/build-scripts/gulp/gather-static.js
+@@ -52,7 +52,7 @@ function copyFonts(staticDir) {
+   fs.copySync(
+     npmPath("roboto-fontface/fonts/roboto/"),
+     staticPath("fonts/roboto/"),
+     {
+-      filter: (src) => !src.includes(".") || src.endsWith(".woff2"),
++      filter: (src) => fs.statSync(src).isDirectory() || src.endsWith(".woff2"),
+     }
+   );
+ }
