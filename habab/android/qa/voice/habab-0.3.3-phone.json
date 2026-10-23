@@ -1,0 +1,119 @@
+{
+  "status": "PARTIAL",
+  "date": "2026-10-23",
+  "device": "Huawei P30 Pro VOG-L29 Android10, no root",
+  "runtime": "ca6eea9923d375b3",
+  "hababVersion": "0.3.3",
+  "sourceCommit": "c49657165867987745da1ab4c6b891e5b90821de",
+  "nativeBuild": 9,
+  "nativeTests": {
+    "tests": 19,
+    "failures": 0,
+    "skipped": 0
+  },
+  "providerUi": {
+    "coreHababVersion": "0.3.3",
+    "configuredThroughUi": true,
+    "provider": "habab",
+    "state": "loaded",
+    "selected": true,
+    "model": "gpt-4.1-mini",
+    "keyInputCleared": true,
+    "feedback": "The model responded and called the test tool. No devices were changed."
+  },
+  "providerPersistence": {
+    "phoneConfigEntryPersisted": true,
+    "serviceKeyDigestMatches": true,
+    "selected": true,
+    "provider": "habab",
+    "model": "gpt-4.1-mini"
+  },
+  "sourceReadback": {
+    "result": "PASS",
+    "scope": "Readback installed source files from actual P30",
+    "runtimeId": "ca6eea9923d375b3",
+    "sourceCommit": "c49657165867987745da1ab4c6b891e5b90821de",
+    "files": 53,
+    "mismatches": []
+  },
+  "realtime": {
+    "scope": "actual P30 owner session endpoint and service WebSocket; not microphone acceptance",
+    "phoneSessionHttp": 200,
+    "websocketOrigin": "wss://habab-voice.wpmix.net",
+    "model": "gpt-realtime-mini",
+    "tools": [
+      "ask_home_assistant"
+    ],
+    "sharedSession": true
+  },
+  "readonlyChat": {
+    "actualReplyReceived": true,
+    "reportedDevices": 4,
+    "registryDevices": 4
+  },
+  "limitations": {
+    "physicalWakeAndAudibleReply": "AWAITING_USER_COMMAND",
+    "telegramFreshReply": "PASS_THROUGH_TEMPORARY_QA_TRANSPORT",
+    "telegramAndWebHistory": "SEPARATE; same assistant service, voice uses web history",
+    "gatewayRestart": "Upstream credential is RAM only; re-enrollment needed after restart"
+  },
+  "telegram": {
+    "result": "PASS_SCOPED",
+    "botUsername": "manulboxbot",
+    "configuredThroughActualPhoneUi": true,
+    "pairedThroughPyrogramStartBot": true,
+    "realQuestionMessageId": 64749,
+    "realReplyMessageId": 64750,
+    "reply": "В доме зарегистрировано 4 устройства по данным реестра устройств Home Assistant. Хотите узнать детали по ним?",
+    "registryDeviceCount": 4,
+    "transport": "Temporary loopback-only opaque USB CONNECT QA bridge, TLS terminated by Telegram",
+    "cleanup": {
+      "initialPhase": "not_configured",
+      "testPhase": "connected",
+      "finalPhase": "not_configured",
+      "phoneProxyStopped": true,
+      "hostUplinksStopped": true,
+      "hostProxyStopped": true,
+      "workerStopped": true
+    },
+    "limitation": "No ongoing standalone Telegram connection; durable phone-reachable proxy still required in this network"
+  },
+  "voiceIdle": {
+    "active": true,
+    "screenOn": false,
+    "wakeCount": 0,
+    "replies": 0,
+    "uploadedPcmBytes": 0,
+    "scope": "AudioRecord read loop only; actual speech and speaker not yet accepted"
+  },
+  "telegramNativeSetup": {
+    "result": "PASS_SCOPED",
+    "requestMessageId": 64753,
+    "readyMessageId": 64758,
+    "form": {
+      "nativeTag": "step-flow-form",
+      "contextTag": "habab-native-form-context",
+      "domain": "local_todo",
+      "target": "Actual P30 backend, desktop1280x800 UI"
+    },
+    "entryState": "loaded",
+    "todoState": "0",
+    "completion": {
+      "result": "COMPLETION_RECEIVED",
+      "botUsername": "manulboxbot",
+      "messageId": 64759,
+      "text": "Настройка local_todo завершена: интеграция загружена в Home Assistant.",
+      "originatingRequestId": 64753
+    },
+    "cleanup": {
+      "exactQaEmptyListRemoved": true,
+      "qaEntityGone": true,
+      "ownInteractionDismissed": true,
+      "botRestoredToInitial": "not_configured",
+      "coreRestarted": false
+    },
+    "temporaryNetworkHelpers": "ALL_TERMINAL_STOPPED",
+    "scope": "Empty QA list; not real device actuation"
+  },
+  "serviceCredentialTemporaryPhoneFileRemoved": true
+}
