@@ -1,10 +1,10 @@
 import { createInterface } from 'node:readline';
 import { TelegramTransport } from 'noxon-telegram';
-import { createTelegramFetch } from './relay-fetch.mjs';
+import { createTelegramRelayFetch } from './relay-fetch.mjs';
 
 const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
-const fetchImpl = createTelegramFetch({relay: process.env.HABAB_TELEGRAM_RELAY, token: () => transport.token});
-const transport = new TelegramTransport({ emit, fetchImpl });
+const relay = createTelegramRelayFetch({relayBase: process.env.HABAB_TELEGRAM_RELAY});
+const transport = new TelegramTransport({ emit, fetchImpl: relay.fetch });
 let configured = false;
 let configuring = false;
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -17,13 +17,13 @@ input.on('line', async (line) => {
   try {
     if (!configured && !configuring && command?.type === 'configure') {
       configuring = true;
-      await transport.configure(command.token);
+      await relay.withOperation('configure', () => transport.configure(command.token));
       configured = true;
       configuring = false;
     } else if (command?.type === 'send') {
-      await transport.send(command.chat_id, command.text, command.request_id);
+      await relay.withOperation('send', () => transport.send(command.chat_id, command.text, command.request_id));
     } else if (command?.type === 'typing') {
-      await transport.typing(command.chat_id);
+      await relay.withOperation('typing', () => transport.typing(command.chat_id));
     } else if (command?.type === 'shutdown') {
       await transport.shutdown();
       input.close();
