@@ -81,7 +81,7 @@ final class RealtimeVoice implements AutoCloseable {
         java.net.URI uri = new java.net.URI(address);
         if (!"wss".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) throw new IOException("invalid_voice_endpoint");
         if ("gemini".equals(connection.optString("provider"))) {
-            if (!address.equals("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained"))
+            if (!GeminiVoiceProtocol.allowedEndpoint(address, connection.optString("transport", "direct")))
                 throw new IOException("invalid_voice_endpoint");
             gemini = new GeminiVoiceProtocol(this::event);
             transcripts.independentOutput();

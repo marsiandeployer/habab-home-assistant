@@ -7,6 +7,23 @@ import static org.junit.Assert.*;
 
 /** Protects Google/OpenAI wire separation, interruption and exact tool correlation. */
 public class GeminiVoiceProtocolTest {
+    @Test public void ephemeralCredentialOnlyReachesExplicitlySelectedTrustedTransport() {
+        String direct = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
+        String habab = "wss://habab-voice.wpmix.net/gemini/ws";
+        assertTrue(GeminiVoiceProtocol.allowedEndpoint(direct, "direct"));
+        assertTrue(GeminiVoiceProtocol.allowedEndpoint(habab, "habab"));
+        assertFalse(GeminiVoiceProtocol.allowedEndpoint(habab, "direct"));
+        assertFalse(GeminiVoiceProtocol.allowedEndpoint(direct, "habab"));
+        assertFalse(GeminiVoiceProtocol.allowedEndpoint(habab, "unknown"));
+        for (String address : Arrays.asList(
+                "ws://habab-voice.wpmix.net/gemini/ws",
+                "wss://habab-voice.wpmix.net.attacker.example/gemini/ws",
+                "wss://habab-voice.wpmix.net@attacker.example/gemini/ws",
+                habab + "?key=untrusted", habab + "#fragment", habab + "/")) {
+            assertFalse(address, GeminiVoiceProtocol.allowedEndpoint(address, "habab"));
+        }
+    }
+
     private final List<JSONObject> events = new ArrayList<>();
     private final GeminiVoiceProtocol protocol = new GeminiVoiceProtocol(events::add);
     private void receive(String json) throws Exception { protocol.receive(new JSONObject(json)); }

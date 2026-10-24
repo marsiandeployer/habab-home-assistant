@@ -1,7 +1,7 @@
-"""Authenticated, bounded cloud API transport for the owner's Android installation.
+"""Authenticated, bounded Gemini API transport for the owner's Android installation.
 
 No HA access, model substitution, public demo context, or credential logging.
-Only hashes of enrolled credentials and short-lived voice keys are retained.
+Habab credentials are hashed; Google credentials remain process-memory only.
 """
 import argparse
 import asyncio
@@ -10,6 +10,8 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
+import secrets
 import socket
 import stat
 import struct
@@ -17,8 +19,40 @@ import time
 
 from aiohttp import ClientSession, ClientTimeout, ClientWSTimeout, WSMsgType, web
 
-UPSTREAM = 'https://api.openai.com'
-ROUTES = {'chat/completions', 'audio/speech', 'audio/transcriptions', 'realtime/client_secrets', 'models'}
+GEMINI_TEXT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+GEMINI_TOKEN_URL = 'https://generativelanguage.googleapis.com/v1beta/auth_tokens'
+GEMINI_CONSTRAINED_UPSTREAM = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
+GEMINI_MODEL = 'gemini-3.8-live'
+GEMINI_TEXT_MODEL = 'gemini-3.1-flash-lite'
+GEMINI_WEBSOCKET = 'wss://habab-voice.wpmix.net/gemini/ws'
+TOKEN_RESPONSE_MAX = 64 * 1024
+LEGACY_OPENAI_ROUTES = {'chat/completions', 'audio/speech', 'audio/transcriptions', 'realtime/client_secrets', 'models'}
+
+
+async def redacted_stream(content, secret, max_bytes):
+    """Stream upstream bytes while redacting a secret even across chunk boundaries."""
+    pending = b''
+    total = 0
+    overlap = max(1, len(secret))
+    async for block in content.iter_chunked(16384):
+        total += len(block)
+        if total > max_bytes:
+            raise ValueError('relay_response_too_large')
+        combined = pending + block
+        cutoff = max(0, len(combined) - overlap + 1)
+        search_from = 0
+        while True:
+            index = combined.find(secret, search_from)
+            if index < 0 or index >= cutoff:
+                break
+            cutoff = max(cutoff, index + len(secret))
+            search_from = index + len(secret)
+        safe = combined[:cutoff].replace(secret, b'[redacted]')
+        pending = combined[cutoff:]
+        if safe:
+            yield safe
+    if pending:
+        yield pending.replace(secret, b'[redacted]')
 
 
 class Gateway:
@@ -28,16 +62,26 @@ class Gateway:
         self.key_hash = key_hash
         self.upstream_key = upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
-        self.ephemeral = {}
+        self.gemini_credentials = {}
         self.active_voice = 0
         self.inflight = 0
         self.client = None
 
     def authorization(self, request):
-        header = request.headers.get('Authorization', '')
-        if not header.startswith('Bearer ') or len(header) > 2048:
+        authorization = request.headers.get('Authorization', '')
+        api_key = request.headers.get('x-goog-api-key', '')
+        if bool(authorization) == bool(api_key):
             return None, None
-        secret = header[7:]
+        if authorization:
+            if not authorization.startswith('Bearer ') or len(authorization) > 2048:
+                return None, None
+            secret = authorization[7:]
+        else:
+            if len(api_key) > 2048:
+                return None, None
+            secret = api_key
+        if not secret:
+            return None, None
         return secret, hashlib.sha256(secret.encode()).hexdigest()
 
     def owner(self, digest):
@@ -62,6 +106,7 @@ class Gateway:
                 await control.wait_closed()
                 self.control_socket.unlink(missing_ok=True)
             self.upstream_key = None
+            self.gemini_credentials.clear()
             await self.client.close()
 
     async def enroll(self, reader, writer):
@@ -88,88 +133,214 @@ class Gateway:
     async def health(self, request):
         return web.json_response({'service': 'habab-voice-relay', 'ok': True, 'upstreamReady': self.upstream_key is not None})
 
-    async def http(self, request):
-        secret, digest = self.authorization(request)
+    async def capabilities(self, request):
+        _, digest = self.authorization(request)
         if not self.owner(digest):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if request.query:
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        return web.json_response({
+            'provider': 'habab',
+            'chat': {'provider': 'gemini', 'protocol': 'google-generative-language-v1beta',
+                     'api_base': 'https://habab-voice.wpmix.net/gemini/v1beta',
+                     'models': [GEMINI_TEXT_MODEL], 'default_model': GEMINI_TEXT_MODEL,
+                     'streaming': True},
+            'realtime': {'provider': 'gemini', 'transport': 'habab', 'models': [GEMINI_MODEL],
+                         'default_model': GEMINI_MODEL, 'protocol': 'google-generative-language-bidi-v1beta',
+                         'bootstrap': '/v1/realtime/bootstrap', 'websocket': '/gemini/ws'},
+        }, headers={'Cache-Control': 'no-store'})
+
+    async def gemini_bootstrap(self, request):
+        service_key, digest = self.authorization(request)
+        if not self.owner(digest):
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if request.query:
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
         if self.upstream_key is None:
             return web.json_response({'error': {'code': 'habab_upstream_not_ready'}}, status=503)
-        upstream_key = self.upstream_key
-        route = request.match_info['route']
-        if route not in ROUTES or request.method != ('GET' if route == 'models' else 'POST'):
-            return web.json_response({'error': {'code': 'relay_route_not_allowed'}}, status=404)
+        if self.active_voice >= 2:
+            return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)
+        try:
+            body = await request.json()
+            model, setup = body.get('model'), body.get('setup')
+            if (set(body) != {'model', 'setup'} or model != GEMINI_MODEL or not isinstance(setup, dict)
+                    or setup.get('model') != 'models/' + GEMINI_MODEL):
+                raise ValueError
+            encoded = json.dumps(setup, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+            encoded_bytes = encoded.encode('utf-8')
+            if len(encoded_bytes) > 64 * 1024 or service_key.encode() in encoded_bytes:
+                raise ValueError
+        except (ValueError, AttributeError, TypeError):
+            return web.json_response({'error': {'code': 'relay_invalid_model_or_setup'}}, status=400)
+        now = time.time()
+        token_request = {'uses': 1, 'expireTime': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now + 180)),
+                         'newSessionExpireTime': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now + 60)),
+                         'bidiGenerateContentSetup': setup}
+        self.gemini_credentials = {key: item for key, item in self.gemini_credentials.items() if item['expires'] > now}
+        if len(self.gemini_credentials) >= 8:
+            return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)
         if self.inflight >= 6:
             return web.json_response({'error': {'code': 'relay_busy'}}, status=429)
         self.inflight += 1
         try:
-            body = await request.read()
-            headers = {'Authorization': 'Bearer ' + upstream_key}
-            if request.content_type:
-                headers['Content-Type'] = request.headers.get('Content-Type', 'application/json')
-            async with self.client.request(request.method, UPSTREAM + '/v1/' + route,
-                                           data=body or None, headers=headers, allow_redirects=False) as response:
-                payload = bytearray()
-                async for block in response.content.iter_chunked(65536):
-                    payload.extend(block)
-                    if len(payload) > 8 * 1024 * 1024:
-                        return web.json_response({'error': {'code': 'relay_response_too_large'}}, status=502)
-                payload = bytes(payload).replace(upstream_key.encode(), b'[redacted]')
-                if route == 'realtime/client_secrets' and response.status == 200:
-                    session = json.loads(payload)
-                    value = session.get('value')
-                    if not isinstance(value, str) or not value:
-                        return web.json_response({'error': {'code': 'relay_invalid_session'}}, status=502)
-                    now = time.time()
-                    self.ephemeral = {key:item for key,item in self.ephemeral.items() if item[0] > now}
-                    model = json.loads(body).get('session', {}).get('model')
-                    self.ephemeral[hashlib.sha256(value.encode()).hexdigest()] = (min(now + 60, session.get('expires_at', now + 60)), model)
-                return web.Response(body=payload, status=response.status, headers={
-                    'Content-Type': response.headers.get('Content-Type', 'application/json'),
-                    'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+            async with self.client.post(GEMINI_TOKEN_URL, headers={'x-goog-api-key': self.upstream_key},
+                                        json=token_request, allow_redirects=False) as response:
+                if response.status != 200:
+                    return web.json_response({'error': {'code': 'relay_upstream_unavailable'}}, status=502)
+                token_payload = await response.content.read(TOKEN_RESPONSE_MAX + 1)
+                if len(token_payload) > TOKEN_RESPONSE_MAX:
+                    return web.json_response({'error': {'code': 'relay_invalid_upstream_response'}}, status=502)
+                google_token = json.loads(token_payload)
+            if not isinstance(google_token, dict):
+                return web.json_response({'error': {'code': 'relay_invalid_upstream_response'}}, status=502)
+            google_value = google_token.get('name')
+            if not isinstance(google_value, str) or not google_value or len(google_value) > 2048:
+                return web.json_response({'error': {'code': 'relay_invalid_upstream_response'}}, status=502)
         except asyncio.CancelledError:
             raise
         except Exception:
             return web.json_response({'error': {'code': 'relay_upstream_unavailable'}}, status=502)
         finally:
             self.inflight -= 1
+        value = secrets.token_urlsafe(32)
+        self.gemini_credentials[hashlib.sha256(value.encode()).hexdigest()] = {
+            'expires': now + 60, 'model': model, 'setup': encoded, 'google_token': google_value,
+        }
+        return web.json_response({'provider': 'gemini', 'transport': 'habab', 'model': model,
+                                  'value': value, 'expires_at': int(now + 60),
+                                  'websocket_url': GEMINI_WEBSOCKET, 'setup': setup},
+                                 headers={'Cache-Control': 'no-store'})
 
-    async def voice(self, request):
-        secret, digest = self.authorization(request)
-        model = request.query.get('model', '')
-        ephemeral = self.ephemeral.get(digest)
-        allowed = self.owner(digest) or (ephemeral is not None and ephemeral[0] > time.time() and ephemeral[1] == model)
-        if not allowed:
+    async def gemini_text(self, request):
+        service_key, digest = self.authorization(request)
+        if not self.owner(digest):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
-        if self.owner(digest) and self.upstream_key is None:
+        if self.upstream_key is None:
             return web.json_response({'error': {'code': 'habab_upstream_not_ready'}}, status=503)
-        if not model.startswith('gpt-realtime') or len(model) > 100 or set(request.query) != {'model'}:
-            return web.json_response({'error': {'code': 'relay_invalid_model'}}, status=400)
+        upstream_key = self.upstream_key
+        match = re.fullmatch(
+            r'/gemini/v1beta/models/(gemini-3\.1-flash-lite):(generateContent|streamGenerateContent)',
+            request.path,
+        )
+        if request.method != 'POST' or match is None:
+            return web.json_response({'error': {'code': 'relay_route_not_allowed'}}, status=404)
+        action = match.group(2)
+        streaming = action == 'streamGenerateContent'
+        if ((streaming and (len(request.query) != 1 or request.query.get('alt') != 'sse'))
+                or (not streaming and len(request.query) != 0)):
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        if request.content_type != 'application/json':
+            return web.json_response({'error': {'code': 'relay_invalid_request'}}, status=400)
+        try:
+            body = await request.read()
+            if (not body or len(body) > 2 * 1024 * 1024 or service_key.encode() in body
+                    or not isinstance(json.loads(body), dict)):
+                raise ValueError
+        except (ValueError, UnicodeError, TypeError):
+            return web.json_response({'error': {'code': 'relay_invalid_request'}}, status=400)
+        if self.inflight >= 6:
+            return web.json_response({'error': {'code': 'relay_busy'}}, status=429)
+        self.inflight += 1
+        upstream_url = GEMINI_TEXT_BASE + '/' + GEMINI_TEXT_MODEL + ':' + action
+        query = {'alt': 'sse'} if streaming else None
+        result = None
+        try:
+            async with self.client.post(upstream_url, params=query,
+                    headers={'x-goog-api-key': upstream_key, 'Content-Type': 'application/json'},
+                    data=body, allow_redirects=False, timeout=ClientTimeout(total=120, sock_read=60)) as response:
+                headers = {'Content-Type': response.headers.get('Content-Type', 'application/json'),
+                           'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+                if streaming and response.status == 200:
+                    result = web.StreamResponse(status=response.status, headers=headers)
+                    await result.prepare(request)
+                    needle = upstream_key.encode()
+                    try:
+                        async for block in redacted_stream(response.content, needle, 16 * 1024 * 1024):
+                            await result.write(block)
+                    except ValueError:
+                        await result.write(b'event: error\ndata: {"error":{"code":"relay_response_too_large"}}\n\n')
+                    await result.write_eof()
+                    return result
+                payload = bytearray()
+                async for block in response.content.iter_chunked(65536):
+                    payload.extend(block)
+                    if len(payload) > 8 * 1024 * 1024:
+                        return web.json_response({'error': {'code': 'relay_response_too_large'}}, status=502)
+                safe = bytes(payload).replace(upstream_key.encode(), b'[redacted]')
+                return web.Response(body=safe, status=response.status, headers=headers)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if result is not None and result.prepared:
+                try:
+                    await result.write(b'event: error\ndata: {"error":{"code":"relay_upstream_unavailable"}}\n\n')
+                    await result.write_eof()
+                except Exception:
+                    pass
+                return result
+            return web.json_response({'error': {'code': 'relay_upstream_unavailable'}}, status=502)
+        finally:
+            self.inflight -= 1
+
+    async def gemini_voice(self, request):
+        if request.query:
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        header = request.headers.get('Authorization', '')
+        secret = header[6:] if header.startswith('Token ') and len(header) <= 2048 else ''
+        digest = hashlib.sha256(secret.encode()).hexdigest() if secret else None
+        item = self.gemini_credentials.get(digest)
+        if item is None or item['expires'] <= time.time() or self.upstream_key is None:
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if self.active_voice >= 2:
             return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)
+        self.gemini_credentials.pop(digest, None)
         self.active_voice += 1
-        if ephemeral is not None:
-            self.ephemeral.pop(digest, None)
         downstream = web.WebSocketResponse(max_msg_size=256 * 1024, heartbeat=20)
         try:
-            async with self.client.ws_connect(UPSTREAM + '/v1/realtime', params={'model': model},
-                    headers={'Authorization': 'Bearer ' + (self.upstream_key if self.owner(digest) else secret)}, max_msg_size=256 * 1024,
+            await downstream.prepare(request)
+            first = await downstream.receive(timeout=10)
+            if first.type != WSMsgType.TEXT or len(first.data.encode()) > 64 * 1024:
+                await downstream.close(code=1008, message=b'invalid_setup')
+                return downstream
+            try:
+                frame = json.loads(first.data)
+                setup = frame.get('setup') if set(frame) == {'setup'} else None
+                canonical = json.dumps(setup, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+            except (ValueError, TypeError, AttributeError):
+                setup, canonical = None, None
+            if not isinstance(setup, dict) or canonical != item['setup']:
+                await downstream.close(code=1008, message=b'invalid_setup')
+                return downstream
+            google_token = item.pop('google_token')
+            async with self.client.ws_connect(GEMINI_CONSTRAINED_UPSTREAM,
+                    headers={'Authorization': 'Token ' + google_token}, max_msg_size=256 * 1024,
                     timeout=ClientWSTimeout(ws_receive=60, ws_close=5), heartbeat=20) as upstream:
-                await downstream.prepare(request)
+                google_token = None
+                await upstream.send_str(first.data)
+
                 async def relay(source, target):
                     total = 0
-                    async for item in source:
-                        if item.type != WSMsgType.TEXT:
-                            if item.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR): break
-                            continue
-                        total += len(item.data.encode())
-                        if total > 16 * 1024 * 1024:
+                    async for message in source:
+                        if message.type == WSMsgType.TEXT:
+                            total += len(message.data.encode())
+                            if total > 16 * 1024 * 1024:
+                                break
+                            await target.send_str(message.data)
+                        elif message.type == WSMsgType.BINARY:
+                            total += len(message.data)
+                            if total > 16 * 1024 * 1024:
+                                break
+                            await target.send_bytes(message.data)
+                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
                             break
-                        await target.send_str(item.data)
-                tasks = [asyncio.create_task(relay(downstream, upstream)), asyncio.create_task(relay(upstream, downstream))]
+
+                tasks = [asyncio.create_task(relay(downstream, upstream)),
+                         asyncio.create_task(relay(upstream, downstream))]
                 try:
                     await asyncio.wait(tasks, timeout=180, return_when=asyncio.FIRST_COMPLETED)
                 finally:
-                    for task in tasks: task.cancel()
+                    for task in tasks:
+                        task.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
         except asyncio.CancelledError:
             raise
@@ -178,15 +349,29 @@ class Gateway:
                 return web.json_response({'error': {'code': 'relay_voice_unavailable'}}, status=502)
         finally:
             self.active_voice -= 1
-            if downstream.prepared: await downstream.close()
+            if downstream.prepared:
+                await downstream.close()
         return downstream
+
+    async def legacy_http(self, request):
+        _, digest = self.authorization(request)
+        if not self.owner(digest):
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        route = request.match_info['route']
+        if route in LEGACY_OPENAI_ROUTES:
+            return web.json_response({'error': {'code': 'habab_api_upgrade_required'}}, status=426,
+                                     headers={'Cache-Control': 'no-store'})
+        return web.json_response({'error': {'code': 'relay_route_not_allowed'}}, status=404)
 
     def app(self):
         app = web.Application(client_max_size=2 * 1024 * 1024)
         app.cleanup_ctx.append(self.lifecycle)
         app.router.add_get('/health', self.health)
-        app.router.add_get('/v1/realtime', self.voice)
-        app.router.add_route('*', '/v1/{route:.*}', self.http)
+        app.router.add_get('/v1/capabilities', self.capabilities)
+        app.router.add_post('/v1/realtime/bootstrap', self.gemini_bootstrap)
+        app.router.add_get('/gemini/ws', self.gemini_voice)
+        app.router.add_route('*', '/gemini/{tail:.*}', self.gemini_text)
+        app.router.add_route('*', '/v1/{route:.*}', self.legacy_http)
         return app
 
 

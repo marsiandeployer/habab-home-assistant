@@ -5,6 +5,13 @@ import org.json.*;
 
 /** Gemini wire adapter. All turn/item IDs below are explicitly local, not provider IDs. */
 final class GeminiVoiceProtocol {
+    static boolean allowedEndpoint(String address, String transport) {
+        String direct = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained";
+        String habab = "wss://habab-voice.wpmix.net/gemini/ws";
+        return ("direct".equals(transport) && direct.equals(address))
+                || ("habab".equals(transport) && habab.equals(address));
+    }
+
     interface Events { void accept(JSONObject event) throws Exception; }
     private final Events events;
     private final String namespace = "gemini_local_" + UUID.randomUUID().toString().replace("-", "");

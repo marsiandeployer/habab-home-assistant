@@ -4,6 +4,7 @@ import hashlib
 import json
 import secrets
 import time
+from urllib.parse import urlsplit
 
 from aiohttp import ClientError, ClientTimeout
 
@@ -16,12 +17,13 @@ import probatio
 
 from .const import DOMAIN
 from .setup_agent import AgentError
-from .providers import provider_api_base
+from .providers import PROVIDERS, provider_api_base
 from .assistant_identity import ASSISTANT_IDENTITY, VOICE_IDENTITY
 from .voice_context import build_voice_context as voice_context
 from . import gemini_live
 
-MODELS = {"gpt-realtime", "gpt-realtime-mini", "gpt-realtime-2.1", "gpt-realtime-2.1-mini"}
+OPENAI_MODELS = {"gpt-realtime", "gpt-realtime-mini", "gpt-realtime-2.1", "gpt-realtime-2.1-mini"}
+MODELS = OPENAI_MODELS | gemini_live.MODELS
 INSTRUCTIONS = (
     ASSISTANT_IDENTITY + "Пользователь говорит по-русски. "
     "Для каждой реплики вызови ask_home_assistant, передав её смысл без добавления "
@@ -140,12 +142,13 @@ class RealtimeSessionView(HomeAssistantView):
         hass = request.app["hass"]
         try:
             settings = hass.data[DOMAIN]["setup_agent"].settings()
-            gemini = settings.get("provider") == "gemini"
+            selected_provider = settings.get("provider")
+            gemini = selected_provider in {"gemini", "habab"}
             if gemini and client_kind != "native_v2":
                 return self.json_message("unsupported_voice_protocol", status_code=400)
             if gemini and not callable(getattr(hass.data[DOMAIN]["assistant"], "record_voice_event", None)):
                 return self.json_message("voice_history_protocol_required", status_code=400)
-            base = None if gemini else realtime_base(settings)
+            base = None if selected_provider == "gemini" else realtime_base(settings)
         except AgentError as error:
             return self.json_message(error.code, status_code=400)
         except ValueError:
@@ -153,9 +156,11 @@ class RealtimeSessionView(HomeAssistantView):
         try:
             snapshot = voice_context(hass) if client_kind == "native_v2" else None
             model = data.get("model", gemini_live.DEFAULT_MODEL if gemini else "gpt-realtime-mini")
+            allowed_models = gemini_live.MODELS if gemini else OPENAI_MODELS
+            if not isinstance(model, str) or model not in allowed_models:
+                raise ValueError("unsupported_realtime_model")
             # Reuse policy and tool schemas; provider wire formats remain separate.
-            config = session_config("gpt-realtime-mini" if gemini else model,
-                                    client=client_kind, context=snapshot)
+            config = session_config(model, client=client_kind, context=snapshot)
             if gemini:
                 gemini_live.live_setup(model, config)  # Validate before rate limit/network.
         except (ValueError, AttributeError):
@@ -173,7 +178,26 @@ class RealtimeSessionView(HomeAssistantView):
             chat = ({"session_id": "voice2_" + secrets.token_urlsafe(24)} if client_kind == "native_v2"
                     else await hass.data[DOMAIN]["assistant"].web_session(owner.id))
             client = async_get_clientsession(hass)
-            if gemini:
+            if selected_provider == "habab":
+                origin = urlsplit(PROVIDERS["habab"]["url"])
+                relay_root = origin.scheme + "://" + origin.netloc
+                setup = gemini_live.live_setup(model, config)
+                async with client.post(
+                    relay_root + "/v1/realtime/bootstrap",
+                    headers={"Authorization": "Bearer " + settings["api_key"]},
+                    json={"model": model, "setup": setup},
+                    timeout=ClientTimeout(total=25), allow_redirects=False,
+                ) as response:
+                    if response.status != 200:
+                        return self.json_message("realtime_provider_rejected", status_code=502)
+                    relay = await response.json()
+                if (not isinstance(relay, dict) or relay.get("provider") != "gemini" or relay.get("transport") != "habab"
+                        or relay.get("model") != model or relay.get("setup") != setup
+                        or relay.get("websocket_url") != "wss://habab-voice.wpmix.net/gemini/ws"
+                        or not isinstance(relay.get("value"), str) or not 1 <= len(relay["value"]) <= 2048):
+                    return self.json_message("invalid_realtime_response", status_code=502)
+                connection = relay
+            elif gemini:
                 try:
                     connection = await gemini_live.create_connection(client, settings["api_key"], model, config)
                 except ValueError:
@@ -210,7 +234,7 @@ class RealtimeSessionView(HomeAssistantView):
             for key in [key for key, value in leases.items() if value["expires"] <= now]:
                 del leases[key]
             leases[chat["session_id"]] = {"owner": owner.id, "expires": now + 180,
-                                        "provider": settings["provider"],
+                                        "provider": connection["provider"],
                                         "history_session": history["session_id"], "history_epoch": history["epoch"]}
         result = self.json({**connection,
                             "session_id": chat["session_id"],

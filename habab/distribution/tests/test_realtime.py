@@ -109,6 +109,34 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 400)
             client.assert_not_called()
 
+    async def test_habab_voice_rejects_openai_model_without_relay_fallback(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        request = Request(owner, {'client': 'native_v2', 'model': 'gpt-realtime-mini'},
+                          SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock()))
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
+        with patch.object(realtime, 'voice_context', return_value={'time_zone': 'UTC'}), \
+                patch.object(realtime, 'async_get_clientsession') as client:
+            response = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(response.status, 400)
+        self.assertEqual(json.loads(response.body)['message'], 'invalid_voice_settings')
+        client.assert_not_called()
+        self.assertNotIn('voice_sessions', request.app['hass'].data['habab_home'])
+
+    async def test_openai_voice_rejects_gemini_model_before_provider_request(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock())
+        request = Request(owner, {'model': 'gemini-3.8-live'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'openai', 'api_key': 'synthetic-selected-openai', 'model': 'gpt-4.1-mini'})
+        with patch.object(realtime, 'async_get_clientsession') as client:
+            response = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(response.status, 400)
+        self.assertEqual(json.loads(response.body)['message'], 'invalid_voice_settings')
+        client.assert_not_called()
+        assistant.web_session.assert_not_awaited()
+        self.assertNotIn('voice_sessions', request.app['hass'].data['habab_home'])
+
     async def test_gemini_token_failure_never_creates_lease_or_leaks_provider_body(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         for status, token in [(403, {'error': 'synthetic-master'}), (200, {}), (200, {'name': ''})]:
@@ -165,7 +193,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             {'session_id': None, 'epoch': 0}, {'session_id': None, 'epoch': 1}]))
         request = Request(owner, {'client': 'native_v2'}, assistant)
         request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
-            'provider': 'habab', 'api_key': 'synthetic-master'})
+            'provider': 'openai', 'api_key': 'synthetic-master'})
         response = SimpleNamespace(status=200, json=AsyncMock(return_value={'value': 'synthetic-ephemeral'}))
         class Context:
             async def __aenter__(self): return response
@@ -204,16 +232,22 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_native_bootstrap_does_not_start_or_query_opencode(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         assistant = SimpleNamespace(web_session=AsyncMock(),
-            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 2}))
+            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 2}),
+            record_voice_event=AsyncMock())
         request = Request(owner, {'client': 'native_v2'}, assistant)
         request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
             'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
-        response = SimpleNamespace(status=200, json=AsyncMock(return_value={'value': 'synthetic-ephemeral'}))
+        snapshot = {'time_zone': 'UTC', 'states': []}
+        config = realtime.session_config('gpt-realtime-mini', client='native_v2', context=snapshot)
+        setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
+        relay_payload = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
+                         'value': 'synthetic-relay-credential', 'expires_at': 12345,
+                         'websocket_url': 'wss://habab-voice.wpmix.net/gemini/ws', 'setup': setup}
+        response = SimpleNamespace(status=200, json=AsyncMock(return_value=relay_payload))
         class Context:
             async def __aenter__(self): return response
             async def __aexit__(self, *args): pass
         client = SimpleNamespace(post=Mock(return_value=Context()))
-        snapshot = {'time_zone': 'UTC', 'states': []}
         with patch.object(realtime, 'voice_context', return_value=snapshot), \
                 patch.object(realtime, 'async_get_clientsession', return_value=client):
             result = await realtime.RealtimeSessionView().post(request)
@@ -223,9 +257,18 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload['client'], 'native_v2')
         self.assertTrue(payload['session_id'].startswith('voice2_'))
         self.assertEqual(payload['voice_context'], snapshot)
-        self.assertEqual(client.post.call_args.kwargs['json']['session']['tool_choice'], 'auto')
-        self.assertEqual(realtime.voice_lease(request.app['hass'], 'alice', payload['session_id'])['owner'], 'alice')
-        self.assertEqual(realtime.voice_lease(request.app['hass'], 'alice', payload['session_id'])['history_epoch'], 2)
+        call = client.post.call_args
+        self.assertEqual(call.args[0], 'https://habab-voice.wpmix.net/v1/realtime/bootstrap')
+        self.assertEqual(call.kwargs['headers']['Authorization'], 'Bearer synthetic-selected-habab')
+        self.assertEqual(call.kwargs['json'], {'model': 'gemini-3.8-live', 'setup': setup})
+        self.assertEqual(payload['provider'], 'gemini')
+        self.assertEqual(payload['transport'], 'habab')
+        self.assertEqual(payload['model'], 'gemini-3.8-live')
+        self.assertEqual(payload['value'], 'synthetic-relay-credential')
+        lease = realtime.voice_lease(request.app['hass'], 'alice', payload['session_id'])
+        self.assertEqual(lease['owner'], 'alice')
+        self.assertEqual(lease['history_epoch'], 2)
+        self.assertEqual(lease['provider'], 'gemini')
 
     async def test_voice_tool_resolves_canonical_chat_only_when_called(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
@@ -306,25 +349,48 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         for provider, host in [('habab', 'habab-voice.wpmix.net'), ('openai', 'api.openai.com')]:
             with self.subTest(provider=provider):
-                assistant = SimpleNamespace(web_session=AsyncMock(return_value={'session_id': 'ses_alice'}))
-                request = Request(owner, assistant=assistant)
+                assistant = SimpleNamespace(web_session=AsyncMock(return_value={'session_id': 'ses_alice'}),
+                    record_voice_event=AsyncMock(),
+                    voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 0}))
+                request = Request(owner, {'client': 'native_v2'} if provider == 'habab' else {}, assistant)
                 request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=Mock(return_value={
                     'provider': provider, 'api_key': 'synthetic-selected-' + provider, 'model': 'gpt-4.1-mini'}))
-                response = SimpleNamespace(status=200, json=AsyncMock(return_value={'value': 'synthetic-ephemeral', 'expires_at': 12345}))
+                if provider == 'habab':
+                    snapshot = {'time_zone': 'UTC'}
+                    config = realtime.session_config('gpt-realtime-mini', client='native_v2', context=snapshot)
+                    setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
+                    remote = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
+                              'value': 'synthetic-relay', 'expires_at': 12345,
+                              'websocket_url': 'wss://habab-voice.wpmix.net/gemini/ws', 'setup': setup}
+                else:
+                    remote = {'value': 'synthetic-ephemeral', 'expires_at': 12345}
+                response = SimpleNamespace(status=200, json=AsyncMock(return_value=remote))
                 class Context:
                     async def __aenter__(self): return response
                     async def __aexit__(self, *args): pass
                 client = SimpleNamespace(post=Mock(return_value=Context()))
                 with patch.dict(os.environ, {'HABAB_OPENAI_BASE_URL': 'https://wrong.test/v1'}), \
+                        patch.object(realtime, 'voice_context', return_value=snapshot if provider == 'habab' else None), \
                         patch.object(realtime, 'async_get_clientsession', return_value=client):
                     result = await realtime.RealtimeSessionView().post(request)
                 self.assertEqual(result.status, 200)
-                self.assertEqual(client.post.call_args.args[0], f'https://{host}/v1/realtime/client_secrets')
+                expected_path = '/v1/realtime/bootstrap' if provider == 'habab' else '/v1/realtime/client_secrets'
+                self.assertEqual(client.post.call_args.args[0], f'https://{host}{expected_path}')
                 self.assertEqual(client.post.call_args.kwargs['headers']['Authorization'], 'Bearer synthetic-selected-' + provider)
                 self.assertFalse(client.post.call_args.kwargs['allow_redirects'])
                 payload = json.loads(result.body)
-                self.assertEqual(payload['websocket_url'], f'wss://{host}/v1/realtime?model=gpt-realtime-mini')
-                self.assertEqual(payload['session_id'], 'ses_alice')
+                if provider == 'habab':
+                    self.assertEqual((payload['provider'], payload['transport'], payload['model']),
+                                     ('gemini', 'habab', 'gemini-3.8-live'))
+                    self.assertEqual(payload['websocket_url'], remote['websocket_url'])
+                    self.assertEqual(client.post.call_args.kwargs['json'], {'model': 'gemini-3.8-live', 'setup': setup})
+                else:
+                    self.assertEqual(payload['websocket_url'], f'wss://{host}/v1/realtime?model=gpt-realtime-mini')
+                    self.assertEqual(payload['provider'], 'openai')
+                if provider == 'habab':
+                    self.assertTrue(payload['session_id'].startswith('voice2_'))
+                else:
+                    self.assertEqual(payload['session_id'], 'ses_alice')
                 self.assertNotIn('synthetic-selected-', result.body.decode())
                 self.assertEqual(result.headers['Cache-Control'], 'no-store')
 
@@ -350,6 +416,8 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config['audio']['input']['format']['rate'], 24000)
         with self.assertRaises(ValueError):
             realtime.session_config('arbitrary-model')
+        native_gemini = realtime.session_config('gemini-3.8-live', client='native_v2')
+        self.assertEqual(native_gemini['model'], 'gemini-3.8-live')
 
     def test_native_v2_can_answer_directly_and_has_explicit_session_end(self):
         snapshot = {'observed_at': '2026-10-24T16:00:00+03:00', 'weather': None}
