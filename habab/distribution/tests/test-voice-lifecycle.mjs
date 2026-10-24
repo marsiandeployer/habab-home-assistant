@@ -165,3 +165,100 @@ test("closing during a pending spoken reply settles it and releases its subscrip
   assert.equal(unsubscribed, 1);
   assert.equal(subscription.options.end_stage, "tts");
 });
+
+function recordingHarness(t) {
+  const keys = ["window", "navigator", "AudioContext", "AudioWorkletNode", "WebSocket"];
+  const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const state = { sent: [], events: [], stopped: 0, unsubscribed: 0 };
+  class Context {
+    constructor() { this.sampleRate = 16000; this.audioWorklet = { addModule: async () => {} }; }
+    createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+    async resume() {}
+    async close() {}
+  }
+  class Recorder { constructor() { this.port = { onmessage: null }; state.recorder = this; } }
+  const globals = {
+    window: { isSecureContext: true },
+    navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: () => { state.stopped++; } }] }) } },
+    AudioContext: Context, AudioWorkletNode: Recorder, WebSocket: { OPEN: 1 },
+  };
+  for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
+  const hass = { connection: {
+    socket: { readyState: 1, send: (frame) => state.sent.push(frame) },
+    subscribeMessage: (callback) => {
+      state.callback = callback;
+      return new Promise((resolve) => { state.resolveSubscription = () => resolve(() => { state.unsubscribed++; }); });
+    },
+  } };
+  state.voice = new AssistVoice(hass, { id: "privacy-pipeline", stt_engine: "stt" }, (event) => state.events.push(event));
+  t.after(() => {
+    state.voice.close();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  });
+  return state;
+}
+
+test("manual stop before a delayed runner drops buffered microphone audio and cancels the subscription", async (t) => {
+  const h = recordingHarness(t);
+  const starting = h.voice.start();
+  await new Promise(setImmediate);
+  const staleRecorderCallback = h.recorder.port.onmessage;
+  staleRecorderCallback({ data: new Int16Array([101, 102]) });
+  assert.equal(h.voice.pending.length, 1);
+  h.voice.finishRecording();
+  h.callback({ type: "run-start", data: { runner_data: { stt_binary_handler_id: 7 } } });
+  h.callback({ type: "stt-start", data: {} });
+  staleRecorderCallback({ data: new Int16Array([103]) });
+  h.resolveSubscription();
+  await starting;
+  assert.deepEqual(h.sent, [], "neither stale buffered samples nor later samples may leave after stop");
+  assert.equal(h.voice.pending.length, 0);
+  assert.equal(h.stopped, 1);
+  assert.equal(h.unsubscribed, 1);
+});
+
+test("VAD end invalidates stale capture and runner events while retaining the transcript", async (t) => {
+  const h = recordingHarness(t);
+  const starting = h.voice.start();
+  await new Promise(setImmediate);
+  h.resolveSubscription();
+  await starting;
+  const staleRecorderCallback = h.recorder.port.onmessage;
+  h.callback({ type: "run-start", data: { runner_data: { stt_binary_handler_id: 7 } } });
+  h.callback({ type: "stt-start", data: {} });
+  staleRecorderCallback({ data: new Int16Array([101]) });
+  assert.equal(h.sent.length, 1);
+  h.callback({ type: "stt-vad-end", data: {} });
+  h.callback({ type: "run-start", data: { runner_data: { stt_binary_handler_id: 8 } } });
+  h.callback({ type: "stt-start", data: {} });
+  staleRecorderCallback({ data: new Int16Array([102]) });
+  h.voice.send(new Int16Array([103]));
+  h.callback({ type: "stt-end", data: { stt_output: { text: "Привет" } } });
+  assert.equal(h.sent.length, 1, "VAD end is a terminal microphone boundary");
+  assert.equal(h.voice.ready, false);
+  assert.equal(h.voice.handler, undefined);
+  assert(h.events.some((event) => event.type === "stt-end" && event.data.stt_output.text === "Привет"));
+});
+
+test("manual stop sends one empty terminator and never forwards late microphone samples", async (t) => {
+  const h = recordingHarness(t);
+  const starting = h.voice.start();
+  await new Promise(setImmediate);
+  h.resolveSubscription();
+  await starting;
+  const staleRecorderCallback = h.recorder.port.onmessage;
+  h.callback({ type: "run-start", data: { runner_data: { stt_binary_handler_id: 7 } } });
+  h.callback({ type: "stt-start", data: {} });
+  staleRecorderCallback({ data: new Int16Array([101]) });
+  h.voice.finishRecording();
+  h.voice.finishRecording();
+  staleRecorderCallback({ data: new Int16Array([102]) });
+  h.callback({ type: "stt-start", data: {} });
+  assert.equal(h.sent.length, 2);
+  assert.deepEqual([...h.sent[1]], [7], "the final frame is only the handler byte, with no audio payload");
+  assert.equal(h.voice.pending.length, 0);
+  assert.equal(h.stopped, 1);
+});

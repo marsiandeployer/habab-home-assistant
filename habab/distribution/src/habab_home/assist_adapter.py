@@ -9,6 +9,7 @@ from homeassistant.helpers import llm
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .providers import ProviderClient, ProviderError
+from .assistant_identity import ASSISTANT_IDENTITY
 
 MAX_ROUNDS = 4
 MAX_TOOLS = 8
@@ -62,7 +63,7 @@ def parse_calls(message: dict, allowed: set[str]) -> list[llm.ToolInput]:
     return result
 
 
-INSTRUCTIONS = """You are a home voice assistant. Reply briefly in the user's language.
+INSTRUCTIONS = ASSISTANT_IDENTITY + """You are a home voice assistant. Reply briefly in the user's language.
 Use the provided Assist tools to perform all requested device actions.
 Only claim an action succeeded when its tool result confirms success.
 If a tool reports an error, say so and do not claim the device changed.

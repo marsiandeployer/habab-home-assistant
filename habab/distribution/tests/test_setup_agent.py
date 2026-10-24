@@ -14,6 +14,7 @@ from homeassistant.components.habab_home.setup_agent import (
     SetupAgent,
     verify_binary,
 )
+from homeassistant.components.habab_home.assistant_identity import ASSISTANT_IDENTITY
 from homeassistant.components.habab_home.runtime_context import (
     ANDROID_PROOT_RUNTIME_KIND,
     runtime_fingerprint,
@@ -64,6 +65,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.active, None)
         self.assertEqual(agent.request.await_args_list[0].args[:2],
                          ("POST", "session/ses_alice/message"))
+        self.assertEqual(agent.request.await_args_list[0].args[2]["system"], PROMPT)
         self.assertEqual(agent.request.await_args_list[1].args[:2],
                          ("GET", "session/ses_alice/message?limit=60"))
         agent.diagnostics.clear.assert_called_once_with("alice", "ses_alice")
@@ -137,15 +139,17 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
-    def test_docker_prompt_is_byte_for_byte_unchanged(self):
+    def test_shared_identity_preserves_existing_runtime_security_instructions(self):
+        self.assertTrue(PROMPT.startswith(ASSISTANT_IDENTITY))
         self.assertEqual(
-            hashlib.sha256(PROMPT.encode()).hexdigest(),
+            hashlib.sha256(PROMPT.removeprefix(ASSISTANT_IDENTITY).encode()).hexdigest(),
             "2d1bc151f1e28e3053b4ed3ff50fcbc68720a108dcc1736a29a5123081bfa681",
         )
         self.assertIs(runtime_prompt("docker", PROMPT), PROMPT)
 
     def test_android_prompt_uses_proot_sandbox_facts_and_shared_tools(self):
         prompt = runtime_prompt(ANDROID_PROOT_RUNTIME_KIND, PROMPT)
+        self.assertTrue(prompt.startswith(ASSISTANT_IDENTITY))
         self.assertIn("UID 0 действует только внутри PRoot-гостя", prompt)
         self.assertIn("это НЕ root Android и НЕ Docker", prompt)
         self.assertIn("не даёт доступа к Bluetooth, Wi-Fi-сканированию, BlueZ", prompt)

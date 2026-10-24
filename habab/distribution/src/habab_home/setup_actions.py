@@ -3,13 +3,14 @@ import asyncio
 from itertools import islice
 import json
 import logging
+import os
 import secrets
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import DISCOVERY_SOURCES
 from homeassistant.core import Context
 from homeassistant.helpers import device_registry, entity_registry
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +62,35 @@ def discovered_flows(hass, manager):
 
 async def execute(hass, manager, owner, body, trusted_origin=None):
     action = body.get("action")
+    if action == "assistant_status":
+        from .realtime import realtime_base
+        from .setup_agent import AgentError
+        from .runtime_context import DOCKER_RUNTIME_KIND, RUNTIME_KIND_ENV
+
+        try:
+            settings = hass.data[DOMAIN]["setup_agent"].settings()
+        except AgentError:
+            settings = {}
+        try:
+            realtime_base(settings)
+            realtime_supported = True
+        except ValueError:
+            realtime_supported = False
+        telegram = hass.data.get("habab_telegram")
+        telegram_state = await telegram.status(owner) if telegram else {}
+        return {"assistant": "Habab", "version": VERSION,
+                "ha_runtime": os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND),
+                "selected_provider": settings.get("provider"),
+                "voice": {
+                    "realtime_api_registered": True,
+                    "selected_provider_supports_realtime": realtime_supported,
+                    "android": {"wake_detection": "local_vosk", "transport": "native_realtime",
+                                "requires_ha_stt_tts": False},
+                    "browser": {"transport": "ha_assist_pipeline", "requires_ha_stt": True},
+                    "client_microphone_and_network": "not_observed"},
+                "telegram": {"phase": telegram_state.get("phase", "not_configured"),
+                             "group_phase": telegram_state.get("group", {}).get("phase", "not_configured"),
+                             "settings_path": "/habab-telegram"}}
     if action == "discover_devices":
         from .discovery import observe
 

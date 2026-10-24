@@ -15,6 +15,25 @@ from homeassistant.components.habab_home.const import DOMAIN
 
 
 class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_assistant_status_reports_voice_capabilities_without_inventing_client_observation(self):
+        for provider, supported in (("deepseek", False), ("openai", True), ("habab", True)):
+            settings = {"provider": provider, "api_key": "fixture-api-secret"}
+            telegram = SimpleNamespace(status=AsyncMock(return_value={
+                "phase": "connected", "pairing_url": "fixture-pairing-secret",
+                "group": {"phase": "awaiting_admin", "chat_id": "fixture-private-chat"}}))
+            hass = SimpleNamespace(data={
+                DOMAIN: {"setup_agent": SimpleNamespace(settings=lambda: settings)},
+                "habab_telegram": telegram})
+            result = await execute(hass, None, "alice", {"action": "assistant_status"})
+            self.assertEqual(result["selected_provider"], provider)
+            self.assertEqual(result["voice"]["selected_provider_supports_realtime"], supported)
+            self.assertIs(result["voice"]["android"]["requires_ha_stt_tts"], False)
+            self.assertEqual(result["voice"]["client_microphone_and_network"], "not_observed")
+            self.assertEqual(result["telegram"]["group_phase"], "awaiting_admin")
+            for secret in ("fixture-api-secret", "fixture-pairing-secret", "fixture-private-chat"):
+                self.assertNotIn(secret, json.dumps(result))
+            telegram.status.assert_awaited_once_with("alice")
+
     def test_flow_result_never_returns_entry_credentials_or_defaults(self):
         result = flow_result({"type": "create_entry", "flow_id": "flow-one", "title": "Private",
             "data": {"api_key": "fixture-private-key"}, "result": object(),

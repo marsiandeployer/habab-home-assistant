@@ -18,6 +18,7 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .agent_diagnostics import AgentDiagnostics
+from .assistant_identity import ASSISTANT_IDENTITY
 from .const import DOMAIN
 from .providers import PROVIDERS, provider_api_base
 from .runtime_context import (
@@ -28,7 +29,7 @@ from .runtime_context import (
 )
 
 PORT = 4197
-PROMPT = """Ты помощник по настройке домашнего Home Assistant. Отвечай по-русски,
+PROMPT = ASSISTANT_IDENTITY + """Ты помощник по настройке домашнего Home Assistant. Отвечай по-русски,
 кратко. Все сообщения владельцу, включая короткие сообщения о ходе работы, пиши
 по-русски. Внутренние flow_id/session_id не показывай в обычном ответе: владельцу
 нужны понятные названия и шаги в карточке. Ты работаешь через OpenCode от root
@@ -274,6 +275,7 @@ class SetupAgent:
             try:
                 response = await self.request("POST", f"session/{session_id}/message", {
                     "agent": "build", "model": {"providerID": "habab-" + settings["provider"], "modelID": settings["model"]},
+                    "system": runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT),
                     "parts": [{"type": "text", "text": text}],
                 }, timeout=180)
                 if response.get("info", {}).get("error"):

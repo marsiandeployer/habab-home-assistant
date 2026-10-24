@@ -18,24 +18,27 @@ export class AssistVoice {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
-      if (this.closed) { this.stopMicrophone(); return; }
+      if (this.closed || this.recordingEnded) { this.stopMicrophone(); return; }
       this.context = new AudioContext({ sampleRate: 16000 });
       await this.context.audioWorklet.addModule("/habab-home/recorder-worklet.js");
-      if (this.closed) { this.stopMicrophone(); return; }
+      if (this.closed || this.recordingEnded) { this.stopMicrophone(); return; }
       this.source = this.context.createMediaStreamSource(this.stream);
       this.recorder = new AudioWorkletNode(this.context, "habab-recorder");
       this.recorder.port.onmessage = ({ data }) => {
-        if (this.closed) return;
+        if (this.closed || this.recordingEnded) return;
         if (this.ready) this.send(data);
         else if (this.pending.length < 400) this.pending.push(data);
       };
       this.source.connect(this.recorder);
       await this.context.resume();
+      if (this.closed || this.recordingEnded) { this.stopMicrophone(); return; }
       this.unsubscribe = await this.hass.connection.subscribeMessage((event) => {
         if (this.closed) return;
         if (event.type === "run-start") {
+          if (this.recordingEnded) return;
           this.handler = event.data.runner_data.stt_binary_handler_id;
         } else if (event.type === "stt-start") {
+          if (this.recordingEnded) return;
           this.ready = true;
           this.pending.forEach((chunk) => this.send(chunk));
           this.pending = [];
@@ -130,7 +133,7 @@ export class AssistVoice {
   }
 
   send(chunk) {
-    if (this.handler == null || this.hass.connection.socket?.readyState !== WebSocket.OPEN) return;
+    if (this.closed || this.recordingEnded || this.handler == null || this.hass.connection.socket?.readyState !== WebSocket.OPEN) return;
     const data = new Uint8Array(1 + chunk.byteLength);
     data[0] = this.handler;
     data.set(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength), 1);
@@ -138,13 +141,21 @@ export class AssistVoice {
   }
 
   finishRecording() {
+    if (this.closed || this.recordingEnded) return;
+    const hadHandler = this.handler != null;
     if (this.handler != null) this.send(new Int16Array());
-    this.handler = undefined;
     this.stopMicrophone();
     this.onEvent({ type: "recording-ended" });
+    // With no runner yet, there is no recording to finish. Cancel the pending
+    // subscription so a late runner cannot reopen or upload buffered audio.
+    if (!hadHandler) this.close();
   }
 
   stopMicrophone() {
+    this.recordingEnded = true;
+    this.ready = false;
+    this.handler = undefined;
+    this.pending = [];
     clearTimeout(this.micTimer);
     this.micTimer = undefined;
     const stream = this.stream;
