@@ -1,0 +1,18 @@
+{
+  "kind": "shared_demo_venv_repair",
+  "reason": "worker uv run recreated shared .venv as Python3.14",
+  "restoredPython": "3.10.12",
+  "requirements": "habab/requirements-dev.txt pinned",
+  "dependencyInstall": "PASS",
+  "freshApplicationImportBeforeMove": true,
+  "entrypointPathsAdjusted": 16,
+  "serviceRestarted": false,
+  "failedEmptyEnvironmentPreserved": true,
+  "phoneAndCloudDockerChanged": false,
+  "freshApplicationImportAfterMove": true,
+  "gunicornEntrypointVersion": "25.2.0",
+  "liveHealth": "ok",
+  "liveMockStateHttp": 200,
+  "liveMockVirtualStates": 10,
+  "originalMasterAndWorkersUnchanged": true
+}

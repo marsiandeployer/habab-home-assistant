@@ -1,0 +1,60 @@
+{
+  "kind": "immutable_runtime_publication",
+  "runtime": "2c6567223ad3ef6b",
+  "files": [
+    {
+      "name": "habab-runtime-2c6567223ad3ef6b-arm64.tgz",
+      "bytes": 874447647,
+      "sha256": "782acf768f5d0494bb7e9de2a6d1e5c9afdbe4e161c2f5eadea53ffc99fca963"
+    },
+    {
+      "name": "release-2c6567223ad3ef6b.json.sig",
+      "bytes": 513,
+      "sha256": "aa5efd52b80005aeed163be84d2e691d9c1a71927237bc2c179f8bc8be9a403e"
+    },
+    {
+      "name": "release-2c6567223ad3ef6b.json",
+      "bytes": 9761,
+      "sha256": "72f4c80efe95829c835833a4db26685402821dd45d4ecc4dbcbbb2bbcc51404c"
+    }
+  ],
+  "old_files_overwritten": false,
+  "apk_or_stable_cta_published": false,
+  "http_acceptance": "PASS_METADATA_HEAD_AND_RANGES",
+  "http_checks": [
+    {
+      "name": "release-2c6567223ad3ef6b.json",
+      "status": 200,
+      "bytes": 9761,
+      "sha256_match": true
+    },
+    {
+      "name": "release-2c6567223ad3ef6b.json.sig",
+      "status": 200,
+      "bytes": 513,
+      "sha256_match": true
+    },
+    {
+      "name": "habab-runtime-2c6567223ad3ef6b-arm64.tgz",
+      "head_status": 200,
+      "bytes": 874447647
+    },
+    {
+      "range": [
+        0,
+        65535
+      ],
+      "status": 206,
+      "matches_local": true
+    },
+    {
+      "range": [
+        874382111,
+        874447646
+      ],
+      "status": 206,
+      "matches_local": true
+    }
+  ],
+  "fresh_android_https_installer": "NOT_RUN; planned private ADB operator update"
+}

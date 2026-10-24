@@ -1,0 +1,62 @@
+{
+  "kind": "matched_native15_capability_candidate",
+  "source_commit": "6d9565be358caceb7c2da2b129fb41237951b947",
+  "worktree_clean": true,
+  "runtime": {
+    "id": "2c6567223ad3ef6b",
+    "bytes": 874447647,
+    "sha256": "782acf768f5d0494bb7e9de2a6d1e5c9afdbe4e161c2f5eadea53ffc99fca963",
+    "manifest_sha256": "72f4c80efe95829c835833a4db26685402821dd45d4ecc4dbcbbb2bbcc51404c",
+    "signature_sha256": "aa5efd52b80005aeed163be84d2e691d9c1a71927237bc2c179f8bc8be9a403e",
+    "source_files": 59,
+    "habab_version": "0.3.6",
+    "core_version": "2026.10.2",
+    "native_frontend": {
+      "payloadFiles": 14816,
+      "payloadPrefixes": [
+        "usr/local/lib/python3.14/site-packages/hass_frontend",
+        "usr/local/lib/python3.14/site-packages/home_assistant_frontend-20260930.4+habab.7.dist-info"
+      ],
+      "payloadSha256": "1b06e3d766e2e1c19a87b477b05fdc104e0ad4ba53ea1f764ef6f8378580c1f9",
+      "upstreamVersion": "20260930.4",
+      "version": "20260930.4+habab.7",
+      "wheelSha256": "1d518e7cf632827f04481f0ef0d8ad3aec65d17b25cdc73f1b79c34de0ee1867"
+    }
+  },
+  "apk": {
+    "version_code": 15,
+    "version_name": "0.1.7-voice-preview",
+    "bytes": 52483450,
+    "sha256": "7a876240bbcf20449d72924d18f1007102ec2d03249973a52a79c8d39efd481c",
+    "signer_matches_actual_native14_apk": true,
+    "trusted_runtime_key_matches_actual_native14_apk": true
+  },
+  "validation": {
+    "signature_contents": "PASS",
+    "full_java_extraction": "PASS",
+    "jvm": {
+      "tests": 70,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "assemble": "PASS",
+    "lint": "PASS"
+  },
+  "cloud": {
+    "image": "sha256:c1d52c3fc845fc4f2bfc353877794903feefd09a988ba5edb349dfc57a73f678",
+    "original_exposure": "PASS",
+    "risk_turns": 4,
+    "risk_readbacks": "PASS",
+    "native_voice_snapshot_weather_available": true,
+    "image_oci_revision": "known_stale9d_metadata_pending_fix; actual42sourceverified6d"
+  },
+  "phone": {
+    "installed": false,
+    "voice_acoustic_acceptance": "NOT_RUN"
+  },
+  "publication": {
+    "published": false,
+    "stable_cta_changed": false
+  }
+}

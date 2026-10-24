@@ -1,0 +1,20 @@
+{
+  "kind": "owner22ae_native_setting_persistence",
+  "source": "aaeab54b5eb8910406ec97e4e3ab987123608349",
+  "image": "sha256:22ae7a87f5286c37a02257dd61575e55f56ff4424a35d188e956a757c139634d",
+  "target": "weather.forecast_pogoda_doma",
+  "nativeReadOnlyCommand": "homeassistant/expose_entity/list",
+  "explicitExposureSetting": {
+    "conversation": true
+  },
+  "survivedContainerReplacement": true,
+  "originalChatMutationProof": "habab/qa/shopping-list-e2e-20261024/weather-exposure-cloud036-capability-result.json",
+  "directMutationThisCheck": false,
+  "physicalPhoneTest": false,
+  "harnessCorrection": {
+    "initialPredicate": "incorrectly expected explicit false values for absent assistant keys",
+    "sourceFunction": "homeassistant/components/homeassistant/exposed_entities.py:ws_list_exposed_entities",
+    "verifiedSemantics": "native list exports only explicit should_expose=true settings; absent keys are not independent proof of effective false",
+    "otherAssistantClaim": "no explicit Alexa/Google grant in native readback; no claim of separate effective-default evaluation"
+  }
+}
