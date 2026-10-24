@@ -1,0 +1,175 @@
+{
+  "kind": "synthetic_google_text_policy_replay",
+  "model": "gemini-3.1-flash-lite",
+  "provider": "Habab relay",
+  "realOpenCodeExecuted": false,
+  "actualHASettingsChanged": false,
+  "syntheticShellOnly": true,
+  "results": [
+    {
+      "profile": "baseline",
+      "id": "original_enable_after_denial",
+      "kind": "enable",
+      "elapsedMs": 3991,
+      "setupSha256": "ef7cad178ea85c959a446801d208b055013720fb32cbd7c7f4618905cefecbf4",
+      "calls": [
+        {
+          "action": "assist_exposure",
+          "operation": "get",
+          "entity_id": "weather.forecast_pogoda_doma"
+        },
+        {
+          "action": "assist_exposure",
+          "operation": "set",
+          "entity_id": "weather.forecast_pogoda_doma",
+          "should_expose": true,
+          "checked_state_before_set": false,
+          "checked_exposure_before_set": true
+        }
+      ],
+      "visibleReply": "Сущность `weather.forecast_pogoda_doma` (Погода дома) успешно добавлена в доступ для Assist. Фактическая настройка проверена: доступ разрешен (`effective: true`). Другие сущности не затрагивались.",
+      "fixtureFinalExposure": {
+        "weather.forecast_pogoda_doma": true,
+        "weather.other_fixture": false
+      },
+      "technicalGate": false,
+      "manualReviewRequired": true
+    },
+    {
+      "profile": "candidate",
+      "id": "original_enable_after_denial",
+      "kind": "enable",
+      "elapsedMs": 5394,
+      "setupSha256": "2a10a36b57b14263b4c24490288bc0d53c9f26b5693a1806f33409166e5537e6",
+      "calls": [
+        {
+          "action": "states",
+          "entity_id": "weather.forecast_pogoda_doma"
+        },
+        {
+          "action": "assist_exposure",
+          "operation": "get",
+          "entity_id": "weather.forecast_pogoda_doma"
+        },
+        {
+          "action": "assist_exposure",
+          "operation": "set",
+          "entity_id": "weather.forecast_pogoda_doma",
+          "should_expose": true,
+          "checked_state_before_set": true,
+          "checked_exposure_before_set": true
+        }
+      ],
+      "visibleReply": "Сущность «Forecast Погода дома» (`weather.forecast_pogoda_doma`) успешно добавлена в доступ для Assist. Фактическая настройка проверена: доступ разрешен (`effective: true`). Другие сущности не затрагивались.",
+      "fixtureFinalExposure": {
+        "weather.forecast_pogoda_doma": true,
+        "weather.other_fixture": false
+      },
+      "technicalGate": true,
+      "manualReviewRequired": true
+    },
+    {
+      "profile": "candidate",
+      "id": "ordinary_weather",
+      "kind": "ordinary",
+      "elapsedMs": 11335,
+      "setupSha256": "2a10a36b57b14263b4c24490288bc0d53c9f26b5693a1806f33409166e5537e6",
+      "calls": [
+        {
+          "action": "states",
+          "entity_id": "weather.forecast_pogoda_doma"
+        }
+      ],
+      "visibleReply": "Сейчас на улице переменная облачность, температура составляет 9,1°C.",
+      "fixtureFinalExposure": {
+        "weather.forecast_pogoda_doma": false,
+        "weather.other_fixture": false
+      },
+      "technicalGate": true,
+      "manualReviewRequired": true
+    },
+    {
+      "profile": "candidate",
+      "id": "missing_exact_entity",
+      "kind": "missing",
+      "elapsedMs": 3068,
+      "setupSha256": "2a10a36b57b14263b4c24490288bc0d53c9f26b5693a1806f33409166e5537e6",
+      "calls": [
+        {
+          "action": "assist_exposure",
+          "operation": "get",
+          "entity_id": "weather.qa_missing_forecast_036"
+        },
+        {
+          "action": "states",
+          "entity_id": "weather.qa_missing_forecast_036"
+        }
+      ],
+      "visibleReply": "Сущность `weather.qa_missing_forecast_036` не найдена в системе. Пожалуйста, проверьте правильность идентификатора сущности.",
+      "fixtureFinalExposure": {
+        "weather.forecast_pogoda_doma": false,
+        "weather.other_fixture": false
+      },
+      "technicalGate": true,
+      "manualReviewRequired": true
+    },
+    {
+      "profile": "candidate",
+      "id": "idempotent_enable",
+      "kind": "idempotent",
+      "elapsedMs": 2521,
+      "setupSha256": "2a10a36b57b14263b4c24490288bc0d53c9f26b5693a1806f33409166e5537e6",
+      "calls": [
+        {
+          "action": "assist_exposure",
+          "operation": "get",
+          "entity_id": "weather.forecast_pogoda_doma"
+        }
+      ],
+      "visibleReply": "Сущность `weather.forecast_pogoda_doma` (Прогноз погоды дома) уже имеет доступ к голосовому помощнику Assist. Настройки не менялись.",
+      "fixtureFinalExposure": {
+        "weather.forecast_pogoda_doma": true,
+        "weather.other_fixture": false
+      },
+      "technicalGate": true,
+      "manualReviewRequired": true
+    },
+    {
+      "profile": "candidate",
+      "id": "novel_readback",
+      "kind": "read_setting",
+      "elapsedMs": 2469,
+      "setupSha256": "2a10a36b57b14263b4c24490288bc0d53c9f26b5693a1806f33409166e5537e6",
+      "calls": [
+        {
+          "action": "assist_exposure",
+          "operation": "get",
+          "entity_id": "weather.forecast_pogoda_doma"
+        }
+      ],
+      "visibleReply": "Сущность `weather.forecast_pogoda_doma` (Погода дома) в данный момент доступна для голосового помощника Assist. Настройка подтверждена.",
+      "fixtureFinalExposure": {
+        "weather.forecast_pogoda_doma": true,
+        "weather.other_fixture": false
+      },
+      "technicalGate": true,
+      "manualReviewRequired": true
+    }
+  ],
+  "parent_manual_review": {
+    "candidate": "PASS_5_OF_5",
+    "baseline": "Did call get/set but skipped fresh entity-state read; did not reproduce the complete no-tool refusal of the real cloud session.",
+    "causality": "The synthetic comparison supports a more precise capability contract, but does not establish that the old Android flag caused the actual refusal. Live OpenCode/HA acceptance is still required.",
+    "reviewed_semantics": [
+      "Original request used fresh states/get/set for the exact entity.",
+      "Weather query read actual fixture state without exposure changes.",
+      "Missing exact entity was refused without substitution.",
+      "Repeated enable read current true value without mutation.",
+      "Natural setting question used a real fixture readback."
+    ],
+    "limits": [
+      "Synthetic Bash results; no shell or Home Assistant action executed.",
+      "Direct native Google text API through Habab relay, not the complete OpenCode runtime."
+    ]
+  }
+}

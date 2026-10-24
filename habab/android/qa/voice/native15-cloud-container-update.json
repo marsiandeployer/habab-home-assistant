@@ -1,0 +1,12 @@
+{
+  "kind": "cloud036_container_update",
+  "source": "f2b49491b68d85aa99735a5d94df0e1e2047d54f",
+  "image": "sha256:0c588da4009c9aa031fce8bf3655eba79e581580af2dc3dee5fec68e7d4a82ce",
+  "previous_image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+  "rollback_container": "habab-owner-test-before-036-20261024T193455Z",
+  "http_ready": true,
+  "authenticated_acceptance": "NOT_RUN",
+  "new_credential_files_written": false,
+  "config_volume_preserved": true,
+  "old_container_stopped_and_retained": true
+}

@@ -1,0 +1,29 @@
+{
+  "classification": "CLOUD_036_ENABLE_UNSUPPORTED_NO_MUTATION_BACKEND_IDLE_CONFIRMED",
+  "model_turns_sent": 0,
+  "readback": {
+    "runtime": {
+      "core": "2026.10.2",
+      "habab": "0.3.6",
+      "status": "running"
+    },
+    "target": {
+      "entity_exists": true,
+      "friendly_name": "Forecast Погода дома",
+      "hidden_by": null,
+      "disabled_by": null,
+      "exposure": {
+        "conversation": false,
+        "cloud_alexa": false,
+        "cloud_google_assistant": false
+      }
+    },
+    "exposure_map_entity_count": 4,
+    "chat_session_present": true,
+    "backend_diagnostics": {
+      "queried": true,
+      "active": false,
+      "error_name": null
+    }
+  }
+}

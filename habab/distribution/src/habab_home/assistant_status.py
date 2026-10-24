@@ -47,9 +47,15 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
             "supported_clients": {
                 "android_with_native_voice": {
                     "wake_detection": "local_vosk", "transport": "native_realtime",
-                    "requires_ha_stt_tts": False, "settings_control_from_chat": False,
+                    "requires_ha_stt_tts": False,
+                    "android_local_voice_settings_control_from_chat": False,
                     "custom_sound_selection": False},
                 "browser": {"transport": "ha_assist_pipeline", "requires_ha_stt": True},
+            },
+            "home_assistant_conversation_entity_exposure": {
+                "registered": True,
+                "scope": "single_exact_entity",
+                "runtime_status": "not_checked",
             },
             "observed_client": {"platform": "not_observed", "version": "not_observed",
                                 "microphone": "not_observed", "wake_phrase_match": "not_observed",

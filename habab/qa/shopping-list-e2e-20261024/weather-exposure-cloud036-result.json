@@ -1,0 +1,99 @@
+{
+  "classification": "CLOUD_036_ENABLE_UNSUPPORTED_NO_MUTATION_RISK_TURNS_STOPPED_BY_PARENT",
+  "target": "https://habab-demo.wpmix.net/owner-test → /home/overview",
+  "release": {
+    "image": "habab-home:owner-gemini-0.3.6-f2b49491b",
+    "image_sha256": "0c588da4009c9aa031fce8bf3655eba79e581580af2dc3dee5fec68e7d4a82ce",
+    "source_revision": "f2b49491b68d85aa99735a5d94df0e1e2047d54f",
+    "core_expected": "2026.10.2",
+    "habab_expected": "0.3.6"
+  },
+  "checks": [],
+  "prompt_turns_sent": 1,
+  "risk_turns_run": 0,
+  "risk_turn_stop_reason": "Parent requested stop after terminal unsupported enable result.",
+  "direct_exposure_mutation": false,
+  "no_synthetic_entity_creation": true,
+  "native_v2_bootstrap": {
+    "attempted": false
+  },
+  "runtime": {
+    "core": "2026.10.2",
+    "habab": "0.3.6",
+    "status": "running"
+  },
+  "selected_model_before": [
+    {
+      "provider": "habab",
+      "selected_text_model": "gemini-3.1-flash-lite",
+      "state": "loaded",
+      "api_check_status": "verified"
+    }
+  ],
+  "weather_candidates": [
+    {
+      "entity_id": "weather.forecast_pogoda_doma",
+      "friendly_name": "Forecast Погода дома",
+      "state": "rainy",
+      "hidden_by": null,
+      "disabled_by": null,
+      "exposure": {
+        "conversation": false,
+        "cloud_alexa": false,
+        "cloud_google_assistant": false
+      }
+    }
+  ],
+  "target_entity": {
+    "entity_id": "weather.forecast_pogoda_doma",
+    "friendly_name": "Forecast Погода дома",
+    "state": "rainy",
+    "hidden_by": null,
+    "disabled_by": null
+  },
+  "target_exposure_before": {
+    "conversation": false,
+    "cloud_alexa": false,
+    "cloud_google_assistant": false
+  },
+  "missing_entity_before": {
+    "state_exists": false,
+    "registry_exists": false
+  },
+  "turns": [
+    {
+      "name": "enable_exact_weather_entity",
+      "wait_status": "send_wrapper_completed",
+      "exact_user_turn_visible": true,
+      "assistant_reply": "У меня нет прямого доступа к API управления экспозицией (expose entities) сущностей для Assist через команды CLI `habab-ha`. Я вижу устройства, интеграции и состояния, но не имею команд для изменения настроек доступа конкретных сущностей внутри голосового конвейера.\n\nДля выполнения этой задачи вам необходимо воспользоваться штатным интерфейсом Home Assistant: **Настройки → Голосовые помощники → [Ваш конвейер] → Доступные устройства**, где можно явно указать только `weather.forecast_pogoda_doma`.\n\nДругие сущности и настройки я не менял.",
+      "send_completed": true,
+      "elapsed_ms": 3809,
+      "busy": false,
+      "backend": {
+        "active": false,
+        "error_name": null,
+        "error_http_status": null
+      },
+      "prompt": "Разреши встроенному голосовому помощнику Assist доступ только к сущности погоды weather.forecast_pogoda_doma. Другие сущности и настройки не меняй. После изменения проверь фактическую настройку.",
+      "exposure_readback": {
+        "entity_count_before": 4,
+        "entity_count_after": 4,
+        "changed_entity_count": 0,
+        "other_entity_change_count": 0,
+        "target_before": {
+          "conversation": false,
+          "cloud_alexa": false,
+          "cloud_google_assistant": false
+        },
+        "target_after": {
+          "conversation": false,
+          "cloud_alexa": false,
+          "cloud_google_assistant": false
+        }
+      }
+    }
+  ],
+  "independent_readback_receipt": "weather-exposure-cloud036-readback.json",
+  "native_v2_bootstrap_attempted": false,
+  "source_hash_attestation": "Runtime package version was verified through authenticated public status; image digest and source revision are deployment-owner supplied. The running container's 42 baked source hashes were not independently extracted by this browser QA run."
+}

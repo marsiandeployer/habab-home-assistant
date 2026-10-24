@@ -6,7 +6,7 @@ import unittest
 from homeassistant.components.habab_home.assistant_status import get_assistant_status
 from homeassistant.components.habab_home.const import DOMAIN
 from homeassistant.components.habab_home.gemini_live import DEFAULT_MODEL
-from homeassistant.components.habab_home.setup_agent import AgentError
+from homeassistant.components.habab_home.setup_agent import AgentError, PROMPT
 
 
 class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
@@ -32,6 +32,17 @@ class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(voice["selected_provider_protocol"], protocol)
                 self.assertEqual(voice["required_client_kind"], client_kind)
                 self.assertEqual(voice["default_voice_model"], model)
+                self.assertIs(
+                    voice["supported_clients"]["android_with_native_voice"][
+                        "android_local_voice_settings_control_from_chat"
+                    ],
+                    False,
+                )
+                self.assertEqual(voice["home_assistant_conversation_entity_exposure"], {
+                    "registered": True,
+                    "scope": "single_exact_entity",
+                    "runtime_status": "not_checked",
+                })
                 self.assertEqual(result["selected_provider"], provider)
                 self.assertEqual(result["selected_text_model"], "fixture-text-model")
                 self.assertEqual(voice["observed_client"], {
@@ -40,6 +51,14 @@ class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
                     "outbound_audio": "not_observed",
                 })
                 self.assertNotIn(secret, json.dumps(result))
+
+    def test_setup_prompt_separates_android_local_settings_from_assist_exposure(self):
+        prompt = PROMPT.lower()
+        self.assertIn("android_local_voice_settings_control_from_chat=false", prompt)
+        self.assertIn("не запрещает управлять экспозицией сущностей ha conversation", prompt)
+        self.assertIn("home_assistant_conversation_entity_exposure.registered", prompt)
+        self.assertIn("runtime_status=not_checked означает, что настройка ещё не проверялась", prompt)
+        self.assertIn("не делай вывод об успешной работе из регистрации возможности", prompt)
 
     async def test_gemini_live_requires_a_nonempty_string_key_without_claiming_connection(self):
         for provider, api_key in (

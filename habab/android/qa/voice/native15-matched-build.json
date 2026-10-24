@@ -1,0 +1,61 @@
+{
+  "kind": "matched_native15_candidate_artifacts",
+  "source_commit": "f2b49491b68d85aa99735a5d94df0e1e2047d54f",
+  "worktree_clean": true,
+  "apk": {
+    "version_code": 15,
+    "version_name": "0.1.7-voice-preview",
+    "bytes": 52483450,
+    "sha256": "000a1aa8442942c06c048a17d8e9eb0e7e6b556dac1d4ae402272ba1f511fece",
+    "signer_matches_actual_previous_apk": true,
+    "runtime_trust_key_matches_previous_apk": true
+  },
+  "runtime": {
+    "id": "8df23b0eb40f912d",
+    "habab_version": "0.3.6",
+    "core_version": "2026.10.2",
+    "archive_bytes": 874447231,
+    "archive_sha256": "18c472ae54fd4ee693428cb3bbf15edad5b1f8519a455b3adb5b550fd745cb34",
+    "manifest_sha256": "626aab817fbcf9b681fbbd295eac7cca3ea14bc294381c4dee0c82d0e63e1ba0",
+    "signature_sha256": "7611966c4f28fe09f38548f32ae502b1aef6778eefa40183b39783c30ee87abc",
+    "source_files": 59,
+    "native_frontend": {
+      "payloadFiles": 14816,
+      "payloadPrefixes": [
+        "usr/local/lib/python3.14/site-packages/hass_frontend",
+        "usr/local/lib/python3.14/site-packages/home_assistant_frontend-20260930.4+habab.7.dist-info"
+      ],
+      "payloadSha256": "bc2730af40db27bc4a173c3ed57e58635eb9f1bafb339082c32b7689c710d00a",
+      "upstreamVersion": "20260930.4",
+      "version": "20260930.4+habab.7",
+      "wheelSha256": "1d518e7cf632827f04481f0ef0d8ad3aec65d17b25cdc73f1b79c34de0ee1867"
+    }
+  },
+  "checks": {
+    "signature_archive_contents": "PASS",
+    "full_java_archive_extraction": "PASS",
+    "jvm_tests": 70,
+    "jvm_failures": 0,
+    "jvm_errors": 0,
+    "jvm_skipped": 0,
+    "assemble": "PASS",
+    "lint": "PASS"
+  },
+  "acceptance": {
+    "cloud_live": "FAIL_ORIGINAL_EXPOSURE_TURN_NO_ACTION",
+    "installed_on_p30": false,
+    "physical_voice": "NOT_RUN",
+    "published": false,
+    "stable_cta_changed": false,
+    "cloud_container_switched": true,
+    "phone_update_gate": "held_until_cloud_semantic_acceptance"
+  },
+  "cloud_image": {
+    "tag": "habab-home:owner-gemini-0.3.6-f2b49491b",
+    "sha256": "0c588da4009c9aa031fce8bf3655eba79e581580af2dc3dee5fec68e7d4a82ce",
+    "baked_focused_tests": 63,
+    "component_source_overlay": false,
+    "network_during_tests": "none",
+    "tests_result": "PASS"
+  }
+}

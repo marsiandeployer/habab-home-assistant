@@ -1,0 +1,15 @@
+{
+  "kind": "read_only_actual_opencode_prompt_diagnosis",
+  "target": "cloud036_f2b49491b",
+  "agent_config_has_new_action": true,
+  "agent_prompt_matches_current_source": true,
+  "stored_last_user_system_matches_source": true,
+  "stored_last_user_system_length": 13955,
+  "latest_user_created": 1792870739847,
+  "exact_latest_qa_prompt_present": true,
+  "latest_turn_tool_calls": 0,
+  "settings_changed": false,
+  "hypothesis": "Broad Android settings_control_from_chat=false may be misread as denying native HA Conversation exposure control.",
+  "causality": "Not established: a short synthetic baseline replay used the tool but skipped the fresh state check; it did not reproduce the actual complete refusal.",
+  "credentials_or_private_conversation_included": false
+}
