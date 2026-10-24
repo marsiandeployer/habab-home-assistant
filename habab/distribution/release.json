@@ -1,6 +1,6 @@
 {
   "product": "Habab Home",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "home_assistant": {
     "version": "2026.10.2",
     "image": "ghcr.io/home-assistant/home-assistant:2026.10.2",
@@ -18,7 +18,7 @@
     "administrator setup chat using private OpenCode and DeepSeek inside the HA container",
     "read-only executable sharing and optional Bluetooth D-Bus Compose overrides",
     "one administrator chat across Home Assistant pages, with a mobile dashboard and chat split",
-    "administrator Telegram pairing and separate chat context over the same private OpenCode runtime",
+    "Telegram owner pairing and household-group membership authorization over the same private OpenCode runtime",
     "bounded native discovery observations and registry-backed robot vacuum dashboard",
     "shared assistant service for web, Telegram and restricted native Assist",
     "Core-matched frontend bridge for one administrator assistant window and native integration forms",

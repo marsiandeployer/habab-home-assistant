@@ -94,14 +94,32 @@ export class TelegramTransport {
   async pollLoop() {
     while (this.running) {
       try {
-        const result = await this.api('getUpdates', { offset: this.offset, timeout: this.pollTimeout, allowed_updates: ['message'] }, { attempts: 2 });
+        const result = await this.api('getUpdates', { offset: this.offset, timeout: this.pollTimeout,
+          allowed_updates: ['message', 'my_chat_member', 'chat_member'] }, { attempts: 2 });
         if (!Array.isArray(result.result)) throw new Error('telegram_api_error');
         for (const update of result.result) {
           this.offset = Math.max(this.offset, Number(update.update_id) + 1);
           const message = update.message;
-          if (!message || typeof message.text !== 'string' || !message.chat || !message.from) continue;
-          this.emit({ type: 'message', chat_id: Number(message.chat.id), user_id: Number(message.from.id),
-            message_id: Number(message.message_id), chat_type: String(message.chat.type), text: message.text });
+          if (message && typeof message.text === 'string' && message.chat && message.from) {
+            this.emit({ type: 'message', chat_id: Number(message.chat.id), user_id: Number(message.from.id),
+              message_id: Number(message.message_id), chat_type: String(message.chat.type),
+              ...(typeof message.chat.title === 'string' ? { chat_title: message.chat.title.slice(0, 256) } : {}),
+              text: message.text });
+          }
+          const member = update.chat_member;
+          if (member?.chat && member.new_chat_member?.user?.id) {
+            this.emit({ type: 'member_update', chat_id: Number(member.chat.id),
+              user_id: Number(member.new_chat_member.user.id),
+              status: String(member.new_chat_member.status),
+              is_member: member.new_chat_member.is_member === true,
+              chat_type: String(member.chat.type) });
+          }
+          const botMember = update.my_chat_member;
+          if (botMember?.chat && botMember.new_chat_member?.user?.id) {
+            this.emit({ type: 'bot_member_update', chat_id: Number(botMember.chat.id),
+              status: String(botMember.new_chat_member.status),
+              chat_type: String(botMember.chat.type) });
+          }
         }
       } catch (error) {
         if (!this.running) break;
@@ -141,6 +159,23 @@ export class TelegramTransport {
     });
     this.outgoing = operation.catch((error) => this.emit(safeError('typing', error instanceof Error ? error.message : 'telegram_typing_failed')));
     return this.outgoing;
+  }
+
+  async getChatMember(chatId, userId, requestId) {
+    if (!this.running || !Number.isSafeInteger(chatId) || !Number.isSafeInteger(userId)
+        || typeof requestId !== 'string') throw new Error('invalid_command');
+    try {
+      const result = await this.api('getChatMember', { chat_id: chatId, user_id: userId }, { attempts: 1 });
+      const member = result?.result;
+      if (!member || typeof member.status !== 'string') throw new Error('telegram_api_error');
+      this.emit({ type: 'member', request_id: requestId.slice(0, 128), status: member.status,
+        is_member: member.status !== 'left' && member.status !== 'kicked'
+          && (member.status !== 'restricted' || member.is_member === true) });
+    } catch (error) {
+      const code = error instanceof Error && /^[a-z0-9_]{1,64}$/i.test(error.message)
+        ? error.message : 'telegram_api_error';
+      this.emit(safeError('member', code, false, requestId));
+    }
   }
 
   async shutdown() {

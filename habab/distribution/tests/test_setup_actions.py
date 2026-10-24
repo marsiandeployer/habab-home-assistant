@@ -27,8 +27,9 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
             result = await execute(hass, None, "alice", {"action": "assistant_status"})
             self.assertEqual(result["selected_provider"], provider)
             self.assertEqual(result["voice"]["selected_provider_supports_realtime"], supported)
-            self.assertIs(result["voice"]["android"]["requires_ha_stt_tts"], False)
-            self.assertEqual(result["voice"]["client_microphone_and_network"], "not_observed")
+            self.assertIs(result["voice"]["supported_clients"]["android_with_native_voice"]["requires_ha_stt_tts"], False)
+            self.assertIs(result["voice"]["supported_clients"]["android_with_native_voice"]["custom_sound_selection"], False)
+            self.assertEqual(result["voice"]["observed_client"]["outbound_audio"], "not_observed")
             self.assertEqual(result["telegram"]["group_phase"], "awaiting_admin")
             for secret in ("fixture-api-secret", "fixture-pairing-secret", "fixture-private-chat"):
                 self.assertNotIn(secret, json.dumps(result))

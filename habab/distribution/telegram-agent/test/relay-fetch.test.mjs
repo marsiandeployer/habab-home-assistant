@@ -40,11 +40,11 @@ test('relay rewrites only allowlisted Telegram methods and carries the token onl
     relayBase: 'https://relay.example.test/',
     fetchImpl: async (...args) => { calls.push(args); return response({ username: 'test_bot' }); },
   });
-  for (const method of ['getMe', 'getUpdates', 'sendMessage', 'sendChatAction']) {
+  for (const method of ['getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction']) {
     const result = await relay.fetch(botApiUrl(method), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     assert.equal((await result.json()).ok, true);
   }
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 5);
   for (const [url, options] of calls) {
     assert.equal(url.startsWith('https://relay.example.test/telegram/'), true);
     assert.equal(url.includes(TOKEN), false);

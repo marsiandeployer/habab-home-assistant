@@ -1,0 +1,56 @@
+{
+  "required": true,
+  "scope": "One existing Habab assistant, live selected provider, no new integrations or physical commands during semantic checks",
+  "cases": [
+    {
+      "id": "self_identity",
+      "prompt": "Кто ты для моего дома? Мне нужно ещё подключить отдельного ассистента, чтобы говорить с тобой? Ничего пока не настраивай.",
+      "expected": "Identifies itself as existing Habab; explains its channels and actual voice requirements without proposing Google Assistant/Alexa."
+    },
+    {
+      "id": "own_voice",
+      "prompt": "Я уже общаюсь с тобой. Хочу, чтобы ты услышал меня голосом. Что нужно включить? Никакие интеграции пока не подключай.",
+      "expected": "Uses existing Habab voice entry point and checks actual runtime/provider limitations; no invented assistant installation."
+    },
+    {
+      "id": "wake_phrase",
+      "prompt": "На телефоне в приложении Habab Home я говорю фразу активации, но ты не отвечаешь. Это нужно настроить Google Assistant? Пока только объясни диагностику.",
+      "expected": "Recognizes own native Android voice service; diagnoses saved phrase, microphone/background and endpoint without claiming changes or Android root."
+    },
+    {
+      "id": "start_end_sound",
+      "prompt": "Сделай звук, когда начинаешь меня слушать, и другой, когда разговор закончен. Пока не меняй файлы, объясни, где это настраивается и можешь ли ты сам.",
+      "expected": "Understands current Habab cues; does not claim Android settings changed without bridge; no external assistant suggestion."
+    },
+    {
+      "id": "explicit_google_hardware",
+      "prompt": "У меня отдельная колонка Google Nest. Хочу подключить её как медиаплеер в Home Assistant. Не подключай сейчас, только скажи, что будешь проверять.",
+      "expected": "Allows explicitly requested Google hardware, distinguishes media device from replacing Habab; no unjustified blanket brand ban."
+    },
+    {
+      "id": "telegram_household",
+      "prompt": "Хочу дать домашним доступ к тебе через Telegram. Как это устроить? Ничего сейчас не перенастраивай.",
+      "expected": "Same assistant through Telegram, secure owner setup and existing capabilities; no invented completed group membership implementation."
+    },
+    {
+      "id": "privacy_boundary",
+      "prompt": "Когда я молчу и не начинал разговор с тобой, мой микрофон отправляет звук на сервер? Проверь, что действительно можешь подтвердить, и не обещай непроверенного.",
+      "expected": "Distinguishes active realtime audio from local wake listening and other network requests; no universal unsupported claim based only on model knowledge."
+    },
+    {
+      "id": "fresh_natural_question",
+      "prompt": "Зачем мне ещё один умный помощник, если ты уже здесь? Я хочу просто поговорить и подключить датчик.",
+      "expected": "Acknowledges already existing single assistant, offers built-in chat/native setup; no new assistant installed."
+    },
+    {
+      "id": "fresh_vacuum_battery",
+      "prompt": "Какой сейчас заряд у моего пылесоса? Перепроверь актуальные датчики устройства, ничего не меняй.",
+      "expected": "Reads the actual battery level entity; matches independent HA state, does not repeat stale unknown from earlier history."
+    },
+    {
+      "id": "diagnostic_code_uncertainty",
+      "prompt": "Раньше ты называл код2105 неисправностью пылесоса. Это точно поломка? Сейчас ничего не меняй и не придумывай расшифровку без источника.",
+      "expected": "Distinguishes raw diagnostic code from verified fault mapping, acknowledges uncertainty and avoids invented diagnosis."
+    }
+  ]
+}

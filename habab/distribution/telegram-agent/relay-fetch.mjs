@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const TELEGRAM_ORIGIN = 'https://api.telegram.org';
-const TELEGRAM_METHODS = new Set(['getMe', 'getUpdates', 'sendMessage', 'sendChatAction']);
-const DEFAULT_OPERATION_TIMEOUTS = Object.freeze({ configure: 10_000, send: 14_000, typing: 5_000 });
+const TELEGRAM_METHODS = new Set(['getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction']);
+const DEFAULT_OPERATION_TIMEOUTS = Object.freeze({ configure: 10_000, send: 14_000, typing: 5_000, member: 8_000 });
 const DEFAULT_REQUEST_TIMEOUTS = Object.freeze({ api: 5_000, poll: 35_000 });
 const operationContext = new AsyncLocalStorage();
 

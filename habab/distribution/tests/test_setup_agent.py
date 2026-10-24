@@ -47,7 +47,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         entry = SimpleNamespace(data={
             "provider": "deepseek", "api_key": "private-provider-key", "model": "deepseek-flash",
         })
-        agent.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: [entry]))
+        agent.hass = SimpleNamespace(data={}, config_entries=SimpleNamespace(async_entries=lambda _: [entry]))
         return agent
 
     async def test_busy_does_not_start_another_root_command(self):
@@ -60,12 +60,23 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_preserves_active_capability_tuple_and_clears_old_diagnostic(self):
         agent = self.agent()
+        telegram = SimpleNamespace(status=AsyncMock(side_effect=AssertionError("unexpected external status lookup")))
+        agent.hass.data["habab_telegram"] = telegram
         result = await agent.run("alice", "ses_alice", "test")
         self.assertEqual(result["session_id"], "ses_alice")
         self.assertEqual(agent.active, None)
         self.assertEqual(agent.request.await_args_list[0].args[:2],
                          ("POST", "session/ses_alice/message"))
         self.assertEqual(agent.request.await_args_list[0].args[2]["system"], PROMPT)
+        parts = agent.request.await_args_list[0].args[2]["parts"]
+        self.assertIs(parts[0]["synthetic"], True)
+        status = json.loads(parts[0]["text"].split("\n", 1)[1])
+        self.assertEqual(status["selected_provider"], "deepseek")
+        self.assertEqual(status["voice"]["observed_client"]["outbound_audio"], "not_observed")
+        self.assertEqual(status["telegram"]["phase"], "not_checked")
+        telegram.status.assert_not_awaited()
+        self.assertNotIn("private-provider-key", parts[0]["text"])
+        self.assertEqual(parts[1], {"type": "text", "text": "test"})
         self.assertEqual(agent.request.await_args_list[1].args[:2],
                          ("GET", "session/ses_alice/message?limit=60"))
         agent.diagnostics.clear.assert_called_once_with("alice", "ses_alice")

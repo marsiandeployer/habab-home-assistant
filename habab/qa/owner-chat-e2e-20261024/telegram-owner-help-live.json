@@ -1,0 +1,9 @@
+{
+  "checked_at": 1792829962.4729385,
+  "scope": "Actual paired-owner DM /help with existing connected household group; no new-pairing step expected and no device commands.",
+  "received": true,
+  "household_group_guidance": true,
+  "private_dm_guidance": true,
+  "cancel_new_help": true,
+  "passed": true
+}

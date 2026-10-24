@@ -1,0 +1,61 @@
+# Telegram household ACL review
+
+**Scope:** read-only review of the current uncommitted household-group ACL diff, transport request/event contract, and `AssistantService.trusted_origin` fallback. No messages were sent, no live endpoint or secret was read, no code was changed, and tests were not rerun.
+
+**Snapshot:** 2026-10-24 09:30:02 +03:00; HEAD `c989098caa4d3ea315fc97b42556ed98b758f6f7`. The relevant source files were modified in the working tree; hashes at this review snapshot:
+
+- `habab/distribution/src/habab_telegram/__init__.py` — `9198127f58fa3a3f65d0d04785919d49cf1e5c159ffe770fb73fc6b6ef498177`
+- `habab/distribution/src/habab_telegram/websocket.py` — `7284ac2f215c70352c0462ab95861948f4a9bc107d6039ef49105174fe6da5a2`
+- `habab/distribution/src/habab_telegram/const.py` — `519b63ba69ba1f41133efbe6aba96583326f3444ca30dcedd459906ffa2f1357`
+- `habab/distribution/telegram-agent/worker.mjs` — `02dbd16b9d16baeb4b1d9828f3d85f8c3be1f55c0a7e6ded0c87fcc8c2e22d19`
+- `habab/distribution/telegram-agent/vendor/noxon-telegram/src/index.mjs` — `b6c06269f79bef4f5e44b916af377cde803bdee6772956daf9104e1ae97f571a`
+- `habab/distribution/telegram-agent/relay-fetch.mjs` — `0879961dbf3f6bbb2a61140272dd1824a8265786210b31fb2ebad9b2d2aaa2da`
+- `habab/distribution/src/habab_home/assistant.py` — `64562e87268ffc9fc186a241a08f84f4a03704e65794caa5e3a4d46370e61e25`
+
+## Confirmed findings
+
+### Original finding 1 — `/cancel` can miss a dequeued message (resolved at queue and completion boundaries)
+
+At the first review snapshot, `_consume()` removed a message ID from `pending_message_ids` before awaiting `handle_one()`, and a concurrent `/cancel` could miss that message before its turn was installed. The current code fixes that sequence: `_reader()` captures the per-chat epoch on arrival and advances it immediately for `/cancel` (`__init__.py:706-720`); `_consume()` retains the pending ID through `handle_one()` and discards it in `finally` (`1002-1027`); `handle_one()` checks the epoch after claim and after its asynchronous member authorization, before creating the turn (`834-849, 877-943`). The new deterministic regression test blocks the dequeued consumer in the authorization check, processes `/cancel`, releases the blocked check, and asserts neither `telegram_session` nor `run` was called (`test_telegram_backend.py:303-343`). **The originally reported pre-run race is resolved by source and assertion review.**
+
+The follow-up active-turn completion window is also closed before the external send is requested. `handle_one()` passes the accepted message epoch into `_run_message()` (`__init__.py:945-962`). `_turn_can_send()` checks the epoch before and after the awaited exact origin/member ACL check (`478-486`), and both success and generic-error replies use that guard (`996-1008`). The new `test_cancel_epoch_suppresses_completion_while_cancel_auth_is_waiting` holds `/cancel` authentication while the runtime completes, then asserts the old answer was not sent (`test_telegram_backend.py:217-268`). This confirms local suppression when cancellation arrives during that auth interval; it does not retract a Telegram send already handed to the worker/API, which the source comments explicitly acknowledge (`__init__.py:998-999`).
+
+### Original finding 2 — result delivery after revocation (recheck added; non-atomic transport boundary remains)
+
+At the first review snapshot, `_run_message()` sent a completed answer without checking membership after the runtime returned. The current code calls `_turn_origin_is_current()` after `assistant.run()` and only then sends the answer (`__init__.py:979-987`). That helper checks the exact session mapping, active owner/config entry, current group binding, bot admin, and member status (`454-476`); the test simulates the member becoming `left` on the post-runtime check and asserts no answer is sent and the member session is forgotten (`test_telegram_backend.py:185-215`). **The original missing post-runtime reauthorization finding is resolved by source and assertion review.**
+
+There remains an unavoidable time-of-check/time-of-use interval between this final membership lookup and the subsequent Telegram `send()` call (`__init__.py:981-985`); Telegram has no atomic “send only if still member” operation. This supports a fresh check immediately before delivery, not an absolute guarantee that membership cannot change during the API send. Do not phrase the claim as a transactional or instantaneous revocation guarantee.
+
+Existing coverage exercises a removal event canceling an in-flight task (`test_telegram_backend.py:211-241`) and fresh authorization on `member_origin` (`184-209`), but not member removal between last check, runtime completion, and `send()`.
+
+## Checks that passed by source inspection
+
+- Group linking is issued only to an active HA admin with an already paired exact bot (`__init__.py:126-151`); the nonce is random, stored as a hash, owner-user-bound, expiring, compared in constant time, and a successful bind consumes it (`439-497`). A pending nonce is replaced under the entry lock when another is issued (`131-150`).
+- The group claim checks that the Telegram sender is the bound owner, the HA owner remains active/admin, the bot is ready, and Bot API confirms it is a group admin. Member requests require a live owner binding, ready worker, current bot-admin status, and `is_member` plus an allowed membership status (`360-377, 439-497, 731-774`). Bot API errors/timeouts return `None`; membership checks therefore fail closed (`304-322`).
+- The worker uses the configured bot process/token to poll `message`, `chat_member`, and `my_chat_member`; it emits sender/chat/message IDs and bounded membership metadata (`vendor/noxon-telegram/src/index.mjs:94-123`). The Python reader correlates member results by UUID request ID and exact entry (`__init__.py:304-322, 626-647`). Worker `get_chat_member` errors resolve the awaiting request to `None`, not “member” (`worker.mjs:27-29,37-41`; vendor `index.mjs:164-179`). The optional relay allowlist and request/operation deadlines include `getChatMember`/`member` (`relay-fetch.mjs:3-6,24-36,99-136`).
+- Ordinary group text is not queued: group/supergroup messages are offered only to `_claim_group_start()` and `_claim_message()` returns false (`__init__.py:731-740`).
+- Member assistant sessions are keyed by owner, entry, and private chat (`AssistantService.telegram_session`, `assistant.py:54-58`); the member path resolves an exact mapped session and rechecks owner, bot, binding, bot admin, and member status (`__init__.py:404-437`; fallback at `assistant.py:86-127`). `_clear_group_binding()` cancels known member tasks and forgets non-owner sessions while preserving the owner DM (`__init__.py:324-346`). Legacy installations load an empty group map and retain the existing private-owner binding (`39-50`), so no legacy owner is automatically granted household access.
+- At initial audit parent reported 39 HA and 14 Node tests passed; at recheck parent reports 41 HA tests pass. I inspected the relevant assertions but did not rerun them. Coverage includes nonce/owner claim, API failure fail-closed, member DM authorization, personal session separation, unlink cleanup, removal-event cancellation, setup-origin checks, transport event conversion, request ID correlation, relay method allowlisting, and the added dequeued-auth-cancel and leave-during-runtime cases. The remaining active-turn cancellation delay is not covered by the assertions I inspected.
+
+## Recheck snapshot and verdict
+
+Recheck performed **2026-10-24 09:36:44 +03:00**, same HEAD `c989098caa4d3ea315fc97b42556ed98b758f6f7`; current hashes: `__init__.py` `80040cf93d888e76b2d682f4b8a52969c9aca8c93fa66720a50c20866bf808bd`; `test_telegram_backend.py` `a14a675802f05a57b88fd072d8f33a5c6711e4a1f45dd0459a58d3c72e5e14aa`.
+
+Final narrow recheck performed **2026-10-24 09:39:24 +03:00**; same HEAD `c989098caa4d3ea315fc97b42556ed98b758f6f7`; current hashes: `__init__.py` `3805970496573b6f2dcfd6306dba3483dae6b5b71e8060858ecc7e3d7ceb3669`; `test_telegram_backend.py` `cd3dbadf4d8b9279663291d6009055367dc9f8e64c0bf1784874d099af13d6ec`.
+
+Both originally reported code races are resolved at the inspected boundaries: the queue/auth cancel epoch prevents an unstarted turn from being scheduled after `/cancel`, and the same epoch suppresses completed success/error responses while cancellation authorization is waiting; final delivery also checks the exact current origin/member ACL. The only accepted limitation is a send already handed off to the worker/Bot API, which is not retractable atomically. Core onboarding and per-request authorization remain fail-closed by source inspection, and no direct outsider-to-assistant path or ordinary-group-text execution path was found. Parent reports 42 HA tests pass; this recheck inspected the source and assertions but did not rerun them. No live deployment or real Bot API event timing was tested.
+
+## Reader and pending-group integration recheck
+
+Rechecked **2026-10-24 09:58:38 +03:00** on the live working tree (HEAD remains `c989098caa4d3ea315fc97b42556ed98b758f6f7`; unrelated Android/web files are concurrently modified). Snapshot hashes:
+
+- `habab/distribution/src/habab_telegram/__init__.py` — `f09927d26fe5e7f78ff00b3c11996dcfbdd3c39de274607a3de1cfed5113bc32`
+- `habab/distribution/tests/test_telegram_backend.py` — `36dde17604a0c5defc84b9018c34d3a462de612e8589627a9bd13c34545cab65`
+- `habab/distribution/telegram-agent/worker.mjs` — `02dbd16b9d16baeb4b1d9828f3d85f8c3be1f55c0a7e6ded0c87fcc8c2e22d19`
+- `habab/distribution/telegram-agent/vendor/noxon-telegram/src/index.mjs` — `b6c06269f79bef4f5e44b916af377cde803bdee6772956daf9104e1ae97f571a`
+
+**Self-deadlock finding resolved at source and regression-test level.** The stdout `_reader()` resolves outstanding `member` responses by request ID (`__init__.py:784-795`) and routes incoming messages to the bounded queue without awaiting claim/auth work (`829-856`). A separate `_consume()` performs `_claim_message()` and can await `get_chat_member()` (`1118-1138`, `314-332`), leaving `_reader()` free to consume that awaited request's response. The regression test runs both actual Python coroutines with a `StreamReader` fake worker stdin that feeds a correlated member response while the group-start claim is awaiting authorization; it asserts the candidate is persisted/bound, the queue drains, and `pending_members` is empty (`test_telegram_backend.py:182-246`). This reproduces the previously reported reader/authorization cycle at the Python protocol boundary. The fake does not execute the Node child process; the worker transport separately polls and emits `my_chat_member` as `bot_member_update` with chat ID and status (`vendor/noxon-telegram/src/index.mjs:94-122`).
+
+**Promotion without repeating the one-time nonce is resolved for the delivered event path.** A failed initial Bot API admin check retains the exact pending candidate and pairing. When `_reader()` receives an administrator/creator event for that candidate's exact group ID, it schedules candidate verification as a separate task (`__init__.py:819-828, 587-602`); `_finish_group_candidate()` rechecks candidate/pairing object identity, expiry, owner binding and owner admin status, exact configured bot ID, and worker readiness before saving and consuming the binding (`537-585`). The regression test first claims the nonce while the bot is only a member, then feeds the admin event and asserts a binding is saved, the nonce/candidate are consumed, and the owner is notified without a second claim (`test_telegram_backend.py:140-180`). `group_status()` is observational: it reports the resulting connected binding after the event-driven verifier succeeds, but does not itself finalize an awaiting candidate (`163-203`).
+
+No new correctness finding in these two reviewed paths. Parent reports 44 HA tests pass; I inspected source and assertions only and did not rerun tests or make live Telegram calls. This is source/test evidence, not evidence of an actual Telegram promotion event, a deployed worker, or live household-group acceptance. The gate for the planned real owner-group sequence therefore remains a separate live check.

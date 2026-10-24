@@ -49,6 +49,65 @@ test('preserves command text in updates and sends bounded chunks through Bot API
   assert.ok(!JSON.stringify(events).includes('unit-test-token'));
 });
 
+test('polls group membership changes and emits only bounded member metadata', async () => {
+  const events = [];
+  let pollCount = 0;
+  let allowedUpdates;
+  const fetchImpl = async (url, init) => {
+    const method = url.split('/').at(-1);
+    const body = JSON.parse(init.body);
+    if (method === 'getMe') return response({ username: 'habab_test_bot' });
+    if (method === 'getUpdates') {
+      allowedUpdates = body.allowed_updates;
+      pollCount += 1;
+      if (pollCount === 1) return response([
+        { update_id: 1, message: { message_id: 2, text: '/start nonce', chat: { id: -100, type: 'supergroup', title: 'Home' }, from: { id: 9 } } },
+        { update_id: 2, chat_member: { chat: { id: -100, type: 'supergroup' }, new_chat_member: { user: { id: 9 }, status: 'left' } } },
+        { update_id: 3, my_chat_member: { chat: { id: -100, type: 'supergroup' }, new_chat_member: { user: { id: 77 }, status: 'administrator' } } },
+      ]);
+      return new Promise((resolve) => init.signal.addEventListener('abort', () => resolve(response([])), { once: true }));
+    }
+    return response({});
+  };
+  const transport = new TelegramTransport({ fetchImpl, emit: (event) => events.push(event), pollTimeout: 1 });
+  await transport.configure('12345678901234567890:unit-test-token');
+  await new Promise((resolve) => setImmediate(resolve));
+  await transport.shutdown();
+  assert.deepEqual(allowedUpdates, ['message', 'my_chat_member', 'chat_member']);
+  assert.deepEqual(events.find((event) => event.type === 'message'), {
+    type: 'message', chat_id: -100, user_id: 9, message_id: 2, chat_type: 'supergroup', chat_title: 'Home', text: '/start nonce',
+  });
+  assert.ok(events.some((event) => event.type === 'member_update'
+    && event.chat_id === -100 && event.user_id === 9 && event.status === 'left'));
+  assert.ok(events.some((event) => event.type === 'bot_member_update'
+    && event.chat_id === -100 && event.status === 'administrator'));
+});
+
+test('getChatMember returns bounded status and fails closed on Bot API errors', async () => {
+  const events = [];
+  let memberReply = { status: 'restricted', is_member: true };
+  const fetchImpl = async (url, init) => {
+    const method = url.split('/').at(-1);
+    if (method === 'getMe') return response({ username: 'x' });
+    if (method === 'getUpdates') return new Promise((resolve) => init.signal.addEventListener('abort', () => resolve(response([])), { once: true }));
+    if (method === 'getChatMember') return response(memberReply, memberReply.ok === false ? 403 : 200);
+    return response({});
+  };
+  const transport = new TelegramTransport({ fetchImpl, emit: (event) => events.push(event) });
+  await transport.configure('12345678901234567890:unit-test-token');
+  await transport.getChatMember(-100, 9, 'member-1');
+  memberReply = { ok: false, description: 'provider details must not escape' };
+  await transport.getChatMember(-100, 9, 'member-2');
+  await transport.shutdown();
+  assert.deepEqual(events.find((event) => event.type === 'member'), {
+    type: 'member', request_id: 'member-1', status: 'restricted', is_member: true,
+  });
+  assert.deepEqual(events.find((event) => event.type === 'error'), {
+    type: 'error', operation: 'member', code: 'telegram_api_error', fatal: false, request_id: 'member-2',
+  });
+  assert.ok(!JSON.stringify(events).includes('provider details'));
+});
+
 test('correlates send failure and does not acknowledge undelivered text', async () => {
   const events = [];
   let sendCalls = 0;

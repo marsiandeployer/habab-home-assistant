@@ -92,6 +92,37 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AgentError):
             await self.service.trusted_origin("alice", "tg-session")
 
+    async def test_group_member_origin_delegates_live_acl_to_telegram_manager(self):
+        await self.service.setup()
+        entry = SimpleNamespace(entry_id="bot-entry", data={"bot_id": 123})
+        telegram = SimpleNamespace(
+            entry_for_owner=Mock(return_value=entry), bindings={}, entries={"bot-entry": {"ready": True}},
+            member_origin=AsyncMock(return_value={
+                "channel": "telegram", "owner": "alice", "entry_id": "bot-entry",
+                "chat_id": "42", "bot_id": 123, "group_id": "-100", "user_id": 42,
+            }),
+        )
+        self.hass.data = {"habab_telegram": telegram}
+        self.service.telegram_sessions = {"alice:bot-entry:42": "member-session"}
+        self.runtime.active = ("alice", "member-session")
+
+        origin = await self.service.trusted_origin("alice", "member-session")
+        self.assertEqual(origin["chat_id"], "42")
+        self.assertEqual(origin["group_id"], "-100")
+        telegram.member_origin.assert_awaited_once_with(
+            "alice", "bot-entry", "42", "member-session")
+        self.assertIsNone(await self.service.trusted_origin("alice", "web-session"))
+
+        telegram.member_origin.reset_mock(return_value=True)
+        telegram.member_origin.return_value = None
+        self.assertIsNone(await self.service.trusted_origin("alice", "member-session"))
+        telegram.member_origin.assert_awaited_once()
+
+        self.service.telegram_sessions.pop("alice:bot-entry:42")
+        telegram.member_origin.reset_mock()
+        self.assertIsNone(await self.service.trusted_origin("alice", "member-session"))
+        telegram.member_origin.assert_not_awaited()
+
     async def test_inactive_or_non_admin_owner_is_rejected_before_runtime(self):
         self.service.web_sessions = {"alice": "web-session"}
         self.user.is_active = False

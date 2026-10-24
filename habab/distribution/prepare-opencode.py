@@ -10,7 +10,7 @@ import subprocess
 parser = argparse.ArgumentParser()
 parser.add_argument("--binary", type=Path, help="Existing Alpine/musl executable, not the Node wrapper")
 parser.add_argument("--output", type=Path, default=Path(".env.opencode"))
-parser.add_argument("--image", default="habab-home:0.1.0", help="Existing HA image for the compatibility check")
+parser.add_argument("--image", default="habab-home:0.3.4", help="Existing HA image for the compatibility check")
 args = parser.parse_args()
 binary = args.binary
 if binary is None:

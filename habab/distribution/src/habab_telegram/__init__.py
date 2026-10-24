@@ -10,12 +10,17 @@ import uuid
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, MAX_LINE, PAIR_TTL
+from .const import (
+    BOT_ONBOARDING_MESSAGE, DOMAIN, GROUP_PAIR_TTL, MAX_LINE,
+    OWNER_PAIRING_COMPLETE_MESSAGE, PAIR_TTL, UNKNOWN_MEMBER_MESSAGE,
+)
 from .websocket import async_register_commands
 from .transport import worker_proxy_env
 
 
 class TelegramManager:
+    CONTROL_TASK_LIMIT = 16
+
     def __init__(self, hass):
         self.hass = hass
         self.entries = {}
@@ -31,13 +36,26 @@ class TelegramManager:
         self.consumer_tasks = {}
         self.turn_tasks = {}
         self.control_tasks = {}
+        self.control_lanes = {}
+        self.pending_message_ids = {}
+        self.cancelled_through = {}
+        self.cancel_epochs = {}
         self.pending_sends = {}
+        self.pending_members = {}
+        self.group_pairing = {}
+        self.group_candidates = {}
+        self.group_candidate_tasks = {}
+        self.overflow_tasks = {}
+        self.group_bindings_store = Store(hass, 1, "habab_telegram.group_bindings", private=True)
+        self.group_bindings = {}
+        self.group_member_chats = {}
 
     async def setup(self):
         self.dedupe_order = await self.store.async_load() or []
         self.dedupe_order = self.dedupe_order[-2000:]
         self.dedupe = set(self.dedupe_order)
         self.bindings = await self.bindings_store.async_load() or {}
+        self.group_bindings = await self.group_bindings_store.async_load() or {}
         async_register_commands(self.hass)
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self.close)
 
@@ -48,7 +66,7 @@ class TelegramManager:
     async def status(self, owner):
         entry = self.entry_for_owner(owner)
         if not entry:
-            return {"phase": "not_configured"}
+            return {"phase": "not_configured", "group": {"phase": "not_configured"}}
         state = self.entries.get(entry.entry_id)
         pair = self.pairing.get(entry.entry_id)
         binding = self.bindings.get(entry.entry_id)
@@ -67,6 +85,7 @@ class TelegramManager:
                 pair = self.pairing[entry.entry_id]
             phase = "pairing"
         result = {"phase": phase}
+        result["group"] = await self.group_status(owner, entry)
         if state and state.get("username"):
             result["bot_username"] = state["username"]
         if pair and phase == "pairing":
@@ -113,6 +132,93 @@ class TelegramManager:
             }
             return {"pairing_url": self.pairing[entry.entry_id]["url"]}
 
+    async def group_pair(self, owner):
+        """Issue a one-time group-start link to the already paired owner."""
+        entry = self.entry_for_owner(owner)
+        if not entry:
+            raise ValueError("not_configured")
+        lock = self.pair_locks.setdefault(entry.entry_id, asyncio.Lock())
+        async with lock:
+            if not await self._owner_is_active_admin(owner):
+                raise ValueError("not_allowed")
+            candidate_task = self.group_candidate_tasks.pop(entry.entry_id, None)
+            if candidate_task and not candidate_task.done():
+                candidate_task.cancel()
+                await asyncio.gather(candidate_task, return_exceptions=True)
+            state = self.entries.get(entry.entry_id, {})
+            binding = self.bindings.get(entry.entry_id)
+            if (not state.get("ready") or not binding
+                    or state.get("chat_id") != binding.get("chat_id")
+                    or state.get("user_id") != binding.get("user_id")
+                    or binding.get("bot_id") != entry.data.get("bot_id")):
+                raise ValueError("owner_pairing_required")
+            nonce = secrets.token_urlsafe(24)
+            candidate = {
+                "hash": hashlib.sha256(nonce.encode()).hexdigest(),
+                "expires": time.monotonic() + GROUP_PAIR_TTL,
+                "owner_user_id": binding["user_id"],
+            }
+            self.group_pairing[entry.entry_id] = candidate
+            self.group_candidates.pop(entry.entry_id, None)
+            username = state.get("username", entry.data["bot_username"])
+            return {"group_pairing_url": f"https://t.me/{username}?startgroup={nonce}"}
+
+    async def group_status(self, owner, entry=None):
+        entry = entry or self.entry_for_owner(owner)
+        if entry is None:
+            return {"phase": "not_configured"}
+        candidate = self.group_candidates.get(entry.entry_id)
+        if candidate and time.monotonic() > candidate.get("expires", 0):
+            self.group_candidates.pop(entry.entry_id, None)
+            candidate = None
+        binding = self.group_bindings.get(entry.entry_id)
+        if binding:
+            state = self.entries.get(entry.entry_id, {})
+            if binding.get("bot_id") != entry.data.get("bot_id"):
+                return {"phase": "error", "error": "bot_changed"}
+            if str(binding.get("owner_user_id")) != str(
+                    self.bindings.get(entry.entry_id, {}).get("user_id")):
+                return {"phase": "error", "error": "owner_pairing_changed"}
+            if not state.get("ready"):
+                return {"phase": "error", "error": "worker_not_ready"}
+            admin = await self._bot_is_admin(entry, int(binding["chat_id"]))
+            if admin is None:
+                result = {"phase": "error", "error": "verification_unavailable"}
+            elif not admin:
+                result = {"phase": "awaiting_admin", "title": binding.get("title", ""),
+                          "error": "bot_not_admin"}
+            else:
+                result = {"phase": "connected", "title": binding.get("title", "")}
+            pairing = self.group_pairing.get(entry.entry_id)
+            if pairing and time.monotonic() <= pairing["expires"]:
+                result["pairing_pending"] = True
+            if candidate:
+                result["pending_phase"] = "awaiting_admin"
+                result["pending_error"] = candidate.get("error", "bot_not_admin")
+                result["pending_title"] = candidate.get("title", "")
+            return result
+        if candidate:
+            return {"phase": "awaiting_admin", "title": candidate.get("title", ""),
+                    "error": candidate.get("error", "bot_not_admin")}
+        pairing = self.group_pairing.get(entry.entry_id)
+        if pairing and time.monotonic() <= pairing["expires"]:
+            return {"phase": "pairing"}
+        return {"phase": "not_configured"}
+
+    async def unlink_group(self, owner):
+        if not await self._owner_is_active_admin(owner):
+            raise ValueError("not_allowed")
+        entry = self.entry_for_owner(owner)
+        if entry:
+            lock = self.pair_locks.setdefault(entry.entry_id, asyncio.Lock())
+            async with lock:
+                if not await self._owner_is_active_admin(owner):
+                    raise ValueError("not_allowed")
+                self.group_pairing.pop(entry.entry_id, None)
+                self.group_candidates.pop(entry.entry_id, None)
+                await self._clear_group_binding(entry)
+        return {"unlinked": True}
+
     async def _owner_is_active_admin(self, owner):
         user = await self.hass.auth.async_get_user(owner)
         return bool(user and user.is_active and user.is_admin)
@@ -136,14 +242,24 @@ class TelegramManager:
         binding = self.bindings.get(entry_id)
         state = self.entries.get(entry_id)
         expected_bot = entry.data.get("bot_username")
-        if (not binding or str(binding.get("chat_id")) != chat_id or not state
-                or not state.get("ready") or state.get("chat_id") != chat_id
-                or state.get("user_id") != binding.get("user_id")
+        if (not state or not state.get("ready")
                 or entry.data.get("bot_id") != origin_bot_id
-                or binding.get("bot_id") != origin_bot_id
-                or binding.get("bot_id") != entry.data.get("bot_id")
                 or not isinstance(expected_bot, str) or not expected_bot
                 or str(state.get("username", "")).casefold() != expected_bot.casefold()):
+            return False
+        member_origin = type(origin.get("user_id")) is int and isinstance(origin.get("group_id"), str)
+        group_binding = self.group_bindings.get(entry_id) if member_origin else None
+        if member_origin:
+            if (not group_binding or group_binding.get("chat_id") != origin["group_id"]
+                    or group_binding.get("bot_id") != origin_bot_id
+                    or not await self._is_group_member(entry, int(origin["group_id"]),
+                                                       origin["user_id"], group_binding)):
+                return False
+        elif (not binding or str(binding.get("chat_id")) != chat_id
+              or state.get("chat_id") != chat_id
+              or state.get("user_id") != binding.get("user_id")
+              or binding.get("bot_id") != origin_bot_id
+              or binding.get("bot_id") != entry.data.get("bot_id")):
             return False
         if not isinstance(domain, str) or not domain:
             return False
@@ -155,8 +271,14 @@ class TelegramManager:
         # a successful completion delivery by the originating flow.
         if (not await self._owner_is_active_admin(owner)
                 or self.entry_for_owner(owner) is None
-                or self.entry_for_owner(owner).entry_id != entry_id
-                or self.bindings.get(entry_id) != binding):
+                or self.entry_for_owner(owner).entry_id != entry_id):
+            return False
+        if member_origin:
+            if (self.group_bindings.get(entry_id) != group_binding
+                    or not await self._is_group_member(entry, int(origin["group_id"]),
+                                                       origin["user_id"], group_binding)):
+                return False
+        elif self.bindings.get(entry_id) != binding:
             return False
         return True
 
@@ -192,6 +314,349 @@ class TelegramManager:
         if assistant is not None:
             await assistant.telegram_forget(entry.data["owner_id"], entry.entry_id, chat_id)
 
+    async def get_chat_member(self, entry_id, chat_id, user_id):
+        """Fail-closed Bot API membership lookup through the existing worker."""
+        if (type(chat_id) is not int or type(user_id) is not int
+                or not 0 < user_id <= 2**53 - 1 or not -2**53 < chat_id < 0):
+            return None
+        request_id = uuid.uuid4().hex
+        future = asyncio.get_running_loop().create_future()
+        self.pending_members[request_id] = (entry_id, future)
+        try:
+            if not await self._write(entry_id, {"type": "get_chat_member", "chat_id": chat_id,
+                                                "user_id": user_id, "request_id": request_id}):
+                return None
+            return await asyncio.wait_for(future, timeout=8)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return None
+        finally:
+            self.pending_members.pop(request_id, None)
+
+    async def _clear_group_binding(self, entry):
+        """Revoke all known group member turns and histories, preserving owner's DM."""
+        entry_id = entry.entry_id
+        binding = self.group_bindings.pop(entry_id, None)
+        self.group_member_chats.pop(entry_id, None)
+        if binding:
+            await self.group_bindings_store.async_save(self.group_bindings)
+        if binding is None:
+            return
+        owner = entry.data["owner_id"]
+        private_owner = self.bindings.get(entry_id, {}).get("chat_id")
+        assistant = self.hass.data.get("habab_home", {}).get("assistant")
+        if assistant is None:
+            return
+        prefix = f"{owner}:{entry_id}:"
+        member_chats = [key[len(prefix):] for key in list(assistant.telegram_sessions)
+                        if key.startswith(prefix) and key[len(prefix):] != str(private_owner)]
+        for chat_id in member_chats:
+            task = self.turn_tasks.get(self._turn_key(entry_id, chat_id))
+            if task and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            await assistant.telegram_forget(owner, entry_id, chat_id)
+
+    def _turn_key(self, entry_id, chat_id):
+        state = self.entries.get(entry_id, {})
+        if chat_id is None or str(chat_id) == str(state.get("chat_id")):
+            return entry_id
+        return f"{entry_id}:{chat_id}"
+
+    def _advance_cancel_epoch(self, entry, msg):
+        """Invalidate earlier messages even while authorization is awaiting the Bot API."""
+        chat_id = str(msg["chat_id"])
+        epochs = self.cancel_epochs.setdefault(entry.entry_id, {})
+        epochs[chat_id] = epochs.get(chat_id, 0) + 1
+        cutoff = int(msg["message_id"])
+        self.cancelled_through.setdefault(entry.entry_id, {})[chat_id] = max(
+            cutoff, self.cancelled_through.get(entry.entry_id, {}).get(chat_id, -1))
+        msg["_habab_cancel_registered"] = True
+        msg["_habab_cancel_epoch"] = epochs[chat_id]
+
+    def _message_epoch_is_current(self, entry_id, chat_id, epoch):
+        return self.cancel_epochs.get(entry_id, {}).get(str(chat_id), 0) == epoch
+
+    async def _bot_is_admin(self, entry, chat_id):
+        member = await self.get_chat_member(entry.entry_id, chat_id, entry.data["bot_id"])
+        if member is None:
+            return None
+        return member.get("status") in ("administrator", "creator")
+
+    async def _is_group_member(self, entry, chat_id, user_id, expected_binding=None):
+        owner = entry.data["owner_id"]
+        if not await self._owner_is_active_admin(owner):
+            return False
+        binding = self.group_bindings.get(entry.entry_id)
+        if (not binding or (expected_binding is not None and binding != expected_binding)
+                or binding.get("bot_id") != entry.data.get("bot_id")
+                or str(binding.get("owner_user_id")) != str(
+                    self.bindings.get(entry.entry_id, {}).get("user_id"))):
+            return False
+        state = self.entries.get(entry.entry_id)
+        if not state or not state.get("ready"):
+            return False
+        if await self._bot_is_admin(entry, int(binding["chat_id"])) is not True:
+            return False
+        member = await self.get_chat_member(entry.entry_id, int(binding["chat_id"]), user_id)
+        return bool(member and member.get("is_member") is True
+                    and member.get("status") in ("creator", "administrator", "member", "restricted"))
+
+    async def _revoke_group_member(self, entry, chat_id, notify=False, cancel_turn=True):
+        key = self._turn_key(entry.entry_id, chat_id)
+        task = self.turn_tasks.get(key)
+        if cancel_turn and task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self.group_member_chats.setdefault(entry.entry_id, {}).pop(str(chat_id), None)
+        assistant = self.hass.data.get("habab_home", {}).get("assistant")
+        if assistant is not None:
+            await assistant.telegram_forget(entry.data["owner_id"], entry.entry_id, str(chat_id))
+        if notify:
+            await self.send(entry.entry_id, chat_id,
+                            "Доступ к помощнику отозван: вас больше нет в группе дома.")
+
+    async def _monitor_group_member(self, entry, chat_id, user_id, binding, turn):
+        while not turn.done():
+            await asyncio.sleep(5)
+            if turn.done():
+                return
+            if not await self._is_group_member(entry, int(binding["chat_id"]), user_id, binding):
+                await self._revoke_group_member(entry, chat_id, notify=True, cancel_turn=False)
+                if not turn.done():
+                    turn.cancel()
+                return
+
+    async def member_origin(self, owner, entry_id, chat_id, session_id):
+        """Resolve an exact member DM only after a fresh owner/bot/roster check."""
+        if not await self._owner_is_active_admin(owner):
+            return None
+        entry = self.entry_for_owner(owner)
+        if entry is None or entry.entry_id != entry_id:
+            return None
+        state = self.entries.get(entry_id)
+        binding = self.group_bindings.get(entry_id)
+        dm_chat = str(chat_id)
+        if (not state or not state.get("ready") or not binding
+                or binding.get("bot_id") != entry.data.get("bot_id")
+                or not dm_chat.isdigit() or len(dm_chat) > 32):
+            return None
+        assistant = self.hass.data.get("habab_home", {}).get("assistant")
+        if (assistant is None
+                or assistant.telegram_sessions.get(
+                    f"{owner}:{entry_id}:{dm_chat}") != session_id):
+            return None
+        user_id = self.group_member_chats.get(entry_id, {}).get(dm_chat)
+        if user_id is None:
+            try:
+                user_id = int(dm_chat)
+            except ValueError:
+                return None
+        if not await self._is_group_member(entry, int(binding["chat_id"]), int(user_id), binding):
+            return None
+        if (self.group_bindings.get(entry_id) != binding
+                or self.entry_for_owner(owner) is not entry
+                or not await self._owner_is_active_admin(owner)):
+            return None
+        return {"channel": "telegram", "owner": owner, "entry_id": entry_id,
+                "chat_id": dm_chat, "bot_id": binding["bot_id"],
+                "group_id": binding["chat_id"], "user_id": int(user_id)}
+
+    async def _turn_origin_is_current(self, entry, chat_id, user_id, group_binding,
+                                      assistant, session_id=None):
+        owner = entry.data["owner_id"]
+        if (not await self._owner_is_active_admin(owner)
+                or self.entry_for_owner(owner) is not entry):
+            return False
+        if assistant is not None and session_id is not None:
+            if assistant.telegram_sessions.get(
+                    f"{owner}:{entry.entry_id}:{chat_id}") != session_id:
+                return False
+        if group_binding is not None:
+            return await self._is_group_member(
+                entry, int(group_binding["chat_id"]), user_id, group_binding)
+        binding = self.bindings.get(entry.entry_id)
+        state = self.entries.get(entry.entry_id)
+        return bool(
+            binding and state and state.get("ready")
+            and entry.data.get("bot_id") == binding.get("bot_id")
+            and str(binding.get("chat_id")) == str(chat_id)
+            and str(binding.get("user_id")) == str(user_id)
+            and str(state.get("chat_id")) == str(chat_id)
+            and str(state.get("user_id")) == str(user_id)
+        )
+
+    async def _turn_can_send(self, entry, chat_id, user_id, group_binding, assistant,
+                             session_id, cancel_epoch):
+        """Check cancellation around ACL lookup; an external send cannot be atomic."""
+        if not self._message_epoch_is_current(entry.entry_id, chat_id, cancel_epoch):
+            return False
+        allowed = await self._turn_origin_is_current(
+            entry, chat_id, user_id, group_binding, assistant, session_id)
+        return allowed and self._message_epoch_is_current(
+            entry.entry_id, chat_id, cancel_epoch)
+
+    async def _claim_group_start(self, entry, msg):
+        if (msg.get("chat_type") not in ("group", "supergroup")
+                or any(type(msg.get(field)) is not int for field in ("chat_id", "user_id", "message_id"))):
+            return False
+        text = msg.get("text", "").strip()
+        username = self.entries.get(entry.entry_id, {}).get("username", "")
+        command = f"/start@{username}" if username else "/start"
+        if not (text.startswith(command + " ") or text.startswith("/start ")):
+            return False
+        supplied = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) == 2 else ""
+        pairing = self.group_pairing.get(entry.entry_id)
+        owner_binding = self.bindings.get(entry.entry_id)
+        if (not pairing or time.monotonic() > pairing["expires"]
+                or str(msg["user_id"]) != str(pairing["owner_user_id"])
+                or not owner_binding
+                or str(owner_binding.get("user_id")) != str(pairing["owner_user_id"])
+                or not await self._owner_is_active_admin(entry.data["owner_id"])
+                or not secrets.compare_digest(hashlib.sha256(supplied.encode()).hexdigest(), pairing["hash"])):
+            return False
+        state = self.entries.get(entry.entry_id)
+        if not state or not state.get("ready"):
+            return False
+        candidate = {"chat_id": str(msg["chat_id"]),
+                     "title": str(msg.get("chat_title") or "Группа дома")[:128],
+                     "bot_id": entry.data["bot_id"], "owner_user_id": msg["user_id"],
+                     "expires": pairing["expires"]}
+        candidate["_pairing"] = pairing
+        candidate["_owner_binding"] = owner_binding
+        lock = self.pair_locks.setdefault(entry.entry_id, asyncio.Lock())
+        async with lock:
+            if (self.group_pairing.get(entry.entry_id) is not pairing
+                    or time.monotonic() > pairing["expires"]
+                    or self.bindings.get(entry.entry_id) != owner_binding
+                    or not await self._owner_is_active_admin(entry.data["owner_id"])):
+                return True
+            self.group_candidates[entry.entry_id] = candidate
+        await self._finish_group_candidate(entry, candidate,
+                                           announce_chat_id=msg["chat_id"])
+        return True
+
+    async def _finish_group_candidate(self, entry, candidate, announce_chat_id=None):
+        """Verify a pending group's bot rights, then atomically replace its binding."""
+        entry_id = entry.entry_id
+        pairing = candidate.get("_pairing")
+        if (self.group_candidates.get(entry_id) is not candidate
+                or self.group_pairing.get(entry_id) is not pairing
+                or not pairing or time.monotonic() > pairing["expires"]):
+            return False
+        admin = await self._bot_is_admin(entry, int(candidate["chat_id"]))
+        lock = self.pair_locks.setdefault(entry_id, asyncio.Lock())
+        async with lock:
+            state = self.entries.get(entry_id, {})
+            owner = entry.data["owner_id"]
+            owner_binding = candidate.get("_owner_binding")
+            current = (self.group_candidates.get(entry_id) is candidate
+                       and self.group_pairing.get(entry_id) is pairing
+                       and time.monotonic() <= pairing["expires"]
+                       and self.bindings.get(entry_id) == owner_binding
+                       and owner_binding is not None
+                       and str(owner_binding.get("user_id")) == str(candidate.get("owner_user_id"))
+                       and candidate.get("bot_id") == entry.data.get("bot_id")
+                       and state.get("ready")
+                       and await self._owner_is_active_admin(owner))
+            if not current:
+                if self.group_candidates.get(entry_id) is candidate:
+                    self.group_candidates.pop(entry_id, None)
+                return False
+            if admin is not True:
+                candidate["error"] = "bot_not_admin" if admin is False else "verification_unavailable"
+                if announce_chat_id is not None:
+                    await self.send(entry_id, announce_chat_id,
+                                    "Для проверки участников дайте боту права администратора.")
+                return False
+
+            old = self.group_bindings.get(entry_id)
+            if old and old.get("chat_id") != candidate["chat_id"]:
+                await self._clear_group_binding(entry)
+            binding = {key: candidate[key] for key in
+                       ("chat_id", "title", "bot_id", "owner_user_id")}
+            self.group_bindings[entry_id] = binding
+            await self.group_bindings_store.async_save(self.group_bindings)
+            self.group_pairing.pop(entry_id, None)
+            self.group_candidates.pop(entry_id, None)
+            notify_chat = (announce_chat_id if announce_chat_id is not None else
+                           owner_binding.get("chat_id"))
+            if notify_chat is not None:
+                await self.send(entry_id, notify_chat,
+                                "Группа дома подключена. Участники пишут помощнику в личные сообщения.")
+            return True
+
+    def _schedule_candidate_verification(self, entry, candidate):
+        entry_id = entry.entry_id
+        current = self.group_candidate_tasks.get(entry_id)
+        if current and not current.done():
+            return
+        task = self.hass.async_create_task(self._finish_group_candidate(entry, candidate))
+        self.group_candidate_tasks[entry_id] = task
+        tasks = self.control_tasks.setdefault(entry_id, set())
+        tasks.add(task)
+
+        def done(completed):
+            tasks.discard(completed)
+            if self.group_candidate_tasks.get(entry_id) is completed:
+                self.group_candidate_tasks.pop(entry_id, None)
+
+        task.add_done_callback(done)
+
+    def _schedule_queue_overflow(self, entry, msg):
+        entry_id = entry.entry_id
+        current = self.overflow_tasks.get(entry_id)
+        if current and not current.done():
+            return
+        task = self.hass.async_create_task(self._send_queue_overflow(entry, msg))
+        self.overflow_tasks[entry_id] = task
+        tasks = self.control_tasks.setdefault(entry_id, set())
+        tasks.add(task)
+
+        def done(completed):
+            tasks.discard(completed)
+            if self.overflow_tasks.get(entry_id) is completed:
+                self.overflow_tasks.pop(entry_id, None)
+
+        task.add_done_callback(done)
+
+    def _schedule_control(self, entry, msg):
+        entry_id = entry.entry_id
+        chat_id = str(msg.get("chat_id"))
+        lanes = self.control_lanes.setdefault(entry_id, {})
+        current = lanes.get(chat_id)
+        if current and not current.done():
+            return
+        if len(lanes) >= self.CONTROL_TASK_LIMIT:
+            return
+        task = self.hass.async_create_task(self._handle_control(entry, msg))
+        lanes[chat_id] = task
+        tasks = self.control_tasks.setdefault(entry_id, set())
+        tasks.add(task)
+
+        def done(completed):
+            tasks.discard(completed)
+            if lanes.get(chat_id) is completed:
+                lanes.pop(chat_id, None)
+
+        task.add_done_callback(done)
+
+    async def _send_queue_overflow(self, entry, msg):
+        state = self.entries.get(entry.entry_id, {})
+        if (msg.get("chat_type") != "private"
+                or str(msg.get("chat_id")) != str(state.get("chat_id"))
+                or str(msg.get("user_id")) != str(state.get("user_id"))):
+            return
+        if not await self._owner_is_active_admin(entry.data["owner_id"]):
+            if state.get("chat_id") is not None:
+                await self._clear_binding(entry)
+            else:
+                self.pairing.pop(entry.entry_id, None)
+            return
+        await self.send(entry.entry_id, msg["chat_id"],
+                        "Очередь занята. Попробуйте позже.")
+
     async def async_setup_entry(self, entry):
         env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE", "HABAB_TELEGRAM_RELAY") if k in os.environ}
         env.update({"HOME": "/config/.habab-telegram", "NODE_NO_WARNINGS": "1"})
@@ -211,6 +676,11 @@ class TelegramManager:
             binding = {}
             self.bindings.pop(entry.entry_id, None)
             await self.bindings_store.async_save(self.bindings)
+        group_binding = self.group_bindings.get(entry.entry_id)
+        if group_binding and group_binding.get("bot_id") != entry.data.get("bot_id"):
+            self.group_pairing.pop(entry.entry_id, None)
+            self.group_candidates.pop(entry.entry_id, None)
+            await self._clear_group_binding(entry)
         state = {"process": proc, "chat_id": binding.get("chat_id"),
                  "user_id": binding.get("user_id"), "username": entry.data["bot_username"]}
         self.entries[entry.entry_id] = state
@@ -314,8 +784,18 @@ class TelegramManager:
                     state["ready"] = True
                     state.pop("error", None)
                     self.hass.async_create_task(self._retry_setup_notifications())
+                elif kind == "member":
+                    request_id = payload.get("request_id")
+                    pending = self.pending_members.get(request_id) if isinstance(request_id, str) else None
+                    if pending and pending[0] == entry.entry_id and not pending[1].done():
+                        pending[1].set_result({"status": payload.get("status"),
+                                               "is_member": payload.get("is_member") is True})
                 elif kind == "error":
                     request_id = payload.get("request_id")
+                    if payload.get("operation") == "member" and isinstance(request_id, str):
+                        pending = self.pending_members.get(request_id)
+                        if pending and pending[0] == entry.entry_id and not pending[1].done():
+                            pending[1].set_result(None)
                     pending = self.pending_sends.pop(request_id, None) if isinstance(request_id, str) else None
                     if pending and not pending[1].done():
                         pending[1].set_result(False)
@@ -326,30 +806,53 @@ class TelegramManager:
                     pending = self.pending_sends.pop(request_id, None) if isinstance(request_id, str) else None
                     if pending and not pending[1].done():
                         pending[1].set_result(True)
+                elif kind == "member_update":
+                    binding = self.group_bindings.get(entry.entry_id)
+                    removed = (payload.get("status") in ("left", "kicked")
+                               or (payload.get("status") == "restricted"
+                                   and payload.get("is_member") is False))
+                    if (binding and str(payload.get("chat_id")) == binding.get("chat_id")
+                            and payload.get("chat_type") in ("group", "supergroup") and removed
+                            and str(payload.get("user_id")) != str(binding.get("owner_user_id"))):
+                        task = self.hass.async_create_task(
+                            self._revoke_group_member(entry, str(payload.get("user_id")), notify=True))
+                        controls = self.control_tasks.setdefault(entry.entry_id, set())
+                        controls.add(task)
+                        task.add_done_callback(controls.discard)
+                elif kind == "bot_member_update":
+                    # Do not perform Bot API requests in the stdout reader: their
+                    # replies are consumed here. Verify a pending group separately.
+                    binding = self.group_bindings.get(entry.entry_id)
+                    if binding and str(payload.get("chat_id")) == binding.get("chat_id"):
+                        binding["bot_status"] = payload.get("status")
+                    candidate = self.group_candidates.get(entry.entry_id)
+                    if (candidate and str(payload.get("chat_id")) == candidate.get("chat_id")
+                            and payload.get("status") in ("administrator", "creator")):
+                        self._schedule_candidate_verification(entry, candidate)
                 elif kind == "message":
                     state.pop("error", None)
                     queue = self.queues[entry.entry_id]
+                    if (payload.get("chat_type") == "private"
+                            and isinstance(payload.get("text"), str)
+                            and payload["text"].strip() == "/cancel"
+                            and all(type(payload.get(field)) is int
+                                    for field in ("chat_id", "user_id", "message_id"))):
+                        self._advance_cancel_epoch(entry, payload)
+                    payload.setdefault("_habab_cancel_epoch", self.cancel_epochs.get(
+                        entry.entry_id, {}).get(str(payload.get("chat_id")), 0))
                     route_control = self._should_route_control(entry, state, payload)
-                    if not await self._claim_message(entry, payload):
-                        continue
-                    payload["_habab_claimed"] = True
                     if route_control:
-                        task = self.hass.async_create_task(self._handle_control(entry, payload))
-                        tasks = self.control_tasks.setdefault(entry.entry_id, set())
-                        tasks.add(task)
-                        task.add_done_callback(tasks.discard)
+                        self._schedule_control(entry, payload)
                     elif queue.full():
-                        if not await self._owner_is_active_admin(entry.data["owner_id"]):
-                            if state.get("chat_id") is not None:
-                                await self._clear_binding(entry)
-                            else:
-                                self.pairing.pop(entry.entry_id, None)
-                            continue
-                        await self.send(
-                            entry.entry_id, payload["chat_id"],
-                            "Очередь занята. Попробуйте позже.",
-                        )
+                        if (payload.get("chat_type") == "private"
+                                and str(payload.get("chat_id")) == str(state.get("chat_id"))
+                                and str(payload.get("user_id")) == str(state.get("user_id"))):
+                            self._schedule_queue_overflow(entry, payload)
                     else:
+                        if payload.get("chat_type") == "private":
+                            pending = self.pending_message_ids.setdefault(
+                                entry.entry_id, {}).setdefault(str(payload["chat_id"]), set())
+                            pending.add(payload["message_id"])
                         queue.put_nowait(payload)
                         # Let the FIFO consumer begin this item before polling
                         # another update that may be a direct /cancel.
@@ -373,28 +876,30 @@ class TelegramManager:
         if not isinstance(value, str):
             return False
         text = value.strip()
+        if (text not in ("/cancel", "/new") or msg.get("chat_type") != "private"
+                or any(type(msg.get(field)) is not int
+                       for field in ("chat_id", "user_id", "message_id"))):
+            return False
+        key = self._turn_key(entry.entry_id, str(msg["chat_id"]))
         if text == "/new":
-            current = self.turn_tasks.get(entry.entry_id)
+            current = self.turn_tasks.get(key)
             if not current or current.done():
                 return False
-        return (
-            text in ("/cancel", "/new")
-            and msg.get("chat_type") == "private"
-            and all(isinstance(msg.get(field), int) for field in ("chat_id", "user_id", "message_id"))
-            and str(msg["chat_id"]) == state.get("chat_id")
-            and str(msg["user_id"]) == state.get("user_id")
-        )
+        return True
 
     async def _handle_control(self, entry, msg):
         await self.handle_one(entry, msg)
 
     async def _claim_message(self, entry, msg):
-        """Persist a trusted private update before queueing any command work."""
-        if msg.get("chat_type") != "private" or any(
-            not isinstance(msg.get(field), int) for field in ("chat_id", "user_id", "message_id")
-        ):
+        """Persist a trusted owner/member update before any command can be queued."""
+        if any(type(msg.get(field)) is not int for field in ("chat_id", "user_id", "message_id")):
             return False
         if not isinstance(msg.get("text"), str):
+            return False
+        if msg.get("chat_type") in ("group", "supergroup"):
+            await self._claim_group_start(entry, msg)
+            return False
+        if msg.get("chat_type") != "private":
             return False
         state = self.entries.get(entry.entry_id)
         if not state:
@@ -404,12 +909,32 @@ class TelegramManager:
             pairing = self.pairing.get(entry.entry_id)
             text = msg.get("text", "")
             supplied = text[7:].strip() if text.startswith("/start ") else ""
-            if not pairing or time.monotonic() > pairing["expires"] or not secrets.compare_digest(
-                hashlib.sha256(supplied.encode()).hexdigest(), pairing["hash"]
-            ):
+            if (not pairing or time.monotonic() > pairing["expires"]
+                    or not secrets.compare_digest(hashlib.sha256(supplied.encode()).hexdigest(), pairing["hash"])):
+                await self.send(entry.entry_id, msg["chat_id"], BOT_ONBOARDING_MESSAGE)
                 return False
-        elif chat_id != state["chat_id"] or user_id != state["user_id"]:
-            return False
+        elif chat_id == state["chat_id"] and user_id == state["user_id"]:
+            if not await self._owner_is_active_admin(entry.data["owner_id"]):
+                msg["_habab_revoked_owner"] = True
+            else:
+                msg["_habab_owner"] = True
+        else:
+            binding = self.group_bindings.get(entry.entry_id)
+            if not await self._owner_is_active_admin(entry.data["owner_id"]):
+                await self._clear_group_binding(entry)
+                return False
+            if binding and await self._is_group_member(entry, int(binding["chat_id"]), msg["user_id"], binding):
+                msg["_habab_member"] = True
+                self.group_member_chats.setdefault(entry.entry_id, {})[chat_id] = msg["user_id"]
+            else:
+                assistant = self.hass.data.get("habab_home", {}).get("assistant")
+                has_history = bool(assistant and
+                                   f"{entry.data['owner_id']}:{entry.entry_id}:{chat_id}"
+                                   in assistant.telegram_sessions)
+                if has_history:
+                    await self._revoke_group_member(entry, chat_id)
+                await self.send(entry.entry_id, msg["chat_id"], UNKNOWN_MEMBER_MESSAGE)
+                return False
         key = f"{entry.entry_id}:{chat_id}:{msg['message_id']}"
         if key in self.dedupe:
             return False
@@ -419,15 +944,25 @@ class TelegramManager:
             self.dedupe_order = self.dedupe_order[-1500:]
             self.dedupe = set(self.dedupe_order)
         await self.store.async_save(self.dedupe_order)
+        msg["_habab_claimed"] = True
         return True
 
     async def handle_one(self, entry, msg):
+        if msg.get("_habab_handled"):
+            return
         state = self.entries.get(entry.entry_id)
         if not state or msg.get("chat_type") != "private":
             return
         if any(not isinstance(msg.get(field), int) for field in ("chat_id", "user_id", "message_id")):
             return
         chat_id, user_id = str(msg.get("chat_id")), str(msg.get("user_id"))
+        text = msg.get("text", "").strip()
+        epoch = msg.get("_habab_cancel_epoch",
+                        self.cancel_epochs.get(entry.entry_id, {}).get(chat_id, 0))
+        if not msg.get("_habab_claimed") and not await self._claim_message(entry, msg):
+            return
+        if text != "/cancel" and not self._message_epoch_is_current(entry.entry_id, chat_id, epoch):
+            return
         if state.get("chat_id") is None:
             pairing = self.pairing.get(entry.entry_id)
             text = msg.get("text", "")
@@ -439,6 +974,8 @@ class TelegramManager:
             if not await self._owner_is_active_admin(entry.data["owner_id"]):
                 self.pairing.pop(entry.entry_id, None)
                 return
+            if not self._message_epoch_is_current(entry.entry_id, chat_id, epoch):
+                return
             if self.pairing.get(entry.entry_id) is not pairing or time.monotonic() > pairing["expires"]:
                 return
             if not msg.get("_habab_claimed") and not await self._claim_message(entry, msg):
@@ -447,25 +984,48 @@ class TelegramManager:
             self.bindings[entry.entry_id] = {"chat_id": chat_id, "user_id": user_id,
                                              "bot_id": entry.data.get("bot_id")}
             await self.bindings_store.async_save(self.bindings)
+            group_binding = self.group_bindings.get(entry.entry_id)
+            if (group_binding and str(group_binding.get("owner_user_id")) != user_id):
+                await self._clear_group_binding(entry)
             self.pairing.pop(entry.entry_id, None)
-            await self.send(entry.entry_id, chat_id, "Telegram подключён. Напишите /help для команд.")
+            await self.send(entry.entry_id, chat_id, OWNER_PAIRING_COMPLETE_MESSAGE)
             return
-        if chat_id != state["chat_id"] or user_id != state["user_id"]:
+        is_owner = (chat_id == state.get("chat_id") and user_id == state.get("user_id"))
+        group_binding = None if is_owner else self.group_bindings.get(entry.entry_id)
+        if is_owner:
+            if not await self._owner_is_active_admin(entry.data["owner_id"]):
+                await self._clear_binding(entry)
+                await self.send(entry.entry_id, chat_id, "Доступ отозван.")
+                return
+        elif (not group_binding
+              or not await self._is_group_member(entry, int(group_binding["chat_id"]), int(user_id), group_binding)):
+            await self._revoke_group_member(entry, chat_id, notify=True)
             return
-        if not await self._owner_is_active_admin(entry.data["owner_id"]):
-            await self._clear_binding(entry)
-            await self.send(entry.entry_id, chat_id, "Доступ отозван.")
+        if text != "/cancel" and not self._message_epoch_is_current(entry.entry_id, chat_id, epoch):
             return
-        if not msg.get("_habab_claimed") and not await self._claim_message(entry, msg):
-            return
-        text = msg.get("text", "").strip()
+        msg["_habab_handled"] = True
         if len(text) > 4000:
             await self.send(entry.entry_id, chat_id, "Сообщение слишком длинное (максимум 4000 символов).")
             return
         if text == "/help":
-            await self.send(entry.entry_id, chat_id, "/new — новый диалог\n/cancel — остановить текущую задачу")
+            commands = "/new — начать новый диалог\n/cancel — остановить текущую задачу"
+            if is_owner:
+                if self.group_bindings.get(entry.entry_id):
+                    guidance = (
+                        "Группа дома подключена. Владелец добавляет в неё доверенных людей; "
+                        "участники общаются с ботом в личных сообщениях."
+                    )
+                else:
+                    guidance = OWNER_PAIRING_COMPLETE_MESSAGE
+            else:
+                guidance = (
+                    "Общайтесь с ботом только в личных сообщениях. Доступом к дому "
+                    "управляет владелец через группу дома."
+                )
+            await self.send(entry.entry_id, chat_id, f"{guidance}\n\n{commands}")
         elif text == "/new":
-            current = self.turn_tasks.get(entry.entry_id)
+            key = self._turn_key(entry.entry_id, chat_id)
+            current = self.turn_tasks.get(key)
             if current and not current.done():
                 await self.send(entry.entry_id, chat_id, "Сначала остановите задачу командой /cancel.")
                 return
@@ -477,10 +1037,20 @@ class TelegramManager:
                 entry.data["owner_id"], entry.entry_id, chat_id)
             await self.send(entry.entry_id, chat_id, "Начат новый диалог.")
         elif text == "/cancel":
-            current = self.turn_tasks.get(entry.entry_id)
+            if not msg.get("_habab_cancel_registered"):
+                self._advance_cancel_epoch(entry, msg)
+            key = self._turn_key(entry.entry_id, chat_id)
+            cutoff = int(msg["message_id"])
+            self.cancelled_through.setdefault(entry.entry_id, {})[chat_id] = max(
+                cutoff, self.cancelled_through.get(entry.entry_id, {}).get(chat_id, -1))
+            queued = any(message_id < cutoff for message_id in
+                         self.pending_message_ids.get(entry.entry_id, {}).get(chat_id, set()))
+            current = self.turn_tasks.get(key)
             if current and not current.done():
                 current.cancel()
                 await asyncio.gather(current, return_exceptions=True)
+                stopped = True
+            elif queued:
                 stopped = True
             else:
                 assistant = self.hass.data.get("habab_home", {}).get("assistant")
@@ -497,31 +1067,92 @@ class TelegramManager:
             if current and not current.done():
                 await self.send(entry.entry_id, chat_id, "Задача уже выполняется. Используйте /cancel.")
             else:
-                task = self.hass.async_create_task(self._run_message(entry, chat_id, text))
-                self.turn_tasks[entry.entry_id] = task
+                key = self._turn_key(entry.entry_id, chat_id)
+                task = self.hass.async_create_task(self._run_message(
+                    entry, chat_id, int(user_id), text, group_binding, epoch))
+                self.turn_tasks[key] = task
 
-    async def _run_message(self, entry, chat_id, text):
+    async def _run_message(self, entry, chat_id, user_id, text, group_binding=None,
+                           cancel_epoch=None):
+        monitor = None
+        session_id = None
+        assistant = None
+        if cancel_epoch is None:
+            cancel_epoch = self.cancel_epochs.get(entry.entry_id, {}).get(str(chat_id), 0)
         try:
             assistant = self.hass.data.get("habab_home", {}).get("assistant")
+            if not await self._turn_origin_is_current(
+                    entry, chat_id, user_id, group_binding, assistant):
+                if group_binding is not None:
+                    await self._revoke_group_member(entry, chat_id, cancel_turn=False)
+                return
             if assistant is None:
-                await self.send(entry.entry_id, chat_id, "Помощник запускается. Повторите запрос позже.")
+                if await self._turn_origin_is_current(
+                        entry, chat_id, user_id, group_binding, assistant):
+                    await self.send(entry.entry_id, chat_id,
+                                    "Помощник запускается. Повторите запрос позже.")
                 return
             session = await assistant.telegram_session(entry.data["owner_id"], entry.entry_id, chat_id)
+            session_id = session["session_id"]
+            # Recheck after session loading and again after the typing request.
+            if not await self._turn_origin_is_current(
+                    entry, chat_id, user_id, group_binding, assistant, session_id):
+                if group_binding is not None:
+                    await self._revoke_group_member(entry, chat_id, cancel_turn=False)
+                return
             await self.typing(entry.entry_id, chat_id)
-            result = await assistant.run(entry.data["owner_id"], "telegram", session["session_id"],
+            if not await self._turn_origin_is_current(
+                    entry, chat_id, user_id, group_binding, assistant, session_id):
+                if group_binding is not None:
+                    await self._revoke_group_member(entry, chat_id, cancel_turn=False)
+                return
+            if group_binding is not None:
+                monitor = asyncio.create_task(self._monitor_group_member(
+                    entry, chat_id, user_id, group_binding, asyncio.current_task()))
+            result = await assistant.run(entry.data["owner_id"], "telegram", session_id,
                                          text, entry.entry_id, chat_id)
-            await self.send(entry.entry_id, chat_id, result["messages"][-1]["text"])
+            # Runtime completion does not preserve authority: verify the exact
+            # owner/member binding and session again before sending the answer.
+            if await self._turn_can_send(entry, chat_id, user_id, group_binding,
+                                         assistant, session_id, cancel_epoch):
+                # A later cancel cannot retract a Bot API request already in flight.
+                await self.send(entry.entry_id, chat_id, result["messages"][-1]["text"])
+            elif group_binding is not None:
+                await self._revoke_group_member(entry, chat_id, cancel_turn=False)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            await self.send(entry.entry_id, chat_id, "Не удалось выполнить запрос. Попробуйте позже.")
+            if await self._turn_can_send(entry, chat_id, user_id, group_binding,
+                                         assistant, session_id, cancel_epoch):
+                await self.send(entry.entry_id, chat_id,
+                                "Не удалось выполнить запрос. Попробуйте позже.")
+            elif group_binding is not None:
+                await self._revoke_group_member(entry, chat_id, cancel_turn=False)
+        finally:
+            if monitor:
+                monitor.cancel()
+                await asyncio.gather(monitor, return_exceptions=True)
 
     async def _consume(self, entry):
         queue = self.queues[entry.entry_id]
         while True:
             msg = await queue.get()
             try:
+                chat_id = str(msg.get("chat_id"))
+                message_id = msg.get("message_id", -1)
+                cutoff = self.cancelled_through.get(entry.entry_id, {}).get(chat_id, -1)
+                epoch = msg.get("_habab_cancel_epoch",
+                                self.cancel_epochs.get(entry.entry_id, {}).get(chat_id, 0))
+                if (message_id <= cutoff
+                        or not self._message_epoch_is_current(entry.entry_id, chat_id, epoch)):
+                    continue
+                if not await self._claim_message(entry, msg):
+                    continue
                 await self.handle_one(entry, msg)
-                turn = self.turn_tasks.get(entry.entry_id)
+                self.pending_message_ids.get(entry.entry_id, {}).get(chat_id, set()).discard(message_id)
+                turn = self.turn_tasks.get(self._turn_key(entry.entry_id, chat_id))
                 if turn and not turn.done():
+                    # The reader handles acknowledgments and direct controls independently.
                     await asyncio.gather(turn, return_exceptions=True)
             except Exception:
                 # Provider and HA errors are intentionally reduced to a stable user message.
@@ -529,19 +1160,22 @@ class TelegramManager:
                 if state and state.get("chat_id"):
                     await self.send(entry.entry_id, state["chat_id"], "Не удалось обработать сообщение.")
             finally:
+                self.pending_message_ids.get(entry.entry_id, {}).get(chat_id, set()).discard(message_id)
                 queue.task_done()
 
     async def close_entry(self, entry_id):
         state = self.entries.pop(entry_id, None)
         task = self.tasks.pop(entry_id, None)
         consumer = self.consumer_tasks.pop(entry_id, None)
-        turn = self.turn_tasks.pop(entry_id, None)
+        turns = [self.turn_tasks.pop(key) for key in list(self.turn_tasks)
+                 if key == entry_id or key.startswith(entry_id + ":")]
         controls = self.control_tasks.pop(entry_id, set())
-        for current in (task, consumer, turn, *controls):
+        self.control_lanes.pop(entry_id, None)
+        for current in (task, consumer, *turns, *controls):
             if current:
                 current.cancel()
         await asyncio.gather(
-            *(item for item in (task, consumer, turn, *controls) if item),
+            *(item for item in (task, consumer, *turns, *controls) if item),
             return_exceptions=True,
         )
         for request_id, (send_entry_id, future) in list(self.pending_sends.items()):
@@ -549,7 +1183,15 @@ class TelegramManager:
                 if not future.done():
                     future.set_result(False)
                 self.pending_sends.pop(request_id, None)
+        for request_id, (member_entry_id, future) in list(self.pending_members.items()):
+            if member_entry_id == entry_id:
+                if not future.done():
+                    future.set_result(None)
+                self.pending_members.pop(request_id, None)
         self.queues.pop(entry_id, None)
+        self.pending_message_ids.pop(entry_id, None)
+        self.cancelled_through.pop(entry_id, None)
+        self.cancel_epochs.pop(entry_id, None)
         if state:
             proc = state["process"]
             try:
@@ -562,20 +1204,31 @@ class TelegramManager:
                 except ProcessLookupError:
                     pass
         self.pairing.pop(entry_id, None)
+        self.group_pairing.pop(entry_id, None)
+        self.group_candidates.pop(entry_id, None)
+        self.group_candidate_tasks.pop(entry_id, None)
+        self.overflow_tasks.pop(entry_id, None)
 
     async def unlink(self, owner):
         entry = self.entry_for_owner(owner)
         if entry:
-            binding = self.bindings.get(entry.entry_id, {})
-            state = self.entries.get(entry.entry_id, {})
-            chat_id = binding.get("chat_id", state.get("chat_id"))
-            await self.close_entry(entry.entry_id)
-            assistant = self.hass.data.get("habab_home", {}).get("assistant")
-            if assistant is not None and chat_id is not None:
-                await assistant.telegram_forget(owner, entry.entry_id, str(chat_id))
-            self.bindings.pop(entry.entry_id, None)
-            await self.bindings_store.async_save(self.bindings)
-            await self.hass.config_entries.async_remove(entry.entry_id)
+            lock = self.pair_locks.setdefault(entry.entry_id, asyncio.Lock())
+            async with lock:
+                if not await self._owner_is_active_admin(owner):
+                    raise ValueError("not_allowed")
+                self.group_pairing.pop(entry.entry_id, None)
+                self.group_candidates.pop(entry.entry_id, None)
+                await self._clear_group_binding(entry)
+                binding = self.bindings.get(entry.entry_id, {})
+                state = self.entries.get(entry.entry_id, {})
+                chat_id = binding.get("chat_id", state.get("chat_id"))
+                await self.close_entry(entry.entry_id)
+                assistant = self.hass.data.get("habab_home", {}).get("assistant")
+                if assistant is not None and chat_id is not None:
+                    await assistant.telegram_forget(owner, entry.entry_id, str(chat_id))
+                self.bindings.pop(entry.entry_id, None)
+                await self.bindings_store.async_save(self.bindings)
+                await self.hass.config_entries.async_remove(entry.entry_id)
 
     async def close(self, _event=None):
         await asyncio.gather(*(self.close_entry(entry_id) for entry_id in list(self.entries)))

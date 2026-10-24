@@ -1,0 +1,28 @@
+{
+  "at": 1792825467.079386,
+  "scope": "Actual owner UI one-use link, private Telegram group creation, bot admin verification, household roster binding. No second human account used.",
+  "steps": [
+    {
+      "name": "bot_added_to_group",
+      "status": "passed"
+    },
+    {
+      "name": "grant_bot_group_admin_for_membership_checks",
+      "status": "passed"
+    }
+  ],
+  "reused_existing_qa_group": true,
+  "before_admin": {
+    "phase": "awaiting_admin",
+    "pending_phase": null
+  },
+  "group_phase": "connected",
+  "owner_phase": "connected",
+  "status_has_no_pairing_secret": true,
+  "nonmember_api_check": {
+    "ok": true,
+    "status": "left",
+    "nonmember_or_unverifiable": true
+  },
+  "status": "passed"
+}

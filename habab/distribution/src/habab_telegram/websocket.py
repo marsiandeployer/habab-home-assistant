@@ -12,6 +12,8 @@ def async_register_commands(hass):
     websocket_api.async_register_command(hass, status)
     websocket_api.async_register_command(hass, configure)
     websocket_api.async_register_command(hass, pair)
+    websocket_api.async_register_command(hass, group_pair)
+    websocket_api.async_register_command(hass, unlink_group)
     websocket_api.async_register_command(hass, unlink)
 
 
@@ -44,6 +46,30 @@ async def configure(hass, connection, msg):
 async def pair(hass, connection, msg):
     try:
         result = await hass.data[DOMAIN].pair(connection.user.id)
+    except ValueError as err:
+        connection.send_error(msg["id"], str(err), str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({probatio.Required("type"): "habab_telegram/group_pair"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def group_pair(hass, connection, msg):
+    try:
+        result = await hass.data[DOMAIN].group_pair(connection.user.id)
+    except ValueError as err:
+        connection.send_error(msg["id"], str(err), str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({probatio.Required("type"): "habab_telegram/unlink_group"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def unlink_group(hass, connection, msg):
+    try:
+        result = await hass.data[DOMAIN].unlink_group(connection.user.id)
     except ValueError as err:
         connection.send_error(msg["id"], str(err), str(err))
         return

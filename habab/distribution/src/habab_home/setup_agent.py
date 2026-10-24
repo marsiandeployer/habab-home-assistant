@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import signal
 
@@ -19,6 +20,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .agent_diagnostics import AgentDiagnostics
 from .assistant_identity import ASSISTANT_IDENTITY
+from .assistant_status import get_assistant_status
 from .const import DOMAIN
 from .providers import PROVIDERS, provider_api_base
 from .runtime_context import (
@@ -29,6 +31,10 @@ from .runtime_context import (
 )
 
 PORT = 4197
+VOICE_TURN_METADATA_KEY = "habab_voice_turn"
+VOICE_TURN_METADATA_VALUE = "native_realtime.v1"
+VOICE_TURN_EVENT_ID_KEY = "habab_voice_event_id"
+VOICE_TURN_HASH_KEY = "habab_voice_payload_sha256"
 PROMPT = ASSISTANT_IDENTITY + """Ты помощник по настройке домашнего Home Assistant. Отвечай по-русски,
 кратко. Все сообщения владельцу, включая короткие сообщения о ходе работы, пиши
 по-русски. Внутренние flow_id/session_id не показывай в обычном ответе: владельцу
@@ -259,8 +265,41 @@ class SetupAgent:
             role = message.get("info", {}).get("role")
             if role not in ("user", "assistant"):
                 continue
-            text = "\n".join(part.get("text", "") for part in message.get("parts", [])
-                             if part.get("type") == "text" and not part.get("synthetic"))
+            visible_parts = []
+            for part in message.get("parts", []):
+                if part.get("type") != "text":
+                    continue
+                metadata = part.get("metadata")
+                if (isinstance(metadata, dict)
+                        and metadata.get(VOICE_TURN_METADATA_KEY) == VOICE_TURN_METADATA_VALUE):
+                    event_id = metadata.get(VOICE_TURN_EVENT_ID_KEY)
+                    payload_hash = metadata.get(VOICE_TURN_HASH_KEY)
+                    if (part.get("synthetic") is True
+                            and isinstance(event_id, str)
+                            and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", event_id)
+                            and isinstance(payload_hash, str)
+                            and re.fullmatch(r"[a-f0-9]{64}", payload_hash)):
+                        raw = part.get("text", "")
+                        if not isinstance(raw, str):
+                            continue
+                        try:
+                            payload = json.loads(raw)
+                        except (TypeError, ValueError):
+                            payload = None
+                        if (isinstance(payload, dict) and set(payload) == {"user", "assistant"}
+                                and isinstance(payload.get("user"), str)
+                                and isinstance(payload.get("assistant"), str)
+                                and 0 < len(payload["user"].strip()) <= 4000
+                                and 0 < len(payload["assistant"].strip()) <= 12000
+                                and hashlib.sha256(raw.encode("utf-8")).hexdigest()
+                                == payload_hash):
+                            result.append({"role": "user", "text": self.clean(payload["user"])})
+                            result.append({"role": "assistant", "text": self.clean(payload["assistant"])})
+                    # Synthetic marked parts are never exposed as raw JSON.
+                    continue
+                if not part.get("synthetic"):
+                    visible_parts.append(part.get("text", ""))
+            text = "\n".join(visible_parts)
             if text.strip():
                 result.append({"role": role, "text": self.clean(text)})
         return result[-60:]
@@ -273,10 +312,15 @@ class SetupAgent:
             await self.ensure()
             self.active = (owner, session_id)
             try:
+                status = await get_assistant_status(self.hass, owner, settings, verify_telegram=False)
                 response = await self.request("POST", f"session/{session_id}/message", {
                     "agent": "build", "model": {"providerID": "habab-" + settings["provider"], "modelID": settings["model"]},
                     "system": runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT),
-                    "parts": [{"type": "text", "text": text}],
+                    "parts": [
+                        {"type": "text", "synthetic": True,
+                         "text": "HABAB_RUNTIME_STATUS\n" + json.dumps(status, ensure_ascii=False)},
+                        {"type": "text", "text": text},
+                    ],
                 }, timeout=180)
                 if response.get("info", {}).get("error"):
                     self.diagnostics.record(

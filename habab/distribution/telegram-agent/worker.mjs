@@ -24,6 +24,9 @@ input.on('line', async (line) => {
       await relay.withOperation('send', () => transport.send(command.chat_id, command.text, command.request_id));
     } else if (command?.type === 'typing') {
       await relay.withOperation('typing', () => transport.typing(command.chat_id));
+    } else if (command?.type === 'get_chat_member') {
+      await relay.withOperation('member', () => transport.getChatMember(
+        command.chat_id, command.user_id, command.request_id));
     } else if (command?.type === 'shutdown') {
       await transport.shutdown();
       input.close();
@@ -31,9 +34,11 @@ input.on('line', async (line) => {
       emit({ type: 'error', code: configured ? 'invalid_command' : 'configure_required' });
     }
   } catch (error) {
-    const operation = command?.type === 'send' || command?.type === 'typing' ? command.type : 'configure';
+    const operation = command?.type === 'send' || command?.type === 'typing'
+      ? command.type : command?.type === 'get_chat_member' ? 'member' : 'configure';
     emit({ type: 'error', operation, code: validCode(error, 'transport_error'), fatal: operation === 'configure',
-      ...(operation === 'send' && typeof command?.request_id === 'string' ? { request_id: command.request_id.slice(0, 128) } : {}) });
+      ...(operation !== 'configure' && typeof command?.request_id === 'string'
+        ? { request_id: command.request_id.slice(0, 128) } : {}) });
     if (operation === 'configure') {
       configuring = false;
       await transport.shutdown();
