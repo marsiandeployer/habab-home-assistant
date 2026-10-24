@@ -11,8 +11,8 @@ import aiohttp
 PROVIDERS = {
     "habab": {
         "name": "Habab",
-        "url": "https://habab-voice.wpmix.net/v1/chat/completions",
-        "model": "gpt-4.1-mini",
+        "url": "https://habab-voice.wpmix.net/gemini/v1beta",
+        "model": "gemini-3.1-flash-lite",
     },
     "openai": {
         "name": "OpenAI",
@@ -36,7 +36,7 @@ REQUEST_TIMEOUT = 25
 
 def provider_api_base(provider: str) -> str:
     """Return the explicitly selected provider's API; never infer a relay."""
-    if provider == "gemini":
+    if provider in {"gemini", "habab"}:
         return PROVIDERS[provider]["url"]
     return PROVIDERS[provider]["url"].removesuffix("/chat/completions")
 
@@ -67,7 +67,7 @@ def validate_settings(data: dict[str, Any]) -> dict[str, str]:
 
 
 class ProviderClient:
-    """Use documented OpenAI-compatible APIs, with no cross-provider fallback."""
+    """Use the selected native or compatible API, with no provider fallback."""
 
     def __init__(self, session: aiohttp.ClientSession, settings: dict[str, Any]) -> None:
         self.session = session
@@ -81,7 +81,7 @@ class ProviderClient:
         probe: bool = False,
     ) -> dict[str, Any]:
         provider = self.settings["provider"]
-        if provider == "gemini":
+        if provider in {"gemini", "habab"}:
             if not hasattr(self, "_gemini"):
                 try:
                     async with asyncio.timeout(REQUEST_TIMEOUT):

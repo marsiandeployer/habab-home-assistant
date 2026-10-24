@@ -248,12 +248,13 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_selected_provider_fixed_route_and_private_key_despite_old_relay_env(self):
-        for provider, expected_base in (("openai", "https://api.openai.com/v1"), ("habab", "https://habab-voice.wpmix.net/v1")):
+        for provider, expected_base in (("openai", "https://api.openai.com/v1"), ("habab", "https://habab-voice.wpmix.net/gemini/v1beta")):
             agent = object.__new__(SetupAgent)
             agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
             agent.password = "private-password"; agent.control_token = "private-control"
             agent.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
-            agent.settings = Mock(return_value={"provider": provider, "model": "gpt-4.1-mini", "api_key": "fixture-selected-key"})
+            model = "gemini-3.1-flash-lite" if provider == "habab" else "gpt-4.1-mini"
+            agent.settings = Mock(return_value={"provider": provider, "model": model, "api_key": "fixture-selected-key"})
             agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
             with patch.dict("os.environ", {"HABAB_OPENAI_BASE_URL": "https://voice.example.test/v1"}):
                 with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
@@ -261,7 +262,10 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
             env = spawn.await_args.kwargs["env"]
             config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
             self.assertEqual(config["enabled_providers"], ["habab-" + provider])
+            self.assertEqual(config["model"], "habab-" + provider + "/" + model)
             self.assertEqual(config["provider"]["habab-" + provider]["options"]["baseURL"], expected_base)
+            self.assertEqual(config["provider"]["habab-" + provider]["npm"],
+                             "@ai-sdk/google" if provider == "habab" else "@ai-sdk/openai-compatible")
             self.assertEqual(env["HABAB_" + provider.upper() + "_KEY"], "fixture-selected-key")
             self.assertNotIn("HABAB_DEEPSEEK_KEY", env)
             self.assertNotIn("fixture-selected-key", env["OPENCODE_CONFIG_CONTENT"])

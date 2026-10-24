@@ -64,7 +64,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
     async def test_all_fixed_endpoints_and_tool_checks(self):
         self.assertEqual(provider_api_base("gemini"),
                          "https://generativelanguage.googleapis.com/v1beta")
-        for provider in ("habab", "openai", "deepseek"):
+        for provider in ("openai", "deepseek"):
             session = Session(Response(payload=message()))
             await ProviderClient(session, self.settings(provider)).check()
             self.assertEqual(session.request["url"], PROVIDERS[provider]["url"])
@@ -73,7 +73,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_old_openai_relay_environment_cannot_reroute_direct_providers(self):
         with patch.dict("os.environ", {"HABAB_OPENAI_BASE_URL": "https://old-relay.test/v1"}):
-            for provider in ("openai", "deepseek", "habab"):
+            for provider in ("openai", "deepseek"):
                 session = Session(Response(payload=message()))
                 await ProviderClient(session, self.settings(provider)).check()
                 self.assertEqual(session.request["url"], PROVIDERS[provider]["url"])

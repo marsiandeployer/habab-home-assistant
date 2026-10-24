@@ -25,4 +25,4 @@ class TransportTests(unittest.TestCase):
     def test_provider_base_has_no_environment_redirect(self):
         with patch.dict(os.environ, {'HABAB_OPENAI_BASE_URL': 'https://relay.test/v1'}):
             self.assertEqual(provider_api_base('openai'), 'https://api.openai.com/v1')
-            self.assertEqual(provider_api_base('habab'), 'https://habab-voice.wpmix.net/v1')
+            self.assertEqual(provider_api_base('habab'), 'https://habab-voice.wpmix.net/gemini/v1beta')

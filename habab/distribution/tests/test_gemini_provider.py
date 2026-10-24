@@ -10,7 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from google import genai
 from google.genai import errors, types
+import httpx
 
 from homeassistant.components.habab_home.providers import (
     PROVIDERS, ProviderClient, ProviderError, provider_api_base,
@@ -87,6 +89,47 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(fake.closed)
         self.assertEqual(provider_api_base("gemini"), "https://generativelanguage.googleapis.com/v1beta")
 
+    async def test_real_sdk_keeps_selected_native_route_and_key_in_header(self):
+        sdk_client = genai.Client
+        for provider, expected_url in (
+            ("gemini", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"),
+            ("habab", "https://habab-voice.wpmix.net/gemini/v1beta/models/gemini-3.1-flash-lite:generateContent"),
+        ):
+            with self.subTest(provider=provider):
+                requests = []
+                unused_clients = []
+
+                def handle(request):
+                    requests.append(request)
+                    return httpx.Response(200, json={"candidates": [{
+                        "finishReason": "STOP", "content": {"role": "model", "parts": [{
+                            "functionCall": {"id": "probe", "name": "habab_connection_test", "args": {"ok": True}},
+                        }]},
+                    }]})
+
+                def factory(*, api_key, http_options):
+                    if http_options.httpx_async_client is not None:
+                        self.assertFalse(http_options.httpx_async_client.follow_redirects)
+                        unused_clients.append(http_options.httpx_async_client)
+                    options = http_options.model_copy(update={
+                        "httpx_async_client": httpx.AsyncClient(transport=httpx.MockTransport(handle)),
+                    })
+                    return sdk_client(api_key=api_key, http_options=options)
+
+                with patch("homeassistant.components.habab_home.providers_gemini.genai.Client", side_effect=factory):
+                    await ProviderClient(None, self.settings(provider)).check()
+                for unused in unused_clients:
+                    await unused.aclose()
+                self.assertEqual(len(requests), 1)
+                request = requests[0]
+                self.assertEqual(str(request.url), expected_url)
+                self.assertEqual(request.headers["x-goog-api-key"], "fixture-not-a-real-key")
+                self.assertNotIn("authorization", request.headers)
+                self.assertFalse(request.url.query)
+                self.assertNotIn("fixture-not-a-real-key", str(request.url))
+                body = json.loads(request.content)
+                self.assertEqual(body["toolConfig"]["functionCallingConfig"]["mode"], "ANY")
+
     async def test_lazy_module_import_and_sdk_client_init_run_off_event_loop(self):
         fake = FakeClient([response(types.Part(text="ready"))])
         main_thread = threading.get_ident()
@@ -118,6 +161,12 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(fake.closed)
 
     async def test_auto_tool_roundtrip_preserves_google_id_and_thought_signature(self):
+        await self._assert_native_tool_roundtrip("gemini")
+
+    async def test_habab_tool_roundtrip_preserves_google_id_and_thought_signature(self):
+        await self._assert_native_tool_roundtrip("habab")
+
+    async def _assert_native_tool_roundtrip(self, provider):
         signature = b"opaque-thought-signature"
         first = response(
             types.Part(text="internal reasoning", thought=True),
@@ -130,7 +179,7 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         second = response(types.Part(text="Done."))
         fake, client_patch = self.make_client([first, second])
         with client_patch:
-            client = ProviderClient(None, self.settings())
+            client = ProviderClient(None, self.settings(provider))
             tools = [{"type": "function", "function": {
                 "name": "HassTurnOn", "description": "Turn on a selected device.",
                 "parameters": {"type": "object", "properties": {"name": {"type": "string"}},
@@ -325,7 +374,7 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.url = url
                 return _Response()
 
-        for provider in ("openai", "deepseek", "habab"):
+        for provider in ("openai", "deepseek"):
             session = DirectSession()
             with patch("homeassistant.components.habab_home.providers_gemini.genai.Client") as factory:
                 await DirectClient(session, self.settings(provider)).complete(

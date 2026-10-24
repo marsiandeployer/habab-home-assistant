@@ -2,7 +2,7 @@ import { strings } from "./strings.js";
 import "./telemetry-panel.js";
 
 const providers = {
-  habab: { name: "Habab", model: "gpt-4.1-mini", keyUrl: "https://habab.ru/" },
+  habab: { name: "Habab", model: "gemini-3.1-flash-lite", keyUrl: "https://habab.ru/" },
   openai: { name: "OpenAI", model: "gpt-4.1-mini", keyUrl: "https://platform.openai.com/api-keys" },
   deepseek: { name: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
   gemini: { name: "Google Gemini", model: "gemini-3.1-flash-lite", keyUrl: "https://aistudio.google.com/api-keys" },

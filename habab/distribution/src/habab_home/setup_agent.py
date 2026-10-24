@@ -190,7 +190,7 @@ class SetupAgent:
         settings = self.settings()
         provider = settings["provider"]
         is_deepseek = provider == "deepseek"
-        is_gemini = provider == "gemini"
+        is_gemini = provider in {"gemini", "habab"}
         provider_id = "habab-" + provider
         key_name = "HABAB_" + provider.upper() + "_KEY"
         fingerprint = runtime_fingerprint(settings, runtime_kind)

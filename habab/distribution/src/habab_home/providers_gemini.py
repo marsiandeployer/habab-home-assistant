@@ -10,7 +10,7 @@ from google.genai import errors as genai_errors
 from google.genai import types
 import httpx
 
-from .providers import MAX_RESPONSE_BYTES, REQUEST_TIMEOUT, ProviderError
+from .providers import MAX_RESPONSE_BYTES, REQUEST_TIMEOUT, ProviderError, provider_api_base
 
 MAX_TOOL_CALLS = 8
 MAX_SIGNATURE_BYTES = 64 * 1024
@@ -20,6 +20,7 @@ class GeminiProvider:
     """Translate the assistant tool-loop contract to Google's native API."""
 
     def __init__(self, settings: dict[str, str]) -> None:
+        self.provider = settings.get("provider", "gemini")
         self.api_key = settings["api_key"]
         self.model = settings["model"]
         self._calls: dict[str, tuple[str, bytes | None]] = {}
@@ -76,13 +77,15 @@ class GeminiProvider:
 
     def _create_client(self):
         """Build the SDK client away from HA's event loop."""
-        return genai.Client(
-            api_key=self.api_key,
-            http_options=types.HttpOptions(
-                api_version="v1beta", timeout=REQUEST_TIMEOUT * 1000,
-                retry_options=types.HttpRetryOptions(attempts=1),
-            ),
+        options = types.HttpOptions(
+            api_version="v1beta", timeout=REQUEST_TIMEOUT * 1000,
+            retry_options=types.HttpRetryOptions(attempts=1),
         )
+        if self.provider == "habab":
+            # Python's SDK appends api_version; OpenCode needs the full base.
+            options.base_url = provider_api_base("habab").removesuffix("/v1beta")
+            options.httpx_async_client = httpx.AsyncClient(follow_redirects=False)
+        return genai.Client(api_key=self.api_key, http_options=options)
 
     def _thinking_config(self) -> types.ThinkingConfig | None:
         if self.model == "gemini-3.1-flash-lite":
