@@ -25,6 +25,9 @@ REGIONS = {"cn", "de", "i2", "ru", "sg", "us"}
 REDIRECT_ORIGIN = "http://homeassistant.local:8123"
 COMPONENT_VERSION = "v0.5.0"
 ACTIVE_PHASES = {"oauth", "homes", "configuring"}
+ORIGIN_ATTACHABLE_PHASES = ACTIVE_PHASES | {
+    "ready", "install_required", "installing", "restart_required", "restarting", "error",
+}
 
 
 class SetupError(Exception):
@@ -122,8 +125,23 @@ class XiaomiSetup:
                 or not chat_id.lstrip("-").isdigit()
                 or type(origin.get("bot_id")) is not int or origin["bot_id"] <= 0):
             return None
-        return {"channel": "telegram", "owner": owner,
-                "entry_id": entry_id, "chat_id": chat_id, "bot_id": origin["bot_id"]}
+        result = {"channel": "telegram", "owner": owner,
+                  "entry_id": entry_id, "chat_id": chat_id, "bot_id": origin["bot_id"]}
+        has_user_id = "user_id" in origin
+        has_group_id = "group_id" in origin
+        if has_user_id != has_group_id:
+            return None
+        if has_user_id:
+            user_id, group_id = origin.get("user_id"), origin.get("group_id")
+            group_digits = group_id[1:] if isinstance(group_id, str) else ""
+            if (type(user_id) is not int or user_id <= 0
+                    or not isinstance(group_id, str) or len(group_id) > 32
+                    or not group_id.startswith("-") or not group_digits.isascii()
+                    or not group_digits.isdigit()
+                    or int(group_id) >= 0 or chat_id != str(user_id)):
+                return None
+            result.update(user_id=user_id, group_id=group_id)
+        return result
 
     async def setup(self):
         self.records = await self.store.async_load() or {}
@@ -197,8 +215,7 @@ class XiaomiSetup:
                         self.records[owner]["trusted_origin"] = origin
                 await self._save()
             elif (trusted_origin and owner in self.records
-                  and self.records[owner].get("phase") in {"ready", "install_required"}
-                  and not self.records[owner].get("entry_id")
+                  and self.records[owner].get("phase") in ORIGIN_ATTACHABLE_PHASES
                   and not self.records[owner].get("trusted_origin")):
                 origin = self._safe_origin(trusted_origin, owner)
                 if origin:

@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 import probatio
 from homeassistant.helpers.config_validation import multi_select
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.components.habab_telegram import TelegramManager
 from homeassistant.components.habab_home import xiaomi_setup as module
 from homeassistant.components.habab_home.xiaomi_setup import (
     SetupError, XiaomiSetup, authorization_link, callback_request,
@@ -177,6 +178,172 @@ class XiaomiSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await restarted.entry_loaded(entry))
         self.assertFalse(await restarted.entry_loaded(entry))
         telegram.notify_setup_complete.assert_awaited_once_with(origin, "xiaomi_home")
+        self.assertTrue(restarted.records["alice"]["completion_delivered"])
+
+    async def test_web_started_oauth_attaches_first_telegram_origin_without_retargeting(self):
+        manager = self.manager()
+        manager._loaded_at_start = True
+        await manager.request("alice")
+        manager.hass.config_entries.flow.async_init.return_value = {
+            "type": "form", "step_id": "eula", "flow_id": "web-flow"}
+        manager.hass.config_entries.flow.async_configure.side_effect = [
+            {"type": "form", "step_id": "auth_config"}, dict(OAUTH)]
+        web_form = await manager.begin("alice", "ru", True, "ru")
+        self.assertEqual(web_form["phase"], "oauth")
+        record = manager.records["alice"]
+        original_flow_id = record["flow_id"]
+        original_flow = manager._flows["alice"]
+        original_origin = {"channel": "telegram", "owner": "alice", "entry_id": "bot-one",
+                           "chat_id": "42", "bot_id": 99}
+
+        joined = await manager.request("alice", original_origin)
+        self.assertEqual(joined["phase"], "oauth")
+        self.assertEqual(record["flow_id"], original_flow_id)
+        self.assertIs(manager._flows["alice"], original_flow)
+        self.assertEqual(record["trusted_origin"], original_origin)
+        self.assertEqual(manager.store.data["alice"]["trusted_origin"], original_origin)
+
+        other_origin = {**original_origin, "entry_id": "other-bot", "chat_id": "43", "bot_id": 100}
+        await manager.request("alice", other_origin)
+        self.assertEqual(record["trusted_origin"], original_origin)
+        self.assertEqual(manager.store.data["alice"]["trusted_origin"], original_origin)
+
+        entry = SimpleNamespace(entry_id="xiaomi-one", state=SimpleNamespace(value="setup_in_progress"))
+        manager.hass.config_entries.async_get_entry = lambda entry_id: (
+            entry if entry_id == entry.entry_id else None)
+        telegram = SimpleNamespace(notify_setup_complete=AsyncMock(return_value=True))
+        manager.hass.data = {"habab_telegram": telegram}
+        await manager._advance("alice", {"type": "create_entry",
+                                          "result": SimpleNamespace(entry_id=entry.entry_id)})
+        entry.state.value = "loaded"
+        self.assertTrue(await manager.entry_loaded(entry))
+        telegram.notify_setup_complete.assert_awaited_once_with(original_origin, "xiaomi_home")
+        self.assertTrue(record["completion_delivered"])
+
+    async def test_completed_or_unknown_setup_cannot_gain_telegram_origin(self):
+        origin = {"channel": "telegram", "owner": "alice", "entry_id": "bot-one",
+                  "chat_id": "42", "bot_id": 99}
+        entry = SimpleNamespace(entry_id="xiaomi-one", state=SimpleNamespace(value="loaded"))
+        for phase in ("completed", "unknown"):
+            with self.subTest(phase=phase):
+                manager = self.manager()
+                manager.records["alice"] = {"phase": phase, "entry_id": entry.entry_id}
+                manager.hass.config_entries.async_get_entry = lambda entry_id: (
+                    entry if entry_id == entry.entry_id else None)
+                if phase == "completed":
+                    manager.hass.config_entries.async_entries = lambda _domain: [entry]
+                else:
+                    manager.hass.config_entries.async_entries = lambda _domain: []
+                with patch.object(module.device_registry, "async_get",
+                                  return_value=SimpleNamespace(devices=[])), \
+                        patch.object(module.entity_registry, "async_get",
+                                     return_value=SimpleNamespace(entities={})):
+                    result = await manager.request("alice", origin)
+                self.assertEqual(result["phase"], phase)
+                self.assertNotIn("trusted_origin", manager.records["alice"])
+
+    async def test_configuring_entry_can_gain_first_telegram_origin_without_replacement(self):
+        manager = self.manager()
+        entry = SimpleNamespace(entry_id="xiaomi-one", state=SimpleNamespace(value="setup_in_progress"))
+        manager.records["alice"] = {
+            "phase": "configuring", "entry_id": entry.entry_id, "region": "ru",
+            "flow_id": "existing-flow",
+        }
+        manager.hass.config_entries.async_get_entry = lambda entry_id: (
+            entry if entry_id == entry.entry_id else None)
+        origin = {"channel": "telegram", "owner": "alice", "entry_id": "bot-one",
+                  "chat_id": "42", "bot_id": 99}
+        with patch.object(module.device_registry, "async_get",
+                          return_value=SimpleNamespace(devices=[])), \
+                patch.object(module.entity_registry, "async_get",
+                             return_value=SimpleNamespace(entities={})):
+            result = await manager.request("alice", origin)
+        self.assertEqual(result["phase"], "configuring")
+        self.assertEqual(manager.records["alice"]["entry_id"], entry.entry_id)
+        self.assertEqual(manager.records["alice"]["flow_id"], "existing-flow")
+        self.assertIs(manager.hass.config_entries.async_get_entry(entry.entry_id), entry)
+        self.assertEqual(manager.records["alice"]["trusted_origin"], origin)
+
+    def test_safe_origin_preserves_only_complete_valid_member_identity(self):
+        owner_origin = {"channel": "telegram", "owner": "alice", "entry_id": "bot-one",
+                        "chat_id": "42", "bot_id": 99}
+        member_origin = {**owner_origin, "chat_id": "50", "group_id": "-200", "user_id": 50}
+        self.assertEqual(XiaomiSetup._safe_origin(owner_origin, "alice"), owner_origin)
+        self.assertEqual(XiaomiSetup._safe_origin(member_origin, "alice"), member_origin)
+
+        malformed_origins = (
+            {key: value for key, value in member_origin.items() if key != "user_id"},
+            {key: value for key, value in member_origin.items() if key != "group_id"},
+            {**member_origin, "owner": "bob"},
+            {**member_origin, "bot_id": True},
+            {**member_origin, "bot_id": 0},
+            {**member_origin, "user_id": True},
+            {**member_origin, "user_id": 0},
+            {**member_origin, "user_id": -50},
+            {**member_origin, "user_id": "50"},
+            {**member_origin, "group_id": "200"},
+            {**member_origin, "group_id": "--200"},
+            {**member_origin, "group_id": "-²"},
+            {**member_origin, "group_id": "-１２"},
+            {**member_origin, "group_id": "-" + "2" * 33},
+            {**member_origin, "chat_id": "51"},
+        )
+        for malformed in malformed_origins:
+            with self.subTest(origin=malformed):
+                self.assertIsNone(XiaomiSetup._safe_origin(malformed, "alice"))
+
+    async def test_member_origin_survives_restart_and_notifies_member_dm(self):
+        xiaomi = self.manager()
+        origin = {"channel": "telegram", "owner": "alice", "entry_id": "entry",
+                  "chat_id": "50", "bot_id": 99, "group_id": "-200", "user_id": 50}
+        await xiaomi.request("alice", origin)
+        entry = SimpleNamespace(entry_id="xiaomi-one", state=SimpleNamespace(value="setup_in_progress"))
+        xiaomi.hass.config_entries.async_get_entry = lambda entry_id: (
+            entry if entry_id == entry.entry_id else None)
+
+        bot_entry = SimpleNamespace(entry_id="entry", data={
+            "owner_id": "alice", "bot_username": "testbot", "bot_id": 99,
+        })
+        telegram = object.__new__(TelegramManager)
+        telegram.hass = SimpleNamespace(
+            auth=SimpleNamespace(async_get_user=AsyncMock(
+                return_value=SimpleNamespace(is_active=True, is_admin=True))),
+            config_entries=SimpleNamespace(async_entries=lambda _domain: [bot_entry]),
+        )
+        telegram.bindings = {"entry": {"chat_id": "10", "user_id": "20", "bot_id": 99}}
+        telegram.entries = {"entry": {
+            "chat_id": "10", "user_id": "20", "ready": True, "username": "testbot",
+        }}
+        telegram.group_bindings = {"entry": {
+            "chat_id": "-200", "title": "Home", "bot_id": 99, "owner_user_id": 20,
+        }}
+        telegram.get_chat_member = AsyncMock(side_effect=lambda _entry, _group, user: (
+            {"status": "administrator", "is_member": True} if user == 99 else
+            {"status": "member", "is_member": True}))
+        telegram.send = AsyncMock(return_value=True)
+        xiaomi.hass.data = {"habab_telegram": telegram}
+        xiaomi.records["alice"].update(
+            phase="configuring", entry_id=entry.entry_id, boot_id="previous-boot")
+        with patch.object(module, "Store", return_value=MemoryStore(deepcopy(xiaomi.records))):
+            restarted = XiaomiSetup(xiaomi.hass)
+        await restarted.setup()
+        self.assertEqual(restarted.records["alice"]["trusted_origin"], origin)
+
+        entry.state.value = "loaded"
+        telegram.get_chat_member.side_effect = lambda _entry, _group, user: (
+            {"status": "administrator", "is_member": True} if user == 99 else
+            {"status": "left", "is_member": False})
+        self.assertFalse(await restarted.entry_loaded(entry))
+        telegram.send.assert_not_awaited()
+        self.assertNotIn("completion_delivered", restarted.records["alice"])
+
+        telegram.get_chat_member.side_effect = lambda _entry, _group, user: (
+            {"status": "administrator", "is_member": True} if user == 99 else
+            {"status": "member", "is_member": True})
+        self.assertTrue(await restarted.entry_loaded(entry))
+        telegram.send.assert_awaited_once_with(
+            "entry", "50", "Настройка xiaomi_home завершена: интеграция загружена в Home Assistant.")
+        self.assertNotEqual(telegram.send.await_args.args[1], "-200")
         self.assertTrue(restarted.records["alice"]["completion_delivered"])
 
     async def test_failed_restart_returns_to_retry_and_preserves_no_exception_text(self):

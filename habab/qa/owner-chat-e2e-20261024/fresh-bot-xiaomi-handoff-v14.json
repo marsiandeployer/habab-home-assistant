@@ -1,0 +1,27 @@
+{
+  "scope": "New BotFather bot, protected UI configure and owner pairing, then live Telegram continuation of existing web Xiaomi OAuth",
+  "bot_created_from_scratch": true,
+  "ui_token_field_cleared": true,
+  "before_phase": "oauth",
+  "origin_before": false,
+  "prompt_sent_once": true,
+  "reply_received": true,
+  "reply_characters": 468,
+  "reply_sha256": "c57ec2dfa523685dc34ac36f341a23a75f845ae36ca5583c8a0e5d3039afa6ad",
+  "elapsed_seconds": 4.33,
+  "after_phase": "oauth",
+  "flow_preserved": true,
+  "region_preserved": true,
+  "origin_attached": true,
+  "origin_matches_fresh_bot": true,
+  "xiaomi_entry_count": 0,
+  "vendor_login_completed": false,
+  "status": "PASS_HANDOFF_ONLY",
+  "semantic_review": {
+    "existing_oauth_step_recognized": true,
+    "protected_web_chat_identified": true,
+    "does_not_request_password_or_code_in_telegram": true,
+    "does_not_claim_card_rendered_in_telegram": true,
+    "does_not_request_restart_of_signin": true
+  }
+}

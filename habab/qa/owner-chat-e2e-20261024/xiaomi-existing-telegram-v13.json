@@ -1,0 +1,34 @@
+{
+  "scope": "Existing Xiaomi Home is recognized from actual Telegram request; no fresh OAuth claim",
+  "before": {
+    "vacuum_states": [
+      "docked"
+    ]
+  },
+  "sent_once": true,
+  "reply_received": true,
+  "reply_characters": 203,
+  "reply_sha256": "dbe5c146bdac86d813cc50307dbe7a6ff45ad1694bcc86240fe13b018f657d47",
+  "elapsed_seconds": 8.24,
+  "after": {
+    "vacuum_states": [
+      "docked"
+    ]
+  },
+  "trace": {
+    "prompt_correlated": true,
+    "tool_names": [
+      "bash",
+      "bash"
+    ],
+    "ha_actions": [
+      "integrations",
+      "devices"
+    ]
+  },
+  "semantic_review": {
+    "already_connected_reported": true,
+    "actual_vacuum_identified": true,
+    "no_repeat_signin_requested": true
+  }
+}

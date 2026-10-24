@@ -77,8 +77,17 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
             setup = await xiaomi.request(owner)
         else:
             setup = await xiaomi.request(owner, trusted_origin)
+        telegram = isinstance(trusted_origin, dict) and trusted_origin.get("channel") == "telegram"
+        location = (
+            "The owner's setup card is available only in the Home Assistant web chat. "
+            "For a remaining protected step, ask the user to open that web chat. "
+            "If the returned phase is completed, explain that Xiaomi is already connected; do not ask for sign-in again. "
+            "Do not claim that a card or password field is displayed in Telegram. "
+            if telegram else
+            "The owner's setup card is shown inside this Home Assistant web chat. "
+        )
         return {"setup": setup,
-                "instruction": "The owner's setup card is shown inside this Home Assistant chat. It installs the pinned official component, asks before restarting, opens Xiaomi sign-in, and imports devices from the selected homes (a single home is automatic). There is no device-picker or password field in the card. Passwords and verification codes are entered only on the official Xiaomi website. A failed local redirect can be pasted only into the card's protected callback field, never chat messages. Explain only controls for the returned phase."}
+                "instruction": location + "It installs the pinned official component, asks before restarting, opens Xiaomi sign-in, and imports devices from the selected homes (a single home is automatic). There is no device-picker or password field in the card. Passwords and verification codes are entered only on the official Xiaomi website. A failed local redirect can be pasted only into the card's protected callback field, never chat messages. Explain only controls for the returned phase."}
     if action == "integrations":
         return {"integrations": [{"entry_id": e.entry_id, "domain": e.domain, "title": e.title,
                                   "state": e.state.value} for e in hass.config_entries.async_entries()]}

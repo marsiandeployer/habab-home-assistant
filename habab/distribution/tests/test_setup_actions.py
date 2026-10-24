@@ -40,6 +40,22 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(secret, json.dumps(result))
             telegram.status.assert_awaited_once_with("alice")
 
+    async def test_xiaomi_handoff_describes_the_authenticated_channel_without_exposing_secrets(self):
+        xiaomi = SimpleNamespace(request=AsyncMock(return_value={"phase": "oauth", "region": "ru"}))
+        hass = SimpleNamespace(data={DOMAIN: {"xiaomi_setup": xiaomi}})
+        origin = {"channel": "telegram", "owner": "alice", "entry_id": "bot", "chat_id": "42", "bot_id": 99}
+        telegram = await execute(hass, None, "alice", {"action": "xiaomi_setup"}, trusted_origin=origin)
+        xiaomi.request.assert_awaited_once_with("alice", origin)
+        self.assertEqual(telegram["setup"], {"phase": "oauth", "region": "ru"})
+        self.assertIn("available only in the Home Assistant web chat", telegram["instruction"])
+        self.assertIn("Do not claim", telegram["instruction"])
+        self.assertIn("never chat messages", telegram["instruction"])
+        xiaomi.request.reset_mock()
+        web = await execute(hass, None, "alice", {"action": "xiaomi_setup", "trusted_origin": origin})
+        xiaomi.request.assert_awaited_once_with("alice")
+        self.assertIn("shown inside this Home Assistant web chat", web["instruction"])
+        self.assertNotIn("ask the user to open", web["instruction"])
+
     def test_flow_result_never_returns_entry_credentials_or_defaults(self):
         result = flow_result({"type": "create_entry", "flow_id": "flow-one", "title": "Private",
             "data": {"api_key": "fixture-private-key"}, "result": object(),

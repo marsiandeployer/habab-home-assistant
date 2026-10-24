@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "botfather_creation": "PASS_ACTUAL_NEW_BOT",
+  "protected_ui_configure": "PASS",
+  "token_field_cleared": true,
+  "owner_pairing": "PASS_ACTUAL_PYROGRAM_START_NONCE",
+  "fresh_native_telegram_phase": "connected",
+  "welcome_group_and_private_dm_instructions_manually_reviewed": true,
+  "distinct_from_primary_bot": true,
+  "primary_bot_token_unchanged": true,
+  "bot_tokens_published": false,
+  "scope": "Actual creation and protected UI onboarding of an isolated new QA bot; no second-human membership acceptance claimed"
+}

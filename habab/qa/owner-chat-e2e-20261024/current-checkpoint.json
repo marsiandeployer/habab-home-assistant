@@ -2,7 +2,7 @@
   "scope": "Owner server QA; Windows and Android physical tunnels intentionally off",
   "frontend_wheel": "20260930.4+habab.7",
   "frontend_sha256": "1d518e7cf632827f04481f0ef0d8ad3aec65d17b25cdc73f1b79c34de0ee1867",
-  "server_candidate": "v12_installed",
+  "server_candidate": "v14_installed",
   "server_unit_tests": 148,
   "browser_addon_tests": 33,
   "native_frontend_tests": 17,
@@ -21,5 +21,10 @@
     "Android physical voice and Windows client acceptance not run; user tunnels intentionally off.",
     "Vacuum actions confirmed by fresh bot replies and HA device states; human physical observation not claimed."
   ],
-  "gemini_saved_connection_check": "PASS_NATIVE_SDK_NO_BLOCKING_WARNINGS"
+  "gemini_saved_connection_check": "PASS_NATIVE_SDK_NO_BLOCKING_WARNINGS",
+  "new_change_targeted_server_tests": 88,
+  "fresh_bot_creation_and_onboarding": "PASS",
+  "fresh_xiaomi_web_to_telegram_continuation": "PASS_SAME_OAUTH_FLOW",
+  "goal_complete": false,
+  "remaining_acceptance": "Authorize the Xiaomi test account, import its device into the isolated installation, then verify chat control there."
 }
