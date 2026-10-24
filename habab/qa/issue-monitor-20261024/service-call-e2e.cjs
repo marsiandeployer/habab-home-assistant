@@ -14,6 +14,21 @@ const FIXTURE_ID_PREFIX = "habab_qa_service_call_20261024";
 const PRIVATE_TRACE_NAME = "service-call-e2e-private.json";
 const ALLOWED_ORIGIN = "https://habab-demo.wpmix.net";
 
+function hasAcceptedTurn(messages, prompt, transitions) {
+  let observedStart = false;
+  let observedFinish = false;
+  for (const transition of transitions) {
+    if (transition.busy === true) observedStart = true;
+    else if (observedStart && transition.busy === false) observedFinish = true;
+  }
+  const userMessage = messages.at(-2);
+  const assistantMessage = messages.at(-1);
+  return observedStart && observedFinish
+    && userMessage?.role === "user" && userMessage.text === prompt
+    && assistantMessage?.role === "assistant"
+    && typeof assistantMessage.text === "string" && assistantMessage.text.trim().length > 0;
+}
+
 function args(argv) {
   const parsed = { runLive: false };
   for (let i = 2; i < argv.length; i += 1) {
@@ -295,7 +310,10 @@ async function main() {
     }
     if (page) {
       try {
-        await page.evaluate(() => localStorage.removeItem("hassTokens"));
+        await page.evaluate(() => {
+          window.__hababQaBusyObserver?.disconnect();
+          localStorage.removeItem("hassTokens");
+        });
       } catch {
         // The owned Chromium profile is removed by withOwnedChromium.
       }
@@ -398,6 +416,18 @@ async function main() {
         }, "call_service");
       }, entityId);
       unsubscribeInstalled = true;
+      await page.evaluate(() => {
+        const chat = document.querySelector("habab-setup-chat");
+        const send = chat.shadowRoot.querySelector(".send");
+        const stop = chat.shadowRoot.querySelector(".stop");
+        window.__hababQaBusyTransitions = [];
+        window.__hababQaBusyObserver = new MutationObserver(() => {
+          window.__hababQaBusyTransitions.push({ busy: chat.busy, send_disabled: send.disabled,
+            stop_hidden: stop.hidden });
+        });
+        window.__hababQaBusyObserver.observe(send, { attributes: true, attributeFilter: ["disabled"] });
+        window.__hababQaBusyObserver.observe(stop, { attributes: true, attributeFilter: ["hidden"] });
+      });
 
       // Calibrate the event observer through native HA helper/service APIs.
       // These two direct calls are apparatus only, never counted as chat proof.
@@ -427,24 +457,46 @@ async function main() {
       async function sendTurn(name, prompt, expectedState, expectedService) {
         const start = await page.evaluate(() => {
           const chat = document.querySelector("habab-setup-chat");
-          return { message_count: chat.messages.length, event_count: window.__hababQaServiceCalls.length };
+          return { busy: chat.busy, send_disabled: chat.shadowRoot.querySelector(".send").disabled,
+            event_count: window.__hababQaServiceCalls.length,
+            transition_count: window.__hababQaBusyTransitions.length };
         });
+        assert.equal(start.busy, false, `${name}_chat_already_busy`);
+        assert.equal(start.send_disabled, false, `${name}_send_disabled_before_submit`);
         privateTrace.prompts.push({ name, text: prompt });
         persistPrivate();
         chatTurnMayBeActive = true;
-        await page.evaluate((text) => {
+        const submitted = await page.evaluate((text) => {
           const chat = document.querySelector("habab-setup-chat");
+          const send = chat.shadowRoot.querySelector(".send");
+          if (chat.busy || send.disabled) return false;
           const input = chat.shadowRoot.querySelector("textarea");
           input.focus();
           input.value = text;
           input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-          chat.shadowRoot.querySelector(".send").click();
+          send.click();
+          return true;
         }, prompt);
-        await page.waitForFunction(({ count }) => {
+        if (!submitted) {
+          chatTurnMayBeActive = false;
+          throw new Error(`${name}_submit_rejected`);
+        }
+        await page.waitForFunction((startCount) => window.__hababQaBusyTransitions
+          .slice(startCount).some((transition) => transition.busy === true),
+        { timeout: 5000 }, start.transition_count);
+        await page.waitForFunction(({ count, prompt }) => {
           const chat = document.querySelector("habab-setup-chat");
           const error = chat.shadowRoot.querySelector("#status")?.classList.contains("error");
-          return !chat.busy && (chat.messages.length >= count + 2 || error);
-        }, { timeout: 210000 }, { count: start.message_count });
+          const transitions = window.__hababQaBusyTransitions.slice(count);
+          const started = transitions.some((transition) => transition.busy === true);
+          const finished = transitions.some((transition, index) => index > transitions.findIndex((item) => item.busy === true)
+            && transition.busy === false);
+          const latest = chat.messages.slice(-2);
+          const exactPromptAndReply = latest.length === 2 && latest[0]?.role === "user"
+            && latest[0].text === prompt && latest[1]?.role === "assistant"
+            && typeof latest[1].text === "string" && !!latest[1].text.trim();
+          return started && finished && !chat.busy && (exactPromptAndReply || error);
+        }, { timeout: 210000 }, { count: start.transition_count, prompt });
         chatTurnMayBeActive = false;
         const reply = await page.evaluate(() => {
           const chat = document.querySelector("habab-setup-chat");
@@ -453,8 +505,13 @@ async function main() {
         });
         privateTrace.replies.push({ name, text: reply.text });
         const events = await page.evaluate((offset) => window.__hababQaServiceCalls.slice(offset), start.event_count);
+        const completion = await page.evaluate((offset) => ({
+          messages: document.querySelector("habab-setup-chat").messages.slice(-2),
+          transitions: window.__hababQaBusyTransitions.slice(offset).map((item) => ({ busy: item.busy })),
+        }), start.transition_count);
         privateTrace.call_service_events.push({ name, events });
         persistPrivate();
+        assert.ok(hasAcceptedTurn(completion.messages, prompt, completion.transitions), `${name}_turn_not_correlated`);
         assert.equal(reply.role, "assistant", `${name}_assistant_reply_missing_or_failed`);
         assert.equal(reply.error, false, `${name}_turn_ended_with_error`);
 
@@ -477,6 +534,7 @@ async function main() {
         assert.equal(state?.friendly_name, FIXTURE_NAME, `${name}_fixture_missing`);
         assert.equal(state.state, expectedState, `${name}_readback_mismatch`);
         report.cases[name] = { assistant_replied: true, service_call_count: events.length,
+          submission_accepted: true,
           target_matched: expectedService ? events[0]?.targets_fixture === true : false,
           context_matched: expectedService ? events[0]?.context_user_id === ownerUserId : false,
           readback: state.state };
@@ -514,9 +572,13 @@ async function pageHelperExists(page, helperId) {
   }, helperId);
 }
 
-main().catch((error) => {
-  const code = error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
-    ? error.message : "preflight_failed";
-  process.stderr.write(`${code}\n`);
-  process.exitCode = 1;
-});
+module.exports = { hasAcceptedTurn };
+
+if (require.main === module) {
+  main().catch((error) => {
+    const code = error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
+      ? error.message : "preflight_failed";
+    process.stderr.write(`${code}\n`);
+    process.exitCode = 1;
+  });
+}

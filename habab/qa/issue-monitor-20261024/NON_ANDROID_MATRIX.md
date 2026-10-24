@@ -2,6 +2,18 @@
 
 Prepared 2026-10-24 from the local issue snapshot, product docs, source contracts, and existing QA artifacts. This is a finite test map for implemented non-Android chat capabilities; it does not claim all Home Assistant integrations, devices, or radio paths have been tested.
 
+## Current cloud checkpoint
+
+The first 0.3.5 checkpoint used source `96551e39e5ea4b8c3de48e4a47f38d7c330907b8`, image `sha256:b4a39badcf4cba07073a989ad6f03650eaa33c85c4bda349ab05c7aa17637987`. Independent readback matched all 42 tracked component files and the authenticated native status. That deployment failed the named-list scenario below.
+
+The coordinated release owner subsequently deployed source `9d795359c22cf2844884caa5affc94209a8120ca`, image `sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29`, still version 0.3.5. It changes the general target-selection instructions. The reported first retry reached the correct target through a get/add/get service trace; independent UI and the remaining risk cases are still pending. This is a prompt change, not a deterministic actuator binding. The runner must collect a new independent source/image attestation before its own live run; the prior 0.3.5 receipt is insufficient despite the shared version number.
+
+- Provider metadata readback reports selected Habab / `gemini-3.1-flash-lite`, loaded and API-verified with a check timestamp. The list response contains no keys or settings fingerprints. The coordinated cloud owner separately accepted Gateway and provider UI checks.
+- Issue #12 is **FAIL** on the first 0.3.5 checkpoint: an explicitly named new QA list remained empty, while the older QA list received an additional item. Both exact registered names exist; the shorter old name is a prefix of the requested new name. A timeout in the initial harness also used an invalid growing-history assumption at the 60-message cap; fixing that harness does not erase the independent wrong-target failure.
+- The service-call runner has not sent model prompts or created a helper. It requires a new exclusive test window and fresh source/image attestation after the coordinated shopping/release work finishes. Android remains excluded.
+
+The original matrix below was prepared against v15/source `a3c1d3f06`. For every pending live case, use the freshly verified current cloud release rather than the historical preparation target. Older evidence retains its original identity.
+
 ## Runtime and evidence rules
 
 - Acceptance target supplied for this task: owner-test **Habab Home 0.3.4 v15 / source `a3c1d3f06`**. Verify the installed image and source before each live run. Workspace candidates `3b0` / `339` are not this deployed runtime.

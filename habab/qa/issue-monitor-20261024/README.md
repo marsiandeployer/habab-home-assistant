@@ -14,7 +14,7 @@ The disposable helper setup is a separate native HA test-apparatus step, not a c
 
 Before the chat turns, an observer calibration directly toggles this exact fixture on and off through native HA WebSocket service calls. Those apparatus calls are separately recorded and are never counted as chat proof. Each must produce one matching `call_service` event with the exact fixture target and authenticated-user context, plus the matching independent REST state readback. If the observer does not see either calibration call, the runner stops before the model prompts; silence is not treated as proof that a later unknown-target turn made no call.
 
-The three bounded prompts request only: turn on the created helper, turn it off, and act on a nonexistent named device. The calibrated `call_service` event subscription observes service domain/name/targets through the complete chat turn. Positive cases require exactly one expected service call targeting only the newly created helper, matching authenticated-user context, and an independent REST state readback. The negative case waits until the assistant turn ends, requires zero service-call events, and independently verifies the helper remains off. The runner never calls `setup_actions.execute` or `habab-ha` as a substitute for chat.
+The three bounded prompts request only: turn on the created helper, turn it off, and act on a nonexistent named device. For each prompt, completion requires an observed post-submit busy start and finish plus an exact trailing user-prompt/assistant-reply pair. It does not depend on message count, so it handles the backend's 60-message history cap and cannot accept a preexisting matching pair if submit was skipped. The calibrated `call_service` event subscription observes service domain/name/targets through the complete chat turn. Positive cases require exactly one expected service call targeting only the newly created helper, matching authenticated-user context, and an independent REST state readback. The negative case waits until the assistant turn ends, requires zero service-call events, and independently verifies the helper remains off. The runner never calls `setup_actions.execute` or `habab-ha` as a substitute for chat.
 
 After the turns, native HA cleanup deletes only the helper ID returned by this run via `input_boolean/delete` (Home Assistant's helper API uses a helper ID, not a config-entry ID). The runner verifies the exact helper is absent from `input_boolean/list` and that its entity has no state. A public report is `PASS` only if observer calibration, both action/readback cases, the no-call negative case, and exact helper cleanup pass. If the browser disconnects after fixture creation, the private trace retains the exact helper ID for owner cleanup; the public report is failure, not acceptance.
 
@@ -36,7 +36,7 @@ node habab/qa/issue-monitor-20261024/service-call-e2e.cjs \
   --expected-image "$HABAB_QA_EXPECTED_IMAGE" \
   --expected-source "$HABAB_QA_EXPECTED_SOURCE" \
   --expected-runtime "$HABAB_QA_EXPECTED_RUNTIME" \
-  --expected-product-version 0.3.4 \
+  --expected-product-version "$HABAB_QA_EXPECTED_PRODUCT_VERSION" \
   --expected-ha-version 2026.10.2
 ```
 
@@ -48,4 +48,11 @@ Only after root explicitly grants the test window, append `--run-live --executio
 
 ## Local checks performed during preparation
 
-`node --check habab/qa/issue-monitor-20261024/service-call-e2e.cjs` is syntax-only. The corrected read-only status preflight passed against owner-test v15 (`0.3.4`, Core `2026.10.2`, source `a3c1d3f06`, image `47c06194…`). No browser, model prompt, helper creation, service call, or cloud mutation has been performed as part of preparation.
+Syntax and local correlation checks:
+
+```sh
+node --check habab/qa/issue-monitor-20261024/service-call-e2e.cjs
+node habab/qa/issue-monitor-20261024/service-call-e2e-completion.test.cjs
+```
+
+The synthetic check confirms a completed prompt/reply pair is accepted at exactly 60 items and rejects a preexisting pair without a busy cycle, an unfinished turn, an unrelated prompt, and a missing reply. The corrected read-only status preflight passed against owner-test v15 (`0.3.4`, Core `2026.10.2`, source `a3c1d3f06`, image `47c06194…`). No browser, model prompt, helper creation, service call, or cloud mutation has been performed as part of preparation.
