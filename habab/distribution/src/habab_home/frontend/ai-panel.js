@@ -15,6 +15,10 @@ class HababAIPanel extends HTMLElement {
     this.provider = "openai";
     this.connections = [];
     this.pipelines = [];
+    this.keyFetchGeneration = 0;
+    this.keyVisibilityPreference = null;
+    this.keyEdited = false;
+    this.modelEdited = false;
     this.onAssistantAvailability = () => this.updateControls();
   }
 
@@ -40,6 +44,7 @@ class HababAIPanel extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener("habab-assistant-availability", this.onAssistantAvailability);
+    this.keyFetchGeneration += 1;
     this.busy = false;
     const key = this.shadowRoot.querySelector("#key");
     if (key) key.value = "";
@@ -62,7 +67,7 @@ class HababAIPanel extends HTMLElement {
       h2{font-size:22px;font-weight:500;margin:0 0 var(--ha-space-2,8px)}h3{font-size:16px;font-weight:500;margin:var(--ha-space-6,24px) 0 var(--ha-space-2,8px)}
       .help,.status{color:var(--secondary-text-color);font-size:13px}.status{margin-block:var(--ha-space-2,8px)}ol{padding-inline-start:22px;margin:8px 0 16px}li{padding-inline-start:4px;margin-block:8px}
       form{margin-block-start:var(--ha-space-6,24px)}label{display:block;font-weight:500;margin:var(--ha-space-4,16px) 0 var(--ha-space-2,8px)}input,textarea{width:100%;min-width:0;padding:12px;border:1px solid var(--secondary-text-color);border-radius:6px;background:var(--card-background-color);color:var(--primary-text-color);caret-color:var(--primary-color)}
-      input{height:48px}.key-row{display:flex;gap:8px}.key-row input{flex:1}.key-row button{flex:none}textarea{resize:vertical;min-height:88px}input::placeholder,textarea::placeholder{color:var(--secondary-text-color);opacity:1}
+      input{height:48px}.key-row{display:flex;gap:8px}.key-row input{flex:1}.key-row button{display:inline-flex;flex:none;align-items:center;justify-content:center;min-width:48px;padding:8px}.key-row ha-icon{--mdc-icon-size:20px}textarea{resize:vertical;min-height:88px}input::placeholder,textarea::placeholder{color:var(--secondary-text-color);opacity:1}
       .actions{display:flex;flex-wrap:wrap;gap:var(--ha-space-2,8px);margin-block:var(--ha-space-4,16px)}.primary{background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color));border-color:transparent;color:var(--ha-color-on-primary-loud,var(--text-primary-color))}.primary:hover{filter:brightness(.93);background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color))}
       #feedback{padding:var(--ha-space-4,16px);border:1px solid var(--divider-color);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}#feedback[data-error=true]{color:var(--error-color)}[hidden]{display:none!important}
       .assistant{padding-block-start:var(--ha-space-8,32px);border-block-start:1px solid var(--divider-color)}.links{display:flex;flex-wrap:wrap;gap:12px 24px;margin-block:16px}.disclosure{margin-block-start:32px}
@@ -75,7 +80,7 @@ class HababAIPanel extends HTMLElement {
       <a id="key-link" target="_blank" rel="noopener noreferrer">${this.t("getKey")}</a>
       <h3>${this.t("guide")}</h3><ol id="guide"></ol>
       <form><label for="model">${this.t("model")}</label><input id="model" name="model" required maxlength="128" autocomplete="off" aria-describedby="model-help"><p class="help" id="model-help">${this.t("modelHelp")}</p>
-      <label for="key">${this.t("key")}</label><div class="key-row"><input id="key" name="api_key" type="password" required maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="key-help"><button type="button" id="reveal" aria-pressed="false">${this.t("show")}</button></div>
+      <label for="key">${this.t("key")}</label><div class="key-row"><input id="key" name="api_key" type="password" required maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="key-help"><button type="button" id="reveal" aria-label="${this.t("show")}" aria-pressed="false"><ha-icon icon="mdi:eye"></ha-icon></button></div>
       <p class="help" id="key-help">${this.t("keyHelp")}</p><div class="actions"><button class="primary" type="submit">${this.t("save")}</button><button type="button" id="check">${this.t("check")}</button></div><p class="help">${this.t("cost")}</p></form>
       <div id="feedback" role="status" aria-live="polite" hidden></div></section></div>
       <section class="assistant" aria-labelledby="assistant-title"><h2 id="assistant-title">${this.t("assistantTitle")}</h2><p>${this.t("assistantHelp")}</p>
@@ -92,33 +97,67 @@ class HababAIPanel extends HTMLElement {
       this.selectProvider();
     });
     this.q("form").addEventListener("submit", (event) => { event.preventDefault(); this.save(); });
+    this.q("#key").addEventListener("input", () => {
+      this.keyEdited = true;
+      this.keyFetchGeneration += 1;
+    });
+    this.q("#model").addEventListener("input", () => { this.modelEdited = true; });
     this.q("#reveal").addEventListener("click", () => {
       const showing = this.q("#key").type === "password";
-      this.q("#key").type = showing ? "text" : "password";
-      this.q("#reveal").textContent = this.t(showing ? "hide" : "show");
-      this.q("#reveal").setAttribute("aria-pressed", String(showing));
+      this.keyVisibilityPreference = showing ? "visible" : "hidden";
+      this.applyKeyVisibility();
     });
     this.q("#check").addEventListener("click", () => this.check());
     this.q("#open-assistant").addEventListener("click", () => this.openAssistant());
     this.selectProvider();
   }
 
-  selectProvider() {
+  selectProvider({ preserveDraft = false } = {}) {
     const provider = providers[this.provider];
+    const generation = ++this.keyFetchGeneration;
     this.q("#provider-title").textContent = provider.name;
     this.q("#key-link").href = provider.keyUrl;
     this.q("#key-link").textContent = this.t(this.provider === "habab" ? "hababOpen" : "getKey");
-    this.q("#model").value = this.entry()?.model || provider.model;
-    this.q("#key").value = "";
-    this.q("#key").type = "password";
-    this.q("#reveal").textContent = this.t("show");
-    this.q("#reveal").setAttribute("aria-pressed", "false");
+    if (!preserveDraft || !this.modelEdited) {
+      this.q("#model").value = this.entry()?.model || provider.model;
+      this.modelEdited = false;
+    }
+    if (!preserveDraft || !this.keyEdited) {
+      this.q("#key").value = "";
+      this.keyEdited = false;
+    }
+    this.applyKeyVisibility();
     this.q("#guide").replaceChildren(...this.t(`${this.provider}Guide`).map((text) => {
       const item = document.createElement("li"); item.textContent = text; return item;
     }));
     this.shadowRoot.querySelectorAll("[data-provider]").forEach((item) => item.setAttribute("aria-pressed", String(item.dataset.provider === this.provider)));
     this.q("#feedback").hidden = true;
     this.updateControls();
+    const entry = this.entry();
+    if (!entry || this.keyEdited) return;
+    this._hass.callWS({ type: "habab_home/providers/key", entry_id: entry.entry_id })
+      .then((result) => {
+        if (!this.isConnected || generation !== this.keyFetchGeneration ||
+            this.provider !== entry.provider || this.entry()?.entry_id !== entry.entry_id || this.keyEdited) return;
+        this.q("#key").value = result.api_key;
+        this.applyKeyVisibility();
+      })
+      .catch((error) => {
+        if (!this.isConnected || generation !== this.keyFetchGeneration ||
+            this.provider !== entry.provider || this.entry()?.entry_id !== entry.entry_id) return;
+        this.feedback(this.t(error.code), true);
+      });
+  }
+
+  applyKeyVisibility() {
+    const key = this.q("#key");
+    const button = this.q("#reveal");
+    const visible = this.keyVisibilityPreference === "visible" ||
+      (this.keyVisibilityPreference === null && !!this.entry());
+    key.type = visible ? "text" : "password";
+    button.setAttribute("aria-label", this.t(visible ? "hide" : "show"));
+    button.setAttribute("aria-pressed", String(visible));
+    button.querySelector("ha-icon").setAttribute("icon", visible ? "mdi:eye-off" : "mdi:eye");
   }
 
   async refresh() {
@@ -130,6 +169,7 @@ class HababAIPanel extends HTMLElement {
       this.connections = connections.connections;
       this.pipelines = pipelines.pipelines;
       this.updateControls();
+      this.selectProvider({ preserveDraft: true });
       this.q("#pipeline-status").textContent = this.pipelines.length
         ? this.t("pipelinesReady").replace("{count}", String(this.pipelines.length))
         : this.t("pipelinesMissing");
@@ -170,6 +210,8 @@ class HababAIPanel extends HTMLElement {
       await this._hass.callWS({ type: "habab_home/providers/save", provider: this.provider,
         model: this.q("#model").value.trim(), api_key: this.q("#key").value.trim() });
       this.q("#key").value = "";
+      this.keyEdited = false;
+      this.modelEdited = false;
       await this.refresh();
       this.feedback(this.t("verified"));
     }, "providerSaveTimeout");

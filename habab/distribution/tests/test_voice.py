@@ -15,7 +15,7 @@ from homeassistant.components.habab_home.assist_adapter import parse_calls
 from homeassistant.components.habab_home.providers import (
     PROVIDERS, ProviderClient, ProviderError, provider_api_base, validate_settings,
 )
-from homeassistant.components.habab_home.websocket import save_connection
+from homeassistant.components.habab_home.websocket import get_connection_key, save_connection
 
 
 class Stream:
@@ -113,6 +113,53 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         flow.async_abort.assert_called_once_with("failed-flow")
         connection.send_error.assert_called_once_with(1, "invalid_auth", "invalid_auth")
         connection.send_result.assert_not_called()
+
+    async def test_saved_key_command_rejects_non_admin_before_reading_credentials(self):
+        from homeassistant.exceptions import Unauthorized
+
+        for user in (None, SimpleNamespace(is_admin=False)):
+            with self.subTest(user=user):
+                hass = SimpleNamespace(config_entries=Mock())
+                connection = Mock(user=user)
+                with self.assertRaises(Unauthorized):
+                    get_connection_key(hass, connection, {"id": 6, "entry_id": "selected-entry"})
+                hass.config_entries.async_get_entry.assert_not_called()
+                connection.send_result.assert_not_called()
+
+    async def test_saved_key_command_returns_only_the_selected_entry_key(self):
+        from homeassistant.components.habab_home.const import DOMAIN
+
+        entry = SimpleNamespace(domain=DOMAIN, data={"api_key": "fixture-saved-key"})
+        hass = SimpleNamespace(config_entries=SimpleNamespace(
+            async_get_entry=Mock(return_value=entry)))
+        connection = Mock()
+
+        await inspect.unwrap(get_connection_key)(hass, connection, {
+            "id": 7, "entry_id": "selected-entry",
+        })
+
+        hass.config_entries.async_get_entry.assert_called_once_with("selected-entry")
+        connection.send_result.assert_called_once_with(7, {"api_key": "fixture-saved-key"})
+        connection.send_error.assert_not_called()
+
+    async def test_saved_key_command_rejects_missing_or_foreign_entries(self):
+        from homeassistant.components.habab_home.const import DOMAIN
+
+        for entry in (
+            None,
+            SimpleNamespace(domain="another_integration", data={"api_key": "fixture-key"}),
+            SimpleNamespace(domain=DOMAIN, data={}),
+            SimpleNamespace(domain=DOMAIN, data={"api_key": ""}),
+        ):
+            with self.subTest(entry=entry):
+                hass = SimpleNamespace(config_entries=SimpleNamespace(
+                    async_get_entry=Mock(return_value=entry)))
+                connection = Mock()
+                await inspect.unwrap(get_connection_key)(hass, connection, {
+                    "id": 8, "entry_id": "selected-entry",
+                })
+                connection.send_error.assert_called_once_with(8, "not_found", "not_found")
+                connection.send_result.assert_not_called()
 
     async def test_successful_save_selects_provider_without_returning_flow_credentials(self):
         flow = SimpleNamespace(async_init=AsyncMock(return_value={"type": "create_entry", "data": {"api_key": "fixture-secret"}}))

@@ -16,6 +16,7 @@ from .setup_agent import AgentError
 @callback
 def async_register_commands(hass):
     websocket_api.async_register_command(hass, list_connections)
+    websocket_api.async_register_command(hass, get_connection_key)
     websocket_api.async_register_command(hass, save_connection)
     websocket_api.async_register_command(hass, check_connection)
     websocket_api.async_register_command(hass, agent_session)
@@ -105,6 +106,25 @@ async def list_connections(hass, connection, msg):
             "entities": entities,
         })
     connection.send_result(msg["id"], {"connections": entries})
+
+
+@websocket_api.websocket_command({
+    probatio.Required("type"): "habab_home/providers/key",
+    probatio.Required("entry_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def get_connection_key(hass, connection, msg):
+    """Return one saved credential to the authenticated HA administrator."""
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(msg["id"], "not_found", "not_found")
+        return
+    api_key = entry.data.get("api_key")
+    if not isinstance(api_key, str) or not api_key:
+        connection.send_error(msg["id"], "not_found", "not_found")
+        return
+    connection.send_result(msg["id"], {"api_key": api_key})
 
 
 @websocket_api.websocket_command({
