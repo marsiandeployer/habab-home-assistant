@@ -1,0 +1,46 @@
+{
+  "checked_at": "2026-10-24T20:59:30.560140+00:00",
+  "verdict": "PASS",
+  "scope": "authenticated native conversation/process with actual selected Habab/Gemini provider; one nonphysical helper read/action/exposure denial",
+  "producer_report": "native-assist-e2e-attempt-3.json",
+  "producer_verdict_preserved": "PASS_PENDING_MANUAL_REVIEW",
+  "runtime_image": "sha256:0d78da1953c957e1c54f62a4a2abb35ca9347ab8e17713abd461e6b2f79c6565",
+  "source": "14d7344390ffdccfbbdb4fcfe657fd2458c71f44",
+  "runner_source_commit": "507c5d843efcaf8bcb450fc3a4d0d7828c4992fa",
+  "runner_sha256": "4ba47cb325af2bcdcf4ab118cedced6d2121bea863d55f08d644c554f444a0d8",
+  "actual_provider_completion": true,
+  "authenticated_native_principal": true,
+  "root_semantic_review": {
+    "read_reply_matches_off": true,
+    "action_reply_matches_on": true,
+    "hidden_reply_truthfully_refuses": true
+  },
+  "independent_tool_and_event_review": {
+    "exact_hidden_intent_target": true,
+    "tool_call_result_ids_correlated": true,
+    "structured_exposure_error": true,
+    "hidden_service_events": 0,
+    "read_service_events": 0,
+    "action_chain": [
+      "homeassistant.turn_on",
+      "input_boolean.turn_on"
+    ],
+    "both_action_events_only_fixture_and_same_owner": true
+  },
+  "cleanup": {
+    "helper_absent": true,
+    "registry_entity_absent": true,
+    "state_http404": true,
+    "baseline_helper_ids_preserved": true,
+    "exact_exposure_restore_before_deletion": "verified by runner"
+  },
+  "not_run": [
+    "physical_device_motion",
+    "physical_microphone",
+    "voice_pipeline_audio",
+    "web_setup_chat_service_attempt4",
+    "new_candidate22ae_lifecycle_and_inventory_acceptance"
+  ],
+  "human_owner_acceptance": "NOT_RUN",
+  "private_trace_sha256": "2ea78f31ed2a84cc5dd660a200f218bbc07b08d997bcf1753d69cf3d1bcd8e61"
+}

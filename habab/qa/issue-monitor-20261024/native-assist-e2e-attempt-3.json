@@ -1,0 +1,63 @@
+{
+  "checked_at": "2026-10-24T20:58:21.367Z",
+  "target_alias": "accepted-owner-test",
+  "runtime": {
+    "identity": {
+      "image": "sha256:0d78da1953c957e1c54f62a4a2abb35ca9347ab8e17713abd461e6b2f79c6565",
+      "source": "14d7344390ffdccfbbdb4fcfe657fd2458c71f44",
+      "runtime": "habab-owner-test"
+    },
+    "product_version": "0.3.6",
+    "home_assistant_version": "2026.10.2",
+    "status": "running"
+  },
+  "verdict": "PASS_PENDING_MANUAL_REVIEW",
+  "failure_stage": null,
+  "failure_class": null,
+  "failure_code": null,
+  "selected_provider": {
+    "provider": "habab",
+    "model": "gemini-3.1-flash-lite"
+  },
+  "cases": {
+    "exposed_read": {
+      "tool_observed": true,
+      "action_event_count": 0,
+      "wrapper_event_count": null,
+      "actor_context_match": null,
+      "readback": "off",
+      "acl_denial_observed": false,
+      "semantic_review": "manual_review_required"
+    },
+    "exposed_action": {
+      "tool_observed": true,
+      "action_event_count": 2,
+      "wrapper_event_count": 1,
+      "actor_context_match": true,
+      "readback": "on",
+      "acl_denial_observed": false,
+      "semantic_review": "manual_review_required"
+    },
+    "hidden_denial": {
+      "tool_observed": true,
+      "action_event_count": 0,
+      "wrapper_event_count": null,
+      "actor_context_match": null,
+      "readback": "off",
+      "acl_denial_observed": true,
+      "semantic_review": "manual_review_required"
+    }
+  },
+  "cleanup": {
+    "fixture_created": true,
+    "exposure_restored": true,
+    "fixture_deleted": true,
+    "failed": false
+  },
+  "limitations": [
+    "Tool/action evidence is automated; answer accuracy remains manual review.",
+    "The operator-provided execution window is the exclusive-idle attestation; Core exposes no admin query for the native ConversationEntity request lock.",
+    "Conversation logs are short-lived native in-memory HA chat logs; no setup-agent history or durable provider session is used.",
+    "Only a nonphysical input_boolean is controlled; no physical-device behavior is tested."
+  ]
+}
