@@ -1,17 +1,29 @@
 """Native action bridge: flow ownership and secret-free form serialization."""
 import json
+import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
+from homeassistant.components.homeassistant import async_setup as async_setup_homeassistant
+from homeassistant.components.homeassistant import exposed_entities
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry, device_registry, entity_registry
 from homeassistant.helpers.device_registry import (
     ActiveDeviceRegistryItems,
     DeviceEntry,
     DeviceRegistry,
     _DeprecatedDeviceRegistryItemsView,
 )
-from homeassistant.components.habab_home.setup_actions import execute, flow_result
+from homeassistant.components.habab_home.setup_actions import (
+    AssistExposureError,
+    SetupActionsView,
+    execute,
+    flow_result,
+)
 from homeassistant.components.habab_home.const import DOMAIN
+from homeassistant.components.habab_home.setup_agent import PROMPT
+from homeassistant.components.habab_home.voice_context import build_voice_context
 
 
 class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -149,6 +161,184 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):
             await execute(None, None, "alice", {"action": "shell", "command": "anything"})
+
+    def test_prompt_only_changes_exact_assist_exposure_on_explicit_request(self):
+        self.assertIn('"action":"assist_exposure","operation":"get"', PROMPT)
+        self.assertIn('"action":"assist_exposure","operation":"set"', PROMPT)
+        self.assertIn('Не меняй экспозицию Assist ради ответа на обычный запрос о погоде', PROMPT)
+        self.assertIn('Меняй экспозицию только по явной просьбе владельца', PROMPT)
+        self.assertIn('не делай массовые изменения', PROMPT)
+        self.assertIn('не меняй настройки Alexa, Google или другого assistant', PROMPT)
+        self.assertIn('проверь effective в ответе', PROMPT)
+
+    async def test_assist_exposure_requires_existing_entity_and_strict_boolean(self):
+        hass = SimpleNamespace(states=SimpleNamespace(
+            get=lambda entity_id: SimpleNamespace(entity_id=entity_id)
+            if entity_id == "weather.fixture" else None))
+        with patch("homeassistant.components.habab_home.setup_actions._assist_exposure_api") as api:
+            with self.assertRaisesRegex(AssistExposureError, "assist_entity_not_found"):
+                await execute(hass, None, "alice", {"action": "assist_exposure",
+                    "operation": "set", "entity_id": "weather.missing", "should_expose": True})
+            for value in (1, 0, "true", None):
+                with self.subTest(value=value), self.assertRaisesRegex(
+                    AssistExposureError, "assist_exposure_boolean_required"
+                ):
+                    await execute(hass, None, "alice", {"action": "assist_exposure",
+                        "operation": "set", "entity_id": "weather.fixture", "should_expose": value})
+            with self.assertRaisesRegex(AssistExposureError, "assist_exposure_operation_invalid"):
+                await execute(hass, None, "alice", {"action": "assist_exposure",
+                    "operation": [], "entity_id": "weather.fixture"})
+            api.assert_not_called()
+
+    async def test_assist_exposure_helper_errors_and_false_readback_fail_explicitly(self):
+        hass = SimpleNamespace(states=SimpleNamespace(
+            get=lambda entity_id: SimpleNamespace(entity_id=entity_id)))
+        body = {"action": "assist_exposure", "operation": "set",
+                "entity_id": "weather.fixture", "should_expose": True}
+        with patch("homeassistant.components.habab_home.setup_actions._assist_exposure_api",
+                   side_effect=AssistExposureError("assist_exposure_unavailable")):
+            with self.assertRaisesRegex(AssistExposureError, "assist_exposure_unavailable"):
+                await execute(hass, None, "alice", body)
+        helper_error = SimpleNamespace(async_should_expose=Mock(side_effect=RuntimeError()),
+                                       async_expose_entity=AsyncMock())
+        with patch("homeassistant.components.habab_home.setup_actions._assist_exposure_api",
+                   return_value=helper_error):
+            with self.assertRaisesRegex(AssistExposureError, "assist_exposure_set_readback_failed"):
+                await execute(hass, None, "alice", body)
+        mismatch = SimpleNamespace(async_should_expose=Mock(side_effect=[False, False]),
+                                   async_expose_entity=Mock())
+        with patch("homeassistant.components.habab_home.setup_actions._assist_exposure_api",
+                   return_value=mismatch):
+            with self.assertRaisesRegex(AssistExposureError, "assist_exposure_readback_mismatch"):
+                await execute(hass, None, "alice", body)
+
+    async def test_setup_actions_capability_still_rejects_non_admin_owners(self):
+        class Content:
+            async def iter_chunked(self, size):
+                yield b'{"action":"assist_exposure","operation":"get","entity_id":"weather.fixture"}'
+
+        for user in (SimpleNamespace(is_active=False, is_admin=True),
+                     SimpleNamespace(is_active=True, is_admin=False)):
+            manager = SimpleNamespace(active=("alice", "interaction"), control_token="fixture-token")
+            assistant = SimpleNamespace(trusted_origin=AsyncMock(return_value=None))
+            hass = SimpleNamespace(
+                data={DOMAIN: {"setup_agent": manager, "assistant": assistant}},
+                auth=SimpleNamespace(async_get_user=AsyncMock(return_value=user)),
+            )
+            request = SimpleNamespace(
+                app={"hass": hass}, headers={"X-Habab-Agent-Token": "fixture-token"},
+                remote="127.0.0.1", content=Content(),
+            )
+            with patch("homeassistant.components.habab_home.setup_actions._assist_exposure_api") as api:
+                response = await SetupActionsView().post(request)
+            self.assertEqual(response.status, 403)
+            api.assert_not_called()
+            assistant.trusted_origin.assert_not_awaited()
+
+    async def test_setup_actions_view_returns_explicit_native_helper_failure(self):
+        class Content:
+            async def iter_chunked(self, size):
+                yield b'{"action":"assist_exposure","operation":"get","entity_id":"weather.fixture"}'
+
+        user = SimpleNamespace(is_active=True, is_admin=True)
+        manager = SimpleNamespace(active=("alice", "interaction"), control_token="fixture-token")
+        assistant = SimpleNamespace(trusted_origin=AsyncMock(return_value=None))
+        hass = SimpleNamespace(
+            data={DOMAIN: {"setup_agent": manager, "assistant": assistant}},
+            auth=SimpleNamespace(async_get_user=AsyncMock(return_value=user)),
+            states=SimpleNamespace(get=lambda entity_id: SimpleNamespace(entity_id=entity_id)),
+        )
+        request = SimpleNamespace(
+            app={"hass": hass}, headers={"X-Habab-Agent-Token": "fixture-token"},
+            remote="127.0.0.1", content=Content(),
+        )
+        with patch("homeassistant.components.habab_home.setup_actions._assist_exposure_api",
+                   side_effect=AssistExposureError("assist_exposure_unavailable")):
+            response = await SetupActionsView().post(request)
+        self.assertEqual(response.status, 503)
+        self.assertEqual(json.loads(response.body), {"error": "assist_exposure_unavailable"})
+
+
+class NativeAssistExposureTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.config_dir = tempfile.TemporaryDirectory(prefix="habab-assist-exposure-")
+        self.addCleanup(self.config_dir.cleanup)
+        self.hass = HomeAssistant(self.config_dir.name)
+        await self.hass.async_start()
+        self.addAsyncCleanup(self.hass.async_stop, force=True)
+        await async_setup_homeassistant(self.hass, {})
+        device_registry.async_setup(self.hass)
+        await device_registry.async_load(self.hass)
+        await area_registry.async_load(self.hass)
+        await entity_registry.async_load(self.hass)
+        registry = entity_registry.async_get(self.hass)
+        entry = registry.async_get_or_create(
+            "weather", "assist_exposure_fixture", "forecast",
+            suggested_object_id="assist_exposure_forecast",
+            original_name="Synthetic forecast",
+        )
+        self.entity_id = entry.entity_id
+        self.hass.states.async_set(self.entity_id, "partlycloudy", {
+            "temperature": 9.1, "temperature_unit": "°C",
+        })
+        exposed_entities.async_expose_entity(
+            self.hass, "fixture_other_assistant", self.entity_id, False
+        )
+
+    async def test_real_core_helper_sets_exact_entity_and_reads_back_without_other_assistant_changes(self):
+        initial_snapshot = build_voice_context(self.hass)
+        self.assertEqual(initial_snapshot["weather"], {"status": "unavailable", "entities": []})
+        before = await execute(self.hass, None, "alice", {
+            "action": "assist_exposure", "operation": "get", "entity_id": self.entity_id,
+        })
+        self.assertFalse(before["effective"])
+        changed = await execute(self.hass, None, "alice", {
+            "action": "assist_exposure", "operation": "set", "entity_id": self.entity_id,
+            "should_expose": True,
+        })
+        self.assertEqual(changed, {
+            "entity_id": self.entity_id,
+            "assistant": "conversation",
+            "before": False,
+            "requested": True,
+            "effective": True,
+            "changed": True,
+            "verification": "native_readback",
+            "storage": "entity_registry",
+        })
+        registry_entry = entity_registry.async_get(self.hass).async_get(self.entity_id)
+        self.assertIs(registry_entry.options["conversation"]["should_expose"], True)
+        self.assertIs(registry_entry.options["fixture_other_assistant"]["should_expose"], False)
+        self.assertTrue(exposed_entities.async_should_expose(self.hass, "conversation", self.entity_id))
+        self.assertFalse(exposed_entities.async_should_expose(
+            self.hass, "fixture_other_assistant", self.entity_id
+        ))
+        enabled_snapshot = build_voice_context(self.hass)
+        self.assertEqual(enabled_snapshot["weather"]["status"], "available")
+        self.assertEqual(enabled_snapshot["weather"]["entities"][0]["entity_id"], self.entity_id)
+        self.assertEqual(enabled_snapshot["weather"]["entities"][0]["temperature"], 9.1)
+
+        after_get = await execute(self.hass, None, "alice", {
+            "action": "assist_exposure", "operation": "get", "entity_id": self.entity_id,
+        })
+        self.assertTrue(after_get["effective"])
+        disabled = await execute(self.hass, None, "alice", {
+            "action": "assist_exposure", "operation": "set", "entity_id": self.entity_id,
+            "should_expose": False,
+        })
+        self.assertEqual(disabled["before"], True)
+        self.assertEqual(disabled["requested"], False)
+        self.assertEqual(disabled["effective"], False)
+        self.assertTrue(disabled["changed"])
+        idempotent = await execute(self.hass, None, "alice", {
+            "action": "assist_exposure", "operation": "set", "entity_id": self.entity_id,
+            "should_expose": False,
+        })
+        self.assertFalse(idempotent["changed"])
+        self.assertEqual(idempotent["effective"], False)
+        registry_entry = entity_registry.async_get(self.hass).async_get(self.entity_id)
+        self.assertIs(registry_entry.options["conversation"]["should_expose"], False)
+        self.assertIs(registry_entry.options["fixture_other_assistant"]["should_expose"], False)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,30 @@
+{
+  "kind": "source_candidate_native_assist_settings",
+  "source_hashes": {
+    "habab/distribution/src/habab_home/setup_actions.py": "549a80d725f091161b3bb44528d7a7a686e7b083d58d85521950175d49fad398",
+    "habab/distribution/src/habab_home/setup_agent.py": "3d996c16eeeab85e681c7a897f740a6888e31d92c3fbf19c5833aac6fa61951b",
+    "habab/distribution/tests/test_setup_actions.py": "16dac7ab0588c525da00495056e80402f78b2ea68141e59177444fce8e640836"
+  },
+  "isolated_core_image": "habab-home:owner-gemini-0.3.5-9d795359c",
+  "network": "none",
+  "focused_tests": 16,
+  "result": "PASS",
+  "native_helper_checks": [
+    "get",
+    "set_true",
+    "set_false",
+    "idempotent_false",
+    "other_assistant_unchanged",
+    "weather_visible_in_bounded_voice_snapshot_when_exposed"
+  ],
+  "capability_checks": [
+    "inactive_admin_rejected",
+    "active_nonadmin_rejected",
+    "helper_failure_explicit"
+  ],
+  "limits": [
+    "Synthetic fixture in isolated real Home Assistant Core, not a household integration or model-driven action.",
+    "No cloud deployment, P30 update or physical voice acceptance.",
+    "Readback verifies native effective state; disk flush is not claimed."
+  ]
+}

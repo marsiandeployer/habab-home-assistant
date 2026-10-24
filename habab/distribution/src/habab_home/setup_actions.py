@@ -15,6 +15,91 @@ from .assistant_status import get_assistant_status
 _LOGGER = logging.getLogger(__name__)
 
 
+class AssistExposureError(ValueError):
+    """A native Home Assistant Assist exposure operation failed."""
+
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
+def _assist_exposure_api():
+    try:
+        from homeassistant.components.homeassistant import exposed_entities
+    except (ImportError, AttributeError) as error:
+        raise AssistExposureError("assist_exposure_unavailable") from error
+    if not all(callable(getattr(exposed_entities, name, None)) for name in (
+        "async_should_expose", "async_expose_entity"
+    )):
+        raise AssistExposureError("assist_exposure_unavailable")
+    return exposed_entities
+
+
+def _assist_entity_id(body):
+    entity_id = body.get("entity_id")
+    if not isinstance(entity_id, str) or not entity_id or len(entity_id) > 255:
+        raise AssistExposureError("assist_entity_id_required")
+    return entity_id
+
+
+def _assist_exposure_error_code(operation, stage):
+    return f"assist_exposure_{operation}_{stage}_failed"
+
+
+def _read_assist_exposure(api, hass, entity_id, operation):
+    try:
+        effective = api.async_should_expose(hass, "conversation", entity_id)
+    except Exception as error:
+        raise AssistExposureError(_assist_exposure_error_code(operation, "readback")) from error
+    if type(effective) is not bool:
+        raise AssistExposureError(_assist_exposure_error_code(operation, "readback"))
+    return effective
+
+
+async def _assist_exposure(hass, body):
+    operation = body.get("operation")
+    if not isinstance(operation, str) or operation not in {"get", "set"}:
+        raise AssistExposureError("assist_exposure_operation_invalid")
+    entity_id = _assist_entity_id(body)
+    state = hass.states.get(entity_id)
+    if state is None or getattr(state, "entity_id", None) != entity_id:
+        raise AssistExposureError("assist_entity_not_found")
+    if operation == "set" and type(body.get("should_expose")) is not bool:
+        raise AssistExposureError("assist_exposure_boolean_required")
+    api = _assist_exposure_api()
+    before = _read_assist_exposure(api, hass, entity_id, operation)
+    if operation == "get":
+        return {
+            "entity_id": entity_id,
+            "assistant": "conversation",
+            "effective": before,
+            "verification": "native_readback",
+        }
+    requested = body["should_expose"]
+    try:
+        api.async_expose_entity(hass, "conversation", entity_id, requested)
+    except Exception as error:
+        raise AssistExposureError(_assist_exposure_error_code(operation, "update")) from error
+    after = _read_assist_exposure(api, hass, entity_id, operation)
+    if after is not requested:
+        raise AssistExposureError("assist_exposure_readback_mismatch")
+    try:
+        registry = entity_registry.async_get(hass)
+    except Exception as error:
+        raise AssistExposureError("assist_exposure_storage_unavailable") from error
+    storage = "entity_registry" if registry.async_get(entity_id) is not None else "assist_settings_store"
+    return {
+        "entity_id": entity_id,
+        "assistant": "conversation",
+        "before": before,
+        "requested": requested,
+        "effective": after,
+        "changed": before is not after,
+        "verification": "native_readback",
+        "storage": storage,
+    }
+
+
 async def _todo_items(hass, owner, entity_id):
     if (not isinstance(entity_id, str) or not entity_id.startswith("todo.")
             or hass.states.get(entity_id) is None):
@@ -148,6 +233,8 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
         return {"states": [{"entity_id": s.entity_id, "state": s.state, "attributes": {
             k: v for k, v in s.attributes.items() if k in {"friendly_name", "device_class", "unit_of_measurement",
                 "temperature", "current_temperature", "brightness", "supported_features"}}} for s in states[:200]]}
+    if action == "assist_exposure":
+        return await _assist_exposure(hass, body)
     if action == "todo_items":
         entity_id = body.get("entity_id")
         items = await _todo_items(hass, owner, entity_id)
@@ -240,6 +327,9 @@ class SetupActionsView(HomeAssistantView):
             result = await execute(hass, manager, manager.active[0], body, trusted_origin)
             # Config flow result data/defaults are deliberately excluded above.
             return self.json(result)
+        except AssistExposureError as error:
+            status = 503 if error.code.endswith(("unavailable", "failed", "mismatch")) else 400
+            return self.json({"error": error.code}, status_code=status)
         except Exception as error:
             _LOGGER.warning("Setup action failed: %s", type(error).__name__)
             return self.json({"error": "action_failed"}, status_code=400)

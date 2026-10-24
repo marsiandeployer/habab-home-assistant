@@ -1,0 +1,72 @@
+{
+  "classification": "UNSUPPORTED_OR_UNVERIFIED_NO_RETRY",
+  "target": "https://habab-demo.wpmix.net/owner-test → /home/overview",
+  "release": {
+    "image": "habab-home:owner-gemini-0.3.5-9d795359c",
+    "image_sha256": "e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+    "source_revision": "9d795359c22cf2844884caa5affc94209a8120ca",
+    "core_expected": "2026.10.2",
+    "habab_expected": "0.3.5"
+  },
+  "prompt_turns_sent": 1,
+  "direct_exposure_mutation": false,
+  "no_synthetic_entity_creation": true,
+  "runtime": {
+    "core": "2026.10.2",
+    "habab": "0.3.5",
+    "habab_status": "running",
+    "chat_session_ready": true
+  },
+  "weather_candidates": [
+    {
+      "entity_id": "weather.forecast_pogoda_doma",
+      "friendly_name": "Forecast Погода дома",
+      "state": "cloudy",
+      "hidden_by": null,
+      "disabled_by": null,
+      "conversation_exposed": false,
+      "expose_settings": {
+        "conversation": false,
+        "cloud_alexa": false,
+        "cloud_google_assistant": false
+      }
+    }
+  ],
+  "target_entity": {
+    "entity_id": "weather.forecast_pogoda_doma",
+    "friendly_name": "Forecast Погода дома",
+    "current_state": "cloudy",
+    "hidden_by": null,
+    "disabled_by": null
+  },
+  "exposure_before": {
+    "conversation": false,
+    "cloud_alexa": false,
+    "cloud_google_assistant": false
+  },
+  "prompt": "Разреши встроенному голосовому помощнику Assist доступ только к сущности погоды weather.forecast_pogoda_doma. Другие сущности и настройки не меняй. После изменения проверь фактическую настройку.",
+  "turn": {
+    "exact_user_turn_visible": true,
+    "assistant_reply": "У меня нет прямого доступа к настройкам «сущностей» внутри самого голосового конвейера Assist через CLI `habab-ha` — я вижу интеграции, устройства и состояния, но не имею прямого API для управления фильтрами доступа сущностей внутри `conversation` или `assist_pipeline`.\n\nПоскольку у меня нет такого действия, я не могу выполнить этот запрос. Для настройки разрешений сущностей (expose entities) вам нужно воспользоваться интерфейсом **«Голосовые помощники»** в настройках Home Assistant, где это настраивается штатным образом для каждого конвейера. Никакие другие сущности и настройки я не менял.",
+    "send_completed": true,
+    "elapsed_ms": 5959,
+    "busy": false,
+    "backend_active": false,
+    "backend_error_name": null,
+    "backend_error_http_status": null
+  },
+  "exposure_readback": {
+    "before": {
+      "conversation": false,
+      "cloud_alexa": false,
+      "cloud_google_assistant": false
+    },
+    "after": {
+      "conversation": false,
+      "cloud_alexa": false,
+      "cloud_google_assistant": false
+    },
+    "changed_entity_count": 0,
+    "other_entity_change_count": 0
+  }
+}
