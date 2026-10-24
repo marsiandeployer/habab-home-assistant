@@ -25,3 +25,5 @@ Recovery order once transport returns:
 5. Only then run physical chat exposure test for weather.forecast_home_assistant, native readback, fresh realtime context and bounded screen-off check. Acoustic voice acceptance remains NOT RUN.
 
 The private original updater now refuses any initial APK other than14 or runtime other than711, allows a bounded900s extraction, treats transport failure as unknown rather than process-exit proof, and does not auto-start Core after an unverified extraction. Syntax checked only; it has not been rerun and is not a recovery installer.
+
+Parent diagnostic HTTP bridge127.0.0.1:18124 was stopped after verifying zero connections. After ADB recovery, restart only `/root/.cache/habab-android/adb-http-bridge.py` when native inspection is complete and HTTP access is needed; check that the port has no other owner first. This did not stop a Windows tunnel or device process.

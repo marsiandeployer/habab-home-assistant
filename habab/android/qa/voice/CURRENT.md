@@ -13,6 +13,8 @@ Checked 2026-10-24 UTC (2026-10-25 Moscow). Overall acceptance is incomplete.
 The active cloud frontend/prompt is newer than the frozen Android runtime2c. They are separate release identities; cloud acceptance must not be described as a phone update. No physical microphone or acoustic voice result is inferred from source tests.
 
 Current evidence:
+- `native-status-android-compile-qa.json`: clean sourcee83e22906 compiled and linted offline against AndroidSDK34 in an isolated RAM workspace; old2c inputs pinned, noAPK or device action.
+- `phone-bridge-cleanup.json`: unused parent HTTP bridge18124 stopped with zero clients; recreate only after transport recovery.
 - `native-status-publication-source-qa.json`: future native status writer uses atomic replacement and final off/error publication,3 focused JVM tests and Java8 API compilation passed. Interrupted-write cause was not reproduced on the host; fix is not in installedAPK15 and has no Android device proof.
 - `../../../qa/shopping-list-e2e-20261024/owner22ae-native-v2-bootstrap.json`: fresh native_v2 session/context HTTP200 on22ae, exact exposed cloud forecast, Gemini3.8 Live through Habab, observed credential TTL60s. No Live/audio/model conversation was performed.
 - `owner22ae-active-readback.json`: active cloud image/source, authenticated baseline, rollback and served frontend.

@@ -1,0 +1,10 @@
+{
+  "kind": "owned_phone_bridge_cleanup",
+  "process": "/root/.cache/habab-android/adb-http-bridge.py",
+  "listen": "127.0.0.1:18124",
+  "activeConnectionsBeforeStop": 0,
+  "ownDiagnosticBridgeStopped": true,
+  "adbDaemonOrSshTunnelsStopped": false,
+  "reason": "phone transport unavailable; no active parent phone job",
+  "restartAfterAdbRecovery": true
+}

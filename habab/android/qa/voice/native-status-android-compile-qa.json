@@ -1,0 +1,78 @@
+{
+  "kind": "native_status_source_compile_lint_qa",
+  "source": {
+    "commit": "e83e2290657d5f9a21fc3e942cbd91a9d35d27e2",
+    "tree": "6a86eda6b91604500d5f51988b9a90afdeafeaa9",
+    "source_snapshot": "clean git archive",
+    "workspace": "isolated /dev/shm build directory; removed after verification"
+  },
+  "ignored_build_inputs": {
+    "provenance": "existing frozen source6d9565be3 inputs used with native15 runtime2c6567223ad3ef6b; not regenerated",
+    "files": [
+      {
+        "path": "app/src/main/assets/release/trusted-key.der",
+        "bytes": 422,
+        "sha256": "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069"
+      },
+      {
+        "path": "app/src/main/assets/release/default-url.txt",
+        "bytes": 77,
+        "sha256": "88111773b9f0b9a983f06d5ccdc27f363eb9e37c4da4d11a1bb58ca7383c04d2"
+      },
+      {
+        "path": "app/src/main/assets/voice/model.zip",
+        "bytes": 46236750,
+        "sha256": "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4"
+      },
+      {
+        "path": "app/src/main/jniLibs/arm64-v8a/libproot.so",
+        "bytes": 265673,
+        "sha256": "5524ccd52dffccfbfecc8133d476140b2bb4dd2fc525289bf10f77976e04f7f7"
+      },
+      {
+        "path": "app/src/main/jniLibs/arm64-v8a/libproot-loader.so",
+        "bytes": 18136,
+        "sha256": "1da54355333cca3fb6ee10e3b82a24df24fb230c99241ce83809bf9e240609b5"
+      },
+      {
+        "path": "app/src/main/jniLibs/arm64-v8a/libtalloc.so",
+        "bytes": 33592,
+        "sha256": "dda9a37e52b493906e488b5fd49195c43125378ae813943ca83d1e337143c6b8"
+      },
+      {
+        "path": "app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so",
+        "bytes": 14432,
+        "sha256": "428f148ee25677823bc01d0e49c49934fa9189dd34034d1b96ad73b6da08b5a5"
+      }
+    ],
+    "tracked_asset": {
+      "path": "app/src/main/assets/voice/model.json",
+      "bytes": 297,
+      "sha256": "0116a1c998bb16ae4b5082868a7a6375e8bcfeb02826c2e9c4d9a97f490832a4",
+      "action": "verified identical; not overwritten"
+    }
+  },
+  "gradle": {
+    "version": "8.5",
+    "android_sdk": "34",
+    "mode": "--offline --no-daemon",
+    "tasks": [
+      ":app:compileDebugJavaWithJavac",
+      ":app:lintDebug"
+    ],
+    "result": "BUILD SUCCESSFUL"
+  },
+  "workspace_cleanup": {
+    "process_cwd_or_fd_references_before_cleanup": 0,
+    "owned_ram_workspace_removed": true
+  },
+  "limitations": {
+    "assemble_or_apk": "NOT RUN",
+    "runtime_archive_build_or_extraction": "NOT RUN",
+    "android_unit_test_suite": "NOT RUN",
+    "device_runtime": "NOT RUN",
+    "release_or_install": "NOT RUN; this fix is not included in the installed APK15"
+  },
+  "setup_note": "An initial isolated archive omitted the root Android build.gradle and stopped before compilation; the successful rerun included the versioned plugin configuration.",
+  "parent_ignored_inputs_readback": "7 pinned inputs independently matched"
+}
