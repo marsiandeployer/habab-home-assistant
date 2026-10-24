@@ -10,7 +10,6 @@ import android.media.audiofx.NoiseSuppressor;
 import android.os.*;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayDeque;
 import org.json.JSONObject;
 
@@ -191,7 +190,8 @@ public final class VoiceService extends Service {
                     .put("active", connected != null && connected.ready() && !connected.finishing()));
             if (lastError != null) result.put("lastError", lastError).put("lastErrorAt", lastErrorAt);
             if (lastCue != null) result.put("lastCue", lastCue).put("lastCueAt", lastCueAt).put("lastCueCompleted", lastCueCompleted);
-            Files.write(new File(getFilesDir(), "voice-status.json").toPath(), result.toString().getBytes(StandardCharsets.UTF_8));
+            VoiceStatusFile.write(new File(getFilesDir(), "voice-status.json").toPath(),
+                    result.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) { /* Foreground status still reports failure. */ }
     }
 
@@ -342,6 +342,7 @@ public final class VoiceService extends Service {
         endSession(VoiceSessionSignals.EndReason.STOP);
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (!status.equals("error")) status = "off";
+        writeStatus(true);
         stopForeground(true); super.onDestroy();
     }
 }

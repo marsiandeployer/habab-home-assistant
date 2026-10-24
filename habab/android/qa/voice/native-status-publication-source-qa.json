@@ -1,0 +1,46 @@
+{
+  "scope": "source-only native voice status publication",
+  "baseline": {
+    "operation": "Files.write(target, bytes) with current thread pre-interrupted",
+    "result": "DID_NOT_REPRODUCE",
+    "environment": "host JVM",
+    "observation": "write completed, replaced the prior document, and preserved the interrupt flag"
+  },
+  "cause": {
+    "android_interruption_cause": "not established"
+  },
+  "focused_tests": [
+    "pre-interrupted writer publishes a complete document and preserves interrupt state",
+    "two concurrent writers with repeated readers expose only complete valid JSON documents; reader loop has a monotonic deadline",
+    "failed atomic replacement over a non-empty directory preserves its sentinel and removes the temporary file"
+  ],
+  "failure_case_limits": [
+    "disk-full behavior was not tested",
+    "power-loss behavior was not tested",
+    "failure replacing an ordinary regular status file was not induced"
+  ],
+  "wiring_review": {
+    "writeStatus": "uses a same-directory temporary file and atomic replacement",
+    "onDestroy": "sets inactive off/error state and requests a final status write",
+    "fallback": "no non-atomic replacement fallback"
+  },
+  "verification": {
+    "focused_junit_cases": 3,
+    "result": "PASS",
+    "android_gradle_test": "NOT RUN",
+    "apk_build": "NOT RUN",
+    "android_device_runtime": "NOT RUN",
+    "independent_parent_junit_rerun": "PASS 3 tests",
+    "parent_java8_api_compilation": "PASS"
+  },
+  "release": {
+    "fix_in_installed_native15": false,
+    "fix_shipped_to_device": false,
+    "target": "future native candidate; APK version not assigned"
+  },
+  "source_sha256": {
+    "habab/android/app/src/main/java/ru/habab/home/VoiceService.java": "27fc90484558c326588df5324bbaa5d86a305d1e9a04bcba9d196e60089eb9dd",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceStatusFile.java": "de560f8145167595076df94e95a78b21cb9ea44fad6fbbb26e11f0b3f3d15997",
+    "habab/android/app/src/test/java/ru/habab/home/VoiceStatusFileTest.java": "3b044eaa6fe77f595fb7bb1aa871bcaf436638c494780d34be700011f0830507"
+  }
+}
