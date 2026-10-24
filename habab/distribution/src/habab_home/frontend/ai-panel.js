@@ -14,6 +14,8 @@ class HababAIPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this.provider = "openai";
     this.connections = [];
+    this.connectionsLoaded = false;
+    this.connectionCheckStates = new Map();
     this.pipelines = [];
     this.keyFetchGeneration = 0;
     this.keyVisibilityPreference = null;
@@ -45,6 +47,7 @@ class HababAIPanel extends HTMLElement {
   disconnectedCallback() {
     window.removeEventListener("habab-assistant-availability", this.onAssistantAvailability);
     this.keyFetchGeneration += 1;
+    this.connectionCheckStates.clear();
     this.busy = false;
     const key = this.shadowRoot.querySelector("#key");
     if (key) key.value = "";
@@ -53,6 +56,14 @@ class HababAIPanel extends HTMLElement {
   t(key) { return strings[this.language || "en"][key] || strings[this.language || "en"].unknown; }
   q(selector) { return this.shadowRoot.querySelector(selector); }
   entry() { return this.connections.find((item) => item.provider === this.provider); }
+  checkStateKey(entry) { return `${entry.entry_id}:${entry.model}`; }
+  checkTime(value) {
+    if (typeof value !== "string") return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat(this.language, {
+      dateStyle: "medium", timeStyle: "short",
+    }).format(date);
+  }
   render() {
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;height:100%;overflow:auto;container-type:inline-size;color:var(--primary-text-color);background:var(--primary-background-color);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
@@ -76,7 +87,7 @@ class HababAIPanel extends HTMLElement {
     <header><ha-menu-button></ha-menu-button><h1>${this.t("title")}</h1></header>
     <main><p class="intro">${this.t("intro")}</p><div class="workspace">
       <nav aria-label="${this.t("provider")}">${Object.entries(providers).map(([id, item]) => `<button type="button" data-provider="${id}" aria-pressed="${id === this.provider}">${item.name}</button>`).join("")}</nav>
-      <section aria-labelledby="provider-title"><h2 id="provider-title"></h2><p class="status" id="connection-status"></p>
+      <section aria-labelledby="provider-title"><p class="status" id="assistant-provider-status" role="status" aria-live="polite"></p><h2 id="provider-title"></h2><p class="status" id="connection-status"></p><p class="status" id="api-status" role="status" aria-live="polite"></p>
       <a id="key-link" target="_blank" rel="noopener noreferrer">${this.t("getKey")}</a>
       <h3>${this.t("guide")}</h3><ol id="guide"></ol>
       <form><label for="model">${this.t("model")}</label><input id="model" name="model" required maxlength="128" autocomplete="off" aria-describedby="model-help"><p class="help" id="model-help">${this.t("modelHelp")}</p>
@@ -161,26 +172,64 @@ class HababAIPanel extends HTMLElement {
   }
 
   async refresh() {
-    try {
-      const [connections, pipelines] = await Promise.all([
-        this._hass.callWS({ type: "habab_home/providers/list" }),
-        this._hass.callWS({ type: "assist_pipeline/pipeline/list" }),
-      ]);
-      this.connections = connections.connections;
-      this.pipelines = pipelines.pipelines;
-      this.updateControls();
+    const [connections, pipelines] = await Promise.allSettled([
+      this._hass.callWS({ type: "habab_home/providers/list" }),
+      this._hass.callWS({ type: "assist_pipeline/pipeline/list" }),
+    ]);
+    if (connections.status === "fulfilled") {
+      this.connections = connections.value.connections;
+      this.connectionsLoaded = true;
       this.selectProvider({ preserveDraft: true });
+    } else {
+      this.connectionsLoaded = false;
+    }
+    if (pipelines.status === "fulfilled") {
+      this.pipelines = pipelines.value.pipelines;
       this.q("#pipeline-status").textContent = this.pipelines.length
         ? this.t("pipelinesReady").replace("{count}", String(this.pipelines.length))
         : this.t("pipelinesMissing");
-    } catch (error) { this.feedback(this.t(error.code), true); }
+    } else {
+      this.q("#pipeline-status").textContent = this.t(pipelines.reason?.code || "unknown");
+    }
+    this.updateControls();
+    const failure = connections.status === "rejected" ? connections.reason
+      : pipelines.status === "rejected" ? pipelines.reason : null;
+    if (failure) this.feedback(this.t(failure.code || "unknown"), true);
   }
 
   updateControls() {
     const entry = this.entry();
+    const selected = this.connections.filter((item) => item.assistant_selected);
+    const currentProvider = selected.length === 1 ? selected[0] : null;
+    this.q("#assistant-provider-status").textContent = !this.connectionsLoaded
+      ? this.t("assistantProviderUnavailable")
+      : currentProvider
+        ? this.t("currentAssistant").replace("{provider}", providers[currentProvider.provider]?.name || currentProvider.provider).replace("{model}", currentProvider.model)
+        : this.t(selected.length ? "assistantProviderAmbiguous" : "noAssistantProvider");
     this.shadowRoot.querySelectorAll("button,input,textarea").forEach((item) => { item.disabled = !!this.busy; });
-    this.q("#check").disabled = !!this.busy || !entry;
-    this.q("#connection-status").textContent = this.t(entry?.assistant_selected ? "savedForAssistant" : entry ? "saved" : "disconnected");
+    this.q("#check").disabled = !!this.busy || !this.connectionsLoaded || !entry;
+    if (!this.connectionsLoaded) {
+      this.q("#connection-status").textContent = this.t("connectionStatusUnavailable");
+      this.q("#api-status").textContent = "";
+    } else if (!entry) {
+      this.q("#connection-status").textContent = this.t("disconnected");
+      this.q("#api-status").textContent = this.t("apiNotConfigured");
+    } else {
+      this.q("#connection-status").textContent = this.t(entry.assistant_selected ? "savedForAssistant" : "saved");
+      const pending = this.connectionCheckStates.get(this.checkStateKey(entry)) === "checking";
+      const result = pending ? { status: "checking" } : {
+        status: entry.api_check_status || "unknown", checked_at: entry.api_check_at,
+      };
+      const time = this.checkTime(result.checked_at);
+      const state = result.status || "unknown";
+      const statusKey = {
+        checking: "apiChecking",
+        verified: time ? "apiVerifiedAt" : "apiVerified",
+        rejected: time ? "apiRejectedAt" : "apiRejected",
+        unknown: time ? "apiUnknownAt" : "apiUnknown",
+      }[state];
+      this.q("#api-status").textContent = this.t(statusKey).replace("{time}", time || "");
+    }
     const openAssistant = this.q("#open-assistant");
     openAssistant.disabled = !!this.busy || window.hababAssistant?.available !== true;
     this.q("#assistant-status").textContent = window.hababAssistant?.available === true
@@ -207,20 +256,45 @@ class HababAIPanel extends HTMLElement {
   async save() {
     if (!this.q("form").reportValidity()) return;
     await this.action(async () => {
+      const model = this.q("#model").value.trim();
       await this._hass.callWS({ type: "habab_home/providers/save", provider: this.provider,
-        model: this.q("#model").value.trim(), api_key: this.q("#key").value.trim() });
+        model, api_key: this.q("#key").value.trim() });
       this.q("#key").value = "";
       this.keyEdited = false;
       this.modelEdited = false;
       await this.refresh();
-      this.feedback(this.t("verified"));
+      const entry = this.entry();
+      if (this.connectionsLoaded && entry?.model === model && entry.api_check_status === "verified") {
+        this.feedback(this.t("verified"));
+      } else {
+        this.feedback(this.t("connection_changed"), true);
+      }
     }, "providerSaveTimeout");
   }
 
   async check() {
-    if (!this.entry()) return;
+    if (this.busy) return;
+    const entry = this.entry();
+    if (!entry) return;
+    const checkStateKey = this.checkStateKey(entry);
+    this.connectionCheckStates.set(checkStateKey, "checking");
+    this.updateControls();
     await this.action(async () => {
-      await this._hass.callWS({ type: "habab_home/providers/check", entry_id: this.entry().entry_id });
+      try {
+        await this._hass.callWS({ type: "habab_home/providers/check", entry_id: entry.entry_id });
+      } catch (error) {
+        this.connectionCheckStates.delete(checkStateKey);
+        await this.refresh();
+        throw error;
+      }
+      this.connectionCheckStates.delete(checkStateKey);
+      await this.refresh();
+      const readback = this.connections.find((item) => item.entry_id === entry.entry_id);
+      if (!this.connectionsLoaded || readback?.api_check_status !== "verified") {
+        this.feedback(this.t("connection_changed"), true);
+        return;
+      }
+      this.updateControls();
       this.feedback(this.t("verified"));
     }, "providerCheckTimeout");
   }

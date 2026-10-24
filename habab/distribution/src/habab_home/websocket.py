@@ -1,5 +1,9 @@
 """Administrator-only connection settings; secrets never appear in results."""
 
+import hashlib
+import json
+from datetime import datetime, timezone
+
 import probatio
 
 from homeassistant.components import websocket_api
@@ -11,6 +15,50 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import DOMAIN
 from .providers import ProviderClient, ProviderError
 from .setup_agent import AgentError
+
+
+_API_CHECK_OPTION = "habab_api_check"
+_API_CHECK_STATUSES = {"verified", "rejected", "unknown"}
+
+
+def _settings_fingerprint(data):
+    """Identify the exact settings that a provider check used without exposing them."""
+    value = json.dumps(
+        [data.get("provider"), data.get("model"), data.get("api_key")],
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(value).hexdigest()
+
+
+def _api_check_readback(entry):
+    """Return only a matching check outcome; never return the settings fingerprint."""
+    record = entry.options.get(_API_CHECK_OPTION)
+    if not isinstance(record, dict) or record.get("fingerprint") != _settings_fingerprint(entry.data):
+        return {"api_check_status": "unknown", "api_check_at": None}
+    status = record.get("status")
+    if status not in _API_CHECK_STATUSES:
+        return {"api_check_status": "unknown", "api_check_at": None}
+    checked_at = record.get("checked_at")
+    return {
+        "api_check_status": status,
+        "api_check_at": checked_at if isinstance(checked_at, str) else None,
+    }
+
+
+def _record_api_check(hass, entry, fingerprint, status):
+    """Persist a terminal result for one exact provider/model/key combination."""
+    if _settings_fingerprint(entry.data) != fingerprint:
+        return False
+    options = {
+        **entry.options,
+        _API_CHECK_OPTION: {
+            "fingerprint": fingerprint,
+            "status": status if status in _API_CHECK_STATUSES else "unknown",
+            "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
+    }
+    hass.config_entries.async_update_entry(entry, options=options)
+    return True
 
 
 @callback
@@ -103,7 +151,7 @@ async def list_connections(hass, connection, msg):
             "entry_id": entry.entry_id, "provider": entry.data["provider"],
             "model": entry.data["model"], "state": entry.state.value,
             "assistant_selected": bool(entry.options.get("assistant_selected")),
-            "entities": entities,
+            "entities": entities, **_api_check_readback(entry),
         })
     connection.send_result(msg["id"], {"connections": entries})
 
@@ -140,6 +188,8 @@ async def save_connection(hass, connection, msg):
     if lock.locked():
         connection.send_error(msg["id"], "busy", "busy")
         return
+    api_check_at = None
+    api_check_status = "unknown"
     async with lock:
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER},
@@ -158,8 +208,20 @@ async def save_connection(hass, connection, msg):
         except AgentError as error:
             connection.send_error(msg["id"], error.code, error.code)
             return
+        saved_entry = result.get("result") if result["type"] == "create_entry" else next(
+            (item for item in hass.config_entries.async_entries(DOMAIN)
+             if item.data.get("provider") == msg["provider"]), None,
+        )
+        fingerprint = _settings_fingerprint({key: msg[key] for key in ("provider", "model", "api_key")})
+        if saved_entry is not None and _settings_fingerprint(saved_entry.data) == fingerprint:
+            if _record_api_check(hass, saved_entry, fingerprint, "verified"):
+                api_check_at = _api_check_readback(saved_entry)["api_check_at"]
+                api_check_status = "verified"
     # Do not send the flow result: it contains a ConfigEntry with the key.
-    connection.send_result(msg["id"], {"saved": True, "tool_call_verified": True})
+    connection.send_result(msg["id"], {
+        "saved": True, "tool_call_verified": True,
+        "api_check_status": api_check_status, "api_check_at": api_check_at,
+    })
 
 
 @websocket_api.websocket_command({
@@ -178,9 +240,26 @@ async def check_connection(hass, connection, msg):
         connection.send_error(msg["id"], "busy", "busy")
         return
     async with lock:
+        fingerprint = _settings_fingerprint(entry.data)
         try:
             await ProviderClient(async_get_clientsession(hass), entry.data).check()
         except ProviderError as err:
+            current = hass.config_entries.async_get_entry(msg["entry_id"])
+            if current is not None and _settings_fingerprint(current.data) == fingerprint:
+                _record_api_check(
+                    hass, current, fingerprint,
+                    "rejected" if err.code == "invalid_auth" else "unknown",
+                )
+            elif current is None or _settings_fingerprint(current.data) != fingerprint:
+                connection.send_error(msg["id"], "connection_changed", "connection_changed")
+                return
             connection.send_error(msg["id"], err.code, err.code)
             return
-    connection.send_result(msg["id"], {"tool_call_verified": True})
+        current = hass.config_entries.async_get_entry(msg["entry_id"])
+        if current is None or _settings_fingerprint(current.data) != fingerprint:
+            connection.send_error(msg["id"], "connection_changed", "connection_changed")
+            return
+        _record_api_check(hass, current, fingerprint, "verified")
+    connection.send_result(msg["id"], {
+        "tool_call_verified": True, **_api_check_readback(current),
+    })
