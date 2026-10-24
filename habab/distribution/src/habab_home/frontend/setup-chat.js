@@ -6,6 +6,18 @@ export function visibleTextMessages(messages) {
   );
 }
 
+export function classifyAssistantContext(previousOwnerId, main) {
+  const hass = main?.hass;
+  const user = hass?.user;
+  if (!main || !hass || !user || typeof user.is_admin !== "boolean") return {state: "unknown"};
+  if (!user.is_admin) return {state: "non-admin"};
+  if (typeof user.id !== "string" || !user.id.trim()) return {state: "unknown"};
+  if (previousOwnerId !== undefined && previousOwnerId !== user.id) {
+    return {state: "different-user", ownerId: user.id};
+  }
+  return {state: "admin", ownerId: user.id};
+}
+
 export function appendQuickReplyToDraft(draft, prompt) {
   return typeof draft === "string" && draft.trim()
     ? `${draft.replace(/\s+$/, "")}\n${prompt}`
@@ -199,6 +211,8 @@ function installChat() {
       this.busy = false;
       this.voiceBusy = false;
       this.voiceGeneration = 0;
+      this.contextAvailable = false;
+      this.ownerId = undefined;
       this.autoOpenStarted = false;
       this.mobileExpanded = false;
       this.layoutLifecycleInstalled = false;
@@ -220,6 +234,62 @@ function installChat() {
       if (this.setupCard) this.setupCard.hass = value;
       if (this.integrationCard) this.integrationCard.hass = value;
       this.subscribeVoiceHistory();
+    }
+
+    isCurrentOwnerContext() {
+      if (this.demo) return true;
+      if (!this.isConnected) return false;
+      if (!this.contextAvailable || this.hidden || this.inert || typeof this.ownerId !== "string") return false;
+      const current = classifyAssistantContext(this.ownerId, locateMain(document));
+      return current.state === "admin" && current.ownerId === this.ownerId &&
+        this.hass?.user?.is_admin === true && this.hass.user.id === this.ownerId;
+    }
+
+    setContextAvailable(available) {
+      if (this.demo) return;
+      if (available) {
+        const current = classifyAssistantContext(this.ownerId, locateMain(document));
+        if (current.state !== "admin" || current.ownerId !== this.ownerId) return;
+        const wasUnavailable = !this.contextAvailable || this.hidden || this.inert;
+        if (!wasUnavailable) return;
+        this.contextAvailable = true;
+        this.hidden = false;
+        this.inert = false;
+        this.removeAttribute("data-context-unavailable");
+        this.removeAttribute("aria-hidden");
+        const dialog = this.shadowRoot?.querySelector?.("dialog");
+        if (dialog?.open) this.setAssistantOpen(true);
+        if (this.integrationCard) this.integrationCard.active = dialog?.open === true;
+        if (this.isConnected && this.shadowRoot?.firstChild) this.controls();
+        if (wasUnavailable && dialog?.open && !this.busy) this.startPendingAssist();
+        return;
+      }
+      if (!this.contextAvailable && this.hidden) return;
+      this.contextAvailable = false;
+      this.cleanupVoice();
+      if (this.openParams) this.openParams.start_listening = false;
+      if (this.integrationCard) this.integrationCard.active = false;
+      const dialog = this.shadowRoot?.querySelector?.("dialog");
+      if (dialog?.open) this.setAssistantOpen(false);
+      const activeElement = this.shadowRoot?.activeElement;
+      activeElement?.blur?.();
+      this.inert = true;
+      this.hidden = true;
+      this.setAttribute("data-context-unavailable", "");
+      this.setAttribute("aria-hidden", "true");
+    }
+
+    cleanupVoice() {
+      this.voiceGeneration += 1;
+      this.pendingVoiceText = undefined;
+      this.voiceReplyPipeline = undefined;
+      const voice = this.voice;
+      const wasVoiceBusy = this.voiceBusy;
+      this.voice = undefined;
+      this.voiceBusy = false;
+      voice?.close();
+      if (wasVoiceBusy && !this.running) this.busy = false;
+      if (this.isConnected && this.shadowRoot?.firstChild) this.controls();
     }
 
     get t() { return copy[this.language || "en"]; }
@@ -263,7 +333,7 @@ function installChat() {
     }
 
     async loadSetup(afterTurn = false) {
-      if (this.demo) return;
+      if (this.demo || !this.isCurrentOwnerContext()) return;
       try {
         await import("/habab-home/xiaomi-setup.js?v=2");
         await import("/habab-home/integration-setup.js?v=1");
@@ -286,6 +356,7 @@ function installChat() {
             }
           });
           this.setupCard.addEventListener("habab-open-devices", async () => {
+            if (!this.isCurrentOwnerContext()) return;
             this.status(this.t.openingDevices);
             try {
               const {openDevices} = await import("/habab-home/device-dashboard.js?v=2");
@@ -332,6 +403,7 @@ function installChat() {
       const t = this.t;
       this.shadowRoot.innerHTML = `<style>
         :host{position:fixed;z-index:10;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));display:block;white-space:normal;pointer-events:none;color:var(--primary-text-color,#212121);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
+        :host([data-context-unavailable]){display:none !important;pointer-events:none !important}
         *{box-sizing:border-box}button,textarea{font:inherit}button{cursor:pointer;color:inherit;background:transparent;border:0;min-height:44px;border-radius:8px;padding:8px 12px}button:hover{background:var(--secondary-background-color,#f0f2f4)}button:disabled{opacity:.5;cursor:default}
         :is(button,textarea,a):focus-visible{outline:3px solid var(--primary-color,#007a9e);outline-offset:2px}::selection{background:var(--primary-color,#007a9e);color:#fff}
         .icon{width:56px;height:56px;padding:16px;display:grid;place-items:center}.launcher{position:relative;z-index:1;pointer-events:auto;border-radius:50%;background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff);box-shadow:0 3px 12px #0003}.launcher:hover{background:var(--dark-primary-color,#006686)}svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -422,6 +494,8 @@ function installChat() {
       this.markdownUpgradeLifecycle += 1;
       this.markdownUpgradePending = false;
       this.drawGeneration += 1;
+      this.cleanupVoice();
+      if (this.integrationCard) this.integrationCard.active = false;
       this.historyConnection = undefined;
       this.historyAttempt = undefined;
       this.historyUnsubscribe?.();
@@ -531,7 +605,7 @@ function installChat() {
     }
 
     open(params = {}, opener = null, options = {}) {
-      if (!this.isConnected || (!this.demo && !this.hass?.user?.is_admin) || !params || typeof params !== "object") return false;
+      if (!this.isConnected || !this.isCurrentOwnerContext() || !params || typeof params !== "object") return false;
       const mobile = matchMedia("(max-width: 720px)").matches;
       const focusComposer = options?.focus !== false && !mobile;
       this.focusComposerOnOpen = focusComposer;
@@ -557,15 +631,8 @@ function installChat() {
     }
 
     onClose() {
-      this.voiceGeneration += 1;
       if (this.integrationCard) this.integrationCard.active = false;
-      if (this.voice) this.voice.close();
-      this.voice = undefined;
-      if (this.voiceBusy) {
-        this.voiceBusy = false;
-        this.busy = false;
-        this.controls();
-      }
+      this.cleanupVoice();
       const target = this.returnFocus;
       this.returnFocus = null;
       if (target?.isConnected && typeof target.focus === "function") target.focus();
@@ -594,7 +661,7 @@ function installChat() {
     }
 
     async connect(fresh = false) {
-      if (this.busy) return;
+      if (this.busy || !this.isCurrentOwnerContext()) return;
       this.busy = true;
       this.status(this.t.loading);
       this.controls();
@@ -626,7 +693,7 @@ function installChat() {
     }
 
     startPendingAssist() {
-      if (!this.sessionId || this.busy || !this.q("dialog").open || !this.openParams) return;
+      if (!this.sessionId || this.busy || !this.q("dialog").open || !this.openParams || !this.isCurrentOwnerContext()) return;
       if (this.openParams.submit_prompt && this.openParams.initial_prompt) {
         const prompt = this.openParams.initial_prompt;
         this.openParams.submit_prompt = false;
@@ -661,7 +728,7 @@ function installChat() {
     }
 
     async startVoice(requestedId = "last_used", invalidId = false) {
-      if (this.demo || this.busy || !this.sessionId) return;
+      if (this.demo || this.busy || !this.sessionId || !this.isCurrentOwnerContext()) return;
       const generation = ++this.voiceGeneration;
       this.voiceBusy = true;
       this.busy = true;
@@ -678,7 +745,10 @@ function installChat() {
         if (!pipeline.stt_engine) throw {code: "speechRequired"};
         this.voiceReplyPipeline = pipeline.tts_engine ? pipeline : undefined;
         this.status(this.t.listening);
-        this.voice = new AssistVoice(this.hass, pipeline, (event) => this.onVoiceEvent(event));
+        this.voice = new AssistVoice(this.hass, pipeline, (event) => {
+          if (generation !== this.voiceGeneration || !this.isCurrentOwnerContext()) return;
+          this.onVoiceEvent(event);
+        });
         await this.voice.start();
       } catch (error) {
         if (generation !== this.voiceGeneration) return;
@@ -726,12 +796,14 @@ function installChat() {
     }
 
     async speakReply(messages) {
-      if (!this.q("dialog").open) return;
+      if (!this.q("dialog").open || !this.isCurrentOwnerContext()) return;
       const message = Array.isArray(messages) ? [...messages].reverse().find((item) => item?.role === "assistant" && typeof item.text === "string" && item.text.trim()) : undefined;
       const pipeline = this.voiceReplyPipeline;
       this.voiceReplyPipeline = undefined;
       if (!message || !pipeline?.tts_engine) return;
+      const generation = this.voiceGeneration;
       const voice = new AssistVoice(this.hass, pipeline, (event) => {
+        if (generation !== this.voiceGeneration || !this.isCurrentOwnerContext()) return;
         if (event.type === "playback-blocked" || event.type === "error") {
           this.status(this.t.voiceReplyFailed, true);
           voice.close();
@@ -824,6 +896,7 @@ function installChat() {
     }
 
     async send(textValue, {voiceReply = false, clearDraft = false} = {}) {
+      if (!this.isCurrentOwnerContext()) return;
       const text = (typeof textValue === "string" ? textValue : this.q("textarea").value).trim();
       if (!text || !this.sessionId || this.busy || this.setupRestarting) return;
       this.followSetupForms = true;
@@ -846,6 +919,7 @@ function installChat() {
     }
 
     async stop() {
+      if (!this.isCurrentOwnerContext()) return;
       this.q(".stop").disabled = true;
       try {
         const result = await this.hass.callWS({type: "habab_home/agent/abort", session_id: this.sessionId});
@@ -867,9 +941,15 @@ function installChat() {
   // A downstream module must also work with the stock Docker frontend. Keep the
   // search off the render loop and reuse the element across dashboard updates.
   let launcher;
+  let currentOwnerId;
+  let assistantContextState = "unknown";
+  const privateContextIsCurrent = (element) => Boolean(element && !element.demo &&
+    assistantContextState === "admin" && element.contextAvailable === true &&
+    !element.hidden && !element.inert && element.ownerId === currentOwnerId &&
+    element.isCurrentOwnerContext());
   const assistantHook = {
     get available() {
-      return !!launcher && launcher.parentNode === document.body && !launcher.demo && launcher.hass?.user?.is_admin === true;
+      return launcher?.parentNode === document.body && privateContextIsCurrent(launcher);
     },
     open(params, opener) {
       if (!this.available || !launcher) return false;
@@ -879,7 +959,8 @@ function installChat() {
   window.addEventListener("show-dialog", (event) => {
     const detail = event.detail;
     if (detail?.dialogTag !== "ha-voice-command-dialog" || !launcher) return;
-    if (!launcher.demo && launcher.hass?.user?.is_admin !== true) return;
+    if (!launcher.demo && !privateContextIsCurrent(launcher)) return;
+    if (launcher.hidden || launcher.inert) return;
     const opener = event.composedPath?.().find((element) => element instanceof HTMLElement);
     if (launcher.open(detail.dialogParams, opener) !== true) return;
     event.stopPropagation();
@@ -900,18 +981,49 @@ function installChat() {
     const demo = document.documentElement.dataset.hababDemo === "true";
     const autoOpenOnConnect = true;
     const hass = main?.hass;
-    if (!demo && !hass?.user?.is_admin) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
-    if (!demo && !main) {launcher?.remove(); launcher = undefined; syncAssistantHook(); return;}
+    if (launcher && launcher.demo !== demo) {
+      launcher.remove();
+      launcher = undefined;
+      currentOwnerId = undefined;
+    }
+    if (demo) {
+      assistantContextState = "demo";
+      currentOwnerId = undefined;
+    } else {
+      const context = classifyAssistantContext(currentOwnerId, main);
+      if (context.state === "unknown") {
+        assistantContextState = "unknown";
+        launcher?.setContextAvailable(false);
+        syncAssistantHook();
+        return;
+      }
+      if (context.state === "non-admin") {
+        assistantContextState = "non-admin";
+        launcher?.remove();
+        launcher = undefined;
+        currentOwnerId = undefined;
+        syncAssistantHook();
+        return;
+      }
+      if (context.state === "different-user") {
+        launcher?.remove();
+        launcher = undefined;
+      }
+      assistantContextState = "admin";
+      currentOwnerId = context.ownerId;
+    }
     if (!launcher) {
       launcher = document.createElement("habab-setup-chat");
-      launcher.demo = demo;
-      launcher.autoOpenOnConnect = autoOpenOnConnect;
-      launcher.hass = hass;
-      document.body.append(launcher);
     }
     launcher.demo = demo;
     launcher.autoOpenOnConnect = autoOpenOnConnect;
-    launcher.hass = hass;
+    if (!demo) {
+      launcher.ownerId = currentOwnerId;
+      launcher.hass = hass;
+      launcher.setContextAvailable(true);
+    } else {
+      launcher.hass = hass;
+    }
     syncThemeVariables(launcher, main);
     if (launcher.parentNode !== document.body) document.body.append(launcher);
     syncAssistantHook();

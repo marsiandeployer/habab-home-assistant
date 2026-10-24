@@ -1,0 +1,114 @@
+{
+  "scope": "client-only lifecycle fault injection using a one-response source overlay; not a live model or account-switch test",
+  "date": "2026-10-24",
+  "runtime_baseline": {
+    "product_version": "0.3.6",
+    "home_assistant_version": "2026.10.2",
+    "status": "running",
+    "verification_source": "parent-reported recent read-only health",
+    "image_digest_attested_in_this_run": false,
+    "source_revision_attested_in_this_run": false
+  },
+  "candidate": {
+    "source": "habab/distribution/src/habab_home/frontend/setup-chat.js",
+    "source_sha256": "7f80a63910a27d6bc0d49d922e9b16d2902e0275f594fca0b34199c4552d2f75",
+    "test": "habab/distribution/tests/test-chat-lifecycle.mjs",
+    "test_sha256": "f93df92edec39c9bb11d294e28849faa2db96cf751217aad29e8cc694b5f737c"
+  },
+  "focused_tests": {
+    "command": "node --test habab/distribution/tests/test-chat-lifecycle.mjs habab/distribution/tests/test-voice-lifecycle.mjs",
+    "passed": 23,
+    "failed": 0
+  },
+  "browser_overlay": {
+    "kind": "isolated authenticated browser; client-only response replacement",
+    "candidate_response_hits": 1,
+    "candidate_source_sha256": "7f80a63910a27d6bc0d49d922e9b16d2902e0275f594fca0b34199c4552d2f75",
+    "runtime_asset_path": "/habab-assistant/3f772a7a7164a157.js",
+    "runtime_asset_is_preexisting": true,
+    "cache_disabled": true,
+    "service_worker_bypassed": true,
+    "dashboard_path": "/home/overview"
+  },
+  "transient_context": {
+    "fault_injection": "client-only synthetic context overrides; no backend principal change",
+    "proof_scope_note": "Draft and pending-text busy preservation were measured during missing-hass injection; missing-main and missing-user injections separately verified same-instance retention, hide/inert state, hook-off state, and prior hass retention.",
+    "missing_hass": {
+      "duration_ms": 1350,
+      "same_chat_instance_retained": true,
+      "synthetic_draft_retained": true,
+      "pending_text_busy_preserved": true,
+      "chat_hidden_and_inert": true,
+      "computed_display": "none",
+      "assistant_hook_disabled": true,
+      "chat_removed": false,
+      "temporary_hass_assignments_swallowed": 0,
+      "original_descriptor_restored": true
+    },
+    "missing_main": {
+      "same_chat_instance_retained": true,
+      "chat_hidden_and_inert": true,
+      "previous_hass_retained": true,
+      "assistant_hook_disabled": true
+    },
+    "missing_user": {
+      "same_chat_instance_retained": true,
+      "chat_hidden_and_inert": true,
+      "previous_hass_retained": true,
+      "assistant_hook_disabled": true
+    },
+    "same_admin_restored": {
+      "same_chat_instance_reused": true,
+      "draft_visible": true,
+      "chat_visible_and_not_inert": true,
+      "assistant_hook_available": true,
+      "original_hass_descriptor_restored": true
+    }
+  },
+  "identity_policy": {
+    "synthetic_non_admin": {
+      "old_chat_removed": true,
+      "assistant_hook_disabled": true,
+      "fresh_chat_after_admin_context_restored": true
+    },
+    "synthetic_different_admin": {
+      "old_chat_disconnected": true,
+      "fresh_chat_created": true,
+      "old_message_state_reused": false,
+      "agent_session_blocked_during_synthetic_identity": true
+    },
+    "actual_backend_principal_switch": "NOT_RUN"
+  },
+  "voice_cleanup": {
+    "fake_voice_close_calls_on_transient_hide": 1,
+    "fake_voice_close_calls_on_disconnect": 1,
+    "pending_text_busy_preserved": true,
+    "physical_microphone": "NOT_RUN"
+  },
+  "guards": {
+    "forbidden_websocket_attempts": 11,
+    "forbidden_websocket_blocked": 11,
+    "forbidden_websocket_forwarded": 0,
+    "blocked_type_names": [
+      "habab_home/setup/status",
+      "habab_home/xiaomi/get",
+      "habab_home/agent/session"
+    ],
+    "agent_session_block_scope": "synthetic identity override only",
+    "api_write_attempts": 0,
+    "xhr_write_attempts": 0,
+    "beacon_write_attempts": 0,
+    "mutation_request_forwarded": false,
+    "model_request_made": false,
+    "raw_history_read": false
+  },
+  "errors": {
+    "console_errors": 0,
+    "page_errors": 0,
+    "failed_http_responses": 0,
+    "first_console_error": null
+  },
+  "deployment": "NOT_RUN",
+  "qa_trace_sha256": "24e0019f86563589bae50690eb0cd70137d952cd8afb1c6c9ae5c3e28031dd59",
+  "remaining_concrete_issue": null
+}
