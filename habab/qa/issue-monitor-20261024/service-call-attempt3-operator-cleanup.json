@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-10-24T19:24:47.297611+00:00",
+  "original_verdict": "FAIL_CLEANUP_preserved",
+  "scope": "operator cleanup only of exact attempt3 fixture after independent native idle and actor/binding checks",
+  "backend_idle_before_delete": true,
+  "actor_and_fixture_identity_confirmed": true,
+  "exact_helper_absent": true,
+  "owned_entity_state_absent": true,
+  "owned_registry_entity_absent": true,
+  "mutating_actions": [
+    "input_boolean/delete_exact_owned_helper"
+  ],
+  "runner_sha256": "683de235abf66f4b4d21db9f416a77d54772021a02e280bf204207fa439b0a84",
+  "unknown_target_acceptance": "UNPROVEN_backend_diagnostics_and_observation_continuity_unavailable",
+  "device_inventory": "NOT_RUN",
+  "production_source_changed": false
+}

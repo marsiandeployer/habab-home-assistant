@@ -1,0 +1,90 @@
+{
+  "checked_at": "2026-10-24T19:17:36.345Z",
+  "target_alias": "accepted-owner-test",
+  "runtime": {
+    "identity": {
+      "image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+      "runtime": "habab-owner-test",
+      "source": "9d795359c22cf2844884caa5affc94209a8120ca"
+    },
+    "product_version": "0.3.5",
+    "home_assistant_version": "2026.10.2",
+    "status": "running"
+  },
+  "mode": "chat_e2e",
+  "verdict": "FAIL_CLEANUP",
+  "cases": {
+    "turn_on": {
+      "assistant_replied": true,
+      "service_call_count": 1,
+      "submission_accepted": true,
+      "turn_completed": true,
+      "turn_elapsed_ms": 13008,
+      "current_node_has_same_probe": true,
+      "diagnostics_available": true,
+      "backend_idle_confirmed": true,
+      "connection_identity": 1,
+      "uninterrupted_observation": true,
+      "target_matched": true,
+      "context_matched": true,
+      "readback": "on"
+    },
+    "turn_off": {
+      "assistant_replied": true,
+      "service_call_count": 1,
+      "submission_accepted": true,
+      "turn_completed": true,
+      "turn_elapsed_ms": 72598,
+      "current_node_has_same_probe": true,
+      "diagnostics_available": true,
+      "backend_idle_confirmed": true,
+      "connection_identity": 1,
+      "uninterrupted_observation": true,
+      "target_matched": true,
+      "context_matched": true,
+      "readback": "off"
+    }
+  },
+  "cleanup": {
+    "fixture_created": true,
+    "fixture_deleted": false,
+    "backend_idle_confirmed": false,
+    "backend_status": "unavailable"
+  },
+  "limitations": [
+    "A browser action trace and independent Home Assistant state readback are required for E2E acceptance.",
+    "Physical device behavior is outside this nonphysical fixture test."
+  ],
+  "attempt": "20261024-attempt-3",
+  "owner_test_pathname": "/home/overview",
+  "browser_pathname": "/home/overview",
+  "preexisting_history_count": 31,
+  "calibration": {
+    "observer_acknowledged": true,
+    "calls_observed": 2,
+    "target_matched": true,
+    "context_matched": true,
+    "state_restored_off": true,
+    "connection_identity": 1,
+    "uninterrupted": true
+  },
+  "failure_code": "e2e_assertion_failed",
+  "failure_snapshot": {
+    "case_name": "unknown_target",
+    "ui_snapshot_captured": true,
+    "busy": false,
+    "status_error": false,
+    "probe_accepted": null,
+    "probe_completed": null,
+    "captured_probe_accepted": true,
+    "captured_probe_completed": true,
+    "exact_prompt_at_tail": true,
+    "assistant_at_tail": true,
+    "backend_active": null,
+    "service_event_count": 0,
+    "fixture_readback_state": "off",
+    "fixture_readback_error": false
+  },
+  "active_turn_stopped_before_cleanup": false,
+  "connection_observer_closed": true
+}

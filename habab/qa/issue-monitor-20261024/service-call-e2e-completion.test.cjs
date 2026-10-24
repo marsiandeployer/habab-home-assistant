@@ -1,7 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { hasAcceptedTurn, shouldDeferFixtureCleanup } = require("./service-call-e2e.cjs");
+const { hasAcceptedTurn, hasContinuousObserver, sameDeviceInventoryCount,
+  shouldDeferFixtureCleanup } = require("./service-call-e2e.cjs");
 
 const prompt = "Turn on the disposable QA helper";
 const cappedTail = Array.from({ length: 58 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `old ${index}` }));
@@ -36,4 +37,22 @@ assert.equal(shouldDeferFixtureCleanup(true, null), true, "retain fixture when b
 assert.equal(shouldDeferFixtureCleanup(true, false), false, "allow cleanup after backend idle confirmation");
 assert.equal(shouldDeferFixtureCleanup(false, null), false, "no active turn guard when no turn may be running");
 
-process.stdout.write("completion correlation synthetic checks passed\n");
+const observerStart = { connection_identity: 4, disconnected_count: 0, same_connection: true, connected: true };
+assert.equal(hasContinuousObserver(observerStart, { ...observerStart }), true,
+  "accept same connected observer without disconnects");
+assert.equal(hasContinuousObserver(observerStart, { ...observerStart, disconnected_count: 1 }), false,
+  "reject observer silence after disconnect");
+assert.equal(hasContinuousObserver(observerStart, { ...observerStart, connection_identity: 5 }), false,
+  "reject replacement connection");
+assert.equal(hasContinuousObserver(observerStart, { ...observerStart, same_connection: false }), false,
+  "reject chat replacing the observed connection");
+assert.equal(hasContinuousObserver(observerStart, { ...observerStart, connected: false }), false,
+  "reject currently disconnected observer");
+assert.equal(hasContinuousObserver({ ...observerStart, disconnected_count: 1 },
+  { ...observerStart, disconnected_count: 1 }), false, "reject observer that disconnected before case start");
+
+assert.equal(sameDeviceInventoryCount(12, 12), true, "accept unchanged device registry count");
+assert.equal(sameDeviceInventoryCount(12, 13), false, "reject device registry count change");
+assert.equal(sameDeviceInventoryCount(null, null), false, "reject unavailable device registry count");
+
+process.stdout.write("completion correlation, observer continuity, and inventory synthetic checks passed\n");

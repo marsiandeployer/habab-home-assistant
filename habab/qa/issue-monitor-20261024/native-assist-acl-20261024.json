@@ -1,7 +1,7 @@
 {
   "scope": "isolated installed Core Assist tool/exposure ACL with provider completion stub; not a live model or authenticated WebSocket E2E",
   "runtime_image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
-  "test_source_sha256": "06afdf63a17958f87d2924a546d8c8e6dc1a25894ebcbe025002f41c3d0af1ba",
+  "test_source_sha256": "5a44a5d0823bdc1aa40a6c20058ae9bcccca58b84d72affdf6fc84422a92180c",
   "focused_suite": "test_assist*.py",
   "tests_passed": 29,
   "network": "none",
@@ -26,5 +26,11 @@
     "authenticated_WebSocket_principal",
     "physical_device"
   ],
-  "production_source_changes": false
+  "production_source_changes": false,
+  "component_source_overlay": false,
+  "context_producer": "ConversationInput.as_llm_context",
+  "context_platform": "habab_home",
+  "context_assistant": "conversation",
+  "focused_test_count": 1,
+  "focused_test_passed": 1
 }

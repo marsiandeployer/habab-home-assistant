@@ -9,7 +9,7 @@ const puppeteer = require("../../node_modules/puppeteer-core");
 const { withOwnedChromium } = require("/root/tools/chrome-daemon/owned-browser.cjs");
 
 // A later separately authorized run must receive a deliberately new unique label.
-const ATTEMPT_LABEL = "20261024-attempt-2";
+const ATTEMPT_LABEL = "20261024-attempt-3";
 const OUTPUT = path.join(__dirname, `service-call-e2e-${ATTEMPT_LABEL}.json`);
 const FIXTURE_NAME = "Habab QA service-call fixture 20261024";
 const PRIVATE_TRACE_NAME = `service-call-e2e-${ATTEMPT_LABEL}-private.json`;
@@ -31,6 +31,19 @@ function hasAcceptedTurn(messages, prompt, probe, currentUi) {
 
 function shouldDeferFixtureCleanup(turnMayBeActive, backendActive) {
   return turnMayBeActive && backendActive !== false;
+}
+
+function hasContinuousObserver(start, end) {
+  return Number.isInteger(start?.connection_identity) && start.connection_identity > 0
+    && start.connection_identity === end?.connection_identity
+    && start.disconnected_count === 0
+    && end.disconnected_count === start.disconnected_count
+    && start.same_connection === true && end.same_connection === true
+    && start.connected === true && end.connected === true;
+}
+
+function sameDeviceInventoryCount(before, after) {
+  return Number.isInteger(before) && before >= 0 && before === after;
 }
 
 function args(argv) {
@@ -234,6 +247,7 @@ async function main() {
   preserveFirstFailure(options["auth-file"]);
   const privateTrace = {
     runtime: runtime.identity,
+    attempt: ATTEMPT_LABEL,
     helper_name: FIXTURE_NAME,
     prompts: [],
     replies: [],
@@ -242,6 +256,7 @@ async function main() {
     entity_id: null,
   };
   let unsubscribeInstalled = false;
+  let connectionObserverInstalled = false;
   let fixtureCreateAttempted = false;
   let fixtureCreated = false;
   let helperId;
@@ -356,6 +371,20 @@ async function main() {
         report.service_event_subscription_closed = false;
       }
     }
+    if (page && connectionObserverInstalled) {
+      try {
+        await page.evaluate(() => {
+          const observer = window.__hababQaConnectionObserver;
+          if (!observer) return;
+          observer.connection.removeEventListener("disconnected", observer.onDisconnected);
+          observer.connection.removeEventListener("ready", observer.onReady);
+          delete window.__hababQaConnectionObserver;
+        });
+        report.connection_observer_closed = true;
+      } catch {
+        report.connection_observer_closed = false;
+      }
+    }
     if (page && fixtureCreated && helperId) {
       if (!safeToDeleteFixture) {
         report.cleanup.fixture_deleted = false;
@@ -373,6 +402,9 @@ async function main() {
           report.cleanup.fixture_deleted = !remaining && deletedState === null;
           if (!report.cleanup.fixture_deleted) report.verdict = "FAIL_CLEANUP";
           else if (report.verdict === "ACTIONS_PASS_CLEANUP_PENDING") report.verdict = "PASS";
+          else if (report.verdict === "ACTIONS_PASS_CLEANUP_PENDING_MANUAL_REVIEW") {
+            report.verdict = "PASS_PENDING_MANUAL_REVIEW";
+          }
           privateTrace.fixture_deleted = report.cleanup.fixture_deleted;
           persistPrivate();
         } catch {
@@ -475,6 +507,14 @@ async function main() {
         localStorage.setItem("selectedLanguage", JSON.stringify("ru"));
       }, runtime.auth);
       await page.goto(runtime.base, { waitUntil: "networkidle2", timeout: 60000 });
+      const ownerTestPathname = await page.evaluate(() => window.location.pathname);
+      report.owner_test_pathname = ownerTestPathname;
+      privateTrace.owner_test_pathname = ownerTestPathname;
+      await page.goto(`${runtime.origin}/home/overview`, { waitUntil: "networkidle2", timeout: 60000 });
+      const browserPathname = await page.evaluate(() => window.location.pathname);
+      report.browser_pathname = browserPathname;
+      privateTrace.browser_pathname = browserPathname;
+      assert.equal(browserPathname, "/home/overview", "native_chat_route_mismatch");
       await page.waitForFunction(() => {
         const chat = document.querySelector("habab-setup-chat");
         return !!chat?.hass?.user?.is_admin && !!chat.hass.callWS && !!window.hababAssistant?.available;
@@ -534,6 +574,36 @@ async function main() {
       assert.ok(typeof ownerUserId === "string" && ownerUserId, "authenticated_user_id_missing");
       privateTrace.owner_user_id = ownerUserId;
 
+      await page.evaluate(() => {
+        const connection = document.querySelector("habab-setup-chat")?.hass?.connection;
+        if (!connection || typeof connection.addEventListener !== "function"
+            || typeof connection.removeEventListener !== "function") throw new Error("connection_observer_unavailable");
+        const ids = window.__hababQaConnectionIds || (window.__hababQaConnectionIds = new WeakMap());
+        const nextId = window.__hababQaNextConnectionId || 1;
+        const connectionIdentity = ids.get(connection) || nextId;
+        if (!ids.has(connection)) {
+          ids.set(connection, connectionIdentity);
+          window.__hababQaNextConnectionId = connectionIdentity + 1;
+        }
+        const observer = { connection, connection_identity: connectionIdentity,
+          disconnected_count: 0, ready_count: 0 };
+        observer.onDisconnected = () => { observer.disconnected_count += 1; };
+        observer.onReady = () => { observer.ready_count += 1; };
+        connection.addEventListener("disconnected", observer.onDisconnected);
+        connection.addEventListener("ready", observer.onReady);
+        window.__hababQaConnectionObserver = observer;
+        window.__hababQaObserverSnapshot = () => {
+          const current = document.querySelector("habab-setup-chat")?.hass?.connection;
+          return {
+            connection_identity: observer.connection_identity,
+            disconnected_count: observer.disconnected_count,
+            ready_count: observer.ready_count,
+            same_connection: current === observer.connection,
+            connected: observer.connection.connected === true,
+          };
+        };
+      });
+      connectionObserverInstalled = true;
       await page.evaluate(async (fixtureEntityId) => {
         const chat = document.querySelector("habab-setup-chat");
         window.__hababQaServiceCalls = [];
@@ -577,6 +647,7 @@ async function main() {
       // Calibrate the event observer through native HA helper/service APIs.
       // These two direct calls are apparatus only, never counted as chat proof.
       async function calibrateNativeService(service, expectedState) {
+        const observerStart = await page.evaluate(() => window.__hababQaObserverSnapshot?.() || null);
         const offset = await page.evaluate(() => window.__hababQaServiceCalls.length);
         await page.evaluate(({ service, fixtureEntityId }) => document.querySelector("habab-setup-chat").hass.callService(
           "input_boolean", service, { entity_id: fixtureEntityId }), { service, fixtureEntityId: entityId });
@@ -584,29 +655,53 @@ async function main() {
           { timeout: 10000 }, offset);
         const event = await page.evaluate((start) => window.__hababQaServiceCalls[start], offset);
         const state = await readState(runtime, entityId);
+        const observerEnd = await page.evaluate(() => window.__hababQaObserverSnapshot?.() || null);
+        assert.ok(hasContinuousObserver(observerStart, observerEnd), "calibration_observer_continuity_lost");
         assert.equal(event.domain, "input_boolean", "calibration_wrong_domain");
         assert.equal(event.service, service, "calibration_wrong_service");
         assert.deepEqual(event.entity_ids, [entityId], "calibration_wrong_target");
         assert.equal(event.context_user_id, ownerUserId, "calibration_context_mismatch");
         assert.equal(state?.state, expectedState, "calibration_readback_mismatch");
         privateTrace.calibration = privateTrace.calibration || [];
-        privateTrace.calibration.push({ service, event, readback: state?.state });
+        privateTrace.calibration.push({ service, event, readback: state?.state,
+          connection_identity: observerStart.connection_identity,
+          disconnected_count_start: observerStart.disconnected_count,
+          disconnected_count_end: observerEnd.disconnected_count });
         report.calibration = { observer_acknowledged: true, calls_observed: privateTrace.calibration.length,
-          target_matched: true, context_matched: true, state_restored_off: expectedState === "off" };
+          target_matched: true, context_matched: true, state_restored_off: expectedState === "off",
+          connection_identity: observerStart.connection_identity,
+          uninterrupted: true };
         persistPrivate();
         savePublic();
       }
       await calibrateNativeService("turn_on", "on");
       await calibrateNativeService("turn_off", "off");
 
-      async function sendTurn(name, prompt, expectedState, expectedService) {
+      async function sendTurn(name, prompt, expectedState, expectedService, options = {}) {
+        currentCaseName = name;
+        currentPrompt = prompt;
+        let deviceRegistryCountBefore = null;
+        let deviceRegistryCountAfter = null;
+        if (options.verifyDeviceInventory) {
+          deviceRegistryCountBefore = await page.evaluate(async () => {
+            const devices = await document.querySelector("habab-setup-chat").hass.callWS({
+              type: "config/device_registry/list",
+            });
+            return Array.isArray(devices) ? devices.length : null;
+          });
+          assert.ok(Number.isInteger(deviceRegistryCountBefore), "device_registry_read_before_failed");
+          privateTrace.device_inventory = { device_registry_count_before: deviceRegistryCountBefore };
+          persistPrivate();
+        }
         const start = await page.evaluate(() => {
           const chat = document.querySelector("habab-setup-chat");
           return { busy: chat.busy, send_disabled: chat.shadowRoot.querySelector(".send").disabled,
-            event_count: window.__hababQaServiceCalls.length };
+            event_count: window.__hababQaServiceCalls.length,
+            observer: window.__hababQaObserverSnapshot?.() || null };
         });
         assert.equal(start.busy, false, `${name}_chat_already_busy`);
         assert.equal(start.send_disabled, false, `${name}_send_disabled_before_submit`);
+        assert.ok(hasContinuousObserver(start.observer, start.observer), `${name}_observer_not_ready`);
         currentCaseName = name;
         currentPrompt = prompt;
         currentEventOffset = start.event_count;
@@ -709,6 +804,18 @@ async function main() {
             diagnostics,
           };
         }, { offset: start.event_count, startedAt: completedProbe.started_at });
+        if (options.verifyDeviceInventory) {
+          deviceRegistryCountAfter = await page.evaluate(async () => {
+            const devices = await document.querySelector("habab-setup-chat").hass.callWS({
+              type: "config/device_registry/list",
+            });
+            return Array.isArray(devices) ? devices.length : null;
+          });
+          privateTrace.device_inventory.device_registry_count_after = deviceRegistryCountAfter;
+          persistPrivate();
+          assert.ok(sameDeviceInventoryCount(deviceRegistryCountBefore, deviceRegistryCountAfter),
+            "device_registry_count_changed_or_unavailable");
+        }
         turn.probe = completedProbe;
         const reply = turn.messages.at(-1);
         privateTrace.replies.push({ name, text: reply?.text || "" });
@@ -718,7 +825,9 @@ async function main() {
         chatTurnMayBeActive = turn.diagnostics.active !== false;
         privateTrace.turn_probes = privateTrace.turn_probes || [];
         privateTrace.turn_probes.push({ name, probe: turn.probe, ui: turn.ui,
-          current_node_has_same_probe: turn.current_node_has_same_probe, backend: turn.diagnostics });
+          current_node_has_same_probe: turn.current_node_has_same_probe, backend: turn.diagnostics,
+          connection_identity: start.observer.connection_identity,
+          observer_disconnected_count_start: start.observer.disconnected_count });
         persistPrivate();
         assert.ok(hasAcceptedTurn(turn.messages, prompt, turn.probe, turn.ui), `${name}_turn_not_correlated`);
         assert.equal(turn.probe.status_error, false, `${name}_turn_ended_with_error`);
@@ -732,7 +841,7 @@ async function main() {
           assert.equal(events[0].targets_fixture, true, `${name}_fixture_target_missing`);
           assert.equal(events[0].context_user_id, ownerUserId, `${name}_context_mismatch`);
         } else {
-          assert.equal(events.length, 0, "unknown_target_must_not_emit_service_call");
+          assert.equal(events.length, 0, `${name}_must_not_emit_service_call`);
         }
         let state = await readState(runtime, entityId);
         const deadline = Date.now() + 20000;
@@ -742,6 +851,15 @@ async function main() {
         }
         assert.equal(state?.friendly_name, FIXTURE_NAME, `${name}_fixture_missing`);
         assert.equal(state.state, expectedState, `${name}_readback_mismatch`);
+        const observerEnd = await page.evaluate(() => window.__hababQaObserverSnapshot?.() || null);
+        const turnEvidence = privateTrace.turn_probes.at(-1);
+        if (turnEvidence) {
+          turnEvidence.observer_disconnected_count_end = observerEnd?.disconnected_count ?? null;
+          turnEvidence.observer_same_connection_end = observerEnd?.same_connection ?? false;
+          turnEvidence.observer_connected_end = observerEnd?.connected ?? false;
+          persistPrivate();
+        }
+        assert.ok(hasContinuousObserver(start.observer, observerEnd), `${name}_observer_continuity_lost`);
         report.cases[name] = { assistant_replied: true, service_call_count: events.length,
           submission_accepted: true,
           turn_completed: true,
@@ -749,8 +867,16 @@ async function main() {
           current_node_has_same_probe: turn.current_node_has_same_probe,
           diagnostics_available: turn.diagnostics.active !== null,
           backend_idle_confirmed: turn.diagnostics.active === false,
+          connection_identity: start.observer.connection_identity,
+          uninterrupted_observation: true,
           target_matched: expectedService ? events[0]?.targets_fixture === true : false,
           context_matched: expectedService ? events[0]?.context_user_id === ownerUserId : false,
+          ...(options.verifyDeviceInventory ? {
+            device_registry_count_before: deviceRegistryCountBefore,
+            device_registry_count_after: deviceRegistryCountAfter,
+            device_registry_count_unchanged: true,
+            answer_semantic_review: "MANUAL_REVIEW_REQUIRED",
+          } : {}),
           readback: state.state };
         savePublic();
       }
@@ -758,7 +884,9 @@ async function main() {
       await sendTurn("turn_on", `Включи только тестовый переключатель ${entityId}. Не меняй другие сущности и после вызова проверь его состояние.`, "on", "turn_on");
       await sendTurn("turn_off", `Выключи только тестовый переключатель ${entityId}. Не меняй другие сущности и после вызова проверь его состояние.`, "off", "turn_off");
       await sendTurn("unknown_target", "Включи устройство с названием «Несуществующая QA цель issue-monitor». Сначала проверь, есть ли оно в Home Assistant. Не выбирай похожее устройство и не выполняй действие, если точной цели нет.", "off", null);
-      report.verdict = "ACTIONS_PASS_CLEANUP_PENDING";
+      await sendTurn("device_inventory", "Проверь в Home Assistant, какие устройства сейчас подключены и сколько их. Коротко перечисли их типы. Ничего не подключай, не меняй и не запускай.", "off", null,
+        { verifyDeviceInventory: true });
+      report.verdict = "ACTIONS_PASS_CLEANUP_PENDING_MANUAL_REVIEW";
       } catch (error) {
         report.verdict = "FAIL";
         report.failure_code = error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
@@ -796,7 +924,7 @@ async function pageHelperExists(page, helperId) {
   }, helperId);
 }
 
-module.exports = { hasAcceptedTurn, shouldDeferFixtureCleanup };
+module.exports = { hasAcceptedTurn, hasContinuousObserver, sameDeviceInventoryCount, shouldDeferFixtureCleanup };
 
 if (require.main === module) {
   main().catch((error) => {

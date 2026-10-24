@@ -7,6 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.auth import auth_manager_from_config
+from homeassistant.components.conversation import (
+    ConversationInput,
+    DOMAIN as CONVERSATION_DOMAIN,
+)
 from homeassistant.components.conversation.chat_log import ChatLog
 from homeassistant.components.homeassistant import async_setup as async_setup_homeassistant
 from homeassistant.components.homeassistant import exposed_entities
@@ -20,7 +24,7 @@ from homeassistant.components.intent.llm import async_get_tools as intent_tools
 from homeassistant.components.llm import AssistAPI, DATA_PLATFORMS
 from homeassistant.const import SERVICE_TURN_ON
 from homeassistant.core import Context, HomeAssistant
-from homeassistant.helpers import area_registry, device_registry, entity_registry, intent, llm
+from homeassistant.helpers import area_registry, device_registry, entity_registry, intent
 
 from homeassistant.components.habab_home.assist_adapter import AssistAdapter
 from homeassistant.components.habab_home.const import DOMAIN
@@ -76,12 +80,6 @@ class NativeAssistACLIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.hass.states.async_set(self.allowed.entity_id, "off")
         self.hass.states.async_set(self.hidden.entity_id, "off")
-        exposed_entities.async_expose_entity(
-            self.hass, DOMAIN, self.allowed.entity_id, True
-        )
-        exposed_entities.async_expose_entity(
-            self.hass, DOMAIN, self.hidden.entity_id, False
-        )
 
         self.service_calls = []
 
@@ -104,12 +102,23 @@ class NativeAssistACLIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.hass, [{"type": "homeassistant"}], []
         )
         user = await auth.async_create_user("Assist ACL fixture user")
-        self.llm_context = llm.LLMContext(
-            platform=DOMAIN,
+        user_input = ConversationInput(
+            text="fixture request",
             context=Context(user_id=user.id),
-            language="en",
-            assistant=DOMAIN,
+            conversation_id=None,
             device_id=None,
+            satellite_id=None,
+            language="en",
+            agent_id="conversation.assist_acl_fixture",
+        )
+        self.llm_context = user_input.as_llm_context(DOMAIN)
+        self.assertEqual(self.llm_context.platform, DOMAIN)
+        self.assertEqual(self.llm_context.assistant, CONVERSATION_DOMAIN)
+        exposed_entities.async_expose_entity(
+            self.hass, self.llm_context.assistant, self.allowed.entity_id, True
+        )
+        exposed_entities.async_expose_entity(
+            self.hass, self.llm_context.assistant, self.hidden.entity_id, False
         )
         self.hass.data[DATA_PLATFORMS] = _AssistPlatforms()
         self.api = await AssistAPI(self.hass).async_get_api_instance(self.llm_context)
