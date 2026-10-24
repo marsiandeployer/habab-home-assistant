@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "device": "Huawei P30 Pro VOG-L29",
+  "apkVersionCode": 12,
+  "runtimeVersion": "0.3.3",
+  "apkSha256": "71b5ca305f86ac780e51ac9508e53bf76031708cc47950a03cf1e95a572fb03e",
+  "build": {
+    "tests": 34,
+    "failed": 0,
+    "skipped": 1,
+    "skipReason": "unchanged full archive test requires HABAB_RUNTIME_ARCHIVE",
+    "lint": "PASS"
+  },
+  "humanAudibility": {
+    "status": "CONFIRMED",
+    "userText": "звуки слышал",
+    "scope": "signals during synthetic P30 probe; wake phrase not yet human-accepted"
+  },
+  "syntheticPrivacyPilot": {
+    "status": "PASS_SCOPED",
+    "microphoneOpened": false,
+    "syntheticPcmBytes": 47998,
+    "receivedAppendFrames": 50,
+    "serverCaptureDrops": 0,
+    "observerCoverageErrors": 0,
+    "rawAudioOrHeadersSaved": false,
+    "clockOffsetHostMinusPhoneSeconds": {
+      "lower": 0.7439179420471191,
+      "upper": 0.9037978649139404
+    },
+    "firstVoiceRequestAfterStartCompletedMinSeconds": 0.5278379917144775,
+    "lastVoicePacketBeforeEndCompletedMinSeconds": 0.314284086227417,
+    "lateAppendBytes": 0,
+    "lateHttp": "voice_session_ended",
+    "lateWebSocketProducedServerEvent": false,
+    "limits": [
+      "Server packet arrival before END cue onset remains within clock uncertainty; client source cancels before queuing END",
+      "Synthetic transport test does not establish wake detector to microphone end-to-end behavior",
+      "Normal HA/auth/control/Telegram traffic is outside voice-audio guarantee"
+    ]
+  },
+  "liveWakePhraseMicrophoneNetworkAcceptance": "NOT_RUN",
+  "assistantIdentityUpdatedRuntime": "PENDING_PEER_FREEZE"
+}

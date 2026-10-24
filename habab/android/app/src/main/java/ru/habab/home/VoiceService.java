@@ -28,7 +28,13 @@ public final class VoiceService extends Service {
     private volatile long lastActivity;
     private volatile long generation;
     private PowerManager.WakeLock wakeLock;
-    private ToneGenerator tones;
+    private VoiceCuePlayer cues;
+    private final Object cueLock = new Object();
+    private final VoiceSessionSignals signals = new VoiceSessionSignals();
+    private volatile String lastCue;
+    private volatile long lastCueAt;
+    private volatile boolean lastCueCompleted;
+    private long cueSequence;
     private AudioManager manager;
     private int oldMode;
     private boolean oldSpeaker;
@@ -47,13 +53,16 @@ public final class VoiceService extends Service {
         notifications.createNotificationChannel(new NotificationChannel("voice", getString(R.string.voice_title), NotificationManager.IMPORTANCE_LOW));
         startForeground(3, notification());
         manager = getSystemService(AudioManager.class);
+        cues = new VoiceCuePlayer(manager);
     }
 
     private Notification notification() {
         PendingIntent open = PendingIntent.getActivity(this, 30, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent stop = PendingIntent.getService(this, 31, new Intent(this, VoiceService.class).setAction("stop"), PendingIntent.FLAG_IMMUTABLE);
-        String message = lastError != null && (status.equals("wake") || status.equals("error"))
-                ? failureLabel(this, lastError) : label(status);
+        String message = label(status);
+        if (lastError != null && status.equals("error")) message = failureLabel(this, lastError);
+        else if (lastError != null && status.equals("wake"))
+            message = getString(R.string.voice_wait_after_error, message, failureLabel(this, lastError));
         return new Notification.Builder(this, "voice").setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle(getString(R.string.voice_title)).setContentText(message)
                 .setStyle(new Notification.BigTextStyle().bigText(message))
@@ -65,7 +74,8 @@ public final class VoiceService extends Service {
         int text;
         switch (phase) {
             case "preparing": text = R.string.voice_preparing; break;
-            case "wake": text = R.string.voice_wake; break;
+            case "wake": return context.getString(R.string.voice_wake,
+                    context.getSharedPreferences("voice", 0).getString("phrase", "эй дом"));
             case "connecting": text = R.string.voice_connecting; break;
             case "listening": case "speech": text = R.string.voice_listening; break;
             case "thinking": text = R.string.voice_thinking; break;
@@ -90,6 +100,7 @@ public final class VoiceService extends Service {
             case "voice_model_unavailable": case "voice_model_checksum_mismatch":
             case "invalid_voice_model": case "incomplete_voice_model": text = R.string.voice_error_model; break;
             case "voice_assistant_failed": case "empty_assistant_reply": text = R.string.voice_error_assistant; break;
+            case "voice_signal_unavailable": text = R.string.voice_error_signal; break;
             case "voice_timeout": case "voice_connection_failed": case "realtime_connection_failed":
             case "realtime_connection_closed": case "realtime_unavailable": text = R.string.voice_error_connection; break;
             default: text = R.string.voice_error;
@@ -138,6 +149,7 @@ public final class VoiceService extends Service {
                     .put("recordedAt", System.currentTimeMillis());
             if (failure != null) result.put("error", failure);
             if (lastError != null) result.put("lastError", lastError).put("lastErrorAt", lastErrorAt);
+            if (lastCue != null) result.put("lastCue", lastCue).put("lastCueAt", lastCueAt).put("lastCueCompleted", lastCueCompleted);
             Files.write(new File(getFilesDir(), "voice-status.json").toPath(), result.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) { /* Foreground status still reports failure. */ }
     }
@@ -157,8 +169,6 @@ public final class VoiceService extends Service {
                 if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("microphone_unavailable");
                 if (AcousticEchoCanceler.isAvailable()) { echo = AcousticEchoCanceler.create(recorder.getAudioSessionId()); if (echo != null) echo.setEnabled(true); }
                 if (NoiseSuppressor.isAvailable()) { noise = NoiseSuppressor.create(recorder.getAudioSessionId()); if (noise != null) noise.setEnabled(true); }
-                // Activation is part of the voice interaction, even when notifications are silent.
-                tones = new ToneGenerator(AudioManager.STREAM_MUSIC, 60);
                 recorder.startRecording();
                 short[] samples = new short[320];
                 ArrayDeque<short[]> pending = new ArrayDeque<>();
@@ -171,14 +181,15 @@ public final class VoiceService extends Service {
                     RealtimeVoice client = realtime;
                     if (failure != null) {
                         recordFailure(failure);
-                        endSession(); pending.clear(); detector.reset();
+                        endSession(VoiceSessionSignals.EndReason.ERROR); pending.clear(); detector.reset();
                         phase("error"); writeStatus(true);
-                        tones.startTone(ToneGenerator.TONE_PROP_NACK, 180);
                         Thread.sleep(1200); failure = null; phase("wake");
                     } else if (client == null) {
                         if (detector.accept(samples, count, now)) { wakeCount++; started = now; lastActivity = now; beginSession(); }
                     } else if (now - started > 120000 || (client.ready() && !status.equals("thinking") && now - lastActivity > 20000)) {
-                        endSession(); pending.clear(); detector.reset(); phase("wake");
+                        endSession(VoiceSessionSignals.EndReason.NORMAL); pending.clear(); detector.reset(); phase("wake");
+                    } else if (!signals.allowsAudio()) {
+                        pending.clear(); // Discard microphone frames while the START cue is still playing.
                     } else if (client.ready()) {
                         while (!pending.isEmpty()) { short[] buffered = pending.removeFirst(); audioUploaded += client.append(buffered, buffered.length); }
                         audioUploaded += client.append(samples, count);
@@ -195,39 +206,62 @@ public final class VoiceService extends Service {
                 phase("error");
             }
         } finally {
-            running = false; active = false; endSession();
+            running = false; active = false; endSession(failure == null ? VoiceSessionSignals.EndReason.STOP : VoiceSessionSignals.EndReason.ERROR);
             AudioRecord current = recorder; if (current != null) { try { current.stop(); } catch (IllegalStateException ignored) {} current.release(); recorder = null; }
-            if (echo != null) echo.release(); if (noise != null) noise.release(); if (tones != null) tones.release();
+            if (echo != null) echo.release(); if (noise != null) noise.release(); cues.close();
             writeStatus(true); stopSelf();
         }
     }
 
-    private void beginSession() {
+    private synchronized void beginSession() {
+        if (!running || realtime != null) return;
         long attempt = ++generation;
         oldMode = manager.getMode(); oldSpeaker = manager.isSpeakerphoneOn(); communicationMode = true;
         manager.setMode(AudioManager.MODE_IN_COMMUNICATION); manager.setSpeakerphoneOn(true);
-        phase("connecting"); tones.startTone(ToneGenerator.TONE_PROP_BEEP, 120);
+        phase("connecting");
         RealtimeVoice client = new RealtimeVoice(this, new RealtimeVoice.Listener() {
             @Override public void phase(String value) { if (running && generation == attempt) { lastActivity = SystemClock.elapsedRealtime(); VoiceService.this.phase(value); } }
             @Override public void completed() { if (generation == attempt) { replies++; clearFailure(); } }
             @Override public void failed(String code) { if (generation == attempt) failure = VoiceFailure.normalize(code); }
         });
         realtime = client;
-        new Thread(() -> { try { client.start(); if (!running || generation != attempt) client.close(); }
-            catch (Exception error) { if (generation == attempt) failure = VoiceFailure.code(error); client.close(); } }, "habab-voice-connect").start();
+        synchronized (cueLock) {
+            playCue(signals.begin(attempt)).thenAccept(complete -> {
+                if (!running || generation != attempt) return;
+                if (!signals.startCompleted(attempt, complete)) { failure = "voice_signal_unavailable"; return; }
+                new Thread(() -> {
+                    if (!running || generation != attempt) { client.close(); return; }
+                    try { client.start(); if (!running || generation != attempt) client.close(); }
+                    catch (Exception error) { if (generation == attempt) failure = VoiceFailure.code(error); client.close(); }
+                }, "habab-voice-connect").start();
+            });
+        }
     }
 
-    private void endSession() {
+    private synchronized void endSession(VoiceSessionSignals.EndReason reason) {
         generation++;
         RealtimeVoice client = realtime; realtime = null; if (client != null) client.close();
         if (communicationMode) { manager.setSpeakerphoneOn(oldSpeaker); manager.setMode(oldMode); communicationMode = false; }
+        synchronized (cueLock) { playCue(signals.end(reason)); }
+    }
+
+    private java.util.concurrent.CompletableFuture<Boolean> playCue(VoiceSessionSignals.Cue cue) {
+        if (cue == VoiceSessionSignals.Cue.NONE) return java.util.concurrent.CompletableFuture.completedFuture(false);
+        synchronized (cueLock) {
+            long sequence = ++cueSequence;
+            lastCue = cue.name().toLowerCase(java.util.Locale.ROOT);
+            lastCueAt = System.currentTimeMillis(); lastCueCompleted = false;
+            java.util.concurrent.CompletableFuture<Boolean> completion = cues.play(cue);
+            completion.thenAccept(complete -> { synchronized (cueLock) { if (sequence == cueSequence) lastCueCompleted = complete; } });
+            return completion;
+        }
     }
 
     @Override public void onDestroy() {
         running = false; active = false;
         AudioRecord current = recorder; if (current != null) { try { current.stop(); } catch (IllegalStateException ignored) {} }
         if (capture != null) capture.interrupt();
-        endSession();
+        endSession(VoiceSessionSignals.EndReason.STOP);
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (!status.equals("error")) status = "off";
         stopForeground(true); super.onDestroy();

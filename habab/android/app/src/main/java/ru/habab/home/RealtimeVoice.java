@@ -21,6 +21,7 @@ final class RealtimeVoice implements AutoCloseable {
     private final AtomicLong queuedAudio = new AtomicLong();
     private final PcmResampler resampler = new PcmResampler();
     private final Object outputLock = new Object();
+    private final Object connectionLock = new Object();
     private volatile boolean closed, ready;
     private volatile WebSocket socket;
     private AudioTrack track;
@@ -35,41 +36,47 @@ final class RealtimeVoice implements AutoCloseable {
 
     void start() throws Exception {
         JSONObject connection = credentials.call("session", new JSONObject());
-        sessionId = connection.getString("session_id");
-        int size = Math.max(AudioTrack.getMinBufferSize(24000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT), 9600);
-        track = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .setAudioFormat(new AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-                .setBufferSizeInBytes(size).setTransferMode(AudioTrack.MODE_STREAM).build();
-        if (track.getState() != AudioTrack.STATE_INITIALIZED) throw new IOException("voice_playback_unavailable");
-        track.play();
+        synchronized (outputLock) {
+            if (closed) return;
+            sessionId = connection.getString("session_id");
+            int size = Math.max(AudioTrack.getMinBufferSize(24000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT), 9600);
+            track = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    .setAudioFormat(new AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+                    .setBufferSizeInBytes(size).setTransferMode(AudioTrack.MODE_STREAM).build();
+            if (track.getState() != AudioTrack.STATE_INITIALIZED) throw new IOException("voice_playback_unavailable");
+            track.play();
+        }
         String address = connection.getString("websocket_url");
         java.net.URI uri = new java.net.URI(address);
         if (!"wss".equals(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) throw new IOException("invalid_voice_endpoint");
         Request request = new Request.Builder().url(address)
                 .header("Authorization", "Bearer " + connection.getString("value")).build();
-        socket = client.newWebSocket(request, new WebSocketListener() {
-            @Override public void onMessage(WebSocket ws, String text) {
-                JSONObject received = null;
-                try { received = new JSONObject(text); event(received); }
-                catch (Exception error) {
-                    String kind = received == null ? "invalid_json" : received.optString("type");
-                    switch (kind) {
-                        case "session.created": case "input_audio_buffer.speech_started":
-                        case "input_audio_buffer.speech_stopped": case "response.output_audio.delta":
-                        case "response.output_audio.done": case "response.function_call_arguments.done":
-                        case "response.done": case "error": break;
-                        default: kind = "other";
+        synchronized (connectionLock) {
+            if (closed) return;
+            socket = client.newWebSocket(request, new WebSocketListener() {
+                @Override public void onMessage(WebSocket ws, String text) {
+                    JSONObject received = null;
+                    try { received = new JSONObject(text); event(received); }
+                    catch (Exception error) {
+                        String kind = received == null ? "invalid_json" : received.optString("type");
+                        switch (kind) {
+                            case "session.created": case "input_audio_buffer.speech_started":
+                            case "input_audio_buffer.speech_stopped": case "response.output_audio.delta":
+                            case "response.output_audio.done": case "response.function_call_arguments.done":
+                            case "response.done": case "error": break;
+                            default: kind = "other";
+                        }
+                        // Never log the event body, exception message, transcript, or audio.
+                        android.util.Log.w("HababVoice", "Event failure: " + kind + " / " + error.getClass().getSimpleName());
+                        fail("invalid_realtime_event");
                     }
-                    // Never log the event body, exception message, transcript, or audio.
-                    android.util.Log.w("HababVoice", "Event failure: " + kind + " / " + error.getClass().getSimpleName());
-                    fail("invalid_realtime_event");
                 }
-            }
-            @Override public void onFailure(WebSocket ws, Throwable error, Response response) { fail("realtime_connection_failed"); }
-            @Override public void onClosed(WebSocket ws, int code, String reason) { if (!closed) fail("realtime_connection_closed"); }
-        });
+                @Override public void onFailure(WebSocket ws, Throwable error, Response response) { fail("realtime_connection_failed"); }
+                @Override public void onClosed(WebSocket ws, int code, String reason) { if (!closed) fail("realtime_connection_closed"); }
+            });
+        }
     }
 
     boolean ready() { return ready && socket != null && !closed; }
@@ -83,11 +90,16 @@ final class RealtimeVoice implements AutoCloseable {
     }
 
     private void send(JSONObject event) {
-        WebSocket current = socket;
-        if (!closed && current != null && !current.send(event.toString())) fail("realtime_send_failed");
+        boolean rejected;
+        synchronized (connectionLock) {
+            WebSocket current = socket;
+            rejected = !closed && current != null && !current.send(event.toString());
+        }
+        if (rejected) fail("realtime_send_failed");
     }
 
     private void event(JSONObject event) throws Exception {
+        if (closed) return;
         String type = event.optString("type");
         if (type.equals("session.created")) { ready = true; listener.phase("listening"); }
         else if (type.equals("input_audio_buffer.speech_started")) {
@@ -109,7 +121,7 @@ final class RealtimeVoice implements AutoCloseable {
                             .put("output", new JSONObject().put("answer", result.getString("text")).toString());
                     send(new JSONObject().put("type", "conversation.item.create").put("item", item));
                     send(new JSONObject().put("type", "response.create").put("response", new JSONObject()
-                            .put("tool_choice", "none").put("instructions", "Озвучь ответ инструмента кратко и точно, не добавляя действий или неподтверждённых фактов.")));
+                            .put("tool_choice", "none").put("instructions", "Ты Habab — тот же встроенный помощник, с которым пользователь уже говорит. Озвучь ответ инструмента кратко и точно, не добавляя действий или неподтверждённых фактов. Для разговора с тобой не нужно подключать Google Assistant, Alexa или другого ассистента.")));
                 } catch (Exception error) { fail("voice_assistant_failed"); }
             });
         } else if (type.equals("response.output_audio.done")) {
@@ -151,7 +163,7 @@ final class RealtimeVoice implements AutoCloseable {
                 int offset = 0;
                 while (!closed && offset < audio.length) {
                     synchronized (outputLock) {
-                        if (version != generation) break;
+                        if (closed || version != generation || track == null) break;
                         int count = track.write(audio, offset, Math.min(4096, audio.length - offset), AudioTrack.WRITE_BLOCKING);
                         if (count <= 0) { fail("voice_playback_failed"); break; }
                         offset += count;
@@ -179,10 +191,23 @@ final class RealtimeVoice implements AutoCloseable {
     private void fail(String code) { if (!closed) { listener.failed(code); close(); } }
 
     @Override public void close() {
-        if (closed) return; closed = true; ready = false;
-        WebSocket current = socket; if (current != null) current.close(1000, "voice session ended");
+        synchronized (connectionLock) {
+            if (closed) return; closed = true; ready = false;
+            WebSocket current = socket; socket = null;
+            // Abort queued audio rather than draining it after the closing cue.
+            if (current != null) current.cancel();
+        }
+        credentials.close(); client.dispatcher().cancelAll();
         tools.shutdownNow(); playback.shutdownNow();
-        synchronized (outputLock) { if (track != null) { track.pause(); track.flush(); track.release(); track = null; } }
+        synchronized (outputLock) {
+            generation++;
+            AudioTrack current = track; track = null;
+            if (current != null) {
+                try { current.pause(); current.flush(); }
+                catch (IllegalStateException ignored) { /* Release even after a playback failure. */ }
+                finally { current.release(); }
+            }
+        }
         client.dispatcher().executorService().shutdown(); client.connectionPool().evictAll();
     }
 }

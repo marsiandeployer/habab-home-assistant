@@ -15,10 +15,11 @@ import okhttp3.*;
 import org.json.JSONObject;
 
 /** HA authorization stays in Android Keystore-encrypted private preferences. */
-final class VoiceCredentials {
+final class VoiceCredentials implements AutoCloseable {
     private static final String ALIAS = "habab.voice.authorization.v1";
     private static final Object LOCK = new Object();
     private final Context context;
+    private final VoiceRequestGate requests = new VoiceRequestGate();
     private final OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS)
             .followRedirects(false).followSslRedirects(false).build();
@@ -66,12 +67,16 @@ final class VoiceCredentials {
                 Request request = new Request.Builder().url("http://127.0.0.1:8123/auth/token")
                         .post(new FormBody.Builder().add("grant_type", "refresh_token")
                                 .add("refresh_token", data.getString("refresh_token")).add("client_id", data.getString("clientId")).build()).build();
-                try (Response response = http.newCall(request).execute()) {
-                    if (!response.isSuccessful() || response.body() == null) throw new IOException("voice_authorization_expired");
-                    JSONObject renewed = new JSONObject(response.body().string());
-                    data.put("access_token", renewed.getString("access_token"));
-                    data.put("expires", System.currentTimeMillis() + renewed.getLong("expires_in") * 1000);
-                    save(data);
+                Call call = http.newCall(request);
+                try (VoiceRequestGate.Ticket ticket = requests.register(call::cancel)) {
+                    if (ticket == null) throw new VoiceFailure("voice_session_ended");
+                    try (Response response = call.execute()) {
+                        if (!response.isSuccessful() || response.body() == null) throw new IOException("voice_authorization_expired");
+                        JSONObject renewed = new JSONObject(response.body().string());
+                        data.put("access_token", renewed.getString("access_token"));
+                        data.put("expires", System.currentTimeMillis() + renewed.getLong("expires_in") * 1000);
+                        save(data);
+                    }
                 }
             }
             return data.getString("access_token");
@@ -82,15 +87,23 @@ final class VoiceCredentials {
         if (!route.equals("session") && !route.equals("turn")) throw new IOException("invalid_voice_route");
         Request request = new Request.Builder().url("http://127.0.0.1:8123/api/habab_home/realtime/" + route)
                 .header("Authorization", "Bearer " + token()).post(RequestBody.create(MediaType.get("application/json"), body.toString())).build();
-        try (Response response = http.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String code = "";
-                try { code = new JSONObject(response.peekBody(8192).string()).optString("message", ""); }
-                catch (org.json.JSONException ignored) { /* Never expose an upstream body. */ }
-                throw VoiceFailure.fromHttp(response.code(), code);
+        Call call = http.newCall(request);
+        try (VoiceRequestGate.Ticket ticket = requests.register(call::cancel)) {
+            if (ticket == null) throw new VoiceFailure("voice_session_ended");
+            try (Response response = call.execute()) {
+                if (!response.isSuccessful()) {
+                    String code = "";
+                    try { code = new JSONObject(response.peekBody(8192).string()).optString("message", ""); }
+                    catch (org.json.JSONException ignored) { /* Never expose an upstream body. */ }
+                    throw VoiceFailure.fromHttp(response.code(), code);
+                }
+                if (response.body() == null) throw new VoiceFailure("invalid_realtime_response");
+                return new JSONObject(response.body().string());
             }
-            if (response.body() == null) throw new VoiceFailure("invalid_realtime_response");
-            return new JSONObject(response.body().string());
         }
+    }
+
+    @Override public void close() {
+        requests.close(); http.dispatcher().cancelAll(); http.connectionPool().evictAll();
     }
 }

@@ -52,14 +52,15 @@
     <string name="voice_title">Голосовой помощник</string>
     <string name="voice_authorize">Подключить голос к этому аккаунту</string>
     <string name="voice_login_help">Войдите в умный дом своим аккаунтом администратора. Затем нажмите сверху «Подключить голос к этому аккаунту».</string>
-    <string name="voice_privacy">Фраза активации распознаётся на телефоне. После сигнала речь отправляется в OpenAI, команда и ответ сохраняются в общем чате. Микрофон работает с погашенным экраном. Отключить его можно здесь или в уведомлении.</string>
+    <string name="voice_privacy">Фраза активации распознаётся на телефоне. Короткий пик открывает голосовой сеанс, два понижающихся — завершают его. Речь передаётся выбранному голосовому сервису во время сеанса; команда и ответ сохраняются в общем чате. Микрофон работает с погашенным экраном. Отключить его можно здесь или в уведомлении.</string>
     <string name="voice_phrase">Фраза активации, например: эй дом</string>
     <string name="voice_enable">Слушать фразу в фоне</string>
     <string name="voice_stop">Выключить микрофон</string>
     <string name="voice_invalid_phrase">Укажите фразу активации.</string>
     <string name="voice_auth_failed">Не удалось сохранить доступ. Войдите в умный дом ещё раз.</string>
     <string name="voice_preparing">Подготовка локального распознавания</string>
-    <string name="voice_wake">Слушаю фразу активации на телефоне</string>
+    <string name="voice_wake">Ожидаю «%1$s»</string>
+    <string name="voice_wait_after_error">%1$s. Последняя попытка: %2$s</string>
     <string name="voice_connecting">Фраза услышана, подключаю голос</string>
     <string name="voice_listening">Слушаю обращение</string>
     <string name="voice_thinking">Помощник готовит ответ</string>
@@ -75,4 +76,5 @@
     <string name="voice_error_model">Не удалось загрузить локальную модель речи. Повторно установите приложение с моделью.</string>
     <string name="voice_error_assistant">Не удалось получить ответ помощника. Проверьте его подключение в разделе AI.</string>
     <string name="voice_error_connection">Не удалось подключить голос. Проверьте, что домашний сервер работает и сервис речи доступен.</string>
+    <string name="voice_error_signal">Не удалось воспроизвести сигнал. Проверьте громкость мультимедиа.</string>
 </resources>
