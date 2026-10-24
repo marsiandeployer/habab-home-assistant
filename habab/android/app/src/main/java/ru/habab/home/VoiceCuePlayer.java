@@ -13,6 +13,10 @@ final class VoiceCuePlayer implements AutoCloseable {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
     VoiceCuePlayer(AudioManager manager) {
+        this(manager, () -> true);
+    }
+
+    VoiceCuePlayer(AudioManager manager, BooleanSupplier permitted) {
         this(samples -> new Sink() {
             final AudioTrack track = new AudioTrack.Builder()
                     .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
@@ -30,7 +34,8 @@ final class VoiceCuePlayer implements AutoCloseable {
             }
             public long played() { return Integer.toUnsignedLong(track.getPlaybackHeadPosition()); }
             public void close() { try { track.stop(); } catch (IllegalStateException ignored) {} finally { track.release(); } }
-        }, () -> !manager.isStreamMute(AudioManager.STREAM_MUSIC) && manager.getStreamVolume(AudioManager.STREAM_MUSIC) > 0);
+        }, () -> permitted.getAsBoolean() && !manager.isStreamMute(AudioManager.STREAM_MUSIC)
+                && manager.getStreamVolume(AudioManager.STREAM_MUSIC) > 0);
     }
 
     VoiceCuePlayer(Factory factory, BooleanSupplier audible) { this.factory = factory; this.audible = audible; }

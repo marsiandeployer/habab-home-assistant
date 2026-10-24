@@ -65,6 +65,7 @@
     <string name="voice_listening">Слушаю обращение</string>
     <string name="voice_thinking">Помощник готовит ответ</string>
     <string name="voice_speaking">Озвучиваю ответ</string>
+    <string name="voice_finishing">Завершаю разговор</string>
     <string name="voice_off">Микрофон выключен</string>
     <string name="voice_error">Голос недоступен. Откройте настройки помощника.</string>
     <string name="voice_error_provider">Для голоса выберите Habab или OpenAI в разделе AI. Текущий провайдер не поддерживает Realtime.</string>
@@ -77,4 +78,7 @@
     <string name="voice_error_assistant">Не удалось получить ответ помощника. Проверьте его подключение в разделе AI.</string>
     <string name="voice_error_connection">Не удалось подключить голос. Проверьте, что домашний сервер работает и сервис речи доступен.</string>
     <string name="voice_error_signal">Не удалось воспроизвести сигнал. Проверьте громкость мультимедиа.</string>
+    <string name="voice_error_audio_focus">Звук занят другим приложением. Голосовой сеанс остановлен.</string>
+    <string name="voice_error_update">Для этого голосового режима обновите серверный пакет Habab.</string>
+    <string name="voice_error_history">Не удалось сохранить разговор в общем чате. Проверьте домашний сервер.</string>
 </resources>

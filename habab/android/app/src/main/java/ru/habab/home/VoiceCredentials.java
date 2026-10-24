@@ -20,6 +20,7 @@ final class VoiceCredentials implements AutoCloseable {
     private static final Object LOCK = new Object();
     private final Context context;
     private final VoiceRequestGate requests = new VoiceRequestGate();
+    private final VoiceRequestGate interactions = new VoiceRequestGate();
     private final OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(8, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS)
             .followRedirects(false).followSslRedirects(false).build();
@@ -55,7 +56,7 @@ final class VoiceCredentials implements AutoCloseable {
         }
     }
 
-    private String token() throws Exception {
+    private String token(VoiceRequestGate scope) throws Exception {
         synchronized (LOCK) {
             String value = context.getSharedPreferences("voice_auth", 0).getString("sealed", null);
             if (value == null) throw new IOException("voice_authorization_required");
@@ -68,8 +69,9 @@ final class VoiceCredentials implements AutoCloseable {
                         .post(new FormBody.Builder().add("grant_type", "refresh_token")
                                 .add("refresh_token", data.getString("refresh_token")).add("client_id", data.getString("clientId")).build()).build();
                 Call call = http.newCall(request);
-                try (VoiceRequestGate.Ticket ticket = requests.register(call::cancel)) {
-                    if (ticket == null) throw new VoiceFailure("voice_session_ended");
+                try (VoiceRequestGate.Ticket ticket = requests.register(call::cancel);
+                     VoiceRequestGate.Ticket interaction = scope == null ? null : scope.register(call::cancel)) {
+                    if (ticket == null || scope != null && interaction == null) throw new VoiceFailure("voice_session_ended");
                     try (Response response = call.execute()) {
                         if (!response.isSuccessful() || response.body() == null) throw new IOException("voice_authorization_expired");
                         JSONObject renewed = new JSONObject(response.body().string());
@@ -84,12 +86,14 @@ final class VoiceCredentials implements AutoCloseable {
     }
 
     JSONObject call(String route, JSONObject body) throws Exception {
-        if (!route.equals("session") && !route.equals("turn")) throw new IOException("invalid_voice_route");
+        if (!route.equals("session") && !route.equals("turn") && !route.equals("context") && !route.equals("transcript")) throw new IOException("invalid_voice_route");
+        VoiceRequestGate scope = route.equals("transcript") ? null : interactions;
         Request request = new Request.Builder().url("http://127.0.0.1:8123/api/habab_home/realtime/" + route)
-                .header("Authorization", "Bearer " + token()).post(RequestBody.create(MediaType.get("application/json"), body.toString())).build();
+                .header("Authorization", "Bearer " + token(scope)).post(RequestBody.create(MediaType.get("application/json"), body.toString())).build();
         Call call = http.newCall(request);
-        try (VoiceRequestGate.Ticket ticket = requests.register(call::cancel)) {
-            if (ticket == null) throw new VoiceFailure("voice_session_ended");
+        try (VoiceRequestGate.Ticket ticket = requests.register(call::cancel);
+             VoiceRequestGate.Ticket interaction = scope == null ? null : scope.register(call::cancel)) {
+            if (ticket == null || scope != null && interaction == null) throw new VoiceFailure("voice_session_ended");
             try (Response response = call.execute()) {
                 if (!response.isSuccessful()) {
                     String code = "";
@@ -103,7 +107,10 @@ final class VoiceCredentials implements AutoCloseable {
         }
     }
 
+    void cancelInteractions() { interactions.close(); }
+
     @Override public void close() {
+        interactions.close();
         requests.close(); http.dispatcher().cancelAll(); http.connectionPool().evictAll();
     }
 }

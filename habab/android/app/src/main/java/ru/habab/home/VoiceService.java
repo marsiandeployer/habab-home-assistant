@@ -25,22 +25,37 @@ public final class VoiceService extends Service {
     private volatile AudioRecord recorder;
     private volatile RealtimeVoice realtime;
     private volatile String failure;
+    private volatile boolean endRequested;
     private volatile long lastActivity;
     private volatile long generation;
     private PowerManager.WakeLock wakeLock;
     private VoiceCuePlayer cues;
     private final Object cueLock = new Object();
     private final VoiceSessionSignals signals = new VoiceSessionSignals();
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> timings = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile String lastCue;
     private volatile long lastCueAt;
     private volatile boolean lastCueCompleted;
     private long cueSequence;
     private AudioManager manager;
-    private int oldMode;
-    private boolean oldSpeaker;
+    private AudioFocusRequest audioFocus;
+    private volatile boolean hasAudioFocus, releasingFocus;
+    private volatile long wakeSuppressedUntil;
+    private volatile boolean echoAvailable, echoEnabled, noiseEnabled;
+    private volatile int outputDeviceType = -1;
+    private volatile String voiceProvider, voiceModel;
+    private volatile long voiceConnectedAt;
+    private boolean routeReceiverRegistered;
+    private final BroadcastReceiver routeReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                RealtimeVoice current = realtime;
+                if (current != null) { endRequested = true; current.close(); }
+            }
+        }
+    };
     private long frames, wakeCount, replies, statusWritten;
     private volatile long audioUploaded;
-    private boolean communicationMode;
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
@@ -53,7 +68,22 @@ public final class VoiceService extends Service {
         notifications.createNotificationChannel(new NotificationChannel("voice", getString(R.string.voice_title), NotificationManager.IMPORTANCE_LOW));
         startForeground(3, notification());
         manager = getSystemService(AudioManager.class);
-        cues = new VoiceCuePlayer(manager);
+        audioFocus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAcceptsDelayedFocusGain(false)
+                .setOnAudioFocusChangeListener(change -> {
+                    if (change < 0) {
+                        hasAudioFocus = false;
+                        RealtimeVoice current = realtime;
+                        if (running && current != null) { failure = "voice_audio_interrupted"; current.close(); }
+                    }
+                }).build();
+        cues = new VoiceCuePlayer(manager, () -> hasAudioFocus);
+        IntentFilter routeFilter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(routeReceiver, routeFilter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(routeReceiver, routeFilter);
+        routeReceiverRegistered = true;
     }
 
     private Notification notification() {
@@ -80,6 +110,7 @@ public final class VoiceService extends Service {
             case "listening": case "speech": text = R.string.voice_listening; break;
             case "thinking": text = R.string.voice_thinking; break;
             case "speaking": text = R.string.voice_speaking; break;
+            case "finishing": text = R.string.voice_finishing; break;
             case "off": text = R.string.voice_off; break;
             default: text = R.string.voice_error;
         }
@@ -101,6 +132,9 @@ public final class VoiceService extends Service {
             case "invalid_voice_model": case "incomplete_voice_model": text = R.string.voice_error_model; break;
             case "voice_assistant_failed": case "empty_assistant_reply": text = R.string.voice_error_assistant; break;
             case "voice_signal_unavailable": text = R.string.voice_error_signal; break;
+            case "voice_audio_busy": case "voice_audio_interrupted": text = R.string.voice_error_audio_focus; break;
+            case "unsupported_voice_protocol": case "voice_history_protocol_required": text = R.string.voice_error_update; break;
+            case "voice_history_failed": text = R.string.voice_error_history; break;
             case "voice_timeout": case "voice_connection_failed": case "realtime_connection_failed":
             case "realtime_connection_closed": case "realtime_unavailable": text = R.string.voice_error_connection; break;
             default: text = R.string.voice_error;
@@ -146,8 +180,15 @@ public final class VoiceService extends Service {
             JSONObject result = new JSONObject().put("phase", status).put("active", running)
                     .put("captureFrames", frames).put("wakeCount", wakeCount).put("replies", replies)
                     .put("uploadedPcmBytes", audioUploaded).put("screenOn", getSystemService(PowerManager.class).isInteractive())
+                    .put("timingsMs", new JSONObject(timings))
+                    .put("audio", new JSONObject().put("echoAvailable", echoAvailable).put("echoEnabled", echoEnabled)
+                            .put("noiseSuppressionEnabled", noiseEnabled).put("focus", hasAudioFocus).put("outputDeviceType", outputDeviceType))
                     .put("recordedAt", System.currentTimeMillis());
             if (failure != null) result.put("error", failure);
+            RealtimeVoice connected = realtime;
+            if (voiceProvider != null && voiceModel != null) result.put("lastConnection", new JSONObject()
+                    .put("provider", voiceProvider).put("model", voiceModel).put("connectedAt", voiceConnectedAt)
+                    .put("active", connected != null && connected.ready() && !connected.finishing()));
             if (lastError != null) result.put("lastError", lastError).put("lastErrorAt", lastErrorAt);
             if (lastCue != null) result.put("lastCue", lastCue).put("lastCueAt", lastCueAt).put("lastCueCompleted", lastCueCompleted);
             Files.write(new File(getFilesDir(), "voice-status.json").toPath(), result.toString().getBytes(StandardCharsets.UTF_8));
@@ -167,8 +208,9 @@ public final class VoiceService extends Service {
                 recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, 16000,
                         AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size);
                 if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("microphone_unavailable");
-                if (AcousticEchoCanceler.isAvailable()) { echo = AcousticEchoCanceler.create(recorder.getAudioSessionId()); if (echo != null) echo.setEnabled(true); }
-                if (NoiseSuppressor.isAvailable()) { noise = NoiseSuppressor.create(recorder.getAudioSessionId()); if (noise != null) noise.setEnabled(true); }
+                echoAvailable = AcousticEchoCanceler.isAvailable();
+                if (echoAvailable) { echo = AcousticEchoCanceler.create(recorder.getAudioSessionId()); if (echo != null) { echo.setEnabled(true); echoEnabled = echo.getEnabled(); } }
+                if (NoiseSuppressor.isAvailable()) { noise = NoiseSuppressor.create(recorder.getAudioSessionId()); if (noise != null) { noise.setEnabled(true); noiseEnabled = noise.getEnabled(); } }
                 recorder.startRecording();
                 short[] samples = new short[320];
                 ArrayDeque<short[]> pending = new ArrayDeque<>();
@@ -184,10 +226,17 @@ public final class VoiceService extends Service {
                         endSession(VoiceSessionSignals.EndReason.ERROR); pending.clear(); detector.reset();
                         phase("error"); writeStatus(true);
                         Thread.sleep(1200); failure = null; phase("wake");
-                    } else if (client == null) {
-                        if (detector.accept(samples, count, now)) { wakeCount++; started = now; lastActivity = now; beginSession(); }
-                    } else if (now - started > 120000 || (client.ready() && !status.equals("thinking") && now - lastActivity > 20000)) {
+                    } else if (endRequested) {
+                        endRequested = false;
                         endSession(VoiceSessionSignals.EndReason.NORMAL); pending.clear(); detector.reset(); phase("wake");
+                    } else if (client == null && now >= wakeSuppressedUntil) {
+                        if (detector.accept(samples, count, now)) { wakeCount++; started = now; lastActivity = now; beginSession(now); }
+                    } else if (client == null) {
+                        pending.clear(); // The END cue and its acoustic tail cannot activate the next session.
+                    } else if (client.finishing()) {
+                        pending.clear();
+                    } else if (now - started > 120000 || (client.ready() && !status.equals("thinking") && now - lastActivity > 20000)) {
+                        client.finish(); pending.clear(); detector.reset();
                     } else if (!signals.allowsAudio()) {
                         pending.clear(); // Discard microphone frames while the START cue is still playing.
                     } else if (client.ready()) {
@@ -208,22 +257,32 @@ public final class VoiceService extends Service {
         } finally {
             running = false; active = false; endSession(failure == null ? VoiceSessionSignals.EndReason.STOP : VoiceSessionSignals.EndReason.ERROR);
             AudioRecord current = recorder; if (current != null) { try { current.stop(); } catch (IllegalStateException ignored) {} current.release(); recorder = null; }
-            if (echo != null) echo.release(); if (noise != null) noise.release(); cues.close();
+            if (echo != null) echo.release(); if (noise != null) noise.release(); echoEnabled = noiseEnabled = false; cues.close();
             writeStatus(true); stopSelf();
         }
     }
 
-    private synchronized void beginSession() {
+    private synchronized void beginSession(long wakeAt) {
         if (!running || realtime != null) return;
+        timings.clear();
+        voiceProvider = voiceModel = null; voiceConnectedAt = 0;
+        outputDeviceType = -1;
+        endRequested = false;
+        hasAudioFocus = manager.requestAudioFocus(audioFocus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        if (!hasAudioFocus) { failure = "voice_audio_busy"; return; }
         long attempt = ++generation;
-        oldMode = manager.getMode(); oldSpeaker = manager.isSpeakerphoneOn(); communicationMode = true;
-        manager.setMode(AudioManager.MODE_IN_COMMUNICATION); manager.setSpeakerphoneOn(true);
         phase("connecting");
         RealtimeVoice client = new RealtimeVoice(this, new RealtimeVoice.Listener() {
             @Override public void phase(String value) { if (running && generation == attempt) { lastActivity = SystemClock.elapsedRealtime(); VoiceService.this.phase(value); } }
             @Override public void completed() { if (generation == attempt) { replies++; clearFailure(); } }
             @Override public void failed(String code) { if (generation == attempt) failure = VoiceFailure.normalize(code); }
-        });
+            @Override public void ended() { if (running && generation == attempt) endRequested = true; }
+            @Override public void timing(String name, long duration) { if (generation == attempt) timings.put(name, duration); }
+            @Override public void routed(int type) { if (generation == attempt) outputDeviceType = type; }
+            @Override public void connected(String provider, String model) {
+                if (generation == attempt) { voiceConnectedAt = System.currentTimeMillis(); voiceModel = model; voiceProvider = provider; }
+            }
+        }, wakeAt);
         realtime = client;
         synchronized (cueLock) {
             playCue(signals.begin(attempt)).thenAccept(complete -> {
@@ -241,8 +300,20 @@ public final class VoiceService extends Service {
     private synchronized void endSession(VoiceSessionSignals.EndReason reason) {
         generation++;
         RealtimeVoice client = realtime; realtime = null; if (client != null) client.close();
-        if (communicationMode) { manager.setSpeakerphoneOn(oldSpeaker); manager.setMode(oldMode); communicationMode = false; }
-        synchronized (cueLock) { playCue(signals.end(reason)); }
+        synchronized (cueLock) {
+            VoiceSessionSignals.Cue cue = signals.end(reason);
+            if (cue != VoiceSessionSignals.Cue.NONE) {
+                wakeSuppressedUntil = Long.MAX_VALUE; releasingFocus = true;
+                playCue(cue).thenAccept(complete -> {
+                    releaseAudioFocus();
+                    wakeSuppressedUntil = SystemClock.elapsedRealtime() + 300;
+                });
+            } else if (!releasingFocus) releaseAudioFocus();
+        }
+    }
+
+    private synchronized void releaseAudioFocus() {
+        manager.abandonAudioFocusRequest(audioFocus); hasAudioFocus = false; releasingFocus = false;
     }
 
     private java.util.concurrent.CompletableFuture<Boolean> playCue(VoiceSessionSignals.Cue cue) {
@@ -259,6 +330,7 @@ public final class VoiceService extends Service {
 
     @Override public void onDestroy() {
         running = false; active = false;
+        if (routeReceiverRegistered) { unregisterReceiver(routeReceiver); routeReceiverRegistered = false; }
         AudioRecord current = recorder; if (current != null) { try { current.stop(); } catch (IllegalStateException ignored) {} }
         if (capture != null) capture.interrupt();
         endSession(VoiceSessionSignals.EndReason.STOP);

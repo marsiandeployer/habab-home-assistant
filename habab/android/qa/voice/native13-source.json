@@ -1,0 +1,81 @@
+{
+  "status": "SOURCE_CHECKPOINT",
+  "parentCommit": "a6999c32dec8b59b3b2e4102bc00280212b01c95",
+  "candidateVersionCode": 13,
+  "installedVersionCode": 12,
+  "installedHababVersion": "0.3.3",
+  "publication": "NOT_PUBLISHED",
+  "physicalCandidateAcceptance": "NOT_RUN_USER_TUNNELS_OFF",
+  "android": {
+    "assembleDebug": "PASS",
+    "lintDebug": "PASS",
+    "unitTests": {
+      "tests": 55,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "skipReason": "Existing full-runtime archive extraction requires HABAB_RUNTIME_ARCHIVE"
+  },
+  "backend": {
+    "tests": 30,
+    "failures": 0,
+    "includes": "HTTP event -> actual shared AssistantService -> private Store/dedupe without model startup"
+  },
+  "protocol": {
+    "openai": "native_v2 direct conversation, conditional ask_home_assistant, explicit end_voice_session",
+    "gemini": "gemini-3.8-live; single-use full-setup-constrained ephemeral token; Token WSS auth; binary JSON; PCM16 input16000/output24000",
+    "geminiHistory": "Independent observed ASR fragments and fully played output; local event IDs, correlation=None; no inferred pairs",
+    "historyDependency": "a6999c32d; record_voice_event; capability checked before Gemini provider request",
+    "normalEnd": "Serial callback intake and accepted-journal drain before END; timeout is explicit error",
+    "emergencyClose": "Best effort; can cancel pending journal writes"
+  },
+  "providerStand": {
+    "microphoneUsed": false,
+    "audioPersisted": false,
+    "setupAndAudio": "PASS",
+    "syntheticPcmInput": "PASS",
+    "policyScenarios": [
+      "direct greeting",
+      "no external-assistant setup",
+      "tool preamble and synthetic result",
+      "explicit goodbye tool",
+      "negative-end request stays open"
+    ],
+    "syntheticBargeIn": {
+      "status": "PASS",
+      "feedToProviderInterruptionMs": 233,
+      "trace": [
+        "ACTIVITY_START",
+        "interrupted",
+        "turnComplete",
+        "ACTIVITY_END",
+        "generationComplete",
+        "turnComplete"
+      ]
+    },
+    "note": "Provider synthetic fixtures do not prove physical wake, audibility, echo suppression, barge-in, mic privacy or end on the phone"
+  },
+  "packaging": "Current compiled APK is compile-QA only; do not distribute before rebuilding a frozen runtime with the accepted native frontend wheel",
+  "sourcePaths": [
+    "habab/android/README.md",
+    "habab/android/app/build.gradle",
+    "habab/android/app/src/main/res/values/strings.xml",
+    "habab/distribution/src/habab_home/realtime.py",
+    "habab/distribution/src/habab_home/gemini_live.py",
+    "habab/distribution/tests/test_realtime.py",
+    "habab/android/app/src/main/java/ru/habab/home/RealtimeVoice.java",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceCredentials.java",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceCuePlayer.java",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceFailure.java",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceService.java",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceResponseGate.java",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceTranscriptLedger.java",
+    "habab/android/app/src/main/java/ru/habab/home/VoiceHistoryQueue.java",
+    "habab/android/app/src/main/java/ru/habab/home/GeminiVoiceProtocol.java",
+    "habab/android/app/src/test/java/ru/habab/home/VoiceResponseGateTest.java",
+    "habab/android/app/src/test/java/ru/habab/home/VoiceTranscriptLedgerTest.java",
+    "habab/android/app/src/test/java/ru/habab/home/VoiceHistoryQueueTest.java",
+    "habab/android/app/src/test/java/ru/habab/home/GeminiVoiceProtocolTest.java"
+  ]
+}

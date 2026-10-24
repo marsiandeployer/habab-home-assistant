@@ -10,13 +10,13 @@ import java.util.Set;
 final class VoiceFailure extends IOException {
     private static final Set<String> CODES = new HashSet<>(Arrays.asList(
             "openai_required", "provider_required", "realtime_provider_required", "realtime_provider_rejected", "realtime_unavailable",
-            "invalid_realtime_response", "not_allowed", "invalid_voice_settings", "voice_rate_limited",
+            "invalid_realtime_response", "unsupported_voice_protocol", "voice_history_protocol_required", "not_allowed", "invalid_voice_settings", "voice_rate_limited",
             "invalid_voice_turn", "empty_assistant_reply", "voice_authorization_required",
             "voice_authorization_expired", "voice_authorization_not_saved", "invalid_voice_authorization",
             "voice_assistant_failed", "voice_connection_failed", "voice_timeout", "invalid_voice_endpoint",
             "invalid_realtime_event", "realtime_connection_failed", "realtime_connection_closed",
             "realtime_upload_backpressure", "realtime_send_failed", "invalid_voice_tool", "invalid_voice_command",
-            "voice_playback_timeout", "realtime_response_failed", "realtime_provider_error",
+            "voice_playback_timeout", "voice_audio_busy", "voice_audio_interrupted", "voice_history_failed", "realtime_response_failed", "realtime_provider_error",
             "realtime_playback_backpressure", "voice_playback_failed", "voice_playback_unavailable",
             "voice_connection_too_slow", "voice_session_ended", "voice_signal_unavailable", "microphone_permission_revoked", "microphone_unavailable",
             "microphone_read_failed", "invalid_wake_phrase", "unsupported_wake_word",

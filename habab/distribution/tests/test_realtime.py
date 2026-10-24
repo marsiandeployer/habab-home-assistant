@@ -1,12 +1,14 @@
 """Voice must use the authenticated owner's canonical chat, never another session."""
 import json
 import os
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.habab_home import realtime
 from homeassistant.components.habab_home.setup_agent import AgentError
+from homeassistant.components.habab_home.assistant import AssistantService
 
 
 class Request(dict):
@@ -17,6 +19,289 @@ class Request(dict):
 
 
 class RealtimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gemini_http_event_reaches_real_shared_store_without_engine_or_false_pair(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        runtime = SimpleNamespace(ensure=AsyncMock(), diagnostics=SimpleNamespace())
+        hass = SimpleNamespace(auth=SimpleNamespace(async_get_user=AsyncMock(return_value=owner)))
+        stores = []
+        def store_factory(*args, **kwargs):
+            store = SimpleNamespace(async_load=AsyncMock(return_value=None), async_save=AsyncMock())
+            stores.append(store); return store
+        with patch('homeassistant.components.habab_home.assistant.Store', side_effect=store_factory):
+            assistant = AssistantService(hass, runtime)
+        await assistant.setup()
+        assistant.web_sessions = {'alice': 'web-alice'}
+        assistant.web_contexts = {'alice': {'session_id': 'web-alice', 'epoch': 3}}
+        request = Request(owner, {'session_id': 'voice2_fixture', 'event_id': 'gemini_local_fixture_input_7',
+            'kind': 'event', 'role': 'user', 'text': 'Запоздавший фрагмент'}, assistant)
+        request.app['hass'] = hass
+        hass.data = {'habab_home': {'assistant': assistant, 'voice_sessions': {'voice2_fixture': {
+            'owner': 'alice', 'expires': time.monotonic() + 60, 'history_session': 'web-alice',
+            'history_epoch': 3, 'provider': 'gemini'}}}}
+        with patch.object(realtime, 'async_dispatcher_send'):
+            response = await realtime.RealtimeTranscriptView().post(request)
+            duplicate = await realtime.RealtimeTranscriptView().post(request)
+        self.assertEqual(response.status, 200); self.assertEqual(duplicate.status, 200)
+        self.assertTrue(json.loads(duplicate.body)['duplicate'])
+        runtime.ensure.assert_not_awaited()
+        self.assertEqual(len(assistant.voice_receipts), 1)
+        receipt = next(iter(assistant.voice_receipts.values()))
+        self.assertEqual(receipt['role'], 'user'); self.assertEqual(receipt['text'], 'Запоздавший фрагмент')
+        self.assertIsNone(receipt['correlation']); self.assertNotIn('assistant_text', receipt)
+        self.assertEqual(assistant._project_pending_voice('alice', 'web-alice', [], 3),
+                         [{'role': 'user', 'text': 'Запоздавший фрагмент'}])
+        self.assertEqual(stores[-1].async_save.await_count, 1)
+
+    async def test_gemini_without_independent_journal_rejects_before_provider_http(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        request = Request(owner, {'client': 'native_v2'}, SimpleNamespace(web_session=AsyncMock()))
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'gemini', 'api_key': 'synthetic-master'})
+        with patch.object(realtime, 'async_get_clientsession') as client:
+            response = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(response.status, 400)
+        self.assertEqual(json.loads(response.body)['message'], 'voice_history_protocol_required')
+        client.assert_not_called()
+
+    async def test_independent_gemini_event_uses_server_lease_metadata_without_fake_pair(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for role, text in [('user', 'Поздняя часть распознанной речи'),
+                           ('assistant', 'Полностью проигранный ответ')]:
+            assistant = SimpleNamespace(record_voice_turn=AsyncMock(),
+                record_voice_event=AsyncMock(return_value={'recorded': True, 'duplicate': False, 'messages': []}))
+            request = Request(owner, {'session_id': 'voice2_test', 'event_id': 'gemini_local_fixture',
+                'kind': 'event', 'role': role, 'text': text, 'owner': 'bob',
+                'metadata': {'provider_response_id': 'forged', 'correlation': 'exact', 'provider': 'openai'}}, assistant)
+            request.app['hass'].data['habab_home']['voice_sessions'] = {'voice2_test': {
+                'owner': 'alice', 'expires': time.monotonic() + 60, 'history_session': None,
+                'history_epoch': 7, 'provider': 'gemini'}}
+            with patch.object(realtime, 'async_dispatcher_send'):
+                response = await realtime.RealtimeTranscriptView().post(request)
+            self.assertEqual(response.status, 200)
+            assistant.record_voice_turn.assert_not_awaited()
+            assistant.record_voice_event.assert_awaited_once_with('alice', None, 'gemini_local_fixture', role, text,
+                history_epoch=7, provider='gemini', correlation=None)
+
+    async def test_provider_journal_modes_cannot_silently_fall_back_to_each_other(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for provider, data in [('openai', {'kind': 'event', 'role': 'user', 'text': 'Речь'}),
+                ('openai', {'kind': 'event_typo', 'user_text': 'Речь', 'assistant_text': 'Ответ'}),
+                ('gemini', {'user_text': 'Речь', 'assistant_text': 'Ответ'})]:
+            assistant = SimpleNamespace(record_voice_turn=AsyncMock(), record_voice_event=AsyncMock())
+            request = Request(owner, dict(data, session_id='voice2_test', event_id='local_fixture'), assistant)
+            request.app['hass'].data['habab_home']['voice_sessions'] = {'voice2_test': {
+                'owner': 'alice', 'expires': time.monotonic() + 60, 'history_session': None,
+                'history_epoch': 1, 'provider': provider}}
+            result = await realtime.RealtimeTranscriptView().post(request)
+            self.assertEqual(result.status, 400)
+            assistant.record_voice_turn.assert_not_awaited(); assistant.record_voice_event.assert_not_awaited()
+
+    async def test_gemini_invalid_protocol_or_model_never_falls_back_or_calls_provider(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for data in [{}, {'client': 'native_v2', 'model': 'gpt-realtime-mini'},
+                     {'client': 'native_v2', 'model': 'gemini-3.8-flash'}]:
+            request = Request(owner, data, SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock()))
+            request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+                'provider': 'gemini', 'api_key': 'synthetic-master'})
+            with patch.object(realtime, 'voice_context', return_value={}), \
+                    patch.object(realtime, 'async_get_clientsession') as client:
+                response = await realtime.RealtimeSessionView().post(request)
+            self.assertEqual(response.status, 400)
+            client.assert_not_called()
+
+    async def test_gemini_token_failure_never_creates_lease_or_leaks_provider_body(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for status, token in [(403, {'error': 'synthetic-master'}), (200, {}), (200, {'name': ''})]:
+            request = Request(owner, {'client': 'native_v2'}, SimpleNamespace(
+                web_session=AsyncMock(), record_voice_event=AsyncMock(), voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 0})))
+            request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+                'provider': 'gemini', 'api_key': 'synthetic-master'})
+            provider_response = SimpleNamespace(status=status, json=AsyncMock(return_value=token))
+            class Context:
+                async def __aenter__(self): return provider_response
+                async def __aexit__(self, *args): pass
+            with patch.object(realtime, 'voice_context', return_value={}), \
+                    patch.object(realtime, 'async_get_clientsession', return_value=SimpleNamespace(post=Mock(return_value=Context()))):
+                response = await realtime.RealtimeSessionView().post(request)
+            self.assertEqual(response.status, 502)
+            self.assertNotIn('synthetic-master', response.body.decode())
+            self.assertNotIn('voice_sessions', request.app['hass'].data['habab_home'])
+
+    async def test_gemini_bootstrap_locks_setup_and_never_returns_master_key(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock(),
+            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 2}))
+        request = Request(owner, {'client': 'native_v2'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'gemini', 'api_key': 'synthetic-master-gemini', 'model': 'gemini-3.8-flash'})
+        response = SimpleNamespace(status=200, json=AsyncMock(return_value={'name': 'synthetic-single-use-token'}))
+        class Context:
+            async def __aenter__(self): return response
+            async def __aexit__(self, *args): pass
+        client = SimpleNamespace(post=Mock(return_value=Context()))
+        with patch.object(realtime, 'voice_context', return_value={'time_zone': 'UTC'}), \
+                patch.object(realtime, 'async_get_clientsession', return_value=client):
+            result = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(result.status, 200)
+        payload = json.loads(result.body)
+        self.assertEqual(payload['provider'], 'gemini')
+        self.assertEqual(payload['model'], 'gemini-3.8-live')
+        self.assertTrue(payload['websocket_url'].endswith('BidiGenerateContentConstrained'))
+        args = client.post.call_args
+        self.assertEqual(args.args[0], realtime.gemini_live.TOKEN_URL)
+        self.assertEqual(args.kwargs['headers'], {'x-goog-api-key': 'synthetic-master-gemini'})
+        self.assertFalse(args.kwargs['allow_redirects'])
+        self.assertEqual(args.kwargs['json']['uses'], 1)
+        self.assertEqual(args.kwargs['json']['bidiGenerateContentSetup'], payload['setup'])
+        self.assertNotIn('fieldMask', args.kwargs['json'])
+        self.assertNotIn('synthetic-master-gemini', result.body.decode())
+        self.assertNotIn('tool_choice', payload['setup'])
+        self.assertEqual(payload['setup']['tools'][0]['functionDeclarations'][0]['behavior'], 'NON_BLOCKING')
+        assistant.web_session.assert_not_awaited()
+
+    async def test_reset_during_provider_http_revokes_bootstrap(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(), voice_history_context=AsyncMock(side_effect=[
+            {'session_id': None, 'epoch': 0}, {'session_id': None, 'epoch': 1}]))
+        request = Request(owner, {'client': 'native_v2'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'habab', 'api_key': 'synthetic-master'})
+        response = SimpleNamespace(status=200, json=AsyncMock(return_value={'value': 'synthetic-ephemeral'}))
+        class Context:
+            async def __aenter__(self): return response
+            async def __aexit__(self, *args): pass
+        with patch.object(realtime, 'voice_context', return_value={'time_zone': 'UTC'}), \
+                patch.object(realtime, 'async_get_clientsession', return_value=SimpleNamespace(post=Mock(return_value=Context()))):
+            result = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(result.status, 403)
+        self.assertNotIn('voice_sessions', request.app['hass'].data['habab_home'])
+
+    async def test_revoked_context_never_reads_device_snapshot(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(voice_history_context=AsyncMock(return_value={'session_id': 'new', 'epoch': 1}))
+        request = Request(owner, {'session_id': 'voice2_test'}, assistant)
+        request.app['hass'].data['habab_home']['voice_sessions'] = {
+            'voice2_test': {'owner': 'alice', 'expires': time.monotonic() + 60, 'history_epoch': 0}}
+        with patch.object(realtime, 'voice_context') as snapshot:
+            result = await realtime.RealtimeContextView().post(request)
+        self.assertEqual(result.status, 403)
+        snapshot.assert_not_called()
+
+    async def test_reset_between_canonical_lookup_and_run_is_guarded_atomically(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 0}),
+            web_session=AsyncMock(return_value={'session_id': 'new-session'}),
+            run=AsyncMock(side_effect=AgentError('invalid_session')))
+        request = Request(owner, {'session_id': 'voice2_test', 'text': 'Включи свет'}, assistant)
+        request.app['hass'].data['habab_home']['voice_sessions'] = {
+            'voice2_test': {'owner': 'alice', 'expires': time.monotonic() + 60, 'history_epoch': 0}}
+        with patch.object(realtime, 'async_dispatcher_send') as dispatch:
+            result = await realtime.RealtimeTurnView().post(request)
+        self.assertEqual(result.status, 400)
+        assistant.run.assert_awaited_once_with('alice', 'web', 'new-session', 'Включи свет', expected_history_epoch=0)
+        dispatch.assert_not_called()
+
+    async def test_native_bootstrap_does_not_start_or_query_opencode(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(),
+            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 2}))
+        request = Request(owner, {'client': 'native_v2'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
+        response = SimpleNamespace(status=200, json=AsyncMock(return_value={'value': 'synthetic-ephemeral'}))
+        class Context:
+            async def __aenter__(self): return response
+            async def __aexit__(self, *args): pass
+        client = SimpleNamespace(post=Mock(return_value=Context()))
+        snapshot = {'time_zone': 'UTC', 'states': []}
+        with patch.object(realtime, 'voice_context', return_value=snapshot), \
+                patch.object(realtime, 'async_get_clientsession', return_value=client):
+            result = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(result.status, 200)
+        assistant.web_session.assert_not_awaited()
+        payload = json.loads(result.body)
+        self.assertEqual(payload['client'], 'native_v2')
+        self.assertTrue(payload['session_id'].startswith('voice2_'))
+        self.assertEqual(payload['voice_context'], snapshot)
+        self.assertEqual(client.post.call_args.kwargs['json']['session']['tool_choice'], 'auto')
+        self.assertEqual(realtime.voice_lease(request.app['hass'], 'alice', payload['session_id'])['owner'], 'alice')
+        self.assertEqual(realtime.voice_lease(request.app['hass'], 'alice', payload['session_id'])['history_epoch'], 2)
+
+    async def test_voice_tool_resolves_canonical_chat_only_when_called(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(return_value={'session_id': 'ses_alice'}),
+            voice_history_context=AsyncMock(return_value={'session_id': 'ses_alice', 'epoch': 0}),
+            run=AsyncMock(return_value={'session_id': 'ses_alice', 'messages': [{'role': 'assistant', 'text': 'Готово'}]}))
+        request = Request(owner, {'session_id': 'voice2_test', 'text': 'Проверь свет'}, assistant)
+        request.app['hass'].data['habab_home']['voice_sessions'] = {
+            'voice2_test': {'owner': 'alice', 'expires': time.monotonic() + 60, 'history_epoch': 0}}
+        with patch.object(realtime, 'async_dispatcher_send'):
+            result = await realtime.RealtimeTurnView().post(request)
+        self.assertEqual(result.status, 200)
+        assistant.web_session.assert_awaited_once_with('alice')
+        assistant.run.assert_awaited_once_with('alice', 'web', 'ses_alice', 'Проверь свет', expected_history_epoch=0)
+
+    async def test_foreign_or_expired_voice_lease_never_starts_opencode(self):
+        for lease in [{'owner': 'bob', 'expires': time.monotonic() + 60},
+                      {'owner': 'alice', 'expires': time.monotonic() - 1}]:
+            owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+            assistant = SimpleNamespace(web_session=AsyncMock(), run=AsyncMock())
+            request = Request(owner, {'session_id': 'voice2_test', 'text': 'Проверь свет'}, assistant)
+            request.app['hass'].data['habab_home']['voice_sessions'] = {'voice2_test': lease}
+            result = await realtime.RealtimeTurnView().post(request)
+            self.assertEqual(result.status, 400)
+            assistant.web_session.assert_not_awaited()
+            assistant.run.assert_not_awaited()
+
+    async def test_context_refresh_is_read_only_and_bound_to_owner(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(), run=AsyncMock(),
+            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 0}))
+        request = Request(owner, {'session_id': 'voice2_test'}, assistant)
+        request.app['hass'].data['habab_home']['voice_sessions'] = {
+            'voice2_test': {'owner': 'alice', 'expires': time.monotonic() + 60, 'history_epoch': 0}}
+        with patch.object(realtime, 'voice_context', return_value={'time_zone': 'UTC'}) as snapshot:
+            result = await realtime.RealtimeContextView().post(request)
+            self.assertEqual(result.status, 200)
+            self.assertEqual(result.headers['Cache-Control'], 'no-store')
+            request['hass_user'] = SimpleNamespace(id='bob', is_active=True, is_admin=True)
+            denied = await realtime.RealtimeContextView().post(request)
+            self.assertEqual(denied.status, 403)
+            self.assertEqual(snapshot.call_count, 1)
+        assistant.web_session.assert_not_awaited()
+        assistant.run.assert_not_awaited()
+
+    async def test_transcript_is_journaled_with_server_lease_epoch_without_opencode(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        recorded = {'recorded': True, 'duplicate': False, 'session_id': None, 'messages': []}
+        assistant = SimpleNamespace(record_voice_turn=AsyncMock(return_value=recorded),
+                                   web_session=AsyncMock(), run=AsyncMock())
+        data = {'session_id': 'voice2_test', 'event_id': 'resp_actual_fixture',
+                'user_text': 'Как тебя зовут?', 'assistant_text': 'Я Habab.',
+                'history_epoch': 999, 'owner': 'bob'}
+        request = Request(owner, data, assistant)
+        request.app['hass'].data['habab_home']['voice_sessions'] = {
+            'voice2_test': {'owner': 'alice', 'expires': time.monotonic() + 60,
+                            'history_session': None, 'history_epoch': 7}}
+        with patch.object(realtime, 'async_dispatcher_send') as dispatch:
+            result = await realtime.RealtimeTranscriptView().post(request)
+        self.assertEqual(result.status, 200)
+        assistant.record_voice_turn.assert_awaited_once_with(
+            'alice', None, 'resp_actual_fixture', 'Как тебя зовут?', 'Я Habab.', history_epoch=7)
+        assistant.web_session.assert_not_awaited(); assistant.run.assert_not_awaited()
+        self.assertEqual(dispatch.call_args.args[1], 'habab_voice_history_alice')
+        self.assertEqual(result.headers['Cache-Control'], 'no-store')
+
+    async def test_foreign_lease_cannot_append_a_voice_transcript(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(record_voice_turn=AsyncMock())
+        request = Request(owner, {'session_id': 'voice2_other', 'event_id': 'resp_fixture',
+                                 'user_text': 'Вопрос', 'assistant_text': 'Ответ'}, assistant)
+        request.app['hass'].data['habab_home']['voice_sessions'] = {
+            'voice2_other': {'owner': 'bob', 'expires': time.monotonic() + 60}}
+        response = await realtime.RealtimeTranscriptView().post(request)
+        self.assertEqual(response.status, 403); assistant.record_voice_turn.assert_not_awaited()
+
     async def test_selected_provider_controls_both_ephemeral_http_and_native_websocket(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         for provider, host in [('habab', 'habab-voice.wpmix.net'), ('openai', 'api.openai.com')]:
@@ -65,6 +350,22 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config['audio']['input']['format']['rate'], 24000)
         with self.assertRaises(ValueError):
             realtime.session_config('arbitrary-model')
+
+    def test_native_v2_can_answer_directly_and_has_explicit_session_end(self):
+        snapshot = {'observed_at': '2026-10-24T16:00:00+03:00', 'weather': None}
+        config = realtime.session_config('gpt-realtime-mini', client='native_v2', context=snapshot)
+        self.assertEqual(config['tool_choice'], 'auto')
+        tools = {tool['name']: tool for tool in config['tools']}
+        self.assertEqual(set(tools), {'ask_home_assistant', 'end_voice_session'})
+        self.assertFalse(tools['end_voice_session']['parameters']['additionalProperties'])
+        self.assertEqual(tools['end_voice_session']['parameters']['properties'], {})
+        self.assertEqual(config['model'], 'gpt-realtime-mini')
+        self.assertEqual(json.loads(config['instructions'].split('\n')[-1]), snapshot)
+
+    def test_unknown_client_never_silently_falls_back_to_legacy_tools(self):
+        for client in ['native_typo', [], {}]:
+            with self.subTest(client=client), self.assertRaises(ValueError):
+                realtime.session_config('gpt-realtime-mini', client=client)
 
     async def test_turn_rejects_inactive_or_non_admin_before_chat(self):
         assistant = SimpleNamespace(run=AsyncMock())
