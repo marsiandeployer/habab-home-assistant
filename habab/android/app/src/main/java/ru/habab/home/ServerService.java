@@ -99,10 +99,14 @@ public final class ServerService extends Service {
     }
 
     static boolean healthy() {
+        return healthyAt("http://127.0.0.1:8123/api/habab_home/status");
+    }
+
+    static boolean healthyAt(String endpoint) {
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) new URL("http://127.0.0.1:8123/api/habab_home/status").openConnection();
-            connection.setConnectTimeout(1500); connection.setReadTimeout(1500);
+            connection = (HttpURLConnection) new URL(endpoint).openConnection();
+            connection.setConnectTimeout(1500); connection.setReadTimeout(10000);
             return connection.getResponseCode() == 401;
         } catch (IOException error) { return false; }
         finally { if (connection != null) connection.disconnect(); }
