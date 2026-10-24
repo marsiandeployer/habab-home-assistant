@@ -15,6 +15,47 @@ from .assistant_status import get_assistant_status
 _LOGGER = logging.getLogger(__name__)
 
 
+async def _todo_items(hass, owner, entity_id):
+    if (not isinstance(entity_id, str) or not entity_id.startswith("todo.")
+            or hass.states.get(entity_id) is None):
+        raise ValueError("todo_entity_not_found")
+    if not hass.services.has_service("todo", "get_items"):
+        raise ValueError("todo_get_items_unavailable")
+    async with asyncio.timeout(5):
+        response = await hass.services.async_call(
+            "todo", "get_items", {"status": ["needs_action", "completed"]},
+            target={"entity_id": entity_id}, blocking=True, return_response=True,
+            context=Context(user_id=owner),
+        )
+    if not isinstance(response, dict):
+        raise ValueError("todo_items_unavailable")
+    entity_response = response.get(entity_id)
+    items = entity_response.get("items") if isinstance(entity_response, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("todo_items_unavailable")
+    valid_items = []
+    for item in items:
+        if (not isinstance(item, dict) or not isinstance(item.get("summary"), str)
+                or (item.get("uid") is not None and not isinstance(item.get("uid"), str))
+                or (item.get("status") is not None and not isinstance(item.get("status"), str))):
+            raise ValueError("todo_items_unavailable")
+        valid_items.append({
+            "uid": item.get("uid"), "summary": item["summary"], "status": item.get("status")
+        })
+    return valid_items
+
+
+def _todo_entity_ids(target):
+    entity_ids = target.get("entity_id")
+    if isinstance(entity_ids, str):
+        entity_ids = [entity_ids]
+    if (not isinstance(entity_ids, list) or not entity_ids
+            or any(not isinstance(entity_id, str) or not entity_id.startswith("todo.")
+                   for entity_id in entity_ids)):
+        raise ValueError("todo_entity_target_required")
+    return list(dict.fromkeys(entity_ids))
+
+
 def flow_result(result):
     """Return only the flow control summary allowed in model context."""
     result_type = result.get("type")
@@ -107,6 +148,13 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
         return {"states": [{"entity_id": s.entity_id, "state": s.state, "attributes": {
             k: v for k, v in s.attributes.items() if k in {"friendly_name", "device_class", "unit_of_measurement",
                 "temperature", "current_temperature", "brightness", "supported_features"}}} for s in states[:200]]}
+    if action == "todo_items":
+        entity_id = body.get("entity_id")
+        items = await _todo_items(hass, owner, entity_id)
+        return {"entity_id": entity_id, "items": [
+            {"summary": item["summary"], "status": item["status"]}
+            for item in items[:200]
+        ]}
     if action == "services":
         return {"services": {domain: sorted(services) for domain, services in hass.services.async_services().items()}}
     if action == "call_service":
@@ -116,6 +164,38 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
         data, target = body.get("data", {}), body.get("target", {})
         if not isinstance(data, dict) or not isinstance(target, dict):
             raise ValueError("invalid_data")
+        if domain == "todo" and service == "add_item":
+            todo_entity_ids = _todo_entity_ids(target)
+            todo_item = data.get("item")
+            if not isinstance(todo_item, str) or not todo_item.strip():
+                raise ValueError("todo_item_required")
+            async with asyncio.timeout(40):
+                todo_before = {}
+                for entity_id in todo_entity_ids:
+                    todo_before[entity_id] = await _todo_items(hass, owner, entity_id)
+                async with asyncio.timeout(30):
+                    await hass.services.async_call(
+                        domain, service, data, target=target, blocking=True,
+                        context=Context(user_id=owner),
+                    )
+                verified_items = []
+                for entity_id in todo_entity_ids:
+                    after = await _todo_items(hass, owner, entity_id)
+                    before_ids = {item["uid"] for item in todo_before[entity_id]
+                                  if isinstance(item["uid"], str)}
+                    new_matches = [item for item in after
+                                   if item["summary"] == todo_item.strip()
+                                   and isinstance(item["uid"], str)
+                                   and item["uid"] not in before_ids]
+                    if len(after) <= len(todo_before[entity_id]) or not new_matches:
+                        raise ValueError("todo_add_item_not_verified")
+                    verified_items.extend({
+                        "entity_id": entity_id,
+                        "summary": item["summary"],
+                        "status": item["status"],
+                    } for item in new_matches)
+            return {"called": "todo.add_item", "verification": "persisted",
+                    "items": verified_items}
         async with asyncio.timeout(30):
             await hass.services.async_call(domain, service, data, target=target, blocking=True,
                                            context=Context(user_id=owner))
