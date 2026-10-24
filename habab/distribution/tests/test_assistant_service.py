@@ -64,6 +64,58 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.code, "not_found")
         self.assertEqual(self.runtime.run.await_count, 2)
 
+    async def test_web_run_rejects_stale_voice_epoch_before_runtime_work(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {
+            "session_id": "canonical-session", "epoch": 4,
+        }}
+
+        with self.assertRaisesRegex(AgentError, "not_found"):
+            await self.service.run(
+                "alice", "web", "canonical-session", "old lease intent",
+                expected_history_epoch=3)
+
+        self.runtime.run.assert_not_awaited()
+        self.runtime.ensure.assert_not_awaited()
+        self.runtime.request.assert_not_awaited()
+
+    async def test_web_lifecycle_lock_keeps_new_chat_out_until_guarded_run_finishes(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {
+            "session_id": "canonical-session", "epoch": 0,
+        }}
+        run_started = asyncio.Event()
+        release_run = asyncio.Event()
+
+        async def root_turn(_owner, _session_id, _text):
+            run_started.set()
+            await release_run.wait()
+            return {"session_id": "canonical-session", "messages": []}
+
+        self.runtime.run.side_effect = root_turn
+        self.runtime.request.side_effect = [
+            {"id": "replacement-session"}, [],
+        ]
+        guarded_run = asyncio.create_task(self.service.run(
+            "alice", "web", "canonical-session", "voice tool intent",
+            expected_history_epoch=0))
+        await asyncio.wait_for(run_started.wait(), timeout=1)
+        new_chat = asyncio.create_task(self.service.web_session("alice", new=True))
+        await asyncio.sleep(0)
+        self.assertFalse(new_chat.done())
+        self.assertEqual(self.service.web_contexts["alice"], {
+            "session_id": "canonical-session", "epoch": 0,
+        })
+
+        release_run.set()
+        await asyncio.wait_for(guarded_run, timeout=1)
+        replacement = await asyncio.wait_for(new_chat, timeout=1)
+        self.assertEqual(replacement["session_id"], "replacement-session")
+        self.assertEqual(self.service.web_contexts["alice"], {
+            "session_id": "replacement-session", "epoch": 1,
+        })
     async def test_trusted_origin_comes_only_from_active_mapped_session(self):
         await self.service.setup()
         self.hass.data = {"habab_telegram": SimpleNamespace(

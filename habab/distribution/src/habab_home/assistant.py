@@ -230,7 +230,8 @@ class AssistantService:
         return {"channel": "telegram", "owner": owner,
                 "entry_id": entry_id, "chat_id": chat_id, "bot_id": bot_id}
 
-    async def run(self, owner, channel, session_id, text, entry_id=None, chat_id=None):
+    async def run(self, owner, channel, session_id, text, entry_id=None, chat_id=None,
+                  expected_history_epoch=None):
         await self._require_active_admin(owner)
         if not self._mapped_session(owner, channel, session_id, entry_id, chat_id):
             raise AgentError("not_found")
@@ -240,18 +241,24 @@ class AssistantService:
                 if not self._mapped_session(owner, channel, session_id):
                     raise AgentError("not_found")
                 async with self.voice_journal_lock:
-                    epoch = self._web_context(owner)["epoch"]
+                    context = dict(self._web_context(owner))
+                    epoch = context["epoch"]
+                    if (context["session_id"] != session_id
+                            or (expected_history_epoch is not None
+                                and (type(expected_history_epoch) is not int
+                                     or expected_history_epoch != epoch))):
+                        raise AgentError("not_found")
                 await self._materialize_pending_voice(owner, session_id, epoch)
-        result = await self.runtime.run(owner, session_id, text)
-        if channel == "web":
-            async with self.voice_journal_lock:
-                if self._mapped_session(owner, channel, session_id):
-                    canonical_messages = result.get("messages", [])
-                    result["messages"] = self._project_pending_voice(
-                        owner, session_id, canonical_messages,
-                        self._web_context(owner)["epoch"])
-                    self.web_history_cache[(owner, session_id)] = list(canonical_messages)
-        return result
+                result = await self.runtime.run(owner, session_id, text)
+                async with self.voice_journal_lock:
+                    if self._mapped_session(owner, channel, session_id):
+                        canonical_messages = result.get("messages", [])
+                        result["messages"] = self._project_pending_voice(
+                            owner, session_id, canonical_messages,
+                            self._web_context(owner)["epoch"])
+                        self.web_history_cache[(owner, session_id)] = list(canonical_messages)
+                return result
+        return await self.runtime.run(owner, session_id, text)
 
     async def record_voice_turn(self, owner, session_id, event_id, user_text,
                                 assistant_text, *, history_epoch=None):
