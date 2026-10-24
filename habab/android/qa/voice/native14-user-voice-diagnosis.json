@@ -1,0 +1,40 @@
+{
+  "kind": "observed_user_voice_failure_diagnosis",
+  "checked_at": "2026-10-24T18:59:29.625Z",
+  "target": "Huawei P30 Pro, installed native14, runtime 7119388d53035d71",
+  "user_confirmed_actual_speech": true,
+  "private_transcript_included": false,
+  "observed": {
+    "actual_opencode_helper_calls_in_first_session": 1,
+    "helper_elapsed_ms": 25253,
+    "helper_read_device_registry": true,
+    "registered_device_count": 4,
+    "helper_read_weather": true,
+    "weather_temperature_celsius": 9.1,
+    "router_has_control_entities": false,
+    "managed_light_switch_climate_vacuum_state_count": 0,
+    "correct_helper_result_in_audible_answer": "not_observed",
+    "next_voice_session_new_opencode_call": false,
+    "next_voice_session_claimed_check_without_new_call": true
+  },
+  "fresh_authenticated_bootstrap": {
+    "selected_service": "habab",
+    "upstream_provider": "gemini",
+    "voice_model": "gemini-3.8-live",
+    "assist_exposure": "verified",
+    "weather_status": "unavailable",
+    "weather_entities": [],
+    "device_states": [],
+    "truncated": false,
+    "credentials_printed_or_persisted": false,
+    "audio_sent": false,
+    "settings_changed": false
+  },
+  "confirmed_source_findings": [
+    "The bounded Assist-exposed snapshot is not a complete Home Assistant device registry; its empty state does not establish absence of weather or registered devices.",
+    "The installed Android capture loop finishes after 120 seconds even with an assistant tool in flight.",
+    "A Gemini tool callback can ignore unsuccessful delivery when its WebSocket was cleared by finish."
+  ],
+  "causality_limit": "The 120-second close is a plausible source-supported explanation for the missed helper answer, not a proven event ordering for this private conversation.",
+  "fix_status_at_capture": "source_candidate_in_progress; not installed or accepted on physical phone"
+}

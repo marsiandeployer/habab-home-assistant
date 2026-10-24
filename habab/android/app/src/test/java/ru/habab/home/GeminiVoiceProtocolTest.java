@@ -77,6 +77,140 @@ public class GeminiVoiceProtocolTest {
         assertEquals("habab.tool_cancelled", events.get(events.size()-1).getString("type"));
     }
 
+    @Test public void toolWithoutPrefaceGetsFreshCanonicalResponseAfterToolResult() throws Exception {
+        VoiceToolSession session = new VoiceToolSession(1_000);
+        session.interrupt(1);
+        receive("{voiceActivity:{type:'ACTIVITY_START',audioOffset:'0s'}}");
+        receive("{toolCall:{functionCalls:[{id:'provider-call-2',name:'ask_home_assistant',args:{text:'Найди устройство'}}]}} ");
+        JSONObject initial = events.stream().filter(e -> "response.created".equals(e.optString("type"))).findFirst().orElseThrow();
+        String initialId = initial.getJSONObject("response").getString("id");
+        assertNull(initial.getJSONObject("response").optJSONObject("metadata"));
+        VoiceResponseGate responseGate = new VoiceResponseGate();
+        responseGate.created(initialId);
+        assertTrue(session.beginTool("provider-call-2", 1, 2_000));
+        receive("{serverContent:{generationComplete:true,turnComplete:true}}");
+        boolean initialCompleted = events.stream().anyMatch(e -> "response.done".equals(e.optString("type"))
+                && initialId.equals(e.optJSONObject("response").optString("id")));
+        assertTrue(initialCompleted);
+        responseGate.done(initialId);
+
+        JSONObject result = new JSONObject().put("type", "conversation.item.create").put("item",
+                new JSONObject().put("type", "function_call_output").put("call_id", "provider-call-2")
+                        .put("output", "{answer:'Нашёл устройство'}"));
+        JSONObject[] wire = new JSONObject[1];
+        VoiceToolSession.Delivery delivery = session.deliverResult("provider-call-2", 1, 1, false, silent -> {
+            try { wire[0] = protocol.encode(result); return wire[0] != null; }
+            catch (JSONException error) { return false; }
+        });
+        assertEquals(VoiceToolSession.Delivery.SENT, delivery);
+        JSONObject toolResponse = wire[0];
+        assertEquals("WHEN_IDLE", toolResponse.getJSONObject("toolResponse").getJSONArray("functionResponses")
+                .getJSONObject(0).getString("scheduling"));
+
+        events.clear();
+        receive("{serverContent:{modelTurn:{parts:[{inlineData:{mimeType:'audio/pcm;rate=24000',data:'AAA='}}]},outputTranscription:{text:'Нашёл устройство.'},generationComplete:true}} ");
+        JSONObject created = events.stream().filter(e -> "response.created".equals(e.optString("type"))).findFirst().orElse(null);
+        assertNotNull("tool response must start a fresh local response", created);
+        String canonicalId = created.getJSONObject("response").getString("id");
+        assertNotEquals(initialId, canonicalId);
+        assertEquals("true", created.getJSONObject("response").getJSONObject("metadata").getString("habab_canonical"));
+        boolean oldClosedBeforeCanonical = initialCompleted;
+        for (JSONObject event : events) {
+            if ("response.done".equals(event.optString("type"))
+                    && initialId.equals(event.getJSONObject("response").optString("id"))) {
+                responseGate.done(initialId); oldClosedBeforeCanonical = true;
+            } else if ("response.created".equals(event.optString("type"))) {
+                responseGate.created(event.getJSONObject("response").getString("id"));
+            } else if ("response.done".equals(event.optString("type"))) {
+                responseGate.done(event.getJSONObject("response").getString("id"));
+            }
+        }
+        assertTrue("the pre-tool response must close before the canonical response", oldClosedBeforeCanonical);
+        assertNull(responseGate.done(initialId));
+        assertNotNull("the response gate must be free after canonical completion", responseGate.request(() -> {}));
+        session.followupStarted(canonicalId);
+        session.audioStarted(canonicalId);
+        for (JSONObject event : events) {
+            if ("response.done".equals(event.optString("type")))
+                session.responseDone(event.getJSONObject("response").getString("id"));
+        }
+        assertEquals(VoiceToolSession.DeadlineAction.DRAIN_RESULT, session.deadlineAction(VoiceToolSession.AUDIO_LIMIT_MS + 1_001));
+        session.audioPlayed(canonicalId);
+        assertEquals(VoiceToolSession.DeadlineAction.FINISH, session.deadlineAction(VoiceToolSession.AUDIO_LIMIT_MS + 1_002));
+    }
+
+    @Test public void prefaceAudioRemainsOutsideCanonicalToolFollowupUntilItsBoundary() throws Exception {
+        VoiceToolSession session = new VoiceToolSession(1_000);
+        session.interrupt(1);
+        receive("{voiceActivity:{type:'ACTIVITY_START',audioOffset:'0s'}}");
+        receive("{serverContent:{modelTurn:{parts:[{inlineData:{mimeType:'audio/pcm;rate=24000',data:'AAA='}}]},outputTranscription:{text:'Секунду, проверю.'}}}");
+        String prefaceId = events.stream().filter(e -> "response.created".equals(e.optString("type")))
+                .findFirst().orElseThrow().getJSONObject("response").getString("id");
+        receive("{toolCall:{functionCalls:[{id:'provider-call-preface',name:'ask_home_assistant',args:{text:'Найди устройство'}}]}} ");
+        JSONObject call = events.stream().filter(e -> "response.function_call_arguments.done".equals(e.optString("type")))
+                .findFirst().orElseThrow();
+        assertEquals(prefaceId, call.getString("response_id"));
+        assertTrue(session.beginTool("provider-call-preface", 1, 2_000));
+
+        JSONObject result = toolResult("provider-call-preface");
+        VoiceToolSession.Delivery delivery = session.deliverResult("provider-call-preface", 1, 1, false, silent -> {
+            try { return protocol.encode(result) != null; }
+            catch (JSONException error) { return false; }
+        });
+        assertEquals(VoiceToolSession.Delivery.SENT, delivery);
+        events.clear();
+
+        receive("{serverContent:{modelTurn:{parts:[{inlineData:{mimeType:'audio/pcm;rate=24000',data:'AQI='}}]},outputTranscription:{text:'Проверяю'}}}");
+        JSONObject morePreface = events.stream().filter(e -> "response.output_audio.delta".equals(e.optString("type")))
+                .findFirst().orElseThrow();
+        assertEquals(prefaceId, morePreface.getString("response_id"));
+        boolean canonicalCreated = false;
+        for (JSONObject event : events) {
+            if (!"response.created".equals(event.optString("type"))) continue;
+            JSONObject metadata = event.getJSONObject("response").optJSONObject("metadata");
+            canonicalCreated |= metadata != null && metadata.optString("habab_canonical").equals("true");
+        }
+        assertFalse(canonicalCreated);
+        assertEquals(VoiceToolSession.DeadlineAction.DRAIN_RESULT,
+                session.deadlineAction(VoiceToolSession.AUDIO_LIMIT_MS + 1_001));
+
+        receive("{serverContent:{generationComplete:true,turnComplete:true}}");
+        session.responseDone(prefaceId);
+        assertEquals(VoiceToolSession.DeadlineAction.DRAIN_RESULT,
+                session.deadlineAction(VoiceToolSession.AUDIO_LIMIT_MS + 1_002));
+
+        events.clear();
+        receive("{serverContent:{modelTurn:{parts:[{inlineData:{mimeType:'audio/pcm;rate=24000',data:'AwQ='}}]},outputTranscription:{text:'Устройство найдено.'},generationComplete:true,turnComplete:true}}");
+        JSONObject canonical = events.stream().filter(e -> "response.created".equals(e.optString("type")))
+                .findFirst().orElseThrow();
+        String canonicalId = canonical.getJSONObject("response").getString("id");
+        assertNotEquals(prefaceId, canonicalId);
+        assertEquals("true", canonical.getJSONObject("response").getJSONObject("metadata").getString("habab_canonical"));
+        session.followupStarted(canonicalId);
+        session.audioStarted(canonicalId);
+        session.responseDone(canonicalId);
+        assertEquals(VoiceToolSession.DeadlineAction.DRAIN_RESULT,
+                session.deadlineAction(VoiceToolSession.AUDIO_LIMIT_MS + 1_003));
+        session.audioPlayed(canonicalId);
+        assertEquals(VoiceToolSession.DeadlineAction.FINISH,
+                session.deadlineAction(VoiceToolSession.AUDIO_LIMIT_MS + 1_004));
+    }
+
+    @Test public void sameFrameToolCallAndGenerationCompleteCloseTheToolResponse() throws Exception {
+        receive("{toolCall:{functionCalls:[{id:'provider-call-frame',name:'ask_home_assistant',args:{text:'Найди устройство'}}]},serverContent:{generationComplete:true,turnComplete:true}}");
+        JSONObject call = events.stream().filter(e -> "response.function_call_arguments.done".equals(e.optString("type")))
+                .findFirst().orElseThrow();
+        String responseId = call.getString("response_id");
+        assertTrue(events.stream().anyMatch(e -> "response.done".equals(e.optString("type"))
+                && responseId.equals(e.optJSONObject("response").optString("id"))));
+    }
+
+    private JSONObject toolResult(String callId) throws JSONException {
+        return new JSONObject().put("type", "conversation.item.create").put("item",
+                new JSONObject().put("type", "function_call_output").put("call_id", callId)
+                        .put("output", "{answer:'Нашёл устройство'}"));
+    }
+
     @Test public void clockCancelAndResponseCreateNeverTriggerGoogleGeneration() throws Exception {
         for (String type : new String[]{"response.cancel","response.create","conversation.item.truncate"})
             assertNull(protocol.encode(new JSONObject().put("type",type)));

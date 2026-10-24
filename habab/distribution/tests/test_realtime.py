@@ -238,7 +238,8 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
             'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
         snapshot = {'time_zone': 'UTC', 'states': []}
-        config = realtime.session_config('gpt-realtime-mini', client='native_v2', context=snapshot)
+        config = realtime.session_config('gemini-3.8-live', client='native_v2', context=snapshot,
+                                         selected_provider='habab')
         setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
         relay_payload = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
                          'value': 'synthetic-relay-credential', 'expires_at': 12345,
@@ -261,6 +262,12 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.args[0], 'https://habab-voice.wpmix.net/v1/realtime/bootstrap')
         self.assertEqual(call.kwargs['headers']['Authorization'], 'Bearer synthetic-selected-habab')
         self.assertEqual(call.kwargs['json'], {'model': 'gemini-3.8-live', 'setup': setup})
+        instructions = setup['systemInstruction']['parts'][0]['text']
+        self.assertNotIn('synthetic-selected-habab', instructions)
+        self.assertEqual(json.loads(instructions.split('\n')[-1])['runtime_metadata'], {
+            'selected_provider': {'id': 'habab', 'name': 'Habab'},
+            'selected_model': 'gemini-3.8-live',
+        })
         self.assertEqual(payload['provider'], 'gemini')
         self.assertEqual(payload['transport'], 'habab')
         self.assertEqual(payload['model'], 'gemini-3.8-live')
@@ -357,7 +364,8 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
                     'provider': provider, 'api_key': 'synthetic-selected-' + provider, 'model': 'gpt-4.1-mini'}))
                 if provider == 'habab':
                     snapshot = {'time_zone': 'UTC'}
-                    config = realtime.session_config('gpt-realtime-mini', client='native_v2', context=snapshot)
+                    config = realtime.session_config('gemini-3.8-live', client='native_v2', context=snapshot,
+                                                     selected_provider='habab')
                     setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
                     remote = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
                               'value': 'synthetic-relay', 'expires_at': 12345,
@@ -420,15 +428,60 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(native_gemini['model'], 'gemini-3.8-live')
 
     def test_native_v2_can_answer_directly_and_has_explicit_session_end(self):
-        snapshot = {'observed_at': '2026-10-24T16:00:00+03:00', 'weather': None}
-        config = realtime.session_config('gpt-realtime-mini', client='native_v2', context=snapshot)
+        snapshot = {'assist_exposure': 'verified', 'states': [],
+                    'weather': {'status': 'unavailable', 'entities': []}, 'truncated': False}
+        config = realtime.session_config('gpt-realtime-mini', client='native_v2', context=snapshot,
+                                         selected_provider='habab')
         self.assertEqual(config['tool_choice'], 'auto')
         tools = {tool['name']: tool for tool in config['tools']}
         self.assertEqual(set(tools), {'ask_home_assistant', 'end_voice_session'})
         self.assertFalse(tools['end_voice_session']['parameters']['additionalProperties'])
         self.assertEqual(tools['end_voice_session']['parameters']['properties'], {})
         self.assertEqual(config['model'], 'gpt-realtime-mini')
-        self.assertEqual(json.loads(config['instructions'].split('\n')[-1]), snapshot)
+        prompt_data = json.loads(config['instructions'].split('\n')[-1])
+        self.assertEqual(prompt_data, {
+            'runtime_metadata': {
+                'selected_provider': {'id': 'habab', 'name': 'Habab'},
+                'selected_model': 'gpt-realtime-mini',
+            },
+            'home_snapshot': snapshot,
+        })
+        self.assertIn('не является полным перечнем дома', config['instructions'])
+        self.assertIn('не доказывает отсутствие устройств', config['instructions'])
+        self.assertIn('Не утверждай, что проверил данные, пока инструмент не вернул результат',
+                      config['instructions'])
+        self.assertIn('не означает, что пользователь подключил Google Gemini напрямую',
+                      config['instructions'])
+        self.assertNotIn('api_key', config['instructions'])
+
+    def test_native_v2_provider_model_metadata_uses_validated_selection_without_secrets(self):
+        for provider, name in [('gemini', 'Google Gemini'), ('openai', 'OpenAI')]:
+            with self.subTest(provider=provider):
+                config = realtime.session_config(
+                    'gemini-3.8-live' if provider == 'gemini' else 'gpt-realtime-mini',
+                    client='native_v2', context={'states': []}, selected_provider=provider)
+                metadata = json.loads(config['instructions'].split('\n')[-1])['runtime_metadata']
+                self.assertEqual(metadata['selected_provider'], {'id': provider, 'name': name})
+                self.assertEqual(metadata['selected_model'], config['model'])
+                self.assertNotIn('synthetic-secret', config['instructions'])
+        with self.assertRaisesRegex(ValueError, 'unsupported_voice_provider'):
+            realtime.session_config('gpt-realtime-mini', client='native_v2',
+                                    selected_provider='deepseek')
+
+    def test_unknown_home_snapshot_does_not_imply_tool_denial(self):
+        context = {'assist_exposure': 'unknown', 'states': [],
+                   'weather': {'status': 'unknown', 'entities': []}}
+        config = realtime.session_config('gemini-3.8-live', client='native_v2',
+                                         context=context, selected_provider='habab')
+        self.assertEqual(config['tool_choice'], 'auto')
+        self.assertIn('ask_home_assistant', {tool['name'] for tool in config['tools']})
+        self.assertIn('это правило действует и при assist_exposure=unknown', config['instructions'])
+        self.assertIn('Неизвестный снимок не означает, что инструмент недоступен',
+                      config['instructions'])
+        self.assertIn('сначала вызови ask_home_assistant', config['instructions'])
+        self.assertIn('Не говори, что у тебя нет доступа к домашним данным', config['instructions'])
+        prompt_data = json.loads(config['instructions'].split('\n')[-1])
+        self.assertEqual(prompt_data['home_snapshot'], context)
 
     def test_unknown_client_never_silently_falls_back_to_legacy_tools(self):
         for client in ['native_typo', [], {}]:

@@ -21,7 +21,8 @@ final class GeminiVoiceProtocol {
     private String response;
     private StringBuilder output = new StringBuilder();
     private int ordinal;
-    private boolean audio, canonicalFollowup;
+    private boolean audio, canonicalFollowup, responseHasOutput, responseHasFunctionCall;
+    private boolean closeToolOnlyResponseBeforeOutput;
     private List<JSONObject> pendingEvents;
 
     GeminiVoiceProtocol(Events events) { this.events = events; }
@@ -49,7 +50,7 @@ final class GeminiVoiceProtocol {
     private void startResponse() throws Exception {
         if (response != null) return;
         response = namespace + "_turn_" + ++ordinal;
-        output = new StringBuilder(); audio = false;
+        output = new StringBuilder(); audio = false; responseHasOutput = false; responseHasFunctionCall = false;
         JSONObject value = new JSONObject().put("id", response);
         if (canonicalFollowup) value.put("metadata", new JSONObject().put("habab_canonical", "true"));
         emit("response.created", "response", value);
@@ -84,6 +85,7 @@ final class GeminiVoiceProtocol {
             }
         }
         JSONObject content = message.optJSONObject("serverContent");
+        boolean interrupted = content != null && content.optBoolean("interrupted");
         if (content != null) {
             JSONObject input = content.optJSONObject("inputTranscription");
             if (input != null && !input.optString("text").isEmpty()) {
@@ -98,9 +100,11 @@ final class GeminiVoiceProtocol {
                 emit("habab.output_interrupted", null, null);
                 finishResponse(false);
             } else {
+                if (closeToolOnlyResponseBeforeOutput && response != null && hasModelOutput(content))
+                    finishResponse(false);
                 JSONObject transcription = content.optJSONObject("outputTranscription");
                 if (transcription != null && !transcription.optString("text").isEmpty()) {
-                    startResponse(); output.append(transcription.getString("text"));
+                    startResponse(); responseHasOutput = true; output.append(transcription.getString("text"));
                     if (output.length() > 12000) throw new IllegalStateException("voice_history_backpressure");
                 }
                 JSONObject model = content.optJSONObject("modelTurn");
@@ -109,11 +113,10 @@ final class GeminiVoiceProtocol {
                     JSONObject blob = parts.getJSONObject(i).optJSONObject("inlineData");
                     if (blob == null) continue;
                     if (!"audio/pcm;rate=24000".equals(blob.optString("mimeType"))) throw new IllegalStateException("invalid_voice_audio_format");
-                    startResponse(); audio = true;
+                    startResponse(); audio = true; responseHasOutput = true;
                     publish(new JSONObject().put("type", "response.output_audio.delta")
                             .put("response_id", response).put("item_id", response + "_audio").put("delta", blob.getString("data")));
                 }
-                if (content.optBoolean("generationComplete") || content.optBoolean("turnComplete")) finishResponse(true);
             }
         }
         JSONObject tool = message.optJSONObject("toolCall");
@@ -123,22 +126,39 @@ final class GeminiVoiceProtocol {
                 JSONObject function = functions.getJSONObject(i);
                 String id = function.getString("id"), name = function.getString("name");
                 if (calls.size() >= 32 || calls.containsKey(id)) throw new IllegalStateException("invalid_voice_tool");
-                calls.put(id, name); startResponse();
+                calls.put(id, name); startResponse(); responseHasFunctionCall = true;
                 publish(new JSONObject().put("type", "response.function_call_arguments.done")
                         .put("response_id", response).put("call_id", id).put("name", name)
                         .put("arguments", function.getJSONObject("args").toString()));
             }
         }
+        // Some Live frames carry toolCall and generationComplete together. Process the
+        // call first so this boundary closes its response before a tool result arrives.
+        if (content != null && !interrupted
+                && (content.optBoolean("generationComplete") || content.optBoolean("turnComplete"))) finishResponse(true);
+    }
+
+    private boolean hasModelOutput(JSONObject content) throws JSONException {
+        JSONObject transcription = content.optJSONObject("outputTranscription");
+        if (transcription != null && !transcription.optString("text").isEmpty()) return true;
+        JSONObject model = content.optJSONObject("modelTurn");
+        JSONArray parts = model == null ? null : model.optJSONArray("parts");
+        if (parts == null) return false;
+        for (int i = 0; i < parts.length(); i++)
+            if (parts.getJSONObject(i).optJSONObject("inlineData") != null) return true;
+        return false;
     }
 
     private void finishResponse(boolean completed) throws Exception {
-        if (response == null) return;
+        if (response == null) { closeToolOnlyResponseBeforeOutput = false; return; }
         String id = response; response = null;
         if (completed && output.length() > 0) publish(new JSONObject().put("type", "response.output_audio_transcript.done")
                 .put("response_id", id).put("transcript", output.toString()));
         if (completed && audio) publish(new JSONObject().put("type", "response.output_audio.done")
                 .put("response_id", id).put("item_id", id + "_audio"));
         emit("response.done", "response", new JSONObject().put("id", id).put("status", completed ? "completed" : "cancelled"));
+        audio = false; output = new StringBuilder(); responseHasOutput = false; responseHasFunctionCall = false;
+        closeToolOnlyResponseBeforeOutput = false;
     }
 
     synchronized JSONObject encode(JSONObject event) throws JSONException {
@@ -152,6 +172,8 @@ final class GeminiVoiceProtocol {
             if (name == null || cancelled.contains(id)) return null;
             boolean silent = event.optBoolean("habab_silent");
             canonicalFollowup = !silent;
+            closeToolOnlyResponseBeforeOutput = !silent && response != null
+                    && responseHasFunctionCall && !responseHasOutput;
             return new JSONObject().put("toolResponse", new JSONObject().put("functionResponses", new JSONArray().put(
                     new JSONObject().put("id", id).put("name", name).put("response", new JSONObject(item.getString("output")))
                             .put("scheduling", silent ? "SILENT" : "WHEN_IDLE"))));

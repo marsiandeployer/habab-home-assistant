@@ -1,0 +1,366 @@
+{
+  "checkedAt": "2026-10-24T19:08:01.505Z",
+  "candidate": {
+    "generator": "homeassistant.components.habab_home.realtime.session_config + gemini_live.live_setup",
+    "source_mount": "/usr/src/homeassistant/homeassistant/components/habab_home",
+    "revision": "unknown-exposure clarification; synthetic contexts only",
+    "contexts": "no user speech, keys, or live state"
+  },
+  "setupFileSha256": "58ccd6a68ea141b8f54f3c9a93a7247dee241d0ace7d0ede1c6fe47672bf52ad",
+  "kind": "synthetic_live_model_policy",
+  "target": "https://habab-voice.wpmix.net",
+  "model": "gemini-3.8-live",
+  "microphoneUsed": false,
+  "physicalPlayback": false,
+  "homeAssistantToolsExecuted": false,
+  "opencodeInvoked": false,
+  "manualReviewRequired": true,
+  "results": [
+    {
+      "id": "weather_original",
+      "context": "empty",
+      "prompt": "Какая сегодня погода на улице?",
+      "calls": [
+        {
+          "name": "ask_home_assistant",
+          "args": {
+            "text": "Какая сегодня погода на улице?"
+          }
+        }
+      ],
+      "output": "Секунду, сейчас проверю.На улице переменная облачность и плюс 9,1 градуса.",
+      "audioBytes": 294242,
+      "toolResponsesSent": 1,
+      "lifecycle": [
+        {
+          "elapsedMs": 2122,
+          "turnComplete": false,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 1
+        },
+        {
+          "elapsedMs": 2122,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 3479,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 5284,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 9213,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 11716,
+      "expectedTool": true,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "inventory_empty",
+      "context": "empty",
+      "prompt": "Какие устройства тебе доступны?",
+      "calls": [
+        {
+          "name": "ask_home_assistant",
+          "args": {
+            "text": "какие устройства есть в доме?"
+          }
+        }
+      ],
+      "output": "Сейчас проверю список доступных устройств.В доме доступны прогноз погоды, резервное копирование, сервисы перевода и роутер. Сейчас на улице переменная облачность и девять и один градуса тепла.",
+      "audioBytes": 539522,
+      "toolResponsesSent": 1,
+      "lifecycle": [
+        {
+          "elapsedMs": 2307,
+          "turnComplete": false,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 1
+        },
+        {
+          "elapsedMs": 2307,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 3803,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 6468,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 14734,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 17236,
+      "expectedTool": true,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "weather_fresh",
+      "context": "fresh",
+      "prompt": "Сколько градусов сейчас на улице?",
+      "calls": [],
+      "output": "На улице сейчас девять и одна десятая градуса тепла.",
+      "audioBytes": 160800,
+      "toolResponsesSent": 0,
+      "lifecycle": [
+        {
+          "elapsedMs": 2563,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 5539,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 5840,
+      "expectedTool": false,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "weather_stale",
+      "context": "stale",
+      "prompt": "А сейчас какая температура на улице?",
+      "calls": [
+        {
+          "name": "ask_home_assistant",
+          "args": {
+            "text": "Какая сейчас температура на улице?"
+          }
+        }
+      ],
+      "output": "Секунду, проверю.На улице сейчас переменная облачность, температура воздуха плюс девять и одна десятая градуса Цельсия.",
+      "audioBytes": 351840,
+      "toolResponsesSent": 1,
+      "lifecycle": [
+        {
+          "elapsedMs": 2621,
+          "turnComplete": false,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 1
+        },
+        {
+          "elapsedMs": 2621,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 3806,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 5400,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 10563,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 13065,
+      "expectedTool": true,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "inventory_unknown",
+      "context": "unknown",
+      "prompt": "Расскажи, какие приборы уже подключены к этому дому.",
+      "calls": [
+        {
+          "name": "ask_home_assistant",
+          "args": {
+            "text": "Какие приборы подключены к дому?"
+          }
+        }
+      ],
+      "output": "Секунду, сейчас проверю.К дому подключены метеопрогноз, резервное копирование, Google Translate и роутер Huawei.",
+      "audioBytes": 330722,
+      "toolResponsesSent": 1,
+      "lifecycle": [
+        {
+          "elapsedMs": 2062,
+          "turnComplete": false,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 1
+        },
+        {
+          "elapsedMs": 2062,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 3524,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 4824,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 9439,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 11941,
+      "expectedTool": true,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "provider_identity",
+      "context": "fresh",
+      "prompt": "Ты работаешь через OpenAI или Gemini, какая у тебя сейчас голосовая модель?",
+      "calls": [],
+      "output": "Я работаю через сервис Habab, а моя голосовая модель — gemini-3.8-live.",
+      "audioBytes": 269760,
+      "toolResponsesSent": 0,
+      "lifecycle": [
+        {
+          "elapsedMs": 2814,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 7714,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 8014,
+      "expectedTool": false,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "novel_missing_vacuum",
+      "context": "unknown",
+      "prompt": "Посмотри, есть ли в моей системе робот-пылесос и можно ли им управлять.",
+      "calls": [
+        {
+          "name": "ask_home_assistant",
+          "args": {
+            "text": "Есть ли в системе робот-пылесос и можно ли им управлять?"
+          }
+        }
+      ],
+      "output": "Секунду, сейчас проверю.В системе не обнаружен робот-пылесос, поэтому управлять им сейчас нельзя.",
+      "audioBytes": 293280,
+      "toolResponsesSent": 1,
+      "lifecycle": [
+        {
+          "elapsedMs": 1996,
+          "turnComplete": false,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 1
+        },
+        {
+          "elapsedMs": 1996,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 3594,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 4713,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 8655,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 11158,
+      "expectedTool": true,
+      "toolRoutingMatches": true
+    }
+  ],
+  "parent_manual_review": {
+    "routing": "PASS_7_OF_7",
+    "response_content": "Reviewed all seven synthetic output transcripts against supplied tool fixtures; no unsupported control capability claimed for the router or missing vacuum.",
+    "limits": [
+      "Text input to actual Gemini Live through public Habab relay; generated audio bytes were discarded without physical playback.",
+      "Home Assistant helper results were synthetic fixture responses; no OpenCode or HA action was executed in these model tests.",
+      "elapsedMs includes setup, generated output timing and harness settling; it is not P30 acoustic answer latency.",
+      "This candidate policy is not yet installed on P30."
+    ]
+  }
+}

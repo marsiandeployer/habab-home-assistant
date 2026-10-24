@@ -31,6 +31,7 @@ final class RealtimeVoice implements AutoCloseable {
     private final Object connectionLock = new Object();
     private final VoiceResponseGate responses = new VoiceResponseGate();
     private final VoiceTranscriptLedger transcripts = new VoiceTranscriptLedger();
+    private final VoiceToolSession toolSession;
     private final java.util.Set<String> cancelledTools = ConcurrentHashMap.newKeySet();
     private GeminiVoiceProtocol gemini;
     private final java.util.concurrent.atomic.AtomicInteger pendingTools = new java.util.concurrent.atomic.AtomicInteger();
@@ -48,6 +49,7 @@ final class RealtimeVoice implements AutoCloseable {
     private int generation, toolCalls;
     private long playbackStart;
     private long writtenFrames;
+    private volatile boolean drainAnnounced;
 
     RealtimeVoice(Context context, Listener listener) {
         this(context, listener, android.os.SystemClock.elapsedRealtime());
@@ -55,6 +57,7 @@ final class RealtimeVoice implements AutoCloseable {
 
     RealtimeVoice(Context context, Listener listener, long activatedAt) {
         this.credentials = new VoiceCredentials(context); this.listener = listener; this.activatedAt = activatedAt;
+        this.toolSession = new VoiceToolSession(activatedAt);
     }
 
     void start() throws Exception {
@@ -134,11 +137,25 @@ final class RealtimeVoice implements AutoCloseable {
 
     boolean ready() { return ready && socket != null && !closed; }
     boolean finishing() { return ending; }
+    boolean audioLimitReached(long now) { return gemini != null && toolSession.audioLimitReached(now); }
+    VoiceToolSession.DeadlineAction deadlineAction(long now) {
+        if (gemini != null) return toolSession.deadlineAction(now);
+        return now - activatedAt >= VoiceToolSession.AUDIO_LIMIT_MS
+                ? VoiceToolSession.DeadlineAction.FINISH : VoiceToolSession.DeadlineAction.CAPTURE_AUDIO;
+    }
+    boolean toolGraceExpired(long now) { return deadlineAction(now) == VoiceToolSession.DeadlineAction.TIMEOUT; }
+    void awaitToolResult() {
+        if (gemini != null && toolSession.hasPendingCurrentTool() && !drainAnnounced) {
+            drainAnnounced = true; listener.phase("thinking");
+        }
+    }
+    void timeoutToolGrace() { if (toolGraceExpired(android.os.SystemClock.elapsedRealtime())) fail("voice_timeout"); }
 
     void finish() {
         synchronized (history) {
             if (closed || ending) return;
             ending = true; listener.phase("finishing");
+            toolSession.end();
             credentials.cancelInteractions();
             try { interruptOutput(); }
             catch (Exception error) { fail("voice_playback_failed"); return; }
@@ -168,14 +185,19 @@ final class RealtimeVoice implements AutoCloseable {
     }
 
     private boolean send(JSONObject event, Long expectedEpoch) {
+        return send(event, expectedEpoch, null);
+    }
+
+    private boolean send(JSONObject event, Long expectedEpoch, String toolCallId) {
         JSONObject wire;
         try { wire = gemini == null ? event : gemini.encode(event); }
         catch (JSONException error) { fail("invalid_realtime_event"); return false; }
-        if (wire == null) return true;
+        if (wire == null) return toolCallId == null;
         boolean rejected, sent;
         synchronized (connectionLock) {
             WebSocket current = socket;
             boolean allowed = !closed && current != null
+                    && (toolCallId == null || !cancelledTools.contains(toolCallId))
                     && (expectedEpoch == null || !ending && expectedEpoch == interruptionEpoch.get());
             sent = allowed && current.send(wire.toString());
             rejected = allowed && !sent;
@@ -197,8 +219,14 @@ final class RealtimeVoice implements AutoCloseable {
                     .put("event_id", event.getString("event_id")).put("text", event.getString("text")));
             return;
         }
-        if (type.equals("habab.tool_cancelled")) { cancelledTools.add(event.getString("call_id")); return; }
-        if (type.equals("habab.output_interrupted")) { interruptOutput(); listener.phase("listening"); return; }
+        if (type.equals("habab.tool_cancelled")) {
+            String callId = event.getString("call_id");
+            synchronized (connectionLock) { cancelledTools.add(callId); }
+            toolSession.cancelTool(callId); return;
+        }
+        if (type.equals("habab.output_interrupted")) {
+            interruptOutput(); listener.phase(audioLimitReached(android.os.SystemClock.elapsedRealtime()) ? "thinking" : "listening"); return;
+        }
         if (type.equals("session.created")) {
             ready = true; listener.connected(negotiatedProvider, negotiatedModel);
             timing("wake_to_ready_ms", android.os.SystemClock.elapsedRealtime() - activatedAt); listener.phase("listening");
@@ -214,6 +242,7 @@ final class RealtimeVoice implements AutoCloseable {
                 cancelResponse(id); return;
             }
             responses.created(id);
+            if (metadata != null && metadata.optString("habab_canonical").equals("true")) toolSession.followupStarted(id);
             if (response.optJSONObject("metadata") == null
                     || !response.getJSONObject("metadata").optString("habab_canonical").equals("true")) transcripts.created(id);
         }
@@ -225,7 +254,7 @@ final class RealtimeVoice implements AutoCloseable {
         }
         else if (type.equals("input_audio_buffer.speech_started")) {
             transcripts.userStarted(event.getString("item_id"));
-            interruptOutput(); listener.phase("speech");
+            interruptOutput(); listener.phase(audioLimitReached(android.os.SystemClock.elapsedRealtime()) ? "thinking" : "speech");
             // Refresh the clock without claiming that the original device snapshot changed.
             String clock = "Текущее местное время: " + java.time.ZonedDateTime.now(homeZone).toString()
                     + ". Время сводки состояний дома остаётся прежним.";
@@ -268,6 +297,10 @@ final class RealtimeVoice implements AutoCloseable {
             JSONObject arguments = new JSONObject(event.getString("arguments"));
             String text = arguments.getString("text");
             if (text.trim().isEmpty() || text.length() > 4000) { fail("invalid_voice_command"); return; }
+            if (gemini != null && !toolSession.beginTool(callId, toolEpoch, android.os.SystemClock.elapsedRealtime())) {
+                fail(android.os.SystemClock.elapsedRealtime() >= activatedAt + VoiceToolSession.AUDIO_LIMIT_MS + VoiceToolSession.RESULT_GRACE_MS
+                        ? "voice_timeout" : "invalid_voice_tool"); return;
+            }
             pendingTools.incrementAndGet();
             tools.execute(() -> {
                 long toolStarted = android.os.SystemClock.elapsedRealtime();
@@ -275,12 +308,24 @@ final class RealtimeVoice implements AutoCloseable {
                     if (!currentTurn(toolEpoch) || cancelledTools.contains(callId)) return;
                     listener.phase("thinking");
                     JSONObject result = credentials.call("turn", new JSONObject().put("session_id", sessionId).put("text", text));
-                    if (closed) return;
                     JSONObject item = new JSONObject().put("type", "function_call_output").put("call_id", callId)
                             .put("output", new JSONObject().put("answer", result.getString("text")).toString());
+                    if (gemini != null) {
+                        VoiceToolSession.Delivery delivery = toolSession.deliverResult(callId, toolEpoch,
+                                interruptionEpoch.get(), closed || ending || cancelledTools.contains(callId), silent -> {
+                                    try {
+                                        if (closed || ending || cancelledTools.contains(callId)) return false;
+                                        return send(new JSONObject().put("type", "conversation.item.create").put("item", item)
+                                                .put("habab_silent", silent), silent ? null : toolEpoch, callId);
+                                    } catch (JSONException error) { return false; }
+                                });
+                        if (delivery == VoiceToolSession.Delivery.FAILED && currentTurn(toolEpoch) && !cancelledTools.contains(callId))
+                            fail("voice_assistant_failed");
+                        return; // Gemini schedules the tool response itself.
+                    }
+                    if (closed) return;
                     send(new JSONObject().put("type", "conversation.item.create").put("item", item)
                             .put("habab_silent", !currentTurn(toolEpoch)));
-                    if (gemini != null) return; // Gemini schedules the tool response itself.
                     if (!currentTurn(toolEpoch)) return; // The action may have finished; its old voice turn is cancelled.
                     JSONObject response = new JSONObject().put("type", "response.create").put("response", new JSONObject()
                             .put("metadata", new JSONObject().put("habab_canonical", "true").put("habab_epoch", toolEpoch.toString()))
@@ -312,7 +357,8 @@ final class RealtimeVoice implements AutoCloseable {
                     }
                     if (completedIn >= 0) {
                         flushTranscripts(); timing("audio_to_played_ms", completedIn); listener.completed();
-                        listener.phase(pendingTools.get() > 0 ? "thinking" : "listening"); return;
+                        if (gemini != null) toolSession.audioPlayed(responseId);
+                        listener.phase(pendingTools.get() > 0 || audioLimitReached(android.os.SystemClock.elapsedRealtime()) ? "thinking" : "listening"); return;
                     }
                     try { Thread.sleep(20); } catch (InterruptedException error) { Thread.currentThread().interrupt(); return; }
                 }
@@ -323,6 +369,7 @@ final class RealtimeVoice implements AutoCloseable {
             Long epoch = responseEpochs.get(result.getString("id"));
             if (epoch != null && epoch != interruptionEpoch.get()) return;
             transcripts.done(result.getString("id"), result.optString("status").equals("completed")); flushTranscripts();
+            if (gemini != null) toolSession.responseDone(result.getString("id"));
             if (result.optString("status").equals("failed")) { fail("realtime_response_failed"); return; }
             Runnable next = responses.done(result.getString("id")); if (next != null) next.run();
         } else if (type.equals("error")) {
@@ -357,6 +404,7 @@ final class RealtimeVoice implements AutoCloseable {
             pendingAudioItems.put(item, response);
             transcripts.queued(response, item);
         }
+        if (gemini != null) toolSession.audioStarted(response);
         listener.phase("speaking");
         playback.execute(() -> {
             try {
@@ -397,6 +445,7 @@ final class RealtimeVoice implements AutoCloseable {
     private void interruptOutput() throws Exception {
         long started = android.os.SystemClock.elapsedRealtime();
         synchronized (connectionLock) { interruptionEpoch.incrementAndGet(); }
+        toolSession.interrupt(interruptionEpoch.get());
         String active = responses.interrupted();
         java.util.List<JSONObject> truncations = new java.util.ArrayList<>();
         synchronized (outputLock) {
@@ -475,6 +524,8 @@ final class RealtimeVoice implements AutoCloseable {
     }
 
     @Override public void close() {
+        ending = true;
+        toolSession.end();
         synchronized (connectionLock) {
             if (closed) return; closed = true; ready = false;
             WebSocket current = socket; socket = null;

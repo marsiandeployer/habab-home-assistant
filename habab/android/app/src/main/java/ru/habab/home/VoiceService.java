@@ -235,7 +235,13 @@ public final class VoiceService extends Service {
                         pending.clear(); // The END cue and its acoustic tail cannot activate the next session.
                     } else if (client.finishing()) {
                         pending.clear();
-                    } else if (now - started > 120000 || (client.ready() && !status.equals("thinking") && now - lastActivity > 20000)) {
+                    } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.TIMEOUT) {
+                        client.timeoutToolGrace(); pending.clear(); detector.reset();
+                    } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.FINISH) {
+                        client.finish(); pending.clear(); detector.reset();
+                    } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.DRAIN_RESULT) {
+                        pending.clear(); client.awaitToolResult(); detector.reset();
+                    } else if (client.ready() && !status.equals("thinking") && now - lastActivity > 20000) {
                         client.finish(); pending.clear(); detector.reset();
                     } else if (!signals.allowsAudio()) {
                         pending.clear(); // Discard microphone frames while the START cue is still playing.

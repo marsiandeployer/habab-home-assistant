@@ -1,0 +1,105 @@
+{
+  "checkedAt": "2026-10-24T19:13:56.901Z",
+  "candidate": {
+    "generator": "homeassistant.components.habab_home.realtime.session_config + gemini_live.live_setup",
+    "source_mount": "/usr/src/homeassistant/homeassistant/components/habab_home",
+    "revision": "unknown-exposure clarification; synthetic contexts only",
+    "contexts": "no user speech, keys, or live state"
+  },
+  "setupFileSha256": "58ccd6a68ea141b8f54f3c9a93a7247dee241d0ace7d0ede1c6fe47672bf52ad",
+  "kind": "synthetic_live_model_policy",
+  "target": "https://habab-voice.wpmix.net",
+  "model": "gemini-3.8-live",
+  "microphoneUsed": false,
+  "physicalPlayback": false,
+  "homeAssistantToolsExecuted": false,
+  "opencodeInvoked": false,
+  "manualReviewRequired": true,
+  "results": [
+    {
+      "id": "greeting_unknown",
+      "context": "unknown",
+      "prompt": "Привет, как дела?",
+      "calls": [],
+      "output": "Привет! Всё отлично, спасибо. Чем могу помочь?",
+      "audioBytes": 160320,
+      "toolResponsesSent": 0,
+      "lifecycle": [
+        {
+          "elapsedMs": 2738,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 5666,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 5967,
+      "expectedTool": false,
+      "expectedFunction": null,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "ordinary_question_unknown",
+      "context": "unknown",
+      "prompt": "Как сварить гороховый суп? Ответь коротко.",
+      "calls": [],
+      "output": "Сварите мясной бульон, добавьте промытый горох и варите до мягкости. Затем положите картофель, зажарку из лука и моркови, посолите и варите до готовности.",
+      "audioBytes": 453120,
+      "toolResponsesSent": 0,
+      "lifecycle": [
+        {
+          "elapsedMs": 3299,
+          "turnComplete": false,
+          "generationComplete": true,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        },
+        {
+          "elapsedMs": 11468,
+          "turnComplete": true,
+          "generationComplete": false,
+          "interactionStatus": null,
+          "toolCallCount": 0
+        }
+      ],
+      "elapsedMs": 11767,
+      "expectedTool": false,
+      "expectedFunction": null,
+      "toolRoutingMatches": true
+    },
+    {
+      "id": "explicit_goodbye_unknown",
+      "context": "unknown",
+      "prompt": "Спасибо, пока. Закончи наш разговор.",
+      "calls": [
+        {
+          "name": "end_voice_session",
+          "args": {}
+        }
+      ],
+      "output": "",
+      "audioBytes": 0,
+      "toolResponsesSent": 0,
+      "lifecycle": [],
+      "elapsedMs": 1648,
+      "expectedTool": true,
+      "expectedFunction": "end_voice_session",
+      "toolRoutingMatches": true
+    }
+  ],
+  "parent_manual_review": {
+    "result": "PASS_3_OF_3",
+    "limits": [
+      "Synthetic text input to actual Gemini Live through public Habab relay.",
+      "No physical microphone/playback and no Home Assistant tool execution.",
+      "Explicit goodbye verified as end_voice_session call; actual P30 END cue not tested."
+    ]
+  }
+}
