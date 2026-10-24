@@ -1,0 +1,11 @@
+test_rejects_data_interface_without_bulk_in_out_pair (test_znp_usb.CdcAcmSelectionTests) ... ok
+test_rejects_generic_non_cdc_serial_interfaces (test_znp_usb.CdcAcmSelectionTests) ... ok
+test_selects_control_and_bulk_data_interfaces (test_znp_usb.CdcAcmSelectionTests) ... ok
+test_discards_bad_fcs_and_recovers_next_frame (test_znp_usb.ZnpCodecTests) ... ok
+test_encode_matches_ti_format_and_incremental_decode (test_znp_usb.ZnpCodecTests) ... ok
+test_rejects_oversized_payload (test_znp_usb.ZnpCodecTests) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
+
+OK

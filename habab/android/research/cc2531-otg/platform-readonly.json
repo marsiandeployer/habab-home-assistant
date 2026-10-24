@@ -1,0 +1,12 @@
+{
+  "checked_at": "2026-10-24",
+  "device_model": "VOG-L29",
+  "android": "10",
+  "sdk": 29,
+  "declares_usb_host_feature": true,
+  "probe": "ADB shell pm list features and read-only getprop; no configuration change",
+  "scope": "Declared USB Host capability only",
+  "cc2531_enumeration": "NOT_RUN",
+  "cdc_transfer": "NOT_RUN",
+  "simultaneous_otg_charging": "NOT_RUN"
+}
