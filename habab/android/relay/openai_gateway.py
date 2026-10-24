@@ -16,6 +16,7 @@ import socket
 import stat
 import struct
 import time
+from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, ClientTimeout, ClientWSTimeout, WSMsgType, web
 
@@ -26,7 +27,24 @@ GEMINI_MODEL = 'gemini-3.8-live'
 GEMINI_TEXT_MODEL = 'gemini-3.1-flash-lite'
 GEMINI_WEBSOCKET = 'wss://habab-voice.wpmix.net/gemini/ws'
 TOKEN_RESPONSE_MAX = 64 * 1024
+VOICE_FIRST_FRAME_TIMEOUT = 10
+VOICE_SETUP_MAX_BYTES = 64 * 1024
+BROWSER_VOICE_AUTH_TYPE = 'habab.voice.auth.v1'
 LEGACY_OPENAI_ROUTES = {'chat/completions', 'audio/speech', 'audio/transcriptions', 'realtime/client_secrets', 'models'}
+
+
+def exact_web_origin(value):
+    if not isinstance(value, str) or not value or value == '*':
+        return False
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        return (parsed.scheme in {'http', 'https'} and bool(parsed.hostname) and bool(parsed.netloc)
+                and parsed.username is None and parsed.password is None and parsed.path == ''
+                and (port is None or 1 <= port <= 65535)
+                and not parsed.query and not parsed.fragment and value == f'{parsed.scheme}://{parsed.netloc}')
+    except ValueError:
+        return False
 
 
 async def redacted_stream(content, secret, max_bytes):
@@ -56,12 +74,17 @@ async def redacted_stream(content, secret, max_bytes):
 
 
 class Gateway:
-    def __init__(self, key_hash, *, upstream_key=None, control_socket=None):
+    def __init__(self, key_hash, *, upstream_key=None, control_socket=None, browser_origins=()):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
+        if not isinstance(browser_origins, (list, tuple, set, frozenset)):
+            raise ValueError('Expected a list of exact browser origins')
+        if any(not exact_web_origin(origin) for origin in browser_origins):
+            raise ValueError('Invalid browser origin')
         self.key_hash = key_hash
         self.upstream_key = upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
+        self.browser_origins = frozenset(browser_origins)
         self.gemini_credentials = {}
         self.active_voice = 0
         self.inflight = 0
@@ -147,7 +170,9 @@ class Gateway:
                      'streaming': True},
             'realtime': {'provider': 'gemini', 'transport': 'habab', 'models': [GEMINI_MODEL],
                          'default_model': GEMINI_MODEL, 'protocol': 'google-generative-language-bidi-v1beta',
-                         'bootstrap': '/v1/realtime/bootstrap', 'websocket': '/gemini/ws'},
+                         'bootstrap': '/v1/realtime/bootstrap', 'websocket': '/gemini/ws',
+                         'browser_auth': {'enabled': bool(self.browser_origins),
+                                          'mode': 'first_text_frame', 'type': BROWSER_VOICE_AUTH_TYPE}},
         }, headers={'Cache-Control': 'no-store'})
 
     async def gemini_bootstrap(self, request):
@@ -286,27 +311,68 @@ class Gateway:
         if request.query:
             return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
         header = request.headers.get('Authorization', '')
-        secret = header[6:] if header.startswith('Token ') and len(header) <= 2048 else ''
-        digest = hashlib.sha256(secret.encode()).hexdigest() if secret else None
-        item = self.gemini_credentials.get(digest)
-        if item is None or item['expires'] <= time.time() or self.upstream_key is None:
-            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
-        if self.active_voice >= 2:
-            return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)
-        self.gemini_credentials.pop(digest, None)
-        self.active_voice += 1
+        browser_mode = 'Authorization' not in request.headers
+        voice_slot = False
+        item = None
+        if browser_mode:
+            origin = request.headers.get('Origin')
+            if origin not in self.browser_origins:
+                return web.json_response({'error': {'code': 'relay_origin_not_allowed'}}, status=403)
+            if self.active_voice >= 2:
+                return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)
+            # Bound unauthenticated upgraded sockets to the same two voice slots.
+            self.active_voice += 1
+            voice_slot = True
+        else:
+            secret = header[6:] if header.startswith('Token ') and len(header) <= 2048 else ''
+            digest = hashlib.sha256(secret.encode()).hexdigest() if secret else None
+            item = self.gemini_credentials.get(digest)
+            if item is None or item['expires'] <= time.time() or self.upstream_key is None:
+                return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+            if self.active_voice >= 2:
+                return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)
+            # A valid native credential is consumed as soon as an upgrade is accepted.
+            self.gemini_credentials.pop(digest, None)
+            self.active_voice += 1
+            voice_slot = True
         downstream = web.WebSocketResponse(max_msg_size=256 * 1024, heartbeat=20)
         try:
             await downstream.prepare(request)
-            first = await downstream.receive(timeout=10)
-            if first.type != WSMsgType.TEXT or len(first.data.encode()) > 64 * 1024:
-                await downstream.close(code=1008, message=b'invalid_setup')
+            try:
+                first = await downstream.receive(timeout=VOICE_FIRST_FRAME_TIMEOUT)
+            except asyncio.TimeoutError:
+                reason = b'auth_timeout' if browser_mode else b'invalid_setup'
+                await downstream.close(code=1008, message=reason)
+                return downstream
+            if first.type != WSMsgType.TEXT or len(first.data.encode()) > VOICE_SETUP_MAX_BYTES:
+                await downstream.close(code=1008, message=b'invalid_auth_frame' if browser_mode else b'invalid_setup')
                 return downstream
             try:
                 frame = json.loads(first.data)
-                setup = frame.get('setup') if set(frame) == {'setup'} else None
+                if browser_mode:
+                    valid_envelope = (isinstance(frame, dict) and set(frame) == {'type', 'credential', 'setup'}
+                                      and frame.get('type') == BROWSER_VOICE_AUTH_TYPE
+                                      and isinstance(frame.get('credential'), str)
+                                      and 1 <= len(frame['credential']) <= 2048)
+                    if not valid_envelope:
+                        await downstream.close(code=1008, message=b'invalid_auth_frame')
+                        return downstream
+                    secret = frame['credential']
+                    digest = hashlib.sha256(secret.encode()).hexdigest()
+                    item = self.gemini_credentials.get(digest)
+                    if item is None or item['expires'] <= time.time() or self.upstream_key is None:
+                        await downstream.close(code=1008, message=b'relay_not_authorized')
+                        return downstream
+                    # Consume before setup comparison: even a mismatched setup cannot replay the grant.
+                    self.gemini_credentials.pop(digest, None)
+                    setup = frame['setup']
+                else:
+                    setup = frame.get('setup') if isinstance(frame, dict) and set(frame) == {'setup'} else None
                 canonical = json.dumps(setup, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
             except (ValueError, TypeError, AttributeError):
+                if browser_mode:
+                    await downstream.close(code=1008, message=b'invalid_auth_frame')
+                    return downstream
                 setup, canonical = None, None
             if not isinstance(setup, dict) or canonical != item['setup']:
                 await downstream.close(code=1008, message=b'invalid_setup')
@@ -316,9 +382,11 @@ class Gateway:
                     headers={'Authorization': 'Token ' + google_token}, max_msg_size=256 * 1024,
                     timeout=ClientWSTimeout(ws_receive=60, ws_close=5), heartbeat=20) as upstream:
                 google_token = None
-                await upstream.send_str(first.data)
+                setup_frame = (json.dumps({'setup': setup}, ensure_ascii=False, separators=(',', ':'))
+                               if browser_mode else first.data)
+                await upstream.send_str(setup_frame)
 
-                async def relay(source, target):
+                async def relay(source, target, *, from_upstream=False):
                     total = 0
                     async for message in source:
                         if message.type == WSMsgType.TEXT:
@@ -331,13 +399,23 @@ class Gateway:
                             if total > 16 * 1024 * 1024:
                                 break
                             await target.send_bytes(message.data)
-                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR):
+                        elif message.type == WSMsgType.ERROR:
+                            if from_upstream:
+                                raise RuntimeError('voice_transport_failed')
                             break
+                        elif message.type in (WSMsgType.CLOSE, WSMsgType.CLOSED):
+                            if from_upstream and source.close_code not in (1000, 1001):
+                                raise RuntimeError('voice_transport_failed')
+                            break
+                    if from_upstream and source.close_code not in (1000, 1001):
+                        raise RuntimeError('voice_transport_failed')
 
                 tasks = [asyncio.create_task(relay(downstream, upstream)),
-                         asyncio.create_task(relay(upstream, downstream))]
+                         asyncio.create_task(relay(upstream, downstream, from_upstream=True))]
                 try:
-                    await asyncio.wait(tasks, timeout=180, return_when=asyncio.FIRST_COMPLETED)
+                    done, _ = await asyncio.wait(tasks, timeout=180, return_when=asyncio.FIRST_COMPLETED)
+                    if any(task.exception() is not None for task in done if not task.cancelled()):
+                        raise RuntimeError('voice_transport_failed')
                 finally:
                     for task in tasks:
                         task.cancel()
@@ -347,8 +425,13 @@ class Gateway:
         except Exception:
             if not downstream.prepared:
                 return web.json_response({'error': {'code': 'relay_voice_unavailable'}}, status=502)
+            try:
+                await downstream.close(code=1011, message=b'relay_voice_unavailable')
+            except Exception:
+                pass
         finally:
-            self.active_voice -= 1
+            if voice_slot:
+                self.active_voice -= 1
             if downstream.prepared:
                 await downstream.close()
         return downstream
@@ -380,7 +463,8 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
-    gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock')
+    gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock',
+                      browser_origins=config.get('browser_origins', []))
     web.run_app(gateway.app(), host='127.0.0.1', port=config.get('port', 8326), access_log=None, print=None, handler_cancellation=True)
 
 

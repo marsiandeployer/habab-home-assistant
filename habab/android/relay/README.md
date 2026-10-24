@@ -24,6 +24,40 @@ token не попадают на устройство. Для прямого Ope
 использовать выбранный провайдер напрямую; fallback между ними нет. Старые
 Habab OpenAI Realtime маршруты отключены.
 
+Для браузера capabilities добавляют `realtime.browser_auth` с режимом
+`first_text_frame` и type `habab.voice.auth.v1`. По умолчанию этот режим
+отключён: список точных Origin задаётся полем `browser_origins` приватной
+конфигурации relay, например:
+
+```json
+{"browser_origins": ["https://habab-demo.wpmix.net"]}
+```
+
+Это только пример origin; production-владелец должен указать фактический origin
+браузерного Home Assistant. Wildcard, Origin без значения и URL с путём не
+принимаются. Клиент без `Authorization` header проходит WebSocket upgrade только
+с разрешённым Origin, затем не позднее 10 секунд отправляет один текстовый кадр
+размером до 64 KiB строго такой формы:
+
+```json
+{"type":"habab.voice.auth.v1","credential":"<opaque relay credential>","setup":{}}
+```
+
+WebSocket parser также ограничивает один кадр 256 KiB; кадры больше этого
+транспортного лимита могут закрываться стандартным кодом 1009 до проверки
+прикладного лимита 64 KiB.
+
+Relay атомарно погашает credential до сравнения setup. Поэтому неверный setup
+тоже требует новой bootstrap-сессии. После проверки relay удаляет auth-поля и
+отправляет Google только `{"setup": ...}`; opaque credential не попадает в
+upstream frame. Неуспешная схема, Origin, replay, expiry или setup не создают
+соединение с Google. Browser pre-auth slots учитываются в лимите двух голосовых
+соединений. После upgrade политика авторизации закрывает ошибку кодом 1008 с
+короткой безопасной причиной; ошибка, transport failure или ненормальное
+закрытие upstream закрывается кодом 1011 с безопасной причиной. Нормальные
+upstream close codes 1000 и 1001 сохраняются. Native клиенты продолжают
+использовать header и setup frame.
+
 ## Авторизация и ключи
 
 В приватном JSON сервиса хранится `key_sha256` — SHA-256 клиентского ключа

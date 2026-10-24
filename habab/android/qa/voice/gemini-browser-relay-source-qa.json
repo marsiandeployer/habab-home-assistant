@@ -1,0 +1,26 @@
+{
+  "kind": "gemini_browser_relay_source_candidate",
+  "issue": 2,
+  "status": "SOURCE_TESTED_NOT_DEPLOYED",
+  "testCommand": "PYTHONPATH=habab/android/relay /root/.venvs/habab-voice-relay/bin/python -m unittest discover -s habab/android/relay -p test_gateway.py -q",
+  "testsPassed": 30,
+  "independentParentTestRun": true,
+  "reviewFix": "sanitize abnormal upstream close/errors as1011 without propagating reason",
+  "browserEnabledByDefault": false,
+  "configurationField": "browser_origins",
+  "nativeHeaderAuthenticationPreserved": true,
+  "productionConfigChanged": false,
+  "relayRestarted": false,
+  "phoneOrModelTests": "NOT RUN",
+  "pendingDependencies": [
+    "backend explicit browser client with scoped voice2 lease/history epoch",
+    "frontend auth frame and audio lifecycle",
+    "configured exact Origin allowlist and controlled relay enrollment/restart",
+    "cloud real browser acceptance before physical phone"
+  ],
+  "sourceSha256": {
+    "habab/android/relay/openai_gateway.py": "7b92b722b70d3e27edb694fd57010766ca377f14d2d989ae2772dd4dd25f9b55",
+    "habab/android/relay/test_gateway.py": "b7104123608b77c0474487bcc6eaa1edeb7397e7521b88519f8258072126b26f",
+    "habab/android/relay/README.md": "0f533104e0c197b1640988ff549ebfdd1b005ffac078d04b414cb07c691203c3"
+  }
+}

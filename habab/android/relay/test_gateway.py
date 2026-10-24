@@ -22,7 +22,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.large_response = False
         self.rotate_upstream_key = False
         self.oversized_token_response = False
+        self.fail_gemini_connect = False
+        self.close_gemini_with = None
         self.gemini_frames = []
+        self.gemini_connections = 0
         async def upstream(request):
             received_key = request.headers.get('x-goog-api-key')
             self.calls.append((request.path, received_key, request.query_string))
@@ -49,11 +52,18 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 return web.Response(body=b'x' * 150000)
             return web.json_response({'candidates': [{'content': {'parts': [{'text': 'synthetic Gemini reply'}]}}]})
         async def gemini_upstream(request):
+            if self.fail_gemini_connect:
+                return web.Response(status=503)
+            self.gemini_connections += 1
             self.gemini_frames.append(('auth', request.headers.get('Authorization')))
             ws = web.WebSocketResponse()
             await ws.prepare(request)
             async for message in ws:
                 self.gemini_frames.append(('frame', message.data))
+                if self.close_gemini_with is not None:
+                    code, reason = self.close_gemini_with
+                    await ws.close(code=code, message=reason)
+                    return ws
                 if message.type == WSMsgType.BINARY:
                     await ws.send_bytes(message.data)
                 else:
@@ -64,7 +74,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         app.router.add_get('/gemini', gemini_upstream)
         self.upstream = TestServer(app)
         await self.upstream.start_server()
-        self.gateway = Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), upstream_key='synthetic-vendor')
+        self.browser_origin = 'https://habab-demo.wpmix.net'
+        self.gateway = Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), upstream_key='synthetic-vendor',
+                               browser_origins=[self.browser_origin])
         self.patch = patch('openai_gateway.GEMINI_TEXT_BASE', str(self.upstream.make_url('/v1beta/models')).rstrip('/'))
         self.patch.start()
         self.gemini_patch = patch('openai_gateway.GEMINI_CONSTRAINED_UPSTREAM', str(self.upstream.make_url('/gemini')))
@@ -86,6 +98,23 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.post(path, headers=headers or {'Authorization': 'Bearer synthetic-owner'},
                                       json={'model': 'gemini-3.8-live', 'setup': setup})
 
+    async def browser_connect(self, credential, setup, *, origin=None, path='/gemini/ws'):
+        ws = await self.client.ws_connect(path, origin=origin or self.browser_origin)
+        await ws.send_json({'type': 'habab.voice.auth.v1', 'credential': credential, 'setup': setup})
+        return ws
+
+    async def browser_credential(self):
+        response = await self.bootstrap()
+        self.assertEqual(response.status, 200)
+        return await response.json()
+
+    async def assert_policy_close(self, ws, code, reason):
+        message = await ws.receive(timeout=3)
+        self.assertEqual(message.type, WSMsgType.CLOSE)
+        self.assertEqual(message.data, code)
+        self.assertEqual(message.extra, reason)
+        await ws.close()
+
     async def test_capabilities_are_authenticated_and_explicit_about_gemini(self):
         response = await self.client.get('/v1/capabilities', headers={'Authorization': 'Bearer wrong'})
         self.assertEqual(response.status, 401)
@@ -97,6 +126,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload['chat']['api_base'], 'https://habab-voice.wpmix.net/gemini/v1beta')
         self.assertEqual(payload['realtime']['transport'], 'habab')
         self.assertEqual(payload['realtime']['protocol'], 'google-generative-language-bidi-v1beta')
+        self.assertEqual(payload['realtime']['browser_auth'], {
+            'enabled': True, 'mode': 'first_text_frame', 'type': 'habab.voice.auth.v1'})
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
 
     async def test_capabilities_bootstrap_and_voice_reject_query_parameters(self):
@@ -145,6 +176,168 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         await ws.close()
         with self.assertRaises(WSServerHandshakeError):
             await self.client.ws_connect('/gemini/ws', headers={'Authorization': 'Token ' + payload['value']})
+
+    async def test_browser_first_frame_auth_strips_credential_and_preserves_native_google_frames(self):
+        payload = await self.browser_credential()
+        ws = await self.browser_connect(payload['value'], payload['setup'])
+        setup = await ws.receive_json(timeout=3)
+        self.assertEqual(setup, {'setup': payload['setup']})
+        self.assertEqual(self.gemini_connections, 1)
+        self.assertEqual(self.gemini_frames[0], ('auth', 'Token synthetic-google-token'))
+        self.assertEqual(json.loads(self.gemini_frames[1][1]), {'setup': payload['setup']})
+        serialized_upstream = repr(self.gemini_frames)
+        self.assertNotIn(payload['value'], serialized_upstream)
+        self.assertNotIn('synthetic-vendor', serialized_upstream)
+        await ws.send_json({'toolCall': {'functionCalls': [{'id': 'call-7', 'name': 'ask_home_assistant',
+                                                            'args': {'text': 'Проверь устройство'}}]}})
+        tool = await ws.receive_json(timeout=3)
+        self.assertEqual(tool['toolCall']['functionCalls'][0]['id'], 'call-7')
+        tool_result = {'toolResponse': {'functionResponses': [{'id': 'call-7', 'name': 'ask_home_assistant',
+                                                               'response': {'answer': 'Нашёл устройство'}}]}}
+        await ws.send_json(tool_result)
+        self.assertEqual(await ws.receive_json(timeout=3), tool_result)
+        await ws.send_bytes(b'gemini-binary-frame')
+        echoed = await ws.receive(timeout=3)
+        self.assertEqual((echoed.type, echoed.data), (WSMsgType.BINARY, b'gemini-binary-frame'))
+        await ws.close()
+
+    async def test_browser_origin_is_exact_allowlisted_and_disabled_by_default(self):
+        disabled = Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), upstream_key='synthetic-vendor')
+        self.assertEqual(disabled.browser_origins, frozenset())
+        async with TestClient(TestServer(disabled.app())) as client:
+            response = await client.get('/v1/capabilities', headers={'Authorization': 'Bearer synthetic-owner'})
+            self.assertFalse((await response.json())['realtime']['browser_auth']['enabled'])
+            with self.assertRaises(WSServerHandshakeError) as disabled_ws:
+                await client.ws_connect('/gemini/ws', origin=self.browser_origin)
+            self.assertEqual(disabled_ws.exception.status, 403)
+        payload = await self.browser_credential()
+        with self.assertRaises(WSServerHandshakeError) as missing:
+            await self.client.ws_connect('/gemini/ws')
+        self.assertEqual(missing.exception.status, 403)
+        with self.assertRaises(WSServerHandshakeError) as disallowed:
+            await self.client.ws_connect('/gemini/ws', origin='https://attacker.example')
+        self.assertEqual(disallowed.exception.status, 403)
+        self.assertEqual(self.gemini_connections, 0)
+        self.assertIn(hashlib.sha256(payload['value'].encode()).hexdigest(), self.gateway.gemini_credentials)
+        with self.assertRaises(ValueError):
+            Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), browser_origins=['*'])
+        with self.assertRaises(ValueError):
+            Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), browser_origins=['https://example.test/path'])
+        with self.assertRaises(ValueError):
+            Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), browser_origins=['https://example.test:65536'])
+
+    async def test_browser_invalid_expired_and_replayed_credentials_close_without_upstream(self):
+        payload = await self.browser_credential()
+        ws = await self.browser_connect('invalid-synthetic-token', payload['setup'])
+        await self.assert_policy_close(ws, 1008, 'relay_not_authorized')
+
+        expired = await self.browser_credential()
+        digest = hashlib.sha256(expired['value'].encode()).hexdigest()
+        self.gateway.gemini_credentials[digest]['expires'] = 0
+        ws = await self.browser_connect(expired['value'], expired['setup'])
+        await self.assert_policy_close(ws, 1008, 'relay_not_authorized')
+
+        replay = await self.browser_credential()
+        first = await self.browser_connect(replay['value'], replay['setup'])
+        self.assertEqual(await first.receive_json(timeout=3), {'setup': replay['setup']})
+        second = await self.browser_connect(replay['value'], replay['setup'])
+        await self.assert_policy_close(second, 1008, 'relay_not_authorized')
+        self.assertEqual(self.gemini_connections, 1)
+        await first.close()
+
+    async def test_browser_credential_has_exactly_one_winner_when_replayed_concurrently(self):
+        payload = await self.browser_credential()
+        clients = await asyncio.gather(
+            self.client.ws_connect('/gemini/ws', origin=self.browser_origin),
+            self.client.ws_connect('/gemini/ws', origin=self.browser_origin),
+        )
+        frame = {'type': 'habab.voice.auth.v1', 'credential': payload['value'], 'setup': payload['setup']}
+        await asyncio.gather(*(client.send_json(frame) for client in clients))
+        replies = await asyncio.gather(*(client.receive(timeout=3) for client in clients))
+        self.assertEqual(sum(reply.type == WSMsgType.TEXT for reply in replies), 1)
+        self.assertEqual(sum(reply.type == WSMsgType.CLOSE and reply.data == 1008
+                             and reply.extra == 'relay_not_authorized' for reply in replies), 1)
+        self.assertEqual(self.gemini_connections, 1)
+        self.assertNotIn(hashlib.sha256(payload['value'].encode()).hexdigest(), self.gateway.gemini_credentials)
+        await asyncio.gather(*(client.close() for client in clients))
+
+    async def test_browser_setup_mismatch_consumes_credential_and_never_connects_upstream(self):
+        payload = await self.browser_credential()
+        wrong_setup = {**payload['setup'], 'systemInstruction': {'parts': [{'text': 'mutated'}]}}
+        ws = await self.browser_connect(payload['value'], wrong_setup)
+        await self.assert_policy_close(ws, 1008, 'invalid_setup')
+        digest = hashlib.sha256(payload['value'].encode()).hexdigest()
+        self.assertNotIn(digest, self.gateway.gemini_credentials)
+        replay = await self.browser_connect(payload['value'], payload['setup'])
+        await self.assert_policy_close(replay, 1008, 'relay_not_authorized')
+        self.assertEqual(self.gemini_connections, 0)
+
+    async def test_browser_invalid_first_frames_close_safely_without_consuming_other_grants(self):
+        payload = await self.browser_credential()
+        frames = [
+            'not-json',
+            {'type': 'wrong.type', 'credential': payload['value'], 'setup': payload['setup']},
+            {'type': 'habab.voice.auth.v1', 'credential': payload['value'], 'setup': payload['setup'], 'extra': True},
+            {'type': 'habab.voice.auth.v1', 'credential': '', 'setup': payload['setup']},
+        ]
+        for frame in frames:
+            ws = await self.client.ws_connect('/gemini/ws', origin=self.browser_origin)
+            if isinstance(frame, str):
+                await ws.send_str(frame)
+            else:
+                await ws.send_json(frame)
+            await self.assert_policy_close(ws, 1008, 'invalid_auth_frame')
+        self.assertEqual(self.gemini_connections, 0)
+        self.assertIn(hashlib.sha256(payload['value'].encode()).hexdigest(), self.gateway.gemini_credentials)
+
+        payload = await self.browser_credential()
+        ws = await self.client.ws_connect('/gemini/ws', origin=self.browser_origin)
+        await ws.send_bytes(b'not-json')
+        await self.assert_policy_close(ws, 1008, 'invalid_auth_frame')
+
+        payload = await self.browser_credential()
+        ws = await self.client.ws_connect('/gemini/ws', origin=self.browser_origin)
+        await ws.send_str('x' * (64 * 1024 + 1))
+        await self.assert_policy_close(ws, 1008, 'invalid_auth_frame')
+        self.assertEqual(self.gemini_connections, 0)
+
+    async def test_browser_first_frame_timeout_is_bounded_and_no_upstream_starts(self):
+        payload = await self.browser_credential()
+        with patch('openai_gateway.VOICE_FIRST_FRAME_TIMEOUT', 0.02):
+            ws = await self.client.ws_connect('/gemini/ws', origin=self.browser_origin)
+            await self.assert_policy_close(ws, 1008, 'auth_timeout')
+        self.assertEqual(self.gemini_connections, 0)
+        self.assertIn(hashlib.sha256(payload['value'].encode()).hexdigest(), self.gateway.gemini_credentials)
+
+    async def test_browser_provisional_connections_are_bounded_and_released(self):
+        first = await self.client.ws_connect('/gemini/ws', origin=self.browser_origin)
+        second = await self.client.ws_connect('/gemini/ws', origin=self.browser_origin)
+        self.assertEqual(self.gateway.active_voice, 2)
+        with self.assertRaises(WSServerHandshakeError) as busy:
+            await self.client.ws_connect('/gemini/ws', origin=self.browser_origin)
+        self.assertEqual(busy.exception.status, 429)
+        await first.close()
+        await second.close()
+        self.assertEqual(self.gateway.active_voice, 0)
+
+    async def test_browser_upstream_failure_uses_sanitized_1011_close(self):
+        payload = await self.browser_credential()
+        self.fail_gemini_connect = True
+        ws = await self.browser_connect(payload['value'], payload['setup'])
+        await self.assert_policy_close(ws, 1011, 'relay_voice_unavailable')
+        self.assertEqual(self.gemini_connections, 0)
+        self.assertNotIn(payload['value'], repr(self.gemini_frames))
+
+    async def test_native_upstream_abnormal_close_is_sanitized_as_1011(self):
+        response = await self.bootstrap()
+        payload = await response.json()
+        self.close_gemini_with = (1011, b'synthetic-upstream-secret')
+        ws = await self.client.ws_connect('/gemini/ws',
+                                          headers={'Authorization': 'Token ' + payload['value']})
+        await ws.send_json({'setup': payload['setup']})
+        await self.assert_policy_close(ws, 1011, 'relay_voice_unavailable')
+        self.assertNotIn('synthetic-upstream-secret', repr(self.gemini_frames))
+        self.assertEqual(self.gemini_frames[0], ('auth', 'Token synthetic-google-token'))
 
     async def test_gemini_bootstrap_rejects_other_models_and_non_owner_keys(self):
         response = await self.bootstrap(headers={'Authorization': 'Bearer synthetic-vendor'})
