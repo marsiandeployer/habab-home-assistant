@@ -1,7 +1,7 @@
 {
   "scope": "Source overlay in pinned HA v15 image; not baked or deployed",
   "checks": {
-    "targeted_python_tests": 46,
+    "targeted_python_tests": 51,
     "python_tests_pass": true,
     "javascript_syntax": true,
     "diff_whitespace": true,
@@ -12,13 +12,15 @@
     "Real installed Python SDK native URL and header-only key for direct Gemini and selected Habab",
     "Habab tool IDs/results/thought-signature roundtrip",
     "OpenCode uses Google SDK and full native base for Habab",
-    "Direct OpenAI and DeepSeek route unchanged"
+    "Direct OpenAI and DeepSeek route unchanged",
+    "Legacy Habab speech rejects before obtaining HTTP session",
+    "Only direct OpenAI advertises STT/TTS; old Habab speech platforms unload on reload"
   ],
   "not_proven": [
     "Live Habab Gateway REST/SSE upstream",
     "Complete web/Telegram shared assistant request through new cloud",
     "Physical native Gemini Live",
-    "Legacy Habab browser STT/TTS replacement"
+    "Gemini replacement for legacy browser STT/TTS; those Habab routes are explicitly unsupported"
   ],
   "deployment": "NOT RUN; owned server stands unchanged"
 }

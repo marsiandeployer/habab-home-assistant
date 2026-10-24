@@ -15,7 +15,9 @@ ENDPOINTS = {
 
 
 async def request_audio(hass, entry, operation, *, data=None, json=None):
-    if entry.data.get("provider") not in {"habab", "openai"}:
+    if entry.data.get("provider") == "habab":
+        raise ProviderError("speech_unsupported")
+    if entry.data.get("provider") != "openai":
         raise ProviderError("invalid_provider")
     endpoint = provider_api_base(entry.data["provider"]) + ("/audio/transcriptions" if operation == "transcribe" else "/audio/speech")
     try:
