@@ -1,0 +1,30 @@
+{
+  "checked_at": "2026-10-24T20:38:11.702714+00:00",
+  "scope": "source-only general registry inventory prompt correction",
+  "source_file": "habab/distribution/src/habab_home/setup_agent.py",
+  "source_sha256": "b548811bcf052e6eeed13e58dc9f787b28f8e88e1228dfe59178d8d007f07d51",
+  "cause_evidence": "device-inventory-web-14d.json",
+  "source_changes": [
+    "Describe devices as bounded HA registry entries rather than physical devices",
+    "Count all returned records while distinguishing physical classification from metadata",
+    "Disclose 200-record limit without inventing an uncapped total"
+  ],
+  "syntax": "ast.parse PASS; no bytecode emitted",
+  "automated_semantic_test_added": false,
+  "actual_model_acceptance": {
+    "original": "NOT_RUN",
+    "risk_queries": 3,
+    "risk_queries_run": 0,
+    "novel_natural_query": "NOT_RUN",
+    "plan": "device-inventory-regression-plan.md"
+  },
+  "deployment": "NOT_RUN",
+  "native_assist_read_only_preflight": {
+    "verdict": "PREFLIGHT_PASS",
+    "source": "14d7344390ffdccfbbdb4fcfe657fd2458c71f44",
+    "image": "sha256:0d78da1953c957e1c54f62a4a2abb35ca9347ab8e17713abd461e6b2f79c6565",
+    "product_version": "0.3.6",
+    "home_assistant_version": "2026.10.2",
+    "browser_or_model_or_fixture_started": false
+  }
+}
