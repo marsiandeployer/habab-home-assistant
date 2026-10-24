@@ -1,0 +1,30 @@
+{
+  "scope": "isolated installed Core Assist tool/exposure ACL with provider completion stub; not a live model or authenticated WebSocket E2E",
+  "runtime_image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+  "test_source_sha256": "06afdf63a17958f87d2924a546d8c8e6dc1a25894ebcbe025002f41c3d0af1ba",
+  "focused_suite": "test_assist*.py",
+  "tests_passed": 29,
+  "network": "none",
+  "real_core_components": [
+    "AssistAPI",
+    "IntentTool",
+    "GetLiveContextTool",
+    "ChatLog",
+    "entity exposure registry",
+    "homeassistant.turn_on dispatcher"
+  ],
+  "real_local_ha_user": true,
+  "accepted_cases": {
+    "exposed_fixture_turn_on_and_state_readback": true,
+    "same_ha_user_context_at_service": true,
+    "hidden_fixture_denied_without_service_call": true,
+    "hidden_fixture_excluded_from_context": true,
+    "no_opencode_or_setup_agent_tools": true
+  },
+  "not_run": [
+    "real_provider_completion",
+    "authenticated_WebSocket_principal",
+    "physical_device"
+  ],
+  "production_source_changes": false
+}

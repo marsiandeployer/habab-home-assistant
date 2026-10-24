@@ -15,6 +15,14 @@ The coordinated release owner subsequently deployed source `9d795359c22cf2844884
 
 The original matrix below was prepared against v15/source `a3c1d3f06`. For every pending live case, use the freshly verified current cloud release rather than the historical preparation target. Older evidence retains its original identity.
 
+
+## Fresh non-Android runtime observations (2026-10-24)
+
+- Independent native read-only baseline on source9d/imagee08: 11 loaded config entries, 4 device-registry records, 152 entity-registry records/states and 56 service domains. Selected assistant is Habab / `gemini-3.1-flash-lite`. Counts are observation, not chat proof or physical-device acceptance.
+- Browser voice configuration has exactly one preferred Assist pipeline: language `en`, stock `conversation.home_assistant`, no STT, TTS or wake-word engine. Current browser mic requires HA STT before microphone capture, so this configuration cannot start browser voice. Habab/Gemini native-v2 backend capability is not wired to that browser mic. Source-only investigation is preparing a common-path implementation plan; physical voice remains NOT RUN.
+- Native setup attempt 1 ended FAIL after 152.95 seconds waiting for a form. The runner counted a trusted pointer click but did not prove prompt acceptance; its ownership guard prevented stop/cancel/delete. Independent postmortem found backend idle, two Local To-do entries unchanged, zero active Local To-do interactions, and no exact native prompt in the existing canonical runtime's most recent 20 messages. Delivery to the model is unproven; this is not evidence that a delivered integration request failed. A no-model pointer-dispatch investigation is next.
+- Native Assist now has an isolated actual-Core exposure regression in `distribution/tests/test_assist_acl_integration.py`: real AssistAPI/ChatLog/IntentTool/GetLiveContextTool and a real local HA user. The exposed virtual light is acted on and read back with the same user context; the hidden light is excluded from context and denied without a service call. The current focused `test_assist*.py` suite passes 29 tests on imagee08 with network disabled. Provider completion is stubbed; authenticated WebSocket entry and physical devices remain NOT RUN.
+
 ## Runtime and evidence rules
 
 - Current execution target: authenticated owner-test **Habab Home 0.3.5 / source `9d795359c22cf2844884caa5affc94209a8120ca` / image `e08f1857…`**. Root independently matched all 42 tracked component files and the running image immediately before attempt 2. The matrix was originally prepared against 0.3.4 v15/a3c1; all older evidence below keeps its original identity. Verify runtime identity again before any later live run.
