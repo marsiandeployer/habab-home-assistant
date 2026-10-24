@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { hasAcceptedTurn, hasContinuousObserver, sameDeviceInventoryCount,
-  shouldDeferFixtureCleanup } = require("./service-call-e2e.cjs");
+  isReadyToSubmit, shouldDeferFixtureCleanup } = require("./service-call-e2e.cjs");
 
 const prompt = "Turn on the disposable QA helper";
 const cappedTail = Array.from({ length: 58 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `old ${index}` }));
@@ -55,4 +55,26 @@ assert.equal(sameDeviceInventoryCount(12, 12), true, "accept unchanged device re
 assert.equal(sameDeviceInventoryCount(12, 13), false, "reject device registry count change");
 assert.equal(sameDeviceInventoryCount(null, null), false, "reject unavailable device registry count");
 
-process.stdout.write("completion correlation, observer continuity, and inventory synthetic checks passed\n");
+const readyToSubmit = {
+  chat_present: true, chat_visible: true, chat_not_inert: true,
+  owner_admin: true, owner_matches: true, hook_available: true,
+  session_ready: true, busy: false, running: false, diagnostics_active: false,
+  connection_connected: true, connection_same: true, connection_disconnected_count: 0,
+  document_visible: true, dialog_open: true, textarea_visible: true,
+  textarea_not_inert: true, textarea_enabled: true, textarea_empty: true,
+  send_visible: true, send_not_inert: true, send_enabled: true,
+};
+assert.equal(isReadyToSubmit(readyToSubmit), true, "accept fully ready native chat");
+for (const [field, value] of [
+  ["chat_present", false], ["chat_visible", false], ["chat_not_inert", false],
+  ["owner_matches", false], ["hook_available", false], ["diagnostics_active", null],
+  ["connection_connected", false], ["connection_same", false], ["connection_disconnected_count", 1],
+  ["document_visible", false], ["dialog_open", false], ["textarea_visible", false],
+  ["textarea_not_inert", false], ["textarea_enabled", false], ["textarea_empty", false],
+  ["send_visible", false], ["send_not_inert", false], ["send_enabled", false],
+  ["busy", true], ["running", true],
+]) {
+  assert.equal(isReadyToSubmit({ ...readyToSubmit, [field]: value }), false, `reject submit when ${field} is unsafe`);
+}
+
+process.stdout.write("completion correlation, observer continuity, inventory, and submit readiness checks passed\n");

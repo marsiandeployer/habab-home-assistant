@@ -1,7 +1,7 @@
 "use strict";
 
-// Real web-chat E2E for one disposable input_boolean. Never uses setup_actions
-// as a test surrogate: only the browser chat sends the three user prompts.
+// Real web-chat E2E for one disposable input_boolean and a read-only inventory case.
+// Never uses setup_actions as a test surrogate: the browser chat sends every prompt.
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
@@ -9,7 +9,7 @@ const puppeteer = require("../../node_modules/puppeteer-core");
 const { withOwnedChromium } = require("/root/tools/chrome-daemon/owned-browser.cjs");
 
 // A later separately authorized run must receive a deliberately new unique label.
-const ATTEMPT_LABEL = "20261024-attempt-3";
+const ATTEMPT_LABEL = "20261024-attempt-4";
 const OUTPUT = path.join(__dirname, `service-call-e2e-${ATTEMPT_LABEL}.json`);
 const FIXTURE_NAME = "Habab QA service-call fixture 20261024";
 const PRIVATE_TRACE_NAME = `service-call-e2e-${ATTEMPT_LABEL}-private.json`;
@@ -44,6 +44,27 @@ function hasContinuousObserver(start, end) {
 
 function sameDeviceInventoryCount(before, after) {
   return Number.isInteger(before) && before >= 0 && before === after;
+}
+
+function isReadyToSubmit(snapshot) {
+  return snapshot?.chat_present === true
+    && snapshot.chat_visible === true && snapshot.chat_not_inert === true
+    && snapshot.owner_admin === true && snapshot.owner_matches === true
+    && snapshot.hook_available === true && snapshot.session_ready === true
+    && snapshot.busy === false && snapshot.running === false
+    && snapshot.diagnostics_active === false
+    && snapshot.connection_connected === true && snapshot.connection_same === true
+    && snapshot.connection_disconnected_count === 0
+    && snapshot.document_visible === true && snapshot.dialog_open === true
+    && snapshot.textarea_visible === true && snapshot.textarea_not_inert === true
+    && snapshot.textarea_enabled === true && snapshot.textarea_empty === true
+    && snapshot.send_visible === true && snapshot.send_not_inert === true
+    && snapshot.send_enabled === true;
+}
+
+function safeErrorClass(error) {
+  const name = error instanceof Error ? error.name : "UnknownError";
+  return /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name) ? name : "OtherError";
 }
 
 function args(argv) {
@@ -266,6 +287,7 @@ async function main() {
   let currentCaseName = null;
   let currentPrompt = null;
   let currentEventOffset = 0;
+  let currentStage = "browser_startup";
   let capturedCompletionProbe = null;
   let setupError;
   let safeToDeleteFixture = true;
@@ -275,6 +297,7 @@ async function main() {
   savePublic();
 
   async function cleanupWhileBrowserOpen(page) {
+    currentStage = "cleanup";
     if (page && fixtureCreateAttempted && !fixtureCreated) {
       try {
         const newlyCreated = await page.evaluate((priorIds) => document.querySelector("habab-setup-chat").hass
@@ -425,21 +448,33 @@ async function main() {
     savePublic();
   }
 
-  async function captureFailureSnapshot(page, caseName, prompt, eventOffset) {
+  async function captureFailureSnapshot(page, caseName, prompt, eventOffset, stage, errorClass) {
     let ui;
     try {
       ui = await page.evaluate(async ({ expectedText, startEvent }) => {
+        const documentState = {
+          document_ready_state: document.readyState,
+          document_pathname: window.location.pathname,
+          document_visible: document.visibilityState === "visible",
+          observer: window.__hababQaObserverSnapshot?.() || null,
+        };
         const chat = document.querySelector("habab-setup-chat");
-        if (!chat) return { chat_present: false, service_events: (window.__hababQaServiceCalls || []).slice(startEvent) };
+        if (!chat) return { ...documentState, chat_present: false,
+          service_events: (window.__hababQaServiceCalls || []).slice(startEvent) };
         const messages = Array.isArray(chat.messages) ? chat.messages.slice(-2) : [];
         const diagnostics = window.__hababQaReadDiagnostics
           ? await window.__hababQaReadDiagnostics()
           : { active: null, error: "diagnostics_unavailable" };
         return {
+          ...documentState,
           chat_present: true,
           busy: Boolean(chat.busy),
           running: Boolean(chat.running),
           status_error: Boolean(chat.shadowRoot.querySelector("#status")?.classList.contains("error")),
+          dialog_open: Boolean(chat.shadowRoot.querySelector("dialog")?.open),
+          session_ready: Boolean(chat.sessionId),
+          owner_admin: chat.hass?.user?.is_admin === true,
+          hook_available: window.hababAssistant?.available === true,
           turn_probe: chat.__qaTurnProbe || null,
           latest_messages: messages.map((message) => ({ role: message.role, text: String(message.text || "") })),
           exact_prompt_at_tail: messages.length === 2 && messages[0]?.role === "user"
@@ -463,6 +498,8 @@ async function main() {
     }
     privateTrace.failure_snapshot = {
       case_name: caseName,
+      stage,
+      error_class: errorClass,
       prompt,
       captured_at: new Date().toISOString(),
       completed_probe: capturedCompletionProbe,
@@ -472,7 +509,16 @@ async function main() {
     };
     report.failure_snapshot = {
       case_name: caseName,
+      stage,
+      error_class: errorClass,
       ui_snapshot_captured: !ui.snapshot_error,
+      document_ready_state: ui.document_ready_state ?? null,
+      document_pathname: ui.document_pathname ?? null,
+      document_visible: ui.document_visible ?? null,
+      chat_present: ui.chat_present ?? false,
+      session_ready: ui.session_ready ?? null,
+      owner_admin: ui.owner_admin ?? null,
+      hook_available: ui.hook_available ?? null,
       busy: ui.busy ?? null,
       status_error: ui.status_error ?? null,
       probe_accepted: ui.turn_probe?.accepted ?? null,
@@ -482,6 +528,10 @@ async function main() {
       exact_prompt_at_tail: ui.exact_prompt_at_tail ?? null,
       assistant_at_tail: ui.assistant_at_tail ?? null,
       backend_active: ui.diagnostics?.active ?? null,
+      connection_identity: ui.observer?.connection_identity ?? null,
+      connection_same: ui.observer?.same_connection ?? null,
+      connection_connected: ui.observer?.connected ?? null,
+      connection_disconnected_count: ui.observer?.disconnected_count ?? null,
       service_event_count: Array.isArray(ui.service_events) ? ui.service_events.length : null,
       fixture_readback_state: fixtureState?.state ?? null,
       fixture_readback_error: fixtureStateReadError,
@@ -491,6 +541,7 @@ async function main() {
   }
 
   try {
+    currentStage = "browser_startup";
     await withOwnedChromium(puppeteer, {
       taskTimeoutMs: 900000,
       args: ["--disable-dev-shm-usage"],
@@ -506,15 +557,18 @@ async function main() {
         }));
         localStorage.setItem("selectedLanguage", JSON.stringify("ru"));
       }, runtime.auth);
+      currentStage = "owner_test_route";
       await page.goto(runtime.base, { waitUntil: "networkidle2", timeout: 60000 });
       const ownerTestPathname = await page.evaluate(() => window.location.pathname);
       report.owner_test_pathname = ownerTestPathname;
       privateTrace.owner_test_pathname = ownerTestPathname;
+      currentStage = "native_route";
       await page.goto(`${runtime.origin}/home/overview`, { waitUntil: "networkidle2", timeout: 60000 });
       const browserPathname = await page.evaluate(() => window.location.pathname);
       report.browser_pathname = browserPathname;
       privateTrace.browser_pathname = browserPathname;
       assert.equal(browserPathname, "/home/overview", "native_chat_route_mismatch");
+      currentStage = "chat_ready";
       await page.waitForFunction(() => {
         const chat = document.querySelector("habab-setup-chat");
         return !!chat?.hass?.user?.is_admin && !!chat.hass.callWS && !!window.hababAssistant?.available;
@@ -523,19 +577,37 @@ async function main() {
         const chat = document.querySelector("habab-setup-chat");
         return !!chat?.sessionId && !chat.busy;
       }, { timeout: 90000 });
-      const ready = await page.evaluate(() => {
+      const initialChat = await page.evaluate(() => {
         const chat = document.querySelector("habab-setup-chat");
-        if (!chat.shadowRoot.querySelector("dialog").open) chat.shadowRoot.querySelector(".launcher")?.click();
+        const dialog = chat.shadowRoot.querySelector("dialog");
+        const launcher = chat.shadowRoot.querySelector(".launcher");
+        const rect = launcher?.getBoundingClientRect();
         return {
-          dialog_open: chat.shadowRoot.querySelector("dialog").open,
+          dialog_open: dialog.open,
           draft_empty: !chat.shadowRoot.querySelector("textarea").value.trim(),
           history_count: chat.messages.length,
+          launcher_visible: Boolean(rect?.width && rect?.height),
+          launcher_x: rect ? rect.left + rect.width / 2 : null,
+          launcher_y: rect ? rect.top + rect.height / 2 : null,
         };
+      });
+      if (!initialChat.dialog_open) {
+        assert.ok(initialChat.launcher_visible, "assistant_launcher_not_visible");
+        await page.mouse.click(initialChat.launcher_x, initialChat.launcher_y);
+        await page.waitForFunction(() => document.querySelector("habab-setup-chat")
+          ?.shadowRoot?.querySelector("dialog")?.open === true, { timeout: 5000 });
+      }
+      const ready = await page.evaluate(() => {
+        const chat = document.querySelector("habab-setup-chat");
+        return { dialog_open: chat.shadowRoot.querySelector("dialog").open,
+          draft_empty: !chat.shadowRoot.querySelector("textarea").value.trim(),
+          history_count: chat.messages.length };
       });
       assert.equal(ready.dialog_open, true, "assistant_dialog_not_open");
       assert.equal(ready.draft_empty, true, "existing_draft_present");
       report.preexisting_history_count = ready.history_count;
 
+      currentStage = "fixture_setup";
       const helpersBefore = await page.evaluate(() => document.querySelector("habab-setup-chat").hass.callWS({ type: "input_boolean/list" }));
       assert.ok(Array.isArray(helpersBefore), "input_boolean_list_unavailable");
       assert.equal(helpersBefore.some((item) => item.name === FIXTURE_NAME), false, "fixture_already_exists");
@@ -574,6 +646,7 @@ async function main() {
       assert.ok(typeof ownerUserId === "string" && ownerUserId, "authenticated_user_id_missing");
       privateTrace.owner_user_id = ownerUserId;
 
+      currentStage = "observer_setup";
       await page.evaluate(() => {
         const connection = document.querySelector("habab-setup-chat")?.hass?.connection;
         if (!connection || typeof connection.addEventListener !== "function"
@@ -647,6 +720,7 @@ async function main() {
       // Calibrate the event observer through native HA helper/service APIs.
       // These two direct calls are apparatus only, never counted as chat proof.
       async function calibrateNativeService(service, expectedState) {
+        currentStage = "observer_calibration";
         const observerStart = await page.evaluate(() => window.__hababQaObserverSnapshot?.() || null);
         const offset = await page.evaluate(() => window.__hababQaServiceCalls.length);
         await page.evaluate(({ service, fixtureEntityId }) => document.querySelector("habab-setup-chat").hass.callService(
@@ -680,6 +754,7 @@ async function main() {
       async function sendTurn(name, prompt, expectedState, expectedService, options = {}) {
         currentCaseName = name;
         currentPrompt = prompt;
+        currentStage = options.verifyDeviceInventory ? "device_inventory_read_before" : "submit_preconditions";
         let deviceRegistryCountBefore = null;
         let deviceRegistryCountAfter = null;
         if (options.verifyDeviceInventory) {
@@ -693,24 +768,84 @@ async function main() {
           privateTrace.device_inventory = { device_registry_count_before: deviceRegistryCountBefore };
           persistPrivate();
         }
-        const start = await page.evaluate(() => {
+        currentStage = "submit_preconditions";
+        const start = await page.evaluate(async (ownerUserId) => {
           const chat = document.querySelector("habab-setup-chat");
-          return { busy: chat.busy, send_disabled: chat.shadowRoot.querySelector(".send").disabled,
-            event_count: window.__hababQaServiceCalls.length,
-            observer: window.__hababQaObserverSnapshot?.() || null };
-        });
-        assert.equal(start.busy, false, `${name}_chat_already_busy`);
-        assert.equal(start.send_disabled, false, `${name}_send_disabled_before_submit`);
-        assert.ok(hasContinuousObserver(start.observer, start.observer), `${name}_observer_not_ready`);
+          const input = chat?.shadowRoot?.querySelector("textarea");
+          const send = chat?.shadowRoot?.querySelector(".send");
+          const dialog = chat?.shadowRoot?.querySelector("dialog");
+          const visibleAndNotInert = (element, requirePointerEvents = true) => {
+            if (!element?.isConnected) return { visible: false, notInert: false, x: null, y: null };
+            let notInert = true;
+            for (let node = element; node;) {
+              if (node.inert || node.hasAttribute?.("inert") || node.getAttribute?.("aria-hidden") === "true") notInert = false;
+              const root = node.getRootNode?.();
+              node = node.parentElement || (root instanceof ShadowRoot ? root.host : null);
+            }
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            const visible = rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0
+              && rect.top < innerHeight && rect.left < innerWidth
+              && style.display !== "none" && style.visibility !== "hidden"
+              && (!requirePointerEvents || style.pointerEvents !== "none");
+            return { visible, notInert, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+          };
+          const inputState = visibleAndNotInert(input);
+          const sendState = visibleAndNotInert(send);
+          const diagnostics = window.__hababQaReadDiagnostics
+            ? await window.__hababQaReadDiagnostics() : { active: null };
+          const observer = window.__hababQaObserverSnapshot?.() || null;
+          return {
+            chat_present: Boolean(chat),
+            chat_visible: visibleAndNotInert(chat, false).visible,
+            chat_not_inert: visibleAndNotInert(chat).notInert,
+            owner_admin: chat?.hass?.user?.is_admin === true,
+            owner_matches: typeof ownerUserId === "string" && chat?.hass?.user?.id === ownerUserId
+              && chat?.isCurrentOwnerContext?.() === true,
+            hook_available: window.hababAssistant?.available === true,
+            session_ready: Boolean(chat?.sessionId),
+            busy: Boolean(chat?.busy),
+            running: Boolean(chat?.running),
+            diagnostics_active: diagnostics.active,
+            connection_connected: observer?.connected === true,
+            connection_same: observer?.same_connection === true,
+            connection_disconnected_count: observer?.disconnected_count ?? null,
+            document_visible: document.visibilityState === "visible",
+            dialog_open: dialog?.open === true,
+            textarea_visible: inputState.visible,
+            textarea_not_inert: inputState.notInert,
+            textarea_enabled: input?.disabled === false,
+            textarea_empty: typeof input?.value === "string" && input.value.trim() === "",
+            send_visible: sendState.visible,
+            send_not_inert: sendState.notInert,
+            send_enabled: send?.disabled === false,
+            input_x: inputState.x,
+            input_y: inputState.y,
+            send_x: sendState.x,
+            send_y: sendState.y,
+            event_count: window.__hababQaServiceCalls?.length ?? 0,
+            observer,
+          };
+        }, ownerUserId);
+        assert.ok(isReadyToSubmit(start), `${name}_submit_not_ready`);
         currentCaseName = name;
         currentPrompt = prompt;
         currentEventOffset = start.event_count;
         privateTrace.prompts.push({ name, text: prompt });
         persistPrivate();
         chatTurnMayBeActive = true;
-        const clicked = await page.evaluate((text) => {
+        currentStage = "chat_submit";
+        const installed = await page.evaluate((text, targetPoints, expectedOwnerId) => {
           const chat = document.querySelector("habab-setup-chat");
           const send = chat.shadowRoot.querySelector(".send");
+          const input = chat.shadowRoot.querySelector("textarea");
+          const dialog = chat.shadowRoot.querySelector("dialog");
+          const observer = window.__hababQaObserverSnapshot?.();
+          if (!chat.isConnected || !chat.isCurrentOwnerContext?.() || chat.hass?.user?.is_admin !== true
+              || chat.hass?.user?.id !== expectedOwnerId
+              || !window.hababAssistant?.available || !chat.sessionId || chat.busy || chat.running
+              || !observer?.connected || !observer.same_connection || observer.disconnected_count !== 0
+              || !dialog?.open || input.disabled || input.value.trim() || send.disabled) return null;
           if (!chat.__qaOriginalSend) {
             chat.__qaOriginalSend = chat.send;
             chat.send = async function (...args) {
@@ -747,20 +882,52 @@ async function main() {
               }
             };
           }
-          if (chat.busy || send.disabled) return false;
+          if (chat.busy || send.disabled) return null;
           chat.__qaTurnProbe = { expected_text: text, accepted: false, completed: false };
-          if (!chat.shadowRoot.querySelector("dialog")?.open) chat.shadowRoot.querySelector(".launcher")?.click();
-          const input = chat.shadowRoot.querySelector("textarea");
-          input.focus();
-          input.value = text;
-          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-          send.click();
-          return true;
-        }, prompt);
-        if (!clicked) {
+          return { text_x: targetPoints.input_x, text_y: targetPoints.input_y,
+            send_x: targetPoints.send_x, send_y: targetPoints.send_y };
+        }, prompt, { input_x: start.input_x, input_y: start.input_y,
+          send_x: start.send_x, send_y: start.send_y }, ownerUserId);
+        if (!installed) {
           chatTurnMayBeActive = false;
-          throw new Error(`${name}_submit_rejected`);
+          throw new Error(`${name}_submit_preconditions_changed`);
         }
+        await page.mouse.click(installed.text_x, installed.text_y);
+        await page.keyboard.type(prompt);
+        const sendPosition = await page.evaluate(async ({ expectedText, expectedOwnerId }) => {
+          const chat = document.querySelector("habab-setup-chat");
+          const input = chat?.shadowRoot?.querySelector("textarea");
+          const send = chat?.shadowRoot?.querySelector(".send");
+          const observer = window.__hababQaObserverSnapshot?.();
+          const diagnostics = window.__hababQaReadDiagnostics
+            ? await window.__hababQaReadDiagnostics() : { active: null };
+          if (!chat?.isCurrentOwnerContext?.() || chat.hass?.user?.is_admin !== true
+              || chat.hass?.user?.id !== expectedOwnerId
+              || !window.hababAssistant?.available || !chat.sessionId || chat.busy || chat.running
+              || !observer?.connected || !observer.same_connection || observer.disconnected_count !== 0
+              || diagnostics.active !== false || document.visibilityState !== "visible"
+              || !chat.shadowRoot.querySelector("dialog")?.open || input?.value !== expectedText
+              || input.disabled || send.disabled) return null;
+          const visibleAndNotInert = (element, requirePointerEvents = true) => {
+            if (!element?.isConnected) return false;
+            for (let node = element; node;) {
+              if (node.inert || node.hasAttribute?.("inert") || node.getAttribute?.("aria-hidden") === "true") return false;
+              const root = node.getRootNode?.();
+              node = node.parentElement || (root instanceof ShadowRoot ? root.host : null);
+            }
+            const elementRect = element.getBoundingClientRect();
+            const elementStyle = getComputedStyle(element);
+            return elementRect.width > 0 && elementRect.height > 0 && elementRect.bottom > 0
+              && elementRect.right > 0 && elementRect.top < innerHeight && elementRect.left < innerWidth
+              && elementStyle.display !== "none" && elementStyle.visibility !== "hidden"
+              && (!requirePointerEvents || elementStyle.pointerEvents !== "none");
+          };
+          if (!visibleAndNotInert(chat, false) || !visibleAndNotInert(input) || !visibleAndNotInert(send)) return null;
+          const rect = send.getBoundingClientRect();
+          return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        }, { expectedText: prompt, expectedOwnerId: ownerUserId });
+        assert.ok(sendPosition, `${name}_submit_preconditions_changed_after_typing`);
+        await page.mouse.click(sendPosition.x, sendPosition.y);
         const completedProbeHandle = await page.waitForFunction((expectedText) => {
           const probe = document.querySelector("habab-setup-chat")?.__qaTurnProbe;
           if (!probe?.completed || probe.expected_text !== expectedText || probe.submitted_text !== expectedText) return false;
@@ -785,6 +952,7 @@ async function main() {
           await completedProbeHandle.dispose();
         }
         capturedCompletionProbe = completedProbe;
+        currentStage = "chat_completion";
         const turn = await page.evaluate(async ({ offset, startedAt }) => {
           const chat = document.querySelector("habab-setup-chat");
           const messages = chat.messages.slice(-2).map((message) => ({ role: message.role, text: String(message.text || "") }));
@@ -843,6 +1011,7 @@ async function main() {
         } else {
           assert.equal(events.length, 0, `${name}_must_not_emit_service_call`);
         }
+        currentStage = "state_readback";
         let state = await readState(runtime, entityId);
         const deadline = Date.now() + 20000;
         while (expectedState && state?.state !== expectedState && Date.now() < deadline) {
@@ -887,12 +1056,16 @@ async function main() {
       await sendTurn("device_inventory", "Проверь в Home Assistant, какие устройства сейчас подключены и сколько их. Коротко перечисли их типы. Ничего не подключай, не меняй и не запускай.", "off", null,
         { verifyDeviceInventory: true });
       report.verdict = "ACTIONS_PASS_CLEANUP_PENDING_MANUAL_REVIEW";
-      } catch (error) {
+        } catch (error) {
         report.verdict = "FAIL";
         report.failure_code = error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
           ? error.message : "e2e_assertion_failed";
+        const errorClass = safeErrorClass(error);
+        report.failure_stage = currentStage;
+        report.failure_error_class = errorClass;
         try {
-          await captureFailureSnapshot(page, currentCaseName || "setup", currentPrompt, currentEventOffset);
+          await captureFailureSnapshot(page, currentCaseName || "setup", currentPrompt, currentEventOffset,
+            currentStage, errorClass);
         } catch {
           report.failure_snapshot = { case_name: currentCaseName || "setup", ui_snapshot_captured: false };
         }
@@ -906,6 +1079,8 @@ async function main() {
     setupError = error instanceof Error ? error.message : "e2e_failed";
     if (report.verdict !== "FAIL_CLEANUP") report.verdict = "FAIL";
     report.failure_code = /^[a-z0-9_]+$/.test(setupError) ? setupError : "e2e_assertion_failed";
+    report.failure_stage ||= currentStage;
+    report.failure_error_class ||= safeErrorClass(error);
   } finally {
     try {
       savePublic();
@@ -924,7 +1099,8 @@ async function pageHelperExists(page, helperId) {
   }, helperId);
 }
 
-module.exports = { hasAcceptedTurn, hasContinuousObserver, sameDeviceInventoryCount, shouldDeferFixtureCleanup };
+module.exports = { hasAcceptedTurn, hasContinuousObserver, isReadyToSubmit,
+  sameDeviceInventoryCount, shouldDeferFixtureCleanup };
 
 if (require.main === module) {
   main().catch((error) => {
