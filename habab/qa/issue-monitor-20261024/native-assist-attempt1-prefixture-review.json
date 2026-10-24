@@ -1,0 +1,22 @@
+{
+  "checked_at": "2026-10-24T20:51:39.561180+00:00",
+  "original_report": "native-assist-e2e.json",
+  "original_verdict_preserved": "FAIL",
+  "failure_classification": "harness readiness gate requires a field absent from native current-user projection",
+  "native_current_user_fields": [
+    "id",
+    "name",
+    "is_owner",
+    "is_admin",
+    "credentials",
+    "mfa_modules"
+  ],
+  "is_active_exposed_to_frontend": false,
+  "core_authorization_evidence": "auth.async_validate_access_token rejects inactive users; WebSocket auth uses this validator",
+  "authenticated_admin_metadata_read": "PASS",
+  "native_assist_fixture_prefix_count": 0,
+  "model_turns_sent": 0,
+  "existing_devices_or_configuration_changed": false,
+  "next": "Use validated authenticated admin/current-user identity instead of nonexistent frontend is_active; capture stage/error class before fixture; retain original failure.",
+  "executed_runner_source_sha256": "f63533c4e4ec603762ec6f24c9ba2cc5975ad7b5456a2f41841c20de4351d5e4"
+}

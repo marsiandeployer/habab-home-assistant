@@ -9,8 +9,8 @@ const puppeteer = require("../../node_modules/puppeteer-core");
 const { withOwnedChromium } = require("/root/tools/chrome-daemon/owned-browser.cjs");
 
 const ALLOWED_ORIGIN = "https://habab-demo.wpmix.net";
-const OUTPUT = path.join(__dirname, "native-assist-e2e.json");
-const PRIVATE_NAME = "native-assist-e2e-private.json";
+const OUTPUT = path.join(__dirname, "native-assist-e2e-attempt-3.json");
+const PRIVATE_NAME = "native-assist-e2e-attempt-3-private.json";
 const FIXTURE_PREFIX = "Habab QA native Assist fixture ";
 const PROVIDER_PRIORITY = ["deepseek", "openai", "habab", "gemini"];
 const MAX_TURN_MS = 120_000;
@@ -36,6 +36,23 @@ function parseArgs(argv) {
     }
   }
   return options;
+}
+
+function validateAuthenticatedAdmin(frontendUser, currentUser, connection) {
+  const frontendId = frontendUser?.id;
+  const currentId = currentUser?.id;
+  if (frontendUser?.is_admin !== true || currentUser?.is_admin !== true
+      || typeof frontendId !== "string" || !frontendId
+      || typeof currentId !== "string" || !currentId || currentId !== frontendId
+      || connection?.connected !== true) {
+    throw new Error("authenticated_admin_identity_required");
+  }
+  return { user_id: currentId };
+}
+
+function boundedErrorClass(error) {
+  const name = error instanceof Error ? error.name : "Error";
+  return /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name) ? name : "OtherError";
 }
 
 function selectConversationAgent(connections, agents) {
@@ -115,6 +132,34 @@ function targetsEntity(event, entityId) {
   return (Array.isArray(target) ? target : [target]).includes(entityId);
 }
 
+function targetsOnlyEntity(event, entityId) {
+  const candidates = [];
+  if (Object.hasOwn(event?.service_data ?? {}, "entity_id")) candidates.push(event.service_data.entity_id);
+  if (Object.hasOwn(event?.target ?? {}, "entity_id")) candidates.push(event.target.entity_id);
+  return candidates.length > 0 && candidates.every((target) => {
+    const ids = Array.isArray(target) ? target : [target];
+    return ids.length === 1 && ids[0] === entityId;
+  });
+}
+
+function validateFixtureActionChain(events, entityId, ownerId) {
+  if (!Array.isArray(events)) return { valid: false, event_count: null, wrapper_count: null };
+  if (events.length !== 1 && events.length !== 2) {
+    return { valid: false, event_count: events.length, wrapper_count: null };
+  }
+  const leaf = { domain: "input_boolean", service: "turn_on" };
+  const wrapper = { domain: "homeassistant", service: "turn_on" };
+  const expectedOrder = events.length === 1 ? [leaf]
+    : events.length === 2 ? [wrapper, leaf] : [];
+  const valid = expectedOrder.length === events.length && expectedOrder.every((expected, index) => {
+    const event = events[index];
+    return event?.domain === expected.domain && event?.service === expected.service
+      && event?.user_id === ownerId && targetsOnlyEntity(event, entityId);
+  });
+  return { valid, event_count: events.length,
+    wrapper_count: events.filter((event) => event?.domain === wrapper.domain && event?.service === wrapper.service).length };
+}
+
 function hasContinuousObserver(start, end) {
   return start?.connected === true && end?.connected === true
     && start?.same_connection === true && end?.same_connection === true
@@ -128,11 +173,14 @@ function publicProjection(report) {
     target_alias: "accepted-owner-test",
     runtime: report.runtime,
     verdict: report.verdict,
+    failure_stage: report.failure_stage ?? null,
+    failure_class: report.failure_class ?? null,
     failure_code: report.failure_code ?? null,
     selected_provider: report.selected_provider ?? null,
     cases: Object.fromEntries(Object.entries(report.cases ?? {}).map(([name, item]) => [name, {
       tool_observed: item.tool_observed === true,
       action_event_count: Number.isInteger(item.action_event_count) ? item.action_event_count : null,
+      wrapper_event_count: Number.isInteger(item.wrapper_event_count) ? item.wrapper_event_count : null,
       actor_context_match: item.actor_context_match === null ? null : item.actor_context_match === true,
       readback: item.readback ?? null,
       acl_denial_observed: item.acl_denial_observed === true,
@@ -248,6 +296,7 @@ async function main() {
       "Only a nonphysical input_boolean is controlled; no physical-device behavior is tested.",
     ],
   };
+  let currentStage = "browser_startup";
   const trace = { runtime: runtime.identity, prompts: [], replies: [], conversation_logs: [], service_events: [], fixture: {} };
   let fixtureCreated = false;
   let helperId = null;
@@ -276,18 +325,22 @@ async function main() {
           clientId: auth.client_id, expires: Date.now() + (auth.expires_in || 3600) * 1000 }));
         localStorage.setItem("selectedLanguage", JSON.stringify("ru"));
       }, runtime.auth);
+      currentStage = "owner_test_route";
       await page.goto(runtime.base, { waitUntil: "networkidle2", timeout: 60000 });
+      currentStage = "native_route";
       await page.goto(`${runtime.origin}/home/overview`, { waitUntil: "networkidle2", timeout: 60000 });
+      currentStage = "auth_context";
       await page.waitForFunction(() => {
         const hass = document.querySelector("home-assistant")?.hass;
-        return !!hass?.user?.is_admin && !!hass?.user?.is_active && !!hass.callWS && !!hass.connection;
+        return !!hass?.user?.is_admin && !!hass.callWS && !!hass.connection?.connected;
       }, { timeout: 30000 });
-      const identity = await page.evaluate(() => {
+      const authSnapshot = await page.evaluate(async () => {
         const hass = document.querySelector("home-assistant").hass;
-        return { admin: hass.user.is_admin === true, active: hass.user.is_active !== false, user_id: hass.user.id,
-          connection: !!hass.connection && hass.connection.connected === true };
+        const currentUser = await hass.callWS({ type: "auth/current_user" });
+        return { frontendUser: { id: hass.user.id, is_admin: hass.user.is_admin }, currentUser,
+          connection: { connected: hass.connection?.connected === true } };
       });
-      assert.ok(identity.admin && identity.active && identity.user_id && identity.connection, "active_admin_connection_required");
+      const identity = validateAuthenticatedAdmin(authSnapshot.frontendUser, authSnapshot.currentUser, authSnapshot.connection);
       await page.evaluate(() => {
         const connection = document.querySelector("home-assistant").hass.connection;
         window.__nativeAssistObserverIdentity = connection;
@@ -296,6 +349,7 @@ async function main() {
         connection.addEventListener("disconnected", window.__nativeAssistOnDisconnect);
       });
 
+      currentStage = "provider_agent_discovery";
       const native = await page.evaluate(async () => {
         const hass = document.querySelector("home-assistant").hass;
         const providers = await hass.callWS({ type: "habab_home/providers/list" });
@@ -307,6 +361,7 @@ async function main() {
       trace.owner_user_id = identity.user_id;
       trace.selected_agent = selected;
 
+      currentStage = "fixture_setup";
       try {
       const helpersBefore = await page.evaluate(() => document.querySelector("home-assistant").hass.callWS({ type: "input_boolean/list" }));
       assert.ok(Array.isArray(helpersBefore), "helper_inventory_unavailable");
@@ -338,6 +393,7 @@ async function main() {
       }
       fixtureCreated = true;
       fixtureCreationUncertain = false;
+      currentStage = "fixture_created";
       report.cleanup.fixture_created = true;
       trace.fixture.helper_id = helperId;
       trace.fixture.name = fixtureName;
@@ -353,6 +409,7 @@ async function main() {
       assert.equal(state?.state, "off", "fixture_initial_state_not_off");
 
       const registryEntry = await page.evaluate((id) => document.querySelector("home-assistant").hass.callWS({ type: "config/entity_registry/get", entity_id: id }), entityId);
+      currentStage = "exposure_snapshot";
       priorOptions = priorConversationOptions(registryEntry);
       exposureSnapshotTaken = true;
       trace.fixture.prior_conversation_options = priorOptions;
@@ -425,6 +482,7 @@ async function main() {
       await setFixture("turn_off");
 
       async function process(text, caseName) {
+        currentStage = caseName;
         const observerStart = await observerSnapshot();
         assert.ok(observerStart.connected && observerStart.same_connection, "native_service_observer_unavailable");
         const eventOffset = await page.evaluate(() => window.__nativeAssistEvents.length);
@@ -484,20 +542,14 @@ async function main() {
 
       const actionPrompt = `Включи только тестовую сущность ${entityId} (имя: ${trace.fixture.friendly_name}), затем назови её состояние.`;
       const actionCase = await process(actionPrompt, "exposed_action");
-      const actionCalls = actionCase.events.filter((event) => event.domain === "input_boolean" && event.service === "turn_on" && targetsEntity(event, entityId));
-      const actionTarget = actionCalls.every((event) => {
-        const target = event.service_data?.entity_id ?? event.target?.entity_id;
-        return targetsEntity(event, entityId)
-          && JSON.stringify(Array.isArray(target) ? target : [target]) === JSON.stringify([entityId]);
-      });
+      const actionEvidence = validateFixtureActionChain(actionCase.events, entityId, identity.user_id);
       state = await readState(runtime, entityId);
       await requireContinuousObserver(actionCase.observerStart);
-      report.cases.exposed_action = { tool_observed: actionCalls.length > 0, action_event_count: actionCalls.length,
-        actor_context_match: actionCalls.every((event) => event.user_id === identity.user_id) && actionTarget,
+      report.cases.exposed_action = { tool_observed: actionCase.events.some((event) => event.domain === "input_boolean" && event.service === "turn_on"),
+        action_event_count: actionEvidence.event_count, wrapper_event_count: actionEvidence.wrapper_count,
+        actor_context_match: actionEvidence.valid,
         readback: state?.state ?? null, acl_denial_observed: false };
-      assert.equal(actionCalls.length, 1, "action_event_count_mismatch");
-      assert.equal(actionCase.events.length, 1, "action_unexpected_service_event");
-      assert.ok(report.cases.exposed_action.actor_context_match, "action_context_or_target_mismatch");
+      assert.ok(actionEvidence.valid, "action_service_chain_mismatch");
       assert.equal(state?.state, "on", "action_readback_mismatch");
 
       await setFixture("turn_off");
@@ -567,6 +619,8 @@ async function main() {
       report.cleanup.errors = [...(report.cleanup.errors ?? []), "fixture_identity_unresolved"];
       report.verdict = "FAIL_CLEANUP";
     } else if (report.verdict !== "FAIL_CLEANUP") report.verdict = "FAIL";
+    report.failure_stage = currentStage;
+    report.failure_class = boundedErrorClass(error);
     report.failure_code = /^[a-z0-9_]{1,60}$/.test(error.message) ? error.message : "runner_error";
   } finally {
     // Only the exact fixture created by this attempt is ever restored/deleted.
@@ -587,4 +641,5 @@ if (require.main === module) {
 }
 
 module.exports = { parseArgs, selectConversationAgent, priorConversationOptions,
-  restoreExposureCommand, collectToolEvidence, hiddenTargetWasDenied, hasContinuousObserver, publicProjection };
+  restoreExposureCommand, collectToolEvidence, hiddenTargetWasDenied, hasContinuousObserver,
+  validateFixtureActionChain, validateAuthenticatedAdmin, boundedErrorClass, publicProjection };

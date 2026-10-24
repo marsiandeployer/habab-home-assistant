@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-10-24T20:54:29.586799+00:00",
+  "original_attempt_report": "native-assist-e2e-attempt-2.json",
+  "original_verdict_preserved": "FAIL",
+  "manual_semantics": {
+    "read_reply_matches_off": true,
+    "action_reply_matches_on": true,
+    "completed_native_GetLiveContext": true,
+    "completed_native_HassTurnOn_without_error": true
+  },
+  "independent_event_review": {
+    "chain": [
+      "homeassistant.turn_on",
+      "input_boolean.turn_on"
+    ],
+    "same_authenticated_owner_context": true,
+    "both_target_only_created_fixture": true,
+    "additional_event_is_native_core_forwarding": true,
+    "core_source": "homeassistant/components/homeassistant/__init__.py forwards domain call with same context"
+  },
+  "independent_cleanup": {
+    "helper_absent": true,
+    "registry_entity_absent": true,
+    "state_http404": true,
+    "prior_helper_ids_preserved": true,
+    "exposure_restored_before_deletion": "runner verified exact prior options; entity now absent"
+  },
+  "hidden_denial": "NOT_RUN",
+  "overall_acl_suite": "INCOMPLETE",
+  "runner_sha256": "41de3eaafa7efad5b7e5700b746dd77071565734a93270a0b042ad9d803f5c57",
+  "private_trace_sha256": "40bcedef99cfef3e954353ceda241841860590504ab36ff015adfc81a0909379"
+}

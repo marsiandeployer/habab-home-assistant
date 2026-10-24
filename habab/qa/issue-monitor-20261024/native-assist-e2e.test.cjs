@@ -9,6 +9,9 @@ const {
   restoreExposureCommand,
   hiddenTargetWasDenied,
   hasContinuousObserver,
+  validateFixtureActionChain,
+  validateAuthenticatedAdmin,
+  boundedErrorClass,
   publicProjection,
 } = require("./native-assist-e2e.cjs");
 
@@ -27,6 +30,29 @@ test("live mode requires an explicit execution window id", () => {
   assert.throws(() => parseArgs(["node", "runner", ...required, "--run-live"]), /execution_window_required/);
   const live = parseArgs(["node", "runner", ...required, "--run-live", "--execution-window-id", "window-20261024-01"]);
   assert.equal(live.runLive, true);
+});
+
+test("auth current-user projection validates identity without requiring nonexistent is_active", () => {
+  const frontendUser = { id: "admin-1", is_admin: true };
+  const currentUser = { id: "admin-1", name: "QA Admin", is_owner: true, is_admin: true,
+    credentials: [], mfa_modules: [] };
+  assert.deepEqual(validateAuthenticatedAdmin(frontendUser, currentUser, { connected: true }), { user_id: "admin-1" });
+  assert.throws(() => validateAuthenticatedAdmin(frontendUser, null, { connected: true }), /authenticated_admin_identity_required/);
+  assert.throws(() => validateAuthenticatedAdmin(frontendUser, { ...currentUser, is_admin: false }, { connected: true }), /authenticated_admin_identity_required/);
+  assert.throws(() => validateAuthenticatedAdmin(frontendUser, { ...currentUser, id: "other-user" }, { connected: true }), /authenticated_admin_identity_required/);
+  assert.throws(() => validateAuthenticatedAdmin(frontendUser, currentUser, { connected: false }), /authenticated_admin_identity_required/);
+});
+
+test("failure diagnostics expose only bounded stage and error class", () => {
+  assert.equal(boundedErrorClass(new TypeError("token=never-log-this")), "TypeError");
+  assert.equal(boundedErrorClass({ message: "secret" }), "Error");
+  const projected = publicProjection({
+    runtime: {}, verdict: "FAIL", failure_stage: "auth_context", failure_class: "Error",
+    failure_code: "authenticated_admin_identity_required", exception: "raw token",
+  });
+  assert.equal(projected.failure_stage, "auth_context");
+  assert.equal(projected.failure_class, "Error");
+  assert.equal(JSON.stringify(projected).includes("raw token"), false);
 });
 
 test("agent selection requires one HA-selected provider and rejects missing or ambiguous mappings", () => {
@@ -83,6 +109,23 @@ test("observer continuity fails closed after disconnect or connection replacemen
   assert.equal(hasContinuousObserver(start, { ...start, connected: false }), false);
   assert.equal(hasContinuousObserver(start, { ...start, connection_identity: 2 }), false);
   assert.equal(hasContinuousObserver(start, { ...start, disconnected_count: 1 }), false);
+});
+
+test("fixture action accepts only the exact Core wrapper-to-leaf service chain", () => {
+  const leaf = { domain: "input_boolean", service: "turn_on", service_data: { entity_id: "input_boolean.fixture" }, user_id: "owner-1" };
+  const wrapper = { domain: "homeassistant", service: "turn_on", target: { entity_id: ["input_boolean.fixture"] }, user_id: "owner-1" };
+  assert.deepEqual(validateFixtureActionChain([leaf], "input_boolean.fixture", "owner-1"), {
+    valid: true, event_count: 1, wrapper_count: 0,
+  });
+  assert.deepEqual(validateFixtureActionChain([wrapper, leaf], "input_boolean.fixture", "owner-1"), {
+    valid: true, event_count: 2, wrapper_count: 1,
+  });
+  assert.equal(validateFixtureActionChain([], "input_boolean.fixture", "owner-1").valid, false);
+  assert.equal(validateFixtureActionChain([wrapper, { ...leaf, user_id: "other-owner" }], "input_boolean.fixture", "owner-1").valid, false);
+  assert.equal(validateFixtureActionChain([{ ...wrapper, target: { entity_id: ["input_boolean.fixture", "light.other"] } }, leaf], "input_boolean.fixture", "owner-1").valid, false);
+  assert.equal(validateFixtureActionChain([leaf, wrapper], "input_boolean.fixture", "owner-1").valid, false);
+  assert.equal(validateFixtureActionChain([wrapper, leaf, leaf], "input_boolean.fixture", "owner-1").valid, false);
+  assert.equal(validateFixtureActionChain([wrapper, leaf, { ...leaf, domain: "light" }], "input_boolean.fixture", "owner-1").valid, false);
 });
 
 test("public projection omits fixture ids, raw replies, user ids, and chat logs", () => {

@@ -1,0 +1,30 @@
+{
+  "checked_at": "2026-10-24T20:49:59.519Z",
+  "target_alias": "accepted-owner-test",
+  "runtime": {
+    "identity": {
+      "image": "sha256:0d78da1953c957e1c54f62a4a2abb35ca9347ab8e17713abd461e6b2f79c6565",
+      "source": "14d7344390ffdccfbbdb4fcfe657fd2458c71f44",
+      "runtime": "habab-owner-test"
+    },
+    "product_version": "0.3.6",
+    "home_assistant_version": "2026.10.2",
+    "status": "running"
+  },
+  "verdict": "FAIL",
+  "failure_code": "runner_error",
+  "selected_provider": null,
+  "cases": {},
+  "cleanup": {
+    "fixture_created": false,
+    "exposure_restored": false,
+    "fixture_deleted": false,
+    "failed": false
+  },
+  "limitations": [
+    "Tool/action evidence is automated; answer accuracy remains manual review.",
+    "The operator-provided execution window is the exclusive-idle attestation; Core exposes no admin query for the native ConversationEntity request lock.",
+    "Conversation logs are short-lived native in-memory HA chat logs; no setup-agent history or durable provider session is used.",
+    "Only a nonphysical input_boolean is controlled; no physical-device behavior is tested."
+  ]
+}
