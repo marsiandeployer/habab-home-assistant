@@ -15,9 +15,11 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
             settings = hass.data[DOMAIN]["setup_agent"].settings()
         except AgentError:
             settings = {}
+    gemini_live_provider = settings.get("provider") in {"habab", "gemini"}
     try:
-        if settings.get("provider") == "gemini":
-            if not settings.get("api_key"):
+        if gemini_live_provider:
+            api_key = settings.get("api_key")
+            if not isinstance(api_key, str) or not api_key.strip():
                 raise ValueError("realtime_provider_required")
         else:
             realtime_base(settings)
@@ -39,9 +41,9 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
         "voice": {
             "realtime_api_registered": True,
             "selected_provider_supports_realtime": realtime_supported,
-            "selected_provider_protocol": "gemini_live" if settings.get("provider") == "gemini" else "openai_realtime" if realtime_supported else None,
-            "required_client_kind": "native_v2" if settings.get("provider") == "gemini" else None,
-            "default_voice_model": DEFAULT_MODEL if settings.get("provider") == "gemini" else "gpt-realtime-mini" if realtime_supported else None,
+            "selected_provider_protocol": "gemini_live" if gemini_live_provider else "openai_realtime" if realtime_supported else None,
+            "required_client_kind": "native_v2" if gemini_live_provider else None,
+            "default_voice_model": DEFAULT_MODEL if gemini_live_provider else "gpt-realtime-mini" if realtime_supported else None,
             "supported_clients": {
                 "android_with_native_voice": {
                     "wake_detection": "local_vosk", "transport": "native_realtime",
