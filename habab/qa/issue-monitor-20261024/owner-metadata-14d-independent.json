@@ -1,0 +1,15 @@
+{
+  "checked_at": "2026-10-24T20:26:53.232983+00:00",
+  "scope": "independent read-only Docker metadata and baked tracked component source attestation",
+  "runtime": "habab-owner-test",
+  "state": "running",
+  "image": "sha256:0d78da1953c957e1c54f62a4a2abb35ca9347ab8e17713abd461e6b2f79c6565",
+  "source": "14d7344390ffdccfbbdb4fcfe657fd2458c71f44",
+  "oci_revision": "14d7344390ffdccfbbdb4fcfe657fd2458c71f44",
+  "tracked_component_files": 42,
+  "matching_component_files": 42,
+  "source_overlay": false,
+  "setup_chat_sha256": "3f772a7a7164a1573a0aeacaddebdb843c9de52c0cd99c3cd8ba1d7c17188a32",
+  "lifecycle_fix_492_deployed": false,
+  "model_or_device_action_run": false
+}

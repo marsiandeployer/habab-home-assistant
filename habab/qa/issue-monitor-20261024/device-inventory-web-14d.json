@@ -1,0 +1,51 @@
+{
+  "checked_at": "2026-10-24T20:29:08.903947+00:00",
+  "verdict": "FAIL_SEMANTIC_INVENTORY",
+  "runtime": {
+    "image": "sha256:0d78da1953c957e1c54f62a4a2abb35ca9347ab8e17713abd461e6b2f79c6565",
+    "source": "14d7344390ffdccfbbdb4fcfe657fd2458c71f44",
+    "oci_revision_matches_source": true,
+    "tracked_component_files_matched": 42,
+    "frontend_sha256": "3f772a7a7164a1573a0aeacaddebdb843c9de52c0cd99c3cd8ba1d7c17188a32"
+  },
+  "execution": {
+    "channel": "ordinary authenticated owner web chat",
+    "trusted_pointer_submit": true,
+    "same_session": true,
+    "original_send_accepted": true,
+    "original_send_completed": true,
+    "backend_idle_after": true,
+    "call_service_count": 0,
+    "connection_continuous": true,
+    "registry_unchanged": true,
+    "native_device_count": 4,
+    "native_entity_count": 152
+  },
+  "independent_tool_trace": {
+    "exact_current_prompt_matched": true,
+    "completed_bash_tools": 1,
+    "action": "devices",
+    "returned_registry_device_count": 4,
+    "extra_model_request_for_review": false
+  },
+  "manual_review": {
+    "registered_count_claimed": 3,
+    "registered_count_actual": 4,
+    "all_four_names_mentioned": true,
+    "system_backup_excluded_from_stated_registered_total": true,
+    "virtual_weather_integration_described_as_weather_station": true,
+    "first_incorrect_layer": "prompt contract describes registry devices as real devices; answer also miscounts the registered total",
+    "physical_appliance_action": "NOT_RUN"
+  },
+  "private_evidence_sha256": {
+    "inventory-ui.cjs": "84adf99337cebe18bbdc75a455a5a3456d319b99fbf0e2aa70a5a3e746272101",
+    "readonly-inventory-ui.json": "e87889bcf029215ef1ac212cb47f4dcc4c612f84f3f9a302218a008be5d19ddd",
+    "opencode-current-turn.json": "0d1d0a052cb7c8f85f0ceed97deeccd16a80edfea5b4fe2899b8743c4a9af3e2"
+  },
+  "cleanup": {
+    "fixture_created": false,
+    "configuration_changed": false,
+    "owned_browser_closed_and_profile_removed": true
+  },
+  "next": "Correct general device registry description/count guidance, then original and risk-query actual-model acceptance. Do not hardcode household device names."
+}
