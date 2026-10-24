@@ -1,0 +1,25 @@
+{
+  "scope": "Owner server QA; Windows and Android physical tunnels intentionally off",
+  "frontend_wheel": "20260930.4+habab.7",
+  "frontend_sha256": "1d518e7cf632827f04481f0ef0d8ad3aec65d17b25cdc73f1b79c34de0ee1867",
+  "server_candidate": "v12_installed",
+  "server_unit_tests": 148,
+  "browser_addon_tests": 33,
+  "native_frontend_tests": 17,
+  "primary_gemini_ui_save_and_readonly_chat": "PASS",
+  "primary_native_v2_gemini_bootstrap": "PASS_NO_AUDIO",
+  "fresh_xiaomi_chat_install_restart_region": "PASS",
+  "fresh_xiaomi_vendor_auth": "WAITING_EMAIL_VERIFICATION",
+  "vacuum_telegram_control": "PASS_REAL_DEVICE_HA_STATES",
+  "desktop_native_vacuum_controls": "PASS_AFTER_COLD_START",
+  "native_android_physical_voice": "NOT_RUN",
+  "startup": "PASS_RUNNING_9_SECONDS",
+  "mobile_chat_layout": "PASS_SPLIT_FOCUS_COLLAPSE",
+  "gemini_followup_history_and_text_model": "PASS",
+  "limitations": [
+    "Fresh Xiaomi vendor authorization requires a new email verification code; fresh OAuth connection and device import not completed.",
+    "Android physical voice and Windows client acceptance not run; user tunnels intentionally off.",
+    "Vacuum actions confirmed by fresh bot replies and HA device states; human physical observation not claimed."
+  ],
+  "gemini_saved_connection_check": "PASS_NATIVE_SDK_NO_BLOCKING_WARNINGS"
+}

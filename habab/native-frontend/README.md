@@ -1,11 +1,14 @@
 # Matched Home Assistant frontend bridge
 
 This patch targets Home Assistant frontend tag `20260930.4`, commit
-`26690e06b0bf64a1487929245c32842ef92c62b5`. It adds the admin-only assistant
-handoff and the versioned `window.hababNativeUi` bridge while retaining the
-native dialog fallback.
+`26690e06b0bf64a1487929245c32842ef92c62b5`. Patch `habab.7` adds the admin-only
+assistant handoff, the versioned `window.hababNativeUi` bridge, and Home favorites
+that remain visible without `usage_prediction`. Vacuum favorites use a full-width
+native Home tile with supported start/pause, stop, and return-home controls. A Home data
+subscription refreshes the open panel when favorites change, without replacing
+the user's saved Home settings. The native dialog fallback remains available.
 
-Bridge patch SHA-256: `9b6f0ef7cffa348bea55cf6ec3299bc692407533ba86ce5114dfdda42199d3fe`.
+Patch SHA-256: `06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da19afcf36c4267bb`.
 
 ## Rebuild
 
@@ -20,7 +23,7 @@ git fetch https://github.com/home-assistant/frontend.git \
 test "$(git rev-parse 'refs/tags/20260930.4^{commit}')" = \
   26690e06b0bf64a1487929245c32842ef92c62b5
 git worktree add --detach \
-  /root/.local/share/habab-native-frontend-fonts-build \
+  /root/.local/share/habab-native-frontend-vacuum-build \
   26690e06b0bf64a1487929245c32842ef92c62b5
 
 cid="$(docker create --entrypoint /bin/true \
@@ -39,7 +42,7 @@ matching translation directory with Russian catalogs, Node `24.21.0`, and pnpm
 matching stock catalogs and hashes into generated translation metadata before
 Rspack bundles it, verifies every declared locale and fragment resolves to a
 stock file, then packages the assets as
-`home_assistant_frontend-20260930.4+habab.4-py3-none-any.whl`.
+`home_assistant_frontend-20260930.4+habab.7-py3-none-any.whl`.
 
 The pinned patch also fixes Roboto copying in `gather-static`: the filter keeps
 directories and `.woff2` files, so absolute source paths under dotted parents
@@ -56,7 +59,9 @@ content SHA-256. Expected catalog fingerprint:
 The artifact directory is keyed by the final wheel SHA-256, matching the
 installer URL convention.
 
-The frontend asset version remains `20260930.4`; `+habab.4` is Python wheel
+The `.7` wheel is 111,675,760 bytes with SHA-256
+`1d518e7cf632827f04481f0ef0d8ad3aec65d17b25cdc73f1b79c34de0ee1867`.
+The frontend asset version remains `20260930.4`; `+habab.7` is Python wheel
 metadata used to distinguish the bridge build while preserving Core version
 compatibility. The wheel is stored in `habab/public/downloads/native-frontend/`
 under a directory named for its final SHA-256; the installer uses that digest
@@ -83,6 +88,14 @@ directory.
   `contextMixin`, including lazy providers, so selectors outside the app shell
   receive the same contexts as built-in flows.
 
+## Home favorites
+
+The native Home overview keeps explicitly pinned entities visible when the
+`usage_prediction` integration is unavailable. Vacuum favorites use the
+`mdi:robot-vacuum` tile icon and the native `vacuum-commands` feature for
+start/pause, stop, and return-home. Home Assistant filters each command against the
+entity's supported features.
+
 ## Checks
 
 Focused source tests:
@@ -90,6 +103,9 @@ Focused source tests:
 ```sh
 pnpm exec vitest run --config test/vitest.config.ts test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts test/habab/native-ui-bridge.test.ts test/data/recorder-info.test.ts
 ```
+
+The `.7` wheel build completed successfully. This does not establish public
+release or physical-device acceptance.
 
 The browser integration and wheel installation checks are performed by the
 parent release workflow.

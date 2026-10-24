@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.habab_home.assist_adapter import parse_calls
 from homeassistant.components.habab_home.providers import (
-    PROVIDERS, ProviderClient, ProviderError, validate_settings,
+    PROVIDERS, ProviderClient, ProviderError, provider_api_base, validate_settings,
 )
 from homeassistant.components.habab_home.websocket import save_connection
 
@@ -62,7 +62,9 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         return {"provider": provider, "api_key": "fixture-not-a-real-key", "model": PROVIDERS[provider]["model"]}
 
     async def test_all_fixed_endpoints_and_tool_checks(self):
-        for provider in PROVIDERS:
+        self.assertEqual(provider_api_base("gemini"),
+                         "https://generativelanguage.googleapis.com/v1beta")
+        for provider in ("habab", "openai", "deepseek"):
             session = Session(Response(payload=message()))
             await ProviderClient(session, self.settings(provider)).check()
             self.assertEqual(session.request["url"], PROVIDERS[provider]["url"])

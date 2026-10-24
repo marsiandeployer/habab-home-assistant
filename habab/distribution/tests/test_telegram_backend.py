@@ -4,7 +4,7 @@ import hashlib
 import json
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.habab_telegram import TelegramManager
 from homeassistant.components.habab_telegram.config_flow import get_bot
@@ -71,6 +71,73 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.cancel_epochs = {}
         manager.pending_sends = {}
         return manager
+
+    async def test_entry_polling_is_backgrounded_and_explicitly_stopped(self):
+        manager = self.manager()
+        normal_tasks = []
+        background_tasks = []
+
+        async def async_block_till_done():
+            # HA startup waits for ordinary tasks, while background tasks are
+            # deliberately excluded from this set.
+            if normal_tasks:
+                await asyncio.gather(*normal_tasks)
+
+        def create_task(coro, name=None):
+            task = asyncio.create_task(coro, name=name)
+            normal_tasks.append(task)
+            return task
+
+        def create_background_task(coro, name, eager_start=True):
+            task = asyncio.create_task(coro, name=name)
+            background_tasks.append(task)
+            return task
+
+        manager.hass.async_create_task = create_task
+        manager.hass.async_create_background_task = create_background_task
+        manager.hass.async_block_till_done = async_block_till_done
+        manager.consumer_tasks = {}
+
+        blocked = asyncio.Event()
+
+        class Stdout:
+            async def readline(self):
+                await blocked.wait()
+                return b""
+
+        process = SimpleNamespace(
+            stdin=SimpleNamespace(write=Mock(), drain=AsyncMock()),
+            stdout=Stdout(),
+            wait=AsyncMock(return_value=0),
+            pid=123,
+        )
+        entry = SimpleNamespace(entry_id="entry", data={
+            "token": "fixture-token", "bot_id": 99, "bot_username": "testbot",
+            "owner_id": "alice",
+        })
+
+        with patch(
+            "homeassistant.components.habab_telegram.asyncio.create_subprocess_exec",
+            new=AsyncMock(return_value=process),
+        ):
+            await manager.async_setup_entry(entry)
+
+        await asyncio.wait_for(manager.hass.async_block_till_done(), timeout=0.1)
+        self.assertEqual(normal_tasks, [])
+        self.assertEqual(len(background_tasks), 2)
+        self.assertEqual(manager.tasks["entry"], background_tasks[0])
+        self.assertEqual(manager.consumer_tasks["entry"], background_tasks[1])
+        self.assertIn("reader", background_tasks[0].get_name())
+        self.assertIn("consumer", background_tasks[1].get_name())
+
+        await asyncio.sleep(0)
+        self.assertFalse(any(task.done() for task in background_tasks))
+        await manager.close_entry("entry")
+        self.assertTrue(all(task.done() for task in background_tasks))
+        self.assertTrue(all(task.cancelled() for task in background_tasks))
+        self.assertEqual(process.stdin.write.call_count, 2)  # configure, then shutdown
+        self.assertEqual(process.stdin.write.call_args.args[0], b'{"type":"shutdown"}\n')
+        process.wait.assert_awaited_once_with()
 
     def group_entry(self):
         entry = SimpleNamespace(entry_id="entry", data={

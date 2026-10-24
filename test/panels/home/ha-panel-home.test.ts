@@ -51,10 +51,14 @@ const STORED: HomeFrontendSystemData = {
   ],
 };
 
-const openPanel = async (fetchImpl: () => Promise<any>) => {
+const openPanel = async (
+  fetchImpl: (key?: string) => Promise<any>,
+  waitForLoad = true
+) => {
   const { fetchFrontendSystemData } =
     await import("../../../src/data/frontend");
-  vi.mocked(fetchFrontendSystemData).mockImplementation(fetchImpl as any);
+  vi.mocked(fetchFrontendSystemData).mockImplementation(((_connection, key) =>
+    fetchImpl(key)) as any);
   const host = document.createElement("div");
   // No legacy overview panel: the banner decision must rest on loaded config.
   const hass = provideHass(host, { panels: {} });
@@ -63,7 +67,9 @@ const openPanel = async (fetchImpl: () => Promise<any>) => {
   host.append(panel);
   panel.hass = hass;
   await panel.updateComplete;
-  await panel._loadConfigPromise;
+  if (waitForLoad) {
+    await panel._loadConfigPromise;
+  }
   return panel;
 };
 
@@ -121,5 +127,44 @@ describe("home panel welcome banner", () => {
     expect(saved.favorite_entities).toEqual(STORED.favorite_entities);
     expect(saved.shortcuts).toEqual(STORED.shortcuts);
     expect(saved.welcome_banner_dismissed).toBe(true);
+  });
+});
+
+describe("home panel system data subscription", () => {
+  it("uses live home data when the initial fetch finishes after a subscription update", async () => {
+    const { fetchFrontendSystemData, subscribeFrontendSystemData } =
+      await import("../../../src/data/frontend");
+    let resolveHomeFetch!: (value: HomeFrontendSystemData) => void;
+    const panel = await openPanel(
+      async (key) =>
+        key === "home"
+          ? new Promise<HomeFrontendSystemData>((resolve) => {
+              resolveHomeFetch = resolve;
+            })
+          : {},
+      false
+    );
+
+    const homeSubscription = vi
+      .mocked(subscribeFrontendSystemData)
+      .mock.calls.find(([, key]) => key === "home")?.[2];
+    expect(homeSubscription).toBeDefined();
+    expect(vi.mocked(fetchFrontendSystemData)).toHaveBeenCalledWith(
+      expect.anything(),
+      "home"
+    );
+
+    const liveConfig: HomeFrontendSystemData = {
+      favorite_entities: ["vacuum.dacha"],
+    };
+    const setLovelace = vi.spyOn(panel as any, "_setLovelace");
+    homeSubscription?.({ value: liveConfig });
+    await panel.updateComplete;
+    expect((panel as any)._config).toEqual(liveConfig);
+    expect(setLovelace).toHaveBeenCalled();
+
+    resolveHomeFetch({ favorite_entities: ["light.kitchen"] });
+    await panel._loadConfigPromise;
+    expect((panel as any)._config).toEqual(liveConfig);
   });
 });

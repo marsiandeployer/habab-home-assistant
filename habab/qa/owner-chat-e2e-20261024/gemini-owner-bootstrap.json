@@ -1,0 +1,11 @@
+{
+  "scope": "Actual owner HA native_v2 bootstrap to selected Gemini; no audio transmitted, no device action",
+  "http_status": 200,
+  "provider": "gemini",
+  "model": "gemini-3.8-live",
+  "client": "native_v2",
+  "constrained_token_received": true,
+  "lease_created": true,
+  "context_present": true,
+  "elapsed_seconds": 0.24
+}

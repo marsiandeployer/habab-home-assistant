@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "core_state": "RUNNING",
+  "elapsed_from_container_start_seconds": 9.09,
+  "image": "habab-home:owner-integrated-qa-0.3.4-20261024-v12",
+  "image_id": "sha256:6c8308919a39d2b98c9490872f1d6fa6415232d4cf5373af615075bfb7cefdf4",
+  "prior_observation": "v10 remained NOT_RUNNING for over five minutes with tracked permanent Telegram tasks",
+  "scope": "Actual Core startup after converting permanent Telegram tasks to HA background tasks"
+}

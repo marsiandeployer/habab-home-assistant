@@ -2,13 +2,13 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-frontend-fonts-build}"
+worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-frontend-vacuum-build}"
 translations="${HABAB_NATIVE_FRONTEND_TRANSLATIONS:-/root/.local/share/habab-native-frontend-translations-official/translations}"
 source_commit="26690e06b0bf64a1487929245c32842ef92c62b5"
 patch_file="$repo_root/habab/native-frontend/bridge.patch"
-patch_sha="9b6f0ef7cffa348bea55cf6ec3299bc692407533ba86ce5114dfdda42199d3fe"
+patch_sha="06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da19afcf36c4267bb"
 catalog_sha="154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce"
-wheel_name="home_assistant_frontend-20260930.4+habab.4-py3-none-any.whl"
+wheel_name="home_assistant_frontend-20260930.4+habab.7-py3-none-any.whl"
 staging="$(mktemp -d /root/.local/share/habab-native-frontend-wheel.XXXXXX)"
 pyproject_backup="$staging/pyproject.toml"
 
@@ -62,6 +62,11 @@ corepack enable pnpm
 
 pnpm install --frozen-lockfile
 pnpm exec eslint \
+  src/panels/home/ha-panel-home.ts \
+  test/panels/home/ha-panel-home.test.ts \
+  src/panels/lovelace/strategies/usage_prediction/common-controls-section-strategy.ts \
+  src/panels/lovelace/strategies/helpers/favorite-cards.ts \
+  test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
   build-scripts/gulp/gather-static.js \
   src/habab/native-ui-bridge.ts \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
@@ -75,6 +80,11 @@ pnpm exec eslint \
   test/data/recorder-info.test.ts \
   --max-warnings=0
 pnpm exec prettier --check \
+  src/panels/home/ha-panel-home.ts \
+  test/panels/home/ha-panel-home.test.ts \
+  src/panels/lovelace/strategies/usage_prediction/common-controls-section-strategy.ts \
+  src/panels/lovelace/strategies/helpers/favorite-cards.ts \
+  test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
   build-scripts/gulp/gather-static.js \
   src/habab/native-ui-bridge.ts \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
@@ -89,6 +99,8 @@ pnpm exec prettier --check \
   test/habab/native-ui-bridge.test.ts \
   test/data/recorder-info.test.ts
 pnpm exec vitest run --config test/vitest.config.ts \
+  test/panels/home/ha-panel-home.test.ts \
+  test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
   test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts \
   test/habab/native-ui-bridge.test.ts \
   test/data/recorder-info.test.ts
@@ -169,7 +181,7 @@ from pathlib import Path
 path = Path("pyproject.toml")
 text = path.read_text()
 old = 'version      = "20260930.4"'
-new = 'version      = "20260930.4+habab.4"'
+new = 'version      = "20260930.4+habab.7"'
 if text.count(old) != 1:
     raise SystemExit("Could not locate the pinned package version exactly once")
 path.write_text(text.replace(old, new, 1))

@@ -1,0 +1,26 @@
+{
+  "scope": "Read-only AI settings adapt to their available width alongside chat",
+  "started": "2026-10-24T10:54:29.351Z",
+  "errors": [],
+  "failures": [],
+  "layouts": [
+    {
+      "viewport": 1280,
+      "hostWidth": 384,
+      "hostScrollWidth": 384,
+      "providerContentWidth": 352,
+      "navigationDirection": "row",
+      "containerType": "inline-size"
+    },
+    {
+      "viewport": 390,
+      "hostWidth": 390,
+      "hostScrollWidth": 390,
+      "providerContentWidth": 358,
+      "navigationDirection": "row",
+      "containerType": "inline-size"
+    }
+  ],
+  "status": "PASS",
+  "ended": "2026-10-24T10:54:35.471Z"
+}

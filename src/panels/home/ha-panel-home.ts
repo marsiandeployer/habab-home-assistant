@@ -60,10 +60,23 @@ class PanelHome extends SubscribeMixin(LitElement) {
 
   private _loadConfigPromise?: Promise<void>;
 
+  private _configRevision = 0;
+
   private _securityConfigRevision = 0;
 
   public hassSubscribe() {
     return [
+      subscribeFrontendSystemData(this.hass.connection, "home", ({ value }) => {
+        this._configRevision++;
+        const config = value || {};
+        if (deepEqual(config, this._config)) {
+          return;
+        }
+        this._config = config;
+        if (this.hasUpdated) {
+          this._setLovelace();
+        }
+      }),
       subscribeFrontendSystemData(
         this.hass.connection,
         "security",
@@ -178,6 +191,7 @@ class PanelHome extends SubscribeMixin(LitElement) {
   }
 
   private async _loadConfig() {
+    const configRevision = this._configRevision;
     const securityConfigRevision = this._securityConfigRevision;
     const [translationsResult, homeResult, securityResult] =
       await Promise.allSettled([
@@ -194,11 +208,17 @@ class PanelHome extends SubscribeMixin(LitElement) {
       );
     }
 
-    if (homeResult.status === "rejected") {
+    if (
+      homeResult.status === "rejected" &&
+      configRevision === this._configRevision
+    ) {
       // eslint-disable-next-line no-console
       console.error("Failed to load home configuration:", homeResult.reason);
       this._config = undefined;
-    } else {
+    } else if (
+      homeResult.status === "fulfilled" &&
+      configRevision === this._configRevision
+    ) {
       this._config = homeResult.value || {};
     }
 

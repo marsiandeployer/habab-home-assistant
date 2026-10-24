@@ -16,8 +16,8 @@ from homeassistant.components.habab_home.const import DOMAIN
 
 class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_assistant_status_reports_voice_capabilities_without_inventing_client_observation(self):
-        for provider, supported in (("deepseek", False), ("openai", True), ("habab", True)):
-            settings = {"provider": provider, "api_key": "fixture-api-secret"}
+        for provider, supported in (("deepseek", False), ("openai", True), ("habab", True), ("gemini", True)):
+            settings = {"provider": provider, "api_key": "fixture-api-secret", "model": "configured-text-model"}
             telegram = SimpleNamespace(status=AsyncMock(return_value={
                 "phase": "connected", "pairing_url": "fixture-pairing-secret",
                 "group": {"phase": "awaiting_admin", "chat_id": "fixture-private-chat"}}))
@@ -26,6 +26,11 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
                 "habab_telegram": telegram})
             result = await execute(hass, None, "alice", {"action": "assistant_status"})
             self.assertEqual(result["selected_provider"], provider)
+            self.assertEqual(result["selected_text_model"], "configured-text-model")
+            if provider == "gemini":
+                self.assertEqual(result["voice"]["required_client_kind"], "native_v2")
+                self.assertEqual(result["voice"]["selected_provider_protocol"], "gemini_live")
+                self.assertTrue(result["voice"]["default_voice_model"])
             self.assertEqual(result["voice"]["selected_provider_supports_realtime"], supported)
             self.assertIs(result["voice"]["supported_clients"]["android_with_native_voice"]["requires_ha_stt_tts"], False)
             self.assertIs(result["voice"]["supported_clients"]["android_with_native_voice"]["custom_sound_selection"], False)

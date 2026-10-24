@@ -5,7 +5,7 @@ const providers = {
   habab: { name: "Habab", model: "gpt-4.1-mini", keyUrl: "https://habab.ru/" },
   openai: { name: "OpenAI", model: "gpt-4.1-mini", keyUrl: "https://platform.openai.com/api-keys" },
   deepseek: { name: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
-  gemini: { name: "Google Gemini", model: "gemini-3.8-flash", keyUrl: "https://aistudio.google.com/api-keys" },
+  gemini: { name: "Google Gemini", model: "gemini-3.1-flash-lite", keyUrl: "https://aistudio.google.com/api-keys" },
 };
 
 class HababAIPanel extends HTMLElement {
@@ -50,7 +50,7 @@ class HababAIPanel extends HTMLElement {
   entry() { return this.connections.find((item) => item.provider === this.provider); }
   render() {
     this.shadowRoot.innerHTML = `<style>
-      :host{display:block;height:100%;overflow:auto;color:var(--primary-text-color);background:var(--primary-background-color);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
+      :host{display:block;height:100%;overflow:auto;container-type:inline-size;color:var(--primary-text-color);background:var(--primary-background-color);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
       *{box-sizing:border-box}::selection{background:var(--primary-color);color:var(--text-primary-color,#fff)}
       header{display:flex;align-items:center;gap:var(--ha-space-4,16px);height:64px;padding-inline:var(--ha-space-4,16px);border-block-end:1px solid var(--divider-color);background:var(--card-background-color)}
       h1{font-size:20px;font-weight:500;margin:0}main{max-width:940px;margin:auto;padding:var(--ha-space-8,32px) var(--ha-space-6,24px) 64px}p{margin:0 0 var(--ha-space-4,16px);max-width:72ch}
@@ -66,7 +66,7 @@ class HababAIPanel extends HTMLElement {
       .actions{display:flex;flex-wrap:wrap;gap:var(--ha-space-2,8px);margin-block:var(--ha-space-4,16px)}.primary{background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color));border-color:transparent;color:var(--ha-color-on-primary-loud,var(--text-primary-color))}.primary:hover{filter:brightness(.93);background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color))}
       #feedback{padding:var(--ha-space-4,16px);border:1px solid var(--divider-color);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}#feedback[data-error=true]{color:var(--error-color)}[hidden]{display:none!important}
       .assistant{padding-block-start:var(--ha-space-8,32px);border-block-start:1px solid var(--divider-color)}.links{display:flex;flex-wrap:wrap;gap:12px 24px;margin-block:16px}.disclosure{margin-block-start:32px}
-      @media(max-width:650px){main{padding:24px 16px 48px}.workspace{grid-template-columns:minmax(0,1fr);gap:24px;margin-block:24px}nav{flex-direction:row;flex-wrap:wrap}nav button{flex:1 1 auto;text-align:center}.key-row{flex-wrap:wrap}.key-row input{flex:1 1 100%}h2{font-size:21px}.actions button{flex:1 1 auto}}
+      @container(max-width:650px){main{padding:24px 16px 48px}.workspace{grid-template-columns:minmax(0,1fr);gap:24px;margin-block:24px}nav{flex-direction:row;flex-wrap:wrap}nav button{flex:1 1 auto;text-align:center}.key-row{flex-wrap:wrap}.key-row input{flex:1 1 100%}h2{font-size:21px}.actions button{flex:1 1 auto}}
     </style>
     <header><ha-menu-button></ha-menu-button><h1>${this.t("title")}</h1></header>
     <main><p class="intro">${this.t("intro")}</p><div class="workspace">
@@ -154,11 +154,13 @@ class HababAIPanel extends HTMLElement {
     el.hidden = false;
   }
 
-  async action(fn) {
+  async action(fn, timeoutMessage) {
     if (this.busy) return;
     this.busy = true; this.updateControls();
     this.feedback(this.t("checking"));
-    try { await fn(); } catch (error) { this.feedback(this.t(error.code), true); }
+    try { await fn(); } catch (error) {
+      this.feedback(error.code === "timeout" && timeoutMessage ? this.t(timeoutMessage) : this.t(error.code), true);
+    }
     finally { this.busy = false; this.updateControls(); }
   }
 
@@ -170,7 +172,7 @@ class HababAIPanel extends HTMLElement {
       this.q("#key").value = "";
       await this.refresh();
       this.feedback(this.t("verified"));
-    });
+    }, "providerSaveTimeout");
   }
 
   async check() {
@@ -178,7 +180,7 @@ class HababAIPanel extends HTMLElement {
     await this.action(async () => {
       await this._hass.callWS({ type: "habab_home/providers/check", entry_id: this.entry().entry_id });
       this.feedback(this.t("verified"));
-    });
+    }, "providerCheckTimeout");
   }
 
   openAssistant() {

@@ -1,0 +1,28 @@
+{
+  "captured_at": 1792834671.0236022,
+  "telegram_transport": "existing TelegramChannelReader().client; read-only DM history",
+  "telegram_request_found": true,
+  "bot_reply_count_after_request": 2,
+  "bot_reply_texts": [
+    "Подключение интеграции погоды Met.no начато. Сейчас в веб-чате HA откроется защищённая карточка с формой: имя точки, широта, долгота и высота над уровнем моря — их нужно заполнить вам.\n\nСуществующие подключения не изменены, устройствами ничего не выполнял. Как заполните форму, напишите — проверю результат подключения.",
+    "Настройка met завершена: интеграция загружена в Home Assistant."
+  ],
+  "met_entry_count": 1,
+  "met_entry_states": [
+    "loaded"
+  ],
+  "met_entry_source_types": [
+    "user"
+  ],
+  "weather_entity_count": 1,
+  "weather_states": [
+    {
+      "entity_id": "weather.forecast_pogoda_doma",
+      "state": "cloudy"
+    }
+  ],
+  "prior_entries_preserved": true,
+  "prior_entry_count": 6,
+  "current_entry_count": 7,
+  "all_history_and_telegram_ids_private": true
+}

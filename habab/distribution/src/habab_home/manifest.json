@@ -8,5 +8,6 @@
   "config_flow": true,
   "dependencies": ["assist_pipeline", "frontend", "http", "webhook", "habab_telegram", "network", "zeroconf", "ssdp", "dhcp"],
   "integration_type": "service",
-  "iot_class": "cloud_polling"
+  "iot_class": "cloud_polling",
+  "requirements": ["google-genai==2.25.0"]
 }

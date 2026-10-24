@@ -685,8 +685,10 @@ class TelegramManager:
                  "user_id": binding.get("user_id"), "username": entry.data["bot_username"]}
         self.entries[entry.entry_id] = state
         self.queues[entry.entry_id] = asyncio.Queue(maxsize=5)
-        self.tasks[entry.entry_id] = self.hass.async_create_task(self._reader(entry, state))
-        self.consumer_tasks[entry.entry_id] = self.hass.async_create_task(self._consume(entry))
+        self.tasks[entry.entry_id] = self.hass.async_create_background_task(
+            self._reader(entry, state), f"Habab Telegram reader {entry.entry_id}")
+        self.consumer_tasks[entry.entry_id] = self.hass.async_create_background_task(
+            self._consume(entry), f"Habab Telegram consumer {entry.entry_id}")
 
     async def _write(self, entry_id, payload):
         state = self.entries.get(entry_id)

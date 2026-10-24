@@ -334,3 +334,29 @@ test("native voice history rejects other sessions and unsubscribes a stale recon
   pending[1].resolve(() => {});
   await Promise.resolve();
 });
+
+test("a ready setup form is revealed without focusing the composer", () => {
+  const instance = Object.create(setupChatElementClass.prototype);
+  const jump = { hidden: true }, revealed = [];
+  instance.q = (selector) => { assert.equal(selector, ".setup-jump"); return jump; };
+  instance.integrationCard = { revealInteraction(id) { revealed.push(id); return true; } };
+  instance.followSetupForms = true;
+  instance.setupFormReady({ interaction_id: "pending-met" });
+  assert.deepEqual(revealed, ["pending-met"]);
+  assert.equal(jump.hidden, true);
+});
+
+test("reading older history keeps its position until the setup jump is chosen", () => {
+  const instance = Object.create(setupChatElementClass.prototype);
+  const jump = { hidden: true }, revealed = [];
+  instance.q = () => jump;
+  instance.integrationCard = { revealInteraction(id) { revealed.push(id); return true; } };
+  instance.followSetupForms = false;
+  instance.setupFormReady({ interaction_id: "pending-met" });
+  assert.deepEqual(revealed, []);
+  assert.equal(jump.hidden, false);
+  assert.equal(instance.revealSetupForm(), true);
+  assert.deepEqual(revealed, ["pending-met"]);
+  assert.equal(jump.hidden, true);
+  assert.equal(instance.followSetupForms, true);
+});

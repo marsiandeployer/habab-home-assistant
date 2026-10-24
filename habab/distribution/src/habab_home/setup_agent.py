@@ -190,6 +190,7 @@ class SetupAgent:
         settings = self.settings()
         provider = settings["provider"]
         is_deepseek = provider == "deepseek"
+        is_gemini = provider == "gemini"
         provider_id = "habab-" + provider
         key_name = "HABAB_" + provider.upper() + "_KEY"
         fingerprint = runtime_fingerprint(settings, runtime_kind)
@@ -210,7 +211,8 @@ class SetupAgent:
                            "edit": "allow", "glob": "allow", "grep": "allow",
                            "external_directory": "allow"},
             "provider": {provider_id: {
-                "npm": "@ai-sdk/openai-compatible", "name": PROVIDERS[provider]["name"],
+                "npm": "@ai-sdk/google" if is_gemini else "@ai-sdk/openai-compatible",
+                "name": PROVIDERS[provider]["name"],
                 "options": {"baseURL": provider_api_base(provider),
                             "apiKey": "{env:" + key_name + "}"},
                 "models": {settings["model"]: {"name": settings["model"],

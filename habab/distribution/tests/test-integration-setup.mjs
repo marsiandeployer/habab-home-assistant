@@ -17,10 +17,13 @@ class ElementStub extends EventTarget {
     this.hidden = false;
     this.disabled = false;
     this.textContent = "";
+    this.updateComplete = Promise.resolve();
+    this.scrollIntoViewCalls = [];
   }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = [...items]; }
   remove() { this.isConnected = false; }
+  scrollIntoView(options) { this.scrollIntoViewCalls.push(options); }
   setAttribute(key, value) { this.attributes[key] = value; }
   querySelectorAll(selector) {
     return selector === "button" ? this.children.filter((child) => child.tagName === "button") : [];
@@ -86,6 +89,8 @@ test("native StepFlowForm bridge is awaited and receives the protected native st
   let resolveBridge;
   const bridgeCalls = installBridge(() => new Promise((resolve) => { resolveBridge = resolve; }));
   const card = setupShell(new module.HababIntegrationSetup());
+  const ready = [];
+  card.addEventListener("habab-setup-form-ready", (event) => ready.push(event.detail));
   card._hass = {connected: true, language: "ru", async callWS() { return {interactions: []}; }};
 
   card._applyInteractions([formRecord()]);
@@ -108,6 +113,79 @@ test("native StepFlowForm bridge is awaited and receives the protected native st
   assert.equal(record.context.tagName, "habab-native-form-context");
   assert.equal(record.form.flowConfig.native, true);
   assert.equal(record.context.hass, card.hass);
+  assert.deepEqual(ready, [{interaction_id: "i1", domain: "mqtt"}]);
+});
+
+test("form-ready waits for native updateComplete and reveal scrolls without focusing", async () => {
+  let resolveUpdate;
+  const updateComplete = new Promise((resolve) => { resolveUpdate = resolve; });
+  const originalCreateElement = document.createElement;
+  let nativeForm;
+  document.createElement = (tag) => {
+    const element = originalCreateElement(tag);
+    if (tag === "step-flow-form") {
+      element.updateComplete = updateComplete;
+      nativeForm = element;
+    }
+    return element;
+  };
+
+  try {
+    installBridge();
+    const card = setupShell(new module.HababIntegrationSetup());
+    const ready = [];
+    card.addEventListener("habab-setup-form-ready", (event) => ready.push(event.detail));
+    card._hass = {connected: true, language: "en", async callWS() { return {interactions: []}; }};
+    card._applyInteractions([formRecord()]);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.ok(nativeForm);
+    assert.deepEqual(ready, []);
+    assert.equal(card.revealInteraction("i1"), true);
+    assert.deepEqual(card.cards.get("i1").element.scrollIntoViewCalls, [{block: "nearest"}]);
+
+    resolveUpdate();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(ready, [{interaction_id: "i1", domain: "mqtt"}]);
+
+    card._applyInteractions([formRecord({errors: {password: "invalid_auth"}})]);
+    card._render();
+    assert.deepEqual(ready, [{interaction_id: "i1", domain: "mqtt"}],
+      "poll refreshes of the same mounted form must not re-emit readiness");
+  } finally {
+    document.createElement = originalCreateElement;
+  }
+});
+
+test("late native updateComplete after disconnect cannot emit form-ready", async () => {
+  let resolveUpdate;
+  const updateComplete = new Promise((resolve) => { resolveUpdate = resolve; });
+  const originalCreateElement = document.createElement;
+  document.createElement = (tag) => {
+    const element = originalCreateElement(tag);
+    if (tag === "step-flow-form") element.updateComplete = updateComplete;
+    return element;
+  };
+
+  try {
+    installBridge();
+    const card = setupShell(new module.HababIntegrationSetup());
+    const ready = [];
+    card.addEventListener("habab-setup-form-ready", (event) => ready.push(event.detail));
+    card._hass = {connected: true, language: "en", async callWS() { return {interactions: []}; }};
+    card._applyInteractions([formRecord()]);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(card.cards.get("i1").form);
+
+    card.isConnected = false;
+    card.disconnectedCallback();
+    resolveUpdate();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(ready, []);
+    assert.equal(card.revealInteraction("i1"), false);
+  } finally {
+    document.createElement = originalCreateElement;
+  }
 });
 
 test("native form button uses native label, delegates submit, and tracks loading", async () => {
@@ -208,26 +286,36 @@ test("options flows use the existing config entry id with the narrow native form
 test("same step error refresh updates native step without replacing native form state", async () => {
   installBridge();
   const card = setupShell(new module.HababIntegrationSetup());
+  const ready = [];
+  card.addEventListener("habab-setup-form-ready", (event) => ready.push(event.detail));
   card._hass = {connected: true, language: "en", async callWS() { return {interactions: []}; }};
   card._applyInteractions([formRecord()]);
   await new Promise((resolve) => setImmediate(resolve));
   const current = card.cards.get("i1");
+  assert.deepEqual(ready, [{interaction_id: "i1", domain: "mqtt"}]);
   current.form.secretInput = "secret-value";
 
   card._applyInteractions([formRecord({errors: {password: "invalid_auth"}})]);
   assert.equal(current.form.secretInput, "secret-value");
   assert.deepEqual(current.form.step.errors, {password: "invalid_auth"});
+  assert.equal(ready.length, 1, "same-form validation updates do not re-emit readiness");
 
   card._applyInteractions([formRecord({step_id: "confirm", data_schema: [{name: "code", type: "string"}]})]);
   assert.equal(current.form, undefined);
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(current.form);
+  assert.deepEqual(ready, [
+    {interaction_id: "i1", domain: "mqtt"},
+    {interaction_id: "i1", domain: "mqtt"},
+  ], "a new step/form instance emits readiness again without exposing schema values");
 });
 
 test("status refresh never reparents a mounted native form", async () => {
   installBridge();
   const card = setupShell(new module.HababIntegrationSetup());
   card._hass = {connected: true, language: "en"};
+  const ready = [];
+  card.addEventListener("habab-setup-form-ready", (event) => ready.push(event.detail));
   let mounts = 0;
   // A real DOM append moves an existing child and runs its disconnect hooks.
   card._cardsRoot.append = (...elements) => {
@@ -245,6 +333,7 @@ test("status refresh never reparents a mounted native form", async () => {
   assert.equal(mounts, 1, "refresh must not disconnect native editors or their contexts");
   assert.equal(card.cards.get("i1").form, form);
   assert.equal(form.privateDraft, "unsent protected input");
+  assert.deepEqual(ready, [{interaction_id: "i1", domain: "mqtt"}]);
 });
 
 test("native submit sends protected values directly to controller and emits no form data", async () => {

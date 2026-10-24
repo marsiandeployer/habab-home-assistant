@@ -236,6 +236,15 @@ export class HababIntegrationSetup extends HTMLElement {
 
   load() { return this.refresh(); }
 
+  revealInteraction(id) {
+    const card = this.cards.get(id);
+    if (!this.isConnected || !card || card.record?.phase !== "form" ||
+        !card.form || card.form.isConnected === false || card.element.isConnected === false ||
+        typeof card.element.scrollIntoView !== "function") return false;
+    card.element.scrollIntoView({block: "nearest"});
+    return true;
+  }
+
   _safeCode(error) {
     const code = error?.code;
     return typeof code === "string" && ERROR_PATTERN.test(code) ? code : "setup_failed";
@@ -482,6 +491,23 @@ export class HababIntegrationSetup extends HTMLElement {
       card.formLoadError = undefined;
       this._renderPhase(card);
       this._render();
+      const form = card.form;
+      if (!form) return;
+      try {
+        await form.updateComplete;
+      } catch {
+        return;
+      }
+      if (lifecycle !== this.lifecycle || !this.isConnected ||
+          this.cards.get(card.id) !== card || card.form !== form ||
+          card.record.phase !== "form" || form.isConnected === false ||
+          card.readyForm === form) return;
+      card.readyForm = form;
+      this.dispatchEvent(new CustomEvent("habab-setup-form-ready", {
+        bubbles: true,
+        composed: true,
+        detail: {interaction_id: card.id, domain: card.record.domain},
+      }));
     } catch (error) {
       if (lifecycle === this.lifecycle && card.flowLoading === loadToken && this.isConnected && this.cards.get(card.id) === card) {
         card.formLoadError = this._safeCode(error);
@@ -660,6 +686,7 @@ export class HababIntegrationSetup extends HTMLElement {
     card.context?.remove();
     card.form = undefined;
     card.context = undefined;
+    card.readyForm = undefined;
     card.flowConfig = undefined;
     card.nativeForm = undefined;
     card.formLoadError = undefined;

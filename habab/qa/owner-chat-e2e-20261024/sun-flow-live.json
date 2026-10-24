@@ -1,0 +1,33 @@
+{
+  "checked_at": 1792831571.751764,
+  "target": "https://habab-demo.wpmix.net/owner-test",
+  "source": "actual paired-owner Telegram DM plus independent read-only HA WebSocket readback",
+  "entry_domains": [
+    "analytics",
+    "backup",
+    "habab_home",
+    "habab_telegram",
+    "sun",
+    "xiaomi_home"
+  ],
+  "sun_entry_count": 1,
+  "sun_entity_present": true,
+  "sun_entity_states": [
+    "above_horizon"
+  ],
+  "flow_result": "passed",
+  "new_sun_entry_count": 1,
+  "new_entry_source": "user",
+  "new_entry_state": "loaded",
+  "existing_entries_preserved": true,
+  "new_entity_state": "above_horizon",
+  "bot_reply_received": true,
+  "bot_reply_count": 2,
+  "bot_replies_sanitized": [
+    "Настройка sun завершена: интеграция загружена в Home Assistant.",
+    "Готово: интеграция «Солнце» добавлена штатным способом — форма была пустой, я её подтвердил. Интеграция загружена, сущность `sun.sun` появилась и сейчас показывает, что солнце над горизонтом. Остальные подключения не изменялись, защищённый шаг не потребовался."
+  ],
+  "bot_says_empty_form_confirmed": true,
+  "bot_says_no_web_handoff": true,
+  "scope_limit": "No device commands or physical-device verification."
+}

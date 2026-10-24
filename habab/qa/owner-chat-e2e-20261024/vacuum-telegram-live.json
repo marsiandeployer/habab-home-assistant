@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "channel": "paired test bot owner DM",
+  "provider": "gemini",
+  "requests": 3,
+  "replies": 3,
+  "duplicate_commands_sent": false,
+  "observed_by": "independent authenticated HA REST and fresh Telegram replies",
+  "states": [
+    "docked",
+    "cleaning",
+    "idle",
+    "returning",
+    "docked"
+  ],
+  "final_state": "docked",
+  "service_call_api_cleanup_used": false,
+  "human_observed_physical_motion": false,
+  "note": "Initial local evidence formatter failed after first send; independent state/history inspection recovered evidence without resending."
+}

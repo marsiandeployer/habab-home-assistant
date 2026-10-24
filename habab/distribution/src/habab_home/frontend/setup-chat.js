@@ -78,15 +78,16 @@ function installChat() {
       settings: "Подключить AI", retry: "Повторить подключение",
       setup_ui_unavailable: "Не удалось открыть настройку устройств. Обновите страницу и попробуйте снова.",
       deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
-      provider_required: "Сначала подключите OpenAI или DeepSeek в разделе AI.",
+      provider_required: "Сначала подключите провайдера ИИ в разделе AI.",
       not_installed: "OpenCode ещё не подключён к контейнеру. Добавьте compose.opencode.yaml по инструкции установки.",
       binary_changed: "Файл OpenCode изменился. Повторите prepare-opencode.py и пересоздайте контейнер.",
       busy: "Помощник уже выполняет задачу. Дождитесь завершения и повторите подключение.",
       stopped: "Выполнение остановлено. Уже сделанные изменения могли сохраниться.",
       failed: "Не удалось завершить запрос. Некоторые действия могли выполниться. Повторите подключение, чтобы проверить историю.",
-      openingDevices: "Готовлю страницу устройств…", devicesReady: "Страница «Мои устройства» открыта.",
-      noVacuumDevices: "Страница открыта. Подключённые роботы-пылесосы появятся здесь, когда Home Assistant добавит их в реестр устройств.",
-      devicesFailed: "Не удалось подготовить страницу устройств. Проверьте права администратора и конфигурацию Lovelace.",
+      showSetupForm: "Открыть форму настройки",
+      openingDevices: "Открываю главную с пылесосом…", devicesReady: "Пылесос в избранном на главной.",
+      noVacuumDevices: "Пылесос пока не найден. После подключения снова нажмите «Показать пылесос на главной».",
+      devicesFailed: "Не удалось показать пылесос на главной. Проверьте права администратора и повторите.",
       diagnosticInvalidModel: " Проверьте имя модели в настройках провайдера.",
       diagnosticQuota: " Проверьте баланс и лимиты запросов у провайдера.",
       diagnosticAuth: " Проверьте API-ключ и доступ к модели в настройках провайдера.",
@@ -117,15 +118,16 @@ function installChat() {
       settings: "Connect AI", retry: "Reconnect",
       setup_ui_unavailable: "Device setup could not open. Refresh the page and try again.",
       deepseek_required: "Connect DeepSeek in AI settings first.",
-      provider_required: "Connect OpenAI or DeepSeek in AI settings first.",
+      provider_required: "Connect an AI provider in AI settings first.",
       not_installed: "OpenCode is not mounted. Follow the installation guide to add compose.opencode.yaml.",
       binary_changed: "The OpenCode executable changed. Run prepare-opencode.py again and recreate the container.",
       busy: "The assistant is already working. Wait for it to finish, then reconnect.",
       stopped: "Stopped. Changes already made may remain.",
       failed: "The request did not finish. Some actions may have run. Reconnect to check the history.",
-      openingDevices: "Preparing your devices page…", devicesReady: "The My devices page is open.",
-      noVacuumDevices: "The page is open. Vacuums will appear when Home Assistant adds them to the device registry.",
-      devicesFailed: "Could not prepare the devices page. Check administrator access and the Lovelace configuration.",
+      showSetupForm: "Open setup form",
+      openingDevices: "Opening Home with your vacuum…", devicesReady: "The vacuum is in your Home favorites.",
+      noVacuumDevices: "No vacuum was found. After connecting it, choose “Show vacuum on Home” again.",
+      devicesFailed: "Could not show the vacuum on Home. Check administrator access and retry.",
       diagnosticInvalidModel: " Check the model name in provider settings.",
       diagnosticQuota: " Check your provider balance and request limits.",
       diagnosticAuth: " Check the API key and model access in provider settings.",
@@ -203,6 +205,7 @@ function installChat() {
       this.markdownUpgradePending = false;
       this.markdownUpgradeLifecycle = 0;
       this.drawGeneration = 0;
+      this.followSetupForms = true;
     }
 
     get hass() { return this._hass; }
@@ -221,6 +224,22 @@ function installChat() {
 
     get t() { return copy[this.language || "en"]; }
     q(selector) { return this.shadowRoot.querySelector(selector); }
+
+    setupFormReady(detail) {
+      if (typeof detail?.interaction_id !== "string") return;
+      this.pendingSetupInteraction = detail.interaction_id;
+      if (this.followSetupForms !== false && this.revealSetupForm()) return;
+      const jump = this.q(".setup-jump");
+      if (jump) jump.hidden = false;
+    }
+
+    revealSetupForm() {
+      const shown = Boolean(this.integrationCard?.revealInteraction(this.pendingSetupInteraction));
+      const jump = this.q(".setup-jump");
+      if (jump) jump.hidden = true;
+      if (shown) this.followSetupForms = true;
+      return shown;
+    }
 
     subscribeVoiceHistory() {
       const connection = !this.demo && this.isConnected && this.hass?.user?.is_admin
@@ -269,10 +288,10 @@ function installChat() {
           this.setupCard.addEventListener("habab-open-devices", async () => {
             this.status(this.t.openingDevices);
             try {
-              const {openDevices} = await import("/habab-home/device-dashboard.js");
+              const {openDevices} = await import("/habab-home/device-dashboard.js?v=2");
               const result = await openDevices(this.hass);
               this.status(result.count ? this.t.devicesReady : this.t.noVacuumDevices);
-              this.q("dialog").close();
+              this.setMobileExpanded(false);
             } catch (_) {
               this.status(this.t.devicesFailed, true);
             }
@@ -280,6 +299,7 @@ function installChat() {
         }
         if (!this.integrationCard) {
           this.integrationCard = document.createElement("habab-integration-setup");
+          this.integrationCard.addEventListener("habab-setup-form-ready", ({detail}) => this.setupFormReady(detail));
           this.integrationCard.addEventListener("habab-setup-verify", ({detail}) => {
             const prompt = integrationVerificationPrompt(detail, this.language);
             if (this.busy || !prompt) return;
@@ -295,7 +315,6 @@ function installChat() {
         mountStableElement(this.q("#setup-cards"), this.integrationCard);
         if (afterTurn && typeof this.integrationCard.refresh === "function") await this.integrationCard.refresh();
         else await this.integrationCard.load();
-        this.setupCard.scrollIntoView({block: "nearest"});
       } catch (_) { this.status(this.t.setup_ui_unavailable, true); }
     }
 
@@ -330,7 +349,7 @@ function installChat() {
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
       <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><p id="status" role="status"></p><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
+      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
@@ -342,6 +361,25 @@ function installChat() {
       this.q(".mic").onclick = () => this.voiceBusy ? this.voice?.finishRecording() : this.startVoice("last_used");
       this.q(".fresh").onclick = () => this.connect(true);
       this.q(".retry").onclick = () => this.connect();
+      this.q(".setup-jump").onclick = () => this.revealSetupForm();
+      const log = this.q("#log");
+      log.addEventListener("wheel", (event) => {
+        if (event.deltaY < 0) this.followSetupForms = false;
+      }, {passive: true});
+      log.addEventListener("scroll", () => {
+        if (log.scrollHeight - log.clientHeight - log.scrollTop < 96) this.followSetupForms = true;
+      }, {passive: true});
+      let touchY;
+      log.addEventListener("touchstart", (event) => {touchY = event.touches[0]?.clientY;}, {passive: true});
+      log.addEventListener("touchmove", (event) => {
+        const next = event.touches[0]?.clientY;
+        if (next > touchY) this.followSetupForms = false;
+        touchY = next;
+      }, {passive: true});
+      log.addEventListener("keydown", (event) => {
+        if (["PageUp", "Home", "ArrowUp"].includes(event.key) &&
+            !event.composedPath().some(isEditableFocusTarget)) this.followSetupForms = false;
+      });
       this.q("form").onsubmit = (event) => {event.preventDefault(); this.send();};
       this.q("textarea").onkeydown = (event) => {
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {event.preventDefault(); this.send();}
@@ -485,6 +523,7 @@ function installChat() {
       textarea.setAttribute("aria-label", t.placeholder);
       this.q(".recovery a").textContent = t.settings;
       this.q(".retry").textContent = t.retry;
+      if (this.q(".setup-jump")) this.q(".setup-jump").textContent = t.showSetupForm;
       this.q(".send").title = t.send;
       this.q(".send").setAttribute("aria-label", t.send);
       this.q(".stop").textContent = t.stop;
@@ -787,6 +826,7 @@ function installChat() {
     async send(textValue, {voiceReply = false, clearDraft = false} = {}) {
       const text = (typeof textValue === "string" ? textValue : this.q("textarea").value).trim();
       if (!text || !this.sessionId || this.busy || this.setupRestarting) return;
+      this.followSetupForms = true;
       this.busy = true; this.running = true; this.stopped = false;
       this.messages.push({role: "user", text});
       if (typeof textValue !== "string" || clearDraft) this.q("textarea").value = "";

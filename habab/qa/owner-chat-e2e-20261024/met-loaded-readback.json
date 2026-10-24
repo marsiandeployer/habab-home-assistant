@@ -1,0 +1,15 @@
+{
+  "checked_at": 1792834361.5988085,
+  "met_entries": 1,
+  "met_states": [
+    "loaded"
+  ],
+  "weather_entity_count": 1,
+  "weather_states": [
+    "cloudy"
+  ],
+  "vacuum_states": [
+    "docked"
+  ],
+  "scope": "Independent read-only owner HA after actual web form submission; no new commands"
+}

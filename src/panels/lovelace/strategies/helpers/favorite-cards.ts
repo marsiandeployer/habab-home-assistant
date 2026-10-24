@@ -22,6 +22,24 @@ export const computeFavoriteCardConfig = (
     } satisfies PictureEntityCardConfig;
   }
 
+  if (computeDomain(entityId) === "vacuum") {
+    return {
+      type: "tile",
+      entity: entityId,
+      icon: "mdi:robot-vacuum",
+      show_entity_picture: false,
+      state_content: ["state"],
+      features: [
+        {
+          type: "vacuum-commands",
+          commands: ["start_pause", "stop", "return_home"],
+        },
+      ],
+      features_position: "bottom",
+      grid_options: { columns: 12, rows: 2 },
+    } satisfies TileCardConfig;
+  }
+
   return {
     type: "tile",
     entity: entityId,

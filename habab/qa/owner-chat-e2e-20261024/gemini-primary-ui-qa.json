@@ -1,0 +1,87 @@
+{
+  "target": "https://habab-demo.wpmix.net/owner-test",
+  "route": "/habab-ai",
+  "viewport": "1280x800",
+  "provider": "gemini",
+  "model": "gemini-3.1-flash-lite",
+  "settings": {
+    "save": "PASS",
+    "providerFeedback": "Модель ответила и вызвала проверочный инструмент. Устройства не изменялись.",
+    "geminiLoadedAndSelected": true,
+    "keyFieldEmpty": true,
+    "deepseekPreserved": true
+  },
+  "chat": {
+    "firstPromptSentOnce": true,
+    "persistedSessionReady": true,
+    "latestUserPromptMatches": true,
+    "assistantImmediatelyFollowsPrompt": true,
+    "assistantReplyLength": 699,
+    "assistantReplySha256": "3169d75741e8cf4b0645e8f9e0ba4a454358b2e41da8627e6247377204a990f3",
+    "privateReplyPath": "/root/.local/share/habab-owner-test/gemini-web/primary-ui-private-answer.txt",
+    "followupSent": true,
+    "followup": {
+      "promptSentOnce": true,
+      "priorTurnLoaded": true,
+      "sameSession": true,
+      "runResultSuccess": true,
+      "assistantImmediatelyFollowsPrompt": true,
+      "replyLength": 375,
+      "replySha256": "891185ef24d4c46358232e1d400ed363256f02204123c8f6379714d40e392bdc",
+      "privateReplyPath": "/root/.local/share/habab-owner-test/gemini-web/primary-ui-followup-private-answer.txt",
+      "review": {
+        "sameVacuumAsPriorAnswer": true,
+        "selectedTextModelNamed": true,
+        "staleGeminiLiveModelRepeated": false,
+        "priorAnswerHadStaleGeminiLiveModel": true,
+        "vacuumModelQuoted": true
+      }
+    },
+    "initialAssistantReplyHadIncorrectTextModel": true
+  },
+  "runnerObservation": {
+    "waitResult": "TIMEOUT at 190 seconds waiting for message-count +2",
+    "classification": "observer predicate mismatch; a fresh authenticated reload read the persisted user prompt with its following assistant reply",
+    "runCommandSentCount": 1
+  },
+  "staticFailures": [],
+  "failedRequests": [],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "followupPageErrors": [],
+  "followupConsoleErrors": [],
+  "followupStaticFailures": [],
+  "followupFailedRequests": [],
+  "savedProviderCheckV11": {
+    "status": "NOT RUN",
+    "reason": "The saved Gemini Check button was not reached; no habab_home/providers/check websocket command was sent.",
+    "attempts": [
+      {
+        "entry": "cold direct /habab-ai URL",
+        "result": "404 before authenticated app load; no HA command sent"
+      },
+      {
+        "entry": "/owner-test with stale auth",
+        "result": "Admin readiness not reached; no HA command sent"
+      },
+      {
+        "entry": "/owner-test with refreshed auth",
+        "result": "Admin-ready on /home/overview; sidebar /habab-ai links found, but panel did not mount after click; no HA command sent"
+      }
+    ],
+    "browserErrorsOnRefreshedRoute": {
+      "staticFailures": [],
+      "failedRequests": [],
+      "consoleErrors": [],
+      "pageErrors": []
+    },
+    "blockingImportWarningWindow": "No provider-check time window was established; no warning absence is claimed for a Check operation.",
+    "nextOwner": "root using the established owner-test then /habab-ai navigation sequence"
+  },
+  "rootSavedConnectionCheckV11": {
+    "status": "PASS",
+    "evidence": "gemini-saved-check-v11.json",
+    "provider_probe_sent_once": true,
+    "blocking_sdk_warnings": 0
+  }
+}

@@ -1,90 +1,91 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildVacuumCards, ensureDeviceDashboard } from "../src/habab_home/frontend/device-dashboard.js";
+import { ensureDeviceDashboard, vacuumFavorites } from "../src/habab_home/frontend/device-dashboard.js";
 
-const state = (entity_id, attributes = {}, stateValue = "docked") => ({
-  entity_id,
-  state: stateValue,
-  attributes,
-});
-
-test("dashboard update is idempotent and preserves user views and cards", async () => {
-  const userCard = { type: "markdown", content: "Keep this card" };
-  const userView = { path: "overview", title: "Overview", cards: [userCard] };
-  const ownedView = { path: "vacuum", title: "My vacuum", cards: [{ id: "habab-vacuum-picture-vacuum.old", type: "picture-entity" }, { type: "entities", entities: [] }] };
-  let savedConfig = { views: [userView, ownedView], background: "keep" };
+const states = {
+  "vacuum.robot": { state: "docked", attributes: {} },
+  "sensor.robot_battery": { state: "73", attributes: { device_class: "battery" } },
+  "sensor.other_battery": { state: "99", attributes: { device_class: "battery" } },
+};
+const entries = [
+  { entity_id: "vacuum.robot", device_id: "robot" },
+  { entity_id: "sensor.robot_battery", device_id: "robot" },
+  { entity_id: "sensor.other_battery", device_id: "other" },
+];
+const makeHass = (config = {}) => {
   const calls = [];
+  let home = structuredClone(config);
   const hass = {
-    user: { is_admin: true },
-    locale: { language: "ru" },
-    states: { "vacuum.living_room": state("vacuum.living_room", { supported_features: 4 | 8 | 16 | 1024, battery_level: 73 }) },
-    async callWS(message) {
+    user: { is_admin: true }, panels: { home: { component_name: "home", url_path: "home" } },
+    states, async callWS(message) {
       calls.push(message);
-      switch (message.type) {
-        case "lovelace/dashboards/list": return [{ url_path: "habab-devices", mode: "storage", title: "Мои устройства" }];
-        case "lovelace/config": return structuredClone(savedConfig);
-        case "config/entity_registry/list": return [{ entity_id: "vacuum.living_room", device_id: "vacuum-device", name: "Living room" }];
-        case "config/device_registry/list": return [{ id: "vacuum-device", manufacturer: "Example", model: "ijai.vacuum.v17", name: "Vacuum", name_by_user: "S10" }];
-        case "lovelace/config/save": savedConfig = structuredClone(message.config); return {};
-        default: throw new Error(`Unexpected WebSocket command: ${message.type}`);
-      }
+      if (message.type === "config/entity_registry/list") return entries;
+      if (message.type === "frontend/get_system_data") return { value: structuredClone(home) };
+      if (message.type === "frontend/set_system_data") { home = structuredClone(message.value); return {}; }
+      throw new Error(`Unexpected command: ${message.type}`);
     },
   };
+  return { hass, calls, home: () => home };
+};
 
-  await ensureDeviceDashboard(hass);
-  await ensureDeviceDashboard(hass);
-  assert.equal(calls.filter(({ type }) => type === "lovelace/config/save").length, 2);
-  assert.deepEqual(savedConfig.views[0], userView);
-  assert.equal(savedConfig.background, "keep");
-  const view = savedConfig.views[1];
-  assert.equal(view.title, "My vacuum");
-  assert.deepEqual(view.cards.slice(0, 1), [{ type: "entities", entities: [] }]);
-  assert.equal(view.cards.filter((card) => card.id?.startsWith("habab-vacuum-picture-")).length, 1);
-  assert.equal(view.cards.filter((card) => card.id?.startsWith("habab-vacuum-controls-")).length, 1);
-  const picture = view.cards.find((card) => card.type === "picture-entity");
-  const tile = view.cards.find((card) => card.type === "tile");
-  assert.equal(picture.entity, "vacuum.living_room");
-  assert.equal(picture.name, "S10");
-  assert.equal(picture.image, "/habab-home/assets/robot-vacuum.svg");
-  assert.deepEqual(tile.features, [{ type: "vacuum-commands", commands: ["start_pause", "stop", "clean_spot", "return_home"] }]);
-  assert.deepEqual(tile.state_content, ["state", "battery_level"]);
+test("pins the verified vacuum and its own battery without creating another dashboard", async () => {
+  const original = { favorite_entities: ["light.kitchen"], hide_suggested_entities: false,
+    shortcuts: [{ path: "/energy" }], welcome_banner_dismissed: true };
+  const fixture = makeHass(original);
+  assert.deepEqual(await ensureDeviceDashboard(fixture.hass), { url: "/home/overview", count: 1 });
+  await ensureDeviceDashboard(fixture.hass);
+  assert.deepEqual(fixture.home(), { ...original,
+    favorite_entities: ["light.kitchen", "vacuum.robot", "sensor.robot_battery"] });
+  assert.equal(fixture.calls.filter((m) => m.type === "frontend/set_system_data").length, 1);
+  assert.equal(fixture.calls.some((m) => m.type.startsWith("lovelace/")), false);
 });
 
-test("unknown battery values are omitted instead of rendered as a zero reading", () => {
-  const cards = buildVacuumCards(
-    { "vacuum.hall": state("vacuum.hall", { battery_level: "unknown", supported_features: 0 }) },
-    [{ entity_id: "vacuum.hall", device_id: "vacuum-device" }],
-    [{ id: "vacuum-device", model: "S10" }],
-  );
-  const tile = cards.find((card) => card.type === "tile");
-  assert.equal(Object.hasOwn(tile, "state_content"), false);
+test("hidden, disabled, stale and unrelated entities never become device favorites", () => {
+  const fixtureStates = { ...states, "vacuum.hidden": { state: "idle" },
+    "vacuum.disabled": { state: "idle" }, "vacuum.orphan": { state: "idle" },
+    "sensor.hidden_battery": { state: "50", attributes: { device_class: "battery" } } };
+  const fixtureEntries = [
+    { entity_id: "vacuum.hidden", hidden_by: "user" },
+    { entity_id: "vacuum.disabled", disabled_by: "user" },
+    { entity_id: "vacuum.missing" },
+    { entity_id: "sensor.hidden_battery", device_id: "robot", hidden_by: "user" }, ...entries,
+  ];
+  assert.deepEqual(vacuumFavorites(fixtureStates, fixtureEntries), {
+    ids: ["vacuum.robot", "sensor.robot_battery"], count: 1,
+  });
 });
 
-test("first setup creates the managed storage dashboard and does not invent vacuum cards", async () => {
-  const calls = [];
-  const hass = {
-    user: { is_admin: true }, locale: { language: "ru" }, states: {},
-    async callWS(message) {
-      calls.push(message);
-      switch (message.type) {
-        case "lovelace/dashboards/list": return [];
-        case "lovelace/dashboards/create": return { url_path: message.url_path, mode: message.mode };
-        case "lovelace/config": return { views: [] };
-        case "config/entity_registry/list": return [];
-        case "config/device_registry/list": return [];
-        case "lovelace/config/save": return {};
-        default: throw new Error(`Unexpected WebSocket command: ${message.type}`);
-      }
-    },
-  };
-  const result = await ensureDeviceDashboard(hass);
-  const create = calls.find(({ type }) => type === "lovelace/dashboards/create");
-  assert.equal(create.url_path, "habab-devices");
-  assert.equal(create.title, "Мои устройства");
-  assert.equal(create.mode, "storage");
-  assert.equal(result.count, 0);
-  const emptyCards = calls.find(({ type }) => type === "lovelace/config/save").config.views[0].cards;
-  assert.equal(emptyCards.length, 1);
-  assert.equal(emptyCards[0].type, "markdown");
-  assert.match(emptyCards[0].content, /не найдены/);
+test("unavailable battery does not become a false zero reading", () => {
+  const fixtureStates = { ...states, "sensor.robot_battery": { state: "unavailable",
+    attributes: { device_class: "battery" } } };
+  assert.deepEqual(vacuumFavorites(fixtureStates, entries), { ids: ["vacuum.robot"], count: 1 });
+});
+
+test("no vacuum leaves all Home settings untouched", async () => {
+  const fixture = makeHass({ favorite_entities: ["light.kitchen"] });
+  fixture.hass.states = {};
+  assert.deepEqual(await ensureDeviceDashboard(fixture.hass), { url: "/home/overview", count: 0 });
+  assert.equal(fixture.calls.some((m) => m.type === "frontend/set_system_data"), false);
+});
+
+test("administrator and existing Home panel are required before any write", async () => {
+  for (const patch of [{ user: { is_admin: false } }, { panels: {} }]) {
+    const fixture = makeHass(); Object.assign(fixture.hass, patch);
+    await assert.rejects(ensureDeviceDashboard(fixture.hass));
+    assert.deepEqual(fixture.calls, []);
+  }
+});
+
+test("invalid persisted favorite configuration is not overwritten", async () => {
+  const fixture = makeHass({ favorite_entities: "invalid" });
+  await assert.rejects(ensureDeviceDashboard(fixture.hass), /invalid_home_config/);
+  assert.equal(fixture.calls.some((m) => m.type === "frontend/set_system_data"), false);
+});
+
+test("failed Home save remains a failure", async () => {
+  const fixture = makeHass(); const call = fixture.hass.callWS;
+  fixture.hass.callWS = (message) => message.type === "frontend/set_system_data"
+    ? Promise.reject(new Error("save_failed")) : call(message);
+  await assert.rejects(ensureDeviceDashboard(fixture.hass), /save_failed/);
+  assert.deepEqual(fixture.home(), {});
 });

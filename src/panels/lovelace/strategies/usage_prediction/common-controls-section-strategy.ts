@@ -64,23 +64,25 @@ export class CommonControlsSectionStrategy extends ReactiveElement {
     const includedEntities = (config.include_entities || []).filter(
       (entity) => entity in hass.states
     );
+    const pinnedEntities = includedEntities.slice(0, limit);
 
     // Pinned entities already fill the section, skip the prediction call.
-    if (includedEntities.length >= limit) {
-      section.cards!.push(
-        ...includedEntities.slice(0, limit).map(computeFavoriteCardConfig)
-      );
+    if (pinnedEntities.length >= limit && pinnedEntities.length > 0) {
+      section.cards!.push(...pinnedEntities.map(computeFavoriteCardConfig));
       return section;
     }
 
     if (!isComponentLoaded(hass.config, "usage_prediction")) {
-      section.cards!.push({
-        type: "markdown",
-        content: hass.localize(
-          "ui.panel.lovelace.strategy.common_controls.not_loaded"
-        ),
-      });
-      section.disabled = config.hide_empty;
+      section.cards!.push(...pinnedEntities.map(computeFavoriteCardConfig));
+      if (pinnedEntities.length === 0) {
+        section.cards!.push({
+          type: "markdown",
+          content: hass.localize(
+            "ui.panel.lovelace.strategy.common_controls.not_loaded"
+          ),
+        });
+        section.disabled = config.hide_empty;
+      }
       return section;
     }
 

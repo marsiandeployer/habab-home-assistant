@@ -1,6 +1,7 @@
 """Bounded server-side transports for explicitly selected providers."""
 
 import asyncio
+import importlib
 import json
 import re
 from typing import Any
@@ -25,8 +26,8 @@ PROVIDERS = {
     },
     "gemini": {
         "name": "Google Gemini",
-        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "model": "gemini-3.8-flash",
+        "url": "https://generativelanguage.googleapis.com/v1beta",
+        "model": "gemini-3.1-flash-lite",
     },
 }
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -35,6 +36,8 @@ REQUEST_TIMEOUT = 25
 
 def provider_api_base(provider: str) -> str:
     """Return the explicitly selected provider's API; never infer a relay."""
+    if provider == "gemini":
+        return PROVIDERS[provider]["url"]
     return PROVIDERS[provider]["url"].removesuffix("/chat/completions")
 
 
@@ -78,6 +81,19 @@ class ProviderClient:
         probe: bool = False,
     ) -> dict[str, Any]:
         provider = self.settings["provider"]
+        if provider == "gemini":
+            if not hasattr(self, "_gemini"):
+                try:
+                    async with asyncio.timeout(REQUEST_TIMEOUT):
+                        module = await asyncio.to_thread(
+                            importlib.import_module, f"{__package__}.providers_gemini",
+                        )
+                except TimeoutError:
+                    raise ProviderError("timeout") from None
+                except Exception:
+                    raise ProviderError("cannot_connect") from None
+                self._gemini = module.GeminiProvider(self.settings)
+            return await self._gemini.complete(messages, tools, probe=probe)
         body: dict[str, Any] = {
             "model": self.settings["model"],
             "messages": messages,

@@ -1,0 +1,35 @@
+{
+  "recorded_at_utc": "2026-10-24T10:42:57.723Z",
+  "uses_synthetic_fixture": false,
+  "physical_motion_verified": false,
+  "scope": "Actual authenticated Home favorites and native vacuum controls; no synthetic device or service calls",
+  "backend_configuration_writes": 0,
+  "page_errors": [],
+  "stage": "native_cards",
+  "render": {
+    "path": "/home/overview",
+    "language": "ru",
+    "visibleVacuumCards": [
+      {
+        "width": 320,
+        "height": 120,
+        "icon": "mdi:robot-vacuum",
+        "commands": [
+          "start_pause",
+          "stop",
+          "return_home"
+        ],
+        "features": [
+          "vacuum-commands"
+        ]
+      }
+    ],
+    "commandFeatures": [
+      {
+        "width": 296,
+        "height": 42
+      }
+    ]
+  },
+  "verdict": "NATIVE_VACUUM_VISIBLE_WITH_CONTROLS"
+}
