@@ -1,0 +1,31 @@
+{
+  "scope": "independent verification of native setup attempt3; not a physical-device or voice test",
+  "runtime_source": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "runtime_image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+  "runner_sha256": "6063f09be2e9745c437cb61d6ae637d68c61911749e5cb529407ee4443567aea",
+  "native_config_flow": "PASS",
+  "protected_form_visible_submit": "PASS",
+  "loaded_entry_count": 1,
+  "owned_todo_entity_count": 1,
+  "state_before_cleanup": "0",
+  "status_reply_semantic_review": "PASS_exact_fixture_one_entity_empty_state",
+  "status_tool_actions": [
+    "integration_setup_status",
+    "states"
+  ],
+  "status_tool_states": "completed",
+  "independent_cleanup": {
+    "baseline_entries_unchanged": true,
+    "owned_entry_absent": true,
+    "owned_entity_registry_and_state_absent": true,
+    "owned_storage_file_absent": true,
+    "active_local_todo_flows": 0,
+    "backend_idle": true
+  },
+  "historical_native_attempts_1_and_2": "FAIL_preserved",
+  "not_run": [
+    "options_flow",
+    "real_provider_voice_in_browser",
+    "physical_devices"
+  ]
+}

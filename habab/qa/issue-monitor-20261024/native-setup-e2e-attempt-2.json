@@ -1,0 +1,38 @@
+{
+  "started_at": "2026-10-24T18:43:39.966Z",
+  "verdict": "FAIL",
+  "scope": "one Local To-do config flow through authenticated web chat and visible native form",
+  "physical_devices": false,
+  "prompts_sent": 0,
+  "setup_api_start_called": false,
+  "setup_api_submit_called": false,
+  "cleanup": {
+    "attempted": false,
+    "complete": false,
+    "reason": "no_owned_chat_turn"
+  },
+  "target_origin": "https://habab-demo.wpmix.net",
+  "execution_window_id": "3f609c5a-4473-4834-81ed-28bfdb3f6d77",
+  "release": {
+    "image_id": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+    "source_revision": "9d795359c22cf2844884caa5affc94209a8120ca",
+    "product_version": "0.3.5",
+    "core_version": "2026.10.2"
+  },
+  "fixture": {
+    "domain": "local_todo",
+    "unique_name_generated": true,
+    "storage_key_generated": true,
+    "storage_contract": "local_todo.config_flow.LocalTodoConfigFlow.async_step_user -> CONF_STORAGE_KEY=slugify(todo_list_name); local_todo.__init__.STORAGE_PATH; core.config_entries.SAVE_DELAY=1",
+    "baseline_local_todo_entries": 2,
+    "baseline_active_local_todo_flows": 0
+  },
+  "fixture_store_absent_before": true,
+  "assistant_provider": "habab",
+  "failure": {
+    "stage": "chat_request_acceptance",
+    "code": "chat_send_button_not_visible",
+    "source_error_name": "Error"
+  },
+  "finished_at": "2026-10-24T18:43:43.239Z"
+}

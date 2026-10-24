@@ -1,0 +1,75 @@
+{
+  "started_at": "2026-10-24T18:56:44.002Z",
+  "verdict": "PASS",
+  "scope": "one Local To-do config flow through authenticated web chat and visible native form",
+  "physical_devices": false,
+  "prompts_sent": 2,
+  "setup_api_start_called": false,
+  "setup_api_submit_called": false,
+  "cleanup": {
+    "attempted": true,
+    "exact_new_entry_deleted": true,
+    "config_entry_absent": true,
+    "entity_registry_absent": true,
+    "entity_state_absent": true,
+    "local_todo_storage_file_absent": true,
+    "own_interaction_card_closed": true,
+    "broader_entries_touched": 0,
+    "complete": true
+  },
+  "target_origin": "https://habab-demo.wpmix.net",
+  "execution_window_id": "3f609c5a-4473-4834-81ed-28bfdb3f6d77",
+  "release": {
+    "image_id": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+    "source_revision": "9d795359c22cf2844884caa5affc94209a8120ca",
+    "product_version": "0.3.5",
+    "core_version": "2026.10.2"
+  },
+  "fixture": {
+    "domain": "local_todo",
+    "unique_name_generated": true,
+    "storage_key_generated": true,
+    "storage_contract": "local_todo.config_flow.LocalTodoConfigFlow.async_step_user -> CONF_STORAGE_KEY=slugify(todo_list_name); local_todo.__init__.STORAGE_PATH; core.config_entries.SAVE_DELAY=1",
+    "baseline_local_todo_entries": 2,
+    "baseline_active_local_todo_flows": 0
+  },
+  "fixture_store_absent_before": true,
+  "route_pathname": "/home/overview",
+  "assistant_provider": "habab",
+  "flow": {
+    "started_from_chat": true,
+    "matching_interaction_count": 1,
+    "phase": "form",
+    "kind": "config",
+    "step": "user",
+    "native_form": "step-flow-form",
+    "native_context": "habab-native-form-context",
+    "field_names": [
+      "todo_list_name"
+    ],
+    "required_field_present": true,
+    "submitted_via_visible_ui": true,
+    "completed_phase": "done",
+    "entry_state": "loaded",
+    "entity_count": 1
+  },
+  "readback": {
+    "loaded_config_entry": true,
+    "newly_created_entry_count": 1,
+    "owned_entity_count": 1,
+    "todo_entity_count": 1,
+    "empty_todo_state": "0"
+  },
+  "assistant_return": {
+    "same_session": true,
+    "idle": true,
+    "assistant_response_present": true,
+    "chat_open": true
+  },
+  "post_assistant_readback": {
+    "loaded": true,
+    "todo_entity_count": 1,
+    "empty_todo_state": "0"
+  },
+  "finished_at": "2026-10-24T18:59:16.019Z"
+}
