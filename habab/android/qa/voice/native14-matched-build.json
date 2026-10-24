@@ -1,0 +1,71 @@
+{
+  "status": "INSTALLED_ON_P30_ACOUSTIC_ACCEPTANCE_PENDING",
+  "nativeVersionCode": 14,
+  "nativeVersionName": "0.1.6-voice-preview",
+  "coreVersion": "2026.10.2",
+  "hababVersion": "0.3.5",
+  "apkSourceCommit": "47d4913cb9ead8e078af46e3135a94e8d97484ee",
+  "runtimeSourceCommit": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "runtimeId": "7119388d53035d71",
+  "runtimeSourceFilesMatchedToBothRevisions": 59,
+  "frontendVersion": "20260930.4+habab.7",
+  "frontendPayloadFilesMatchedOnPhone": 14816,
+  "apk": {
+    "filename": "habab-home-0.1.6-native14-7119388d53035d71-healthfix-47d4913cb.apk",
+    "bytes": 52479638,
+    "sha256": "44844ad6ac69f6fb98f4953c5e98ad1d4eb0d11303e00f437173d655f32de4a5",
+    "signerMatchesPreviousInstalled": true
+  },
+  "runtime": {
+    "bytes": 874456143,
+    "sha256": "0ca0a167aaf704af84c97927f0eafeada73d2cdb149cd6a677e17b73a1a143c0",
+    "regularFiles": 155833,
+    "symlinks": 1634
+  },
+  "tests": {
+    "baselineNative14Java": {
+      "tests": 56,
+      "failures": 0,
+      "skipped": 0,
+      "source": "96551e39e5ea4b8c3de48e4a47f38d7c330907b8"
+    },
+    "fullRuntime711Extraction": {
+      "status": "PASS",
+      "seconds": 17.779,
+      "source": "9d795359c22cf2844884caa5affc94209a8120ca"
+    },
+    "healthFixJava": {
+      "tests": 57,
+      "failures": 0,
+      "skipped": 1,
+      "skipReason": "runtime extraction already verified separately",
+      "source": "47d4913cb9ead8e078af46e3135a94e8d97484ee"
+    },
+    "latestApkAssembleAndLint": "PASS",
+    "installedApkHealthProbe": "PASS_5160_MS",
+    "physicalRuntimeSignatureSourceFrontendConfigReadback": "PASS"
+  },
+  "phone": {
+    "coreState": "RUNNING",
+    "provider": "habab",
+    "textModel": "gemini-3.1-flash-lite",
+    "apiCheck": "verified",
+    "shoppingListApiAndReloadedUi": "PASS_ONE_BREAD_NEW_UID",
+    "shoppingExactServiceTrace": "NOT_OBSERVED",
+    "screenOffObservationSeconds": 32.075,
+    "localWakeCapture": "ACTIVE",
+    "preWakeUploadedPcmBytes": 0,
+    "acousticConversation": "NOT_RUN"
+  },
+  "publication": {
+    "runtimeAndSignedMetadata": "PUBLIC_IMMUTABLE_HTTP_CHECKED",
+    "apk": "NOT_PUBLISHED",
+    "latestCtaChanged": false
+  },
+  "limitations": [
+    "Acoustic wake/START/END, interruption, echo, spoken farewell and played-audio history need user testing.",
+    "Standalone networking without USB and long-duration operation not tested.",
+    "Cloud upstream key remains RAM-only and needs operator reenrollment after relay restart.",
+    "Heavy shopping writes through OpenCode took about 74 seconds."
+  ]
+}

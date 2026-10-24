@@ -1,0 +1,34 @@
+{
+  "target": "P30 VOG-L29 Android 10; native13 runtime7382c25334564216; source c66f237f0",
+  "runtime_at_initial_read": {
+    "core": "2026.10.2",
+    "habab": "0.3.4",
+    "todo_entity_id": "todo.shopping_list",
+    "friendly_name": "Список покупок",
+    "entity_state": "0",
+    "items_read": false
+  },
+  "current_access_attempt": {
+    "adb_device_state": "device",
+    "loopback_bridge": "127.0.0.1:18124",
+    "auth_login_flow": "HTTP 503",
+    "adb_tcp_service": "closed",
+    "phone_port_8123_listener": false,
+    "adb_forward_present": false,
+    "matching_runtime_process_names": 0,
+    "normal_app_start": "started_once_with_authorized_MainActivity_intent",
+    "core_process": "same_pid_15848_observed_with_increasing_cpu_ticks",
+    "http_readiness": "401_on_ha_api_root",
+    "core_state": "RUNNING",
+    "chat_or_item_mutation_attempted": true,
+    "chat_attempts": 1,
+    "original_todo_items_readbefore": 0,
+    "original_todo_items_after_chat": 0,
+    "last_chat_diagnostics": {
+      "active": false,
+      "error": null
+    }
+  },
+  "chat_or_item_mutation_attempted": false,
+  "classification": "REPRODUCED_FALSE_SUCCESS_P30"
+}

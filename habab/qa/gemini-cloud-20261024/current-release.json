@@ -1,0 +1,17 @@
+{
+  "source": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+  "allComponentHashesMatched": 42,
+  "baselineBackendTestRevision": "96551e39e5ea4b8c3de48e4a47f38d7c330907b8",
+  "baselineBackendTestsPassed": 88,
+  "gatewayTestsPassed": 20,
+  "laterBackendChange": "general explicit-target prompt only",
+  "androidPromptAdaptation": "PASS",
+  "cloudGroceryOriginalRiskAndNaturalE2e": "PASS",
+  "cloudUiProviderStatusKeyAdminReload": "PASS",
+  "publicGoogleNativeToolsSseLiveSetup": "PASS_NO_AUDIO",
+  "telegramPyrogram": "PASS_15.499_SECONDS",
+  "phoneCoreAndUi": "PASS",
+  "phoneGroceryApiAndUi": "PASS_SERVICE_EVENT_UNOBSERVED",
+  "physicalAcousticVoice": "NOT_RUN"
+}

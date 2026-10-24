@@ -1,0 +1,149 @@
+{
+  "target": "https://habab-demo.wpmix.net/owner-test → existing canonical chat",
+  "image": "habab-home:owner-gemini-0.3.5-9d795359c",
+  "image_sha256": "e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+  "source": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "fixture_entity": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+  "preserved_v15_fixture_entity": "todo.qa_shopping_list_e2e_20261024",
+  "checks": [
+    {
+      "name": "existing_item_read_no_duplicate",
+      "complete": true,
+      "turn_index": 2,
+      "elapsed_ms": 4468,
+      "backend": {
+        "active": false,
+        "error": null
+      },
+      "todo_service_events": [
+        {
+          "domain": "todo",
+          "service": "get_items",
+          "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+        }
+      ]
+    },
+    {
+      "name": "existing_item_read_no_duplicate_state",
+      "target_count": 1,
+      "target_bread_count": 1,
+      "preserved_count": 2,
+      "preserved_bread_count": 2,
+      "unchanged": true
+    },
+    {
+      "name": "explicit_repeat_allowed",
+      "complete": true,
+      "turn_index": 3,
+      "elapsed_ms": 68120,
+      "backend": {
+        "active": false,
+        "error": null
+      },
+      "todo_service_events": [
+        {
+          "domain": "todo",
+          "service": "get_items",
+          "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+        },
+        {
+          "domain": "todo",
+          "service": "add_item",
+          "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+        },
+        {
+          "domain": "todo",
+          "service": "get_items",
+          "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+        }
+      ]
+    },
+    {
+      "name": "explicit_repeat_new_item",
+      "target_count": 2,
+      "target_bread_count": 2,
+      "new_uid_count": 1,
+      "preserved_count": 2,
+      "preserved_bread_count": 2
+    },
+    {
+      "name": "unknown_list_no_invented_mutation",
+      "complete": true,
+      "turn_index": 4,
+      "elapsed_ms": 5483,
+      "backend": {
+        "active": false,
+        "error": null
+      },
+      "todo_service_events": []
+    },
+    {
+      "name": "unknown_list_no_invented_mutation",
+      "target_count": 2,
+      "target_bread_count": 2,
+      "preserved_count": 2,
+      "preserved_bread_count": 2,
+      "todo_entity_count": 2,
+      "unchanged": true
+    },
+    {
+      "name": "natural_question_no_mutation",
+      "complete": true,
+      "wait": "timeout_but_terminal_snapshot",
+      "backend": {
+        "active": false,
+        "error": null
+      },
+      "elapsed_ms": "NOT_MEASURED; UI wait timed out but same-session answer was visible and backend terminal. Do not interpret as latency."
+    },
+    {
+      "name": "natural_question_no_mutation",
+      "unchanged": true
+    }
+  ],
+  "readbefore": {
+    "target": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+      "count": 1,
+      "bread_count": 1
+    },
+    "preserved": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024",
+      "count": 2,
+      "bread_count": 2
+    }
+  },
+  "todo_service_events": [
+    {
+      "turn": "existing_item_read_no_duplicate",
+      "domain": "todo",
+      "service": "get_items",
+      "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+    },
+    {
+      "turn": "explicit_repeat_allowed",
+      "domain": "todo",
+      "service": "get_items",
+      "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+    },
+    {
+      "turn": "explicit_repeat_allowed",
+      "domain": "todo",
+      "service": "add_item",
+      "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+    },
+    {
+      "turn": "explicit_repeat_allowed",
+      "domain": "todo",
+      "service": "get_items",
+      "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+    }
+  ],
+  "classification": "CLOUD_035_V2_RISK_INTENTS_PASS_MANUAL_SEMANTIC_REVIEW",
+  "semantic_review": {
+    "existing_item_read_no_duplicate": "Correctly reported one existing bread item and no mutation; API UID sets unchanged.",
+    "explicit_repeat_allowed": "Correctly honored explicit additional-instance request; one new UID and persistent count increased from 1 to 2 on target.",
+    "unknown_list_no_invented_mutation": "Correctly said exact list was not found and asked what to do; no service events or entity/list changes.",
+    "natural_question": "Answered verification flow; target and preserved fixture remained unchanged."
+  }
+}

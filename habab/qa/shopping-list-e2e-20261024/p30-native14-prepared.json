@@ -1,0 +1,20 @@
+{
+  "classification": "PREPARED_NOT_RUN_WAITING_FOR_PHONE_READY",
+  "target": {
+    "device_family": "P30 VOG-L29",
+    "runtime_id": "7119388d53035d71",
+    "android_app": "native14",
+    "source_revision": "9d795359c22cf2844884caa5affc94209a8120ca",
+    "source_files_matched": 59,
+    "frontend_payload_files_matched": 14816,
+    "frontend_version": "read from authenticated live status before E2E",
+    "core_version_expected": "2026.10.2"
+  },
+  "todo_target": {
+    "entity_id": "todo.shopping_list",
+    "friendly_name": "Список покупок"
+  },
+  "runner": "p30-native14-e2e.cjs",
+  "execution": "not_started; awaiting parent PHONE READY",
+  "scope": "One user-authorized visible chat turn only if bread is absent; otherwise read-only. No cleanup of household items."
+}

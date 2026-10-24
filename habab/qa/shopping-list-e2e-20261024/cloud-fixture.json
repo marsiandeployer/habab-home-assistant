@@ -1,0 +1,34 @@
+{
+  "target": "https://habab-demo.wpmix.net/owner-test → /config/integrations/dashboard",
+  "runtime": "habab-owner-test; habab-home:owner-integrated-qa-0.3.4-20261024-v15",
+  "source": "a3c1d3f06",
+  "image_sha256": "47c06194a233b0927f31e31176b332c783636717d82d786bb7b5311ccf762c59",
+  "fixture_name": "QA Shopping List E2E 20261024",
+  "integration_domain": "local_todo",
+  "readbefore": {
+    "exact_fixture_exists": false,
+    "todo_entities": [],
+    "todo_state_count": 0
+  },
+  "flow_form": {
+    "domain": "local_todo",
+    "stepType": "form",
+    "stepId": "user",
+    "fields": [
+      {
+        "name": "todo_list_name",
+        "required": true
+      }
+    ]
+  },
+  "result": {
+    "entry_state": "loaded",
+    "entities": [
+      {
+        "entity_id": "todo.qa_shopping_list_e2e_20261024",
+        "state": "0"
+      }
+    ]
+  },
+  "classification": "FIXTURE_CREATED_READBACK_PASS"
+}

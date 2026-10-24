@@ -1,0 +1,60 @@
+{
+  "target": "https://habab-demo.wpmix.net/habab-ai",
+  "releaseGate": "0.3.5",
+  "viewport": [
+    1280,
+    800
+  ],
+  "checks": {
+    "persistedProviderModel": {
+      "provider": "habab",
+      "model": "gemini-3.1-flash-lite",
+      "summaryMatched": true
+    },
+    "adminSavedKeyReadback": {
+      "adminPlainText": true,
+      "matchesSavedReadback": true
+    },
+    "staleTerminalOverrideIgnored": true,
+    "verifiedTimestampSurvivesReload": true,
+    "verifiedTimestamp": "2026-10-24T17:13:18+00:00",
+    "rejectedStateObserved": "not observed; live credentials were not altered",
+    "selectedProviderIndependentOfEditorTab": {
+      "editorProvider": "openai",
+      "selectedSummary": "Для чата выбрано: Habab, модель gemini-3.1-flash-lite.",
+      "unchanged": true
+    },
+    "pipelineFailureIsolation": {
+      "connectionsLoaded": true,
+      "providerSummary": "Для чата выбрано: Habab, модель gemini-3.1-flash-lite.",
+      "connectionStatus": "Подключение не настроено",
+      "summaryUnchanged": true,
+      "connectionStatusAvailable": true
+    },
+    "anonymousKeyFieldAbsent": true
+  },
+  "liveStatuses": [
+    {
+      "provider": "deepseek",
+      "status": "unknown",
+      "checkedAt": null,
+      "labelMatches": true
+    },
+    {
+      "provider": "gemini",
+      "status": "unknown",
+      "checkedAt": null,
+      "labelMatches": true
+    },
+    {
+      "provider": "habab",
+      "status": "verified",
+      "checkedAt": "2026-10-24T17:13:18+00:00",
+      "labelMatches": true
+    }
+  ],
+  "screenshots": [
+    "owner-provider-status-masked.png"
+  ],
+  "passed": true
+}

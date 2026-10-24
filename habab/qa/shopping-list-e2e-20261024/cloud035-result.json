@@ -1,0 +1,74 @@
+{
+  "target": "https://habab-demo.wpmix.net/owner-test → /home/overview",
+  "image": "habab-home:owner-gemini-0.3.5-96551e39e",
+  "image_sha256": "b4a39badcf4cba07073a989ad6f03650eaa33c85c4bda349ab05c7aa17637987",
+  "source": "96551e39e5ea4b8c3de48e4a47f38d7c330907b8",
+  "core": "2026.10.2",
+  "habab": "0.3.5",
+  "fixture_entity": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+  "preserved_v15_fixture_entity": "todo.qa_shopping_list_e2e_20261024",
+  "checks": [
+    {
+      "name": "original_bread_add",
+      "attempts": 1,
+      "ui_wait_timeout_ms": 180000,
+      "ui_wait_predicate": "Timed out; do not treat this as model latency because the final user/assistant turn was visible in a fresh read of the same canonical chat.",
+      "session_roundtrip": {
+        "user_turn_exact": true,
+        "assistant_final_visible": true,
+        "backend_active": false,
+        "backend_error": null,
+        "visible_message_count_after_turn": 47,
+        "actual_elapsed_ms": "not_measured"
+      },
+      "assistant_result_summary": "Claimed verification=persisted but reported writing to the old v15 entity, not the explicitly named 0.3.5 entity.",
+      "target_api_readback_after": {
+        "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+        "count": 0,
+        "bread_count": 0
+      },
+      "old_fixture_api_readback_before": {
+        "entity_id": "todo.qa_shopping_list_e2e_20261024",
+        "friendly_name": "QA Shopping List E2E 20261024",
+        "count": 1,
+        "bread_count": 1
+      },
+      "old_fixture_api_readback_after": {
+        "entity_id": "todo.qa_shopping_list_e2e_20261024",
+        "friendly_name": "QA Shopping List E2E 20261024",
+        "count": 2,
+        "bread_count": 2
+      },
+      "target_fixture_friendly_name": "QA Shopping List E2E 20261024 v0.3.5",
+      "service_event_trace": "NOT_CAPTURED",
+      "service_and_tool_trace_note": "Public HA diagnostics expose active/error only; exact OpenCode tool metadata was not available through the owner UI/API.",
+      "classification": "WRONG_TARGET_FALSE_SUCCESS",
+      "cleanup": "Not performed; exact before/after item UID delta was not persisted, so no deletion is safe.",
+      "remaining_risk_intents": "NOT_RUN after wrong-target mutation."
+    }
+  ],
+  "runtime": {
+    "core": "2026.10.2",
+    "habab": "0.3.5",
+    "state": "running",
+    "chat_session_ready": true,
+    "existing_todo_entity_ids": [
+      "todo.qa_shopping_list_e2e_20261024",
+      "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+    ]
+  },
+  "readbefore": {
+    "target": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+      "count": 0,
+      "bread_count": 0
+    },
+    "preserved_v15_fixture": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024",
+      "count": 1,
+      "bread_count": 1
+    }
+  },
+  "classification": "CLOUD_035_WRONG_TARGET_FALSE_SUCCESS",
+  "note": "One user-visible request only. No subsequent prompts. Direct source-of-truth reads confirm the named new fixture stayed empty while the old QA fixture gained one bread item."
+}

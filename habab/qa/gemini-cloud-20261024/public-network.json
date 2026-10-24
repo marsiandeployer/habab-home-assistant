@@ -1,0 +1,48 @@
+{
+  "service": "habab-voice-relay",
+  "target": "public_cloud_release",
+  "releaseAcceptanceMustBeVerifiedByParent": true,
+  "audioSent": false,
+  "homeAssistantToolsInvoked": false,
+  "deviceActionsRequested": false,
+  "checks": {
+    "health": {
+      "httpStatus": 200,
+      "upstreamReady": true
+    },
+    "capabilities": {
+      "httpStatus": 200,
+      "provider": "habab",
+      "textProtocol": "google-generative-language-v1beta",
+      "textModel": "gemini-3.1-flash-lite",
+      "voiceProtocol": "google-generative-language-bidi-v1beta",
+      "voiceModel": "gemini-3.8-live",
+      "voiceTransport": "habab"
+    },
+    "nativeGeminiToolRoundTrip": {
+      "callHttpStatus": 200,
+      "resultHttpStatus": 200,
+      "functionName": "habab_relay_acceptance_probe",
+      "exactSyntheticArguments": true,
+      "resultMarkerReceived": true
+    },
+    "nativeGeminiSse": {
+      "httpStatus": 200,
+      "eventCount": 3,
+      "markerReceived": true
+    },
+    "nativeGeminiVoiceSetup": {
+      "bootstrapHttpStatus": 200,
+      "provider": "gemini",
+      "transport": "habab",
+      "model": "gemini-3.8-live",
+      "setupAck": true,
+      "setupFrameType": "setupComplete",
+      "audioSent": false
+    }
+  },
+  "status": "PASS",
+  "source": "96551e39e5ea4b8c3de48e4a47f38d7c330907b8",
+  "image_id": "sha256:b4a39badcf4cba07073a989ad6f03650eaa33c85c4bda349ab05c7aa17637987",
+  "scope": "Public gateway network acceptance; no audio or physical microphone proof"
+}

@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "coreVersion": "2026.10.2",
+  "coreState": "RUNNING",
+  "hababVersion": "0.3.5",
+  "runtimeId": "7119388d53035d71",
+  "apkSourceCommit": "47d4913cb9ead8e078af46e3135a94e8d97484ee",
+  "runtimeSourceCommit": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "provider": "habab",
+  "textModel": "gemini-3.1-flash-lite",
+  "apiCheck": "verified",
+  "scope": "Authenticated P30 after APK-only readiness fix; acoustic voice not tested"
+}

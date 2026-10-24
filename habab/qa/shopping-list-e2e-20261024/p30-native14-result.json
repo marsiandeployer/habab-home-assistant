@@ -1,0 +1,62 @@
+{
+  "target": "P30 VOG-L29; native14 Android app; parent-owned bridge 127.0.0.1:18124",
+  "runtime_id": "7119388d53035d71",
+  "source_revision": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "source_files_matched": 59,
+  "frontend_payload_files_matched": 14816,
+  "frontend_version_expected": "20260930.4+habab.7",
+  "entity_id": "todo.shopping_list",
+  "expected_friendly_name": "Список покупок",
+  "checks": [],
+  "classification": "P30_NATIVE14_API_AND_UI_PASS_SERVICE_EVENT_UNOBSERVED",
+  "readiness_before_mutation": {
+    "home_assistant_present": true,
+    "admin": true,
+    "websocket_connected": true,
+    "chat_present": true,
+    "session_id_present": true,
+    "busy": false,
+    "status_key": "empty"
+  },
+  "live_status": {
+    "core": "2026.10.2",
+    "habab": "0.3.5",
+    "habab_status": "running",
+    "entity_exists": true,
+    "friendly_name": "Список покупок",
+    "chat_ready": true
+  },
+  "readbefore": {
+    "entity_id": "todo.shopping_list",
+    "friendly_name": "Список покупок",
+    "count": 0,
+    "bread_count": 0,
+    "uid_count": 0
+  },
+  "prompt_kind": "ORIGINAL_ADD_IF_ABSENT",
+  "turn": {
+    "terminal": true,
+    "wait_result": "chat_send_wrapper",
+    "elapsed_ms": 74387,
+    "backend": {
+      "active": false,
+      "error": null
+    },
+    "exact_user_turn_visible": true,
+    "todo_service_events": []
+  },
+  "after_chat_api": {
+    "entity_id": "todo.shopping_list",
+    "count": 1,
+    "bread_count": 1,
+    "new_uid_count": 1,
+    "all_readbefore_uids_preserved": true,
+    "add_service_event_confirmed_on_target": false
+  },
+  "service_trace_status": "call_service subscription observed no events; exact service call not independently traced",
+  "ui_after_fresh_reload_receipt": "p30-native14-ui-readback.json",
+  "custom_component_frontend_cache_version": "0.3.5",
+  "frontend_version_verified_by_payload": "20260930.4+habab.7",
+  "frontend_verification_receipt": "habab/android/qa/voice/native14-phone-runtime.json",
+  "apk_source_revision": "47d4913cb9ead8e078af46e3135a94e8d97484ee"
+}

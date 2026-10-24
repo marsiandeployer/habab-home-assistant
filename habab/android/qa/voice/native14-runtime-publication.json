@@ -1,0 +1,28 @@
+{
+  "status": "PASS",
+  "files": [
+    {
+      "filename": "release-7119388d53035d71.json",
+      "httpStatus": 200,
+      "bytes": 9823,
+      "sha256": "56cbb1ac0f13dbd943ae9c8023a76c8c55b49854d75a40405166b06d04a390bd"
+    },
+    {
+      "filename": "release-7119388d53035d71.json.sig",
+      "httpStatus": 200,
+      "bytes": 513,
+      "sha256": "02babd475ab3c26aa37b8f0b134d9857f7708e24ba996aeeb416e3c72bf29ac0"
+    }
+  ],
+  "archive": {
+    "filename": "habab-runtime-7119388d53035d71-arm64.tgz",
+    "httpHead": 200,
+    "bytes": 874456143,
+    "firstAndLast64KiBRanges": 206,
+    "rangeBytesMatchLocal": true
+  },
+  "sourceRevision": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "apkPublished": false,
+  "latestCtaChanged": false,
+  "freshAndroidHttpsInstaller": "NOT_RUN; actual phone install used verified private ADB operator"
+}

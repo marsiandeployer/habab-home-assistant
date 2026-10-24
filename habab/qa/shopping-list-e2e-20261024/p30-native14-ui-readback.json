@@ -1,0 +1,20 @@
+{
+  "classification": "P30_NATIVE14_PERSISTED_ITEM_VISIBLE_AFTER_FRESH_UI_RELOAD",
+  "entity_id": "todo.shopping_list",
+  "friendly_name_expected": "Список покупок",
+  "original_chat_request_repeated": false,
+  "list_mutation_attempted": false,
+  "readback": {
+    "core_version": "2026.10.2",
+    "route": "/todo",
+    "authenticated_admin": true,
+    "list_friendly_name": "Список покупок",
+    "panel_entity_id": "todo.shopping_list",
+    "target_entity_selected": true,
+    "card_items_loaded": true,
+    "ui_item_count": 1,
+    "ui_bread_count": 1,
+    "api_item_count": 1,
+    "api_bread_count": 1
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "target": "P30 VOG-L29 Android 10; native13 runtime7382c25334564216; source c66f237f0",
+  "versions": {
+    "android_app": "0.1.5-voice-preview",
+    "core": "2026.10.2",
+    "habab": "0.3.4",
+    "frontend": "native13 frontend.7"
+  },
+  "entity_id": "todo.shopping_list",
+  "checks": [
+    {
+      "name": "todo_items_readbefore",
+      "count": 0,
+      "bread_count": 0
+    },
+    {
+      "name": "user_visible_web_chat",
+      "turns_sent": 1,
+      "assistant_success_claim": true,
+      "explicit_failure": false
+    },
+    {
+      "name": "chat_backend_terminal_state",
+      "active": false,
+      "error": null
+    },
+    {
+      "name": "todo_items_after_chat",
+      "count": 0,
+      "bread_count": 0
+    },
+    {
+      "name": "todo_items_after_ui_reload",
+      "count": 0,
+      "bread_count": 0
+    },
+    {
+      "name": "todo_panel_after_reload",
+      "route": "/todo",
+      "card_count": 1,
+      "loaded_item_count": 0,
+      "displayed_bread_count": 0
+    },
+    {
+      "name": "todo_get_items_service_readback",
+      "response_valid": true,
+      "items_count": 0
+    },
+    {
+      "name": "service_event_trace",
+      "status": "NOT_OBSERVED"
+    }
+  ],
+  "classification": "REPRODUCED_FALSE_SUCCESS",
+  "notes": "No second chat request was sent. The user-authorized bread mutation was not persistent; no item was removed."
+}

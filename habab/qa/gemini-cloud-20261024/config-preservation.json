@@ -1,0 +1,11 @@
+{
+  "source": "96551e39e5ea4b8c3de48e4a47f38d7c330907b8",
+  "configuration_checkpoint_saved": true,
+  "rollback_container_retained": true,
+  "old_config_entry_count": 9,
+  "current_config_entry_count": 11,
+  "existing_config_entry_data_preserved": true,
+  "existing_auth_users_preserved": true,
+  "selected_provider_changed_through_ui": "habab",
+  "new_habab_entry_count": 1
+}

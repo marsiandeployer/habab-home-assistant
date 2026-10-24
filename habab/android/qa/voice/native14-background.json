@@ -1,0 +1,17 @@
+{
+  "status": "PASS_SHORT_OBSERVATION",
+  "observedSeconds": 32.075,
+  "screenOff": true,
+  "corePidStable": true,
+  "corePid": 30417,
+  "voiceCaptureFramesIncreased": 1606,
+  "wakeCount": 0,
+  "uploadedPcmBytesBeforeWake": 0,
+  "wakePhase": "wake",
+  "acousticConversation": "NOT_RUN",
+  "standaloneWithoutUsbAndLongDuration": "NOT_RUN",
+  "historicalVoiceError": "realtime_provider_error",
+  "historicalVoiceErrorAt": 1792851777802,
+  "recordedAt": 1792866797786,
+  "authenticatedCoreState": "RUNNING"
+}

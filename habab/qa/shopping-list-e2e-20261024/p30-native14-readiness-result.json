@@ -1,0 +1,129 @@
+{
+  "classification": "READINESS_NOT_REACHED_READ_ONLY",
+  "target": {
+    "runtime_id": "7119388d53035d71",
+    "source_revision": "9d795359c22cf2844884caa5affc94209a8120ca",
+    "source_files_matched": 59,
+    "frontend_payload_files_matched": 14816,
+    "frontend_version_expected": "14816"
+  },
+  "max_wait_ms": 30000,
+  "snapshots": [
+    {
+      "elapsed_ms": 0,
+      "home_assistant_present": false,
+      "admin": false,
+      "websocket_connected": false,
+      "chat_present": false,
+      "session_id_present": false,
+      "busy": null,
+      "assistant_running": false,
+      "setup_restarting": false,
+      "status_key": "empty",
+      "status_is_error": false,
+      "agent": {
+        "queried": false
+      }
+    },
+    {
+      "elapsed_ms": 5006,
+      "home_assistant_present": true,
+      "admin": true,
+      "websocket_connected": true,
+      "chat_present": true,
+      "session_id_present": false,
+      "busy": true,
+      "assistant_running": false,
+      "setup_restarting": false,
+      "status_key": "loading",
+      "status_is_error": false,
+      "agent": {
+        "queried": false
+      }
+    },
+    {
+      "elapsed_ms": 10007,
+      "home_assistant_present": true,
+      "admin": true,
+      "websocket_connected": true,
+      "chat_present": true,
+      "session_id_present": false,
+      "busy": true,
+      "assistant_running": false,
+      "setup_restarting": false,
+      "status_key": "loading",
+      "status_is_error": false,
+      "agent": {
+        "queried": false
+      }
+    },
+    {
+      "elapsed_ms": 15012,
+      "home_assistant_present": true,
+      "admin": true,
+      "websocket_connected": true,
+      "chat_present": true,
+      "session_id_present": false,
+      "busy": false,
+      "assistant_running": false,
+      "setup_restarting": false,
+      "status_key": "failed",
+      "status_is_error": true,
+      "agent": {
+        "queried": false
+      }
+    },
+    {
+      "elapsed_ms": 20017,
+      "home_assistant_present": true,
+      "admin": true,
+      "websocket_connected": true,
+      "chat_present": true,
+      "session_id_present": false,
+      "busy": false,
+      "assistant_running": false,
+      "setup_restarting": false,
+      "status_key": "failed",
+      "status_is_error": true,
+      "agent": {
+        "queried": false
+      }
+    },
+    {
+      "elapsed_ms": 25022,
+      "home_assistant_present": true,
+      "admin": true,
+      "websocket_connected": true,
+      "chat_present": true,
+      "session_id_present": false,
+      "busy": false,
+      "assistant_running": false,
+      "setup_restarting": false,
+      "status_key": "failed",
+      "status_is_error": true,
+      "agent": {
+        "queried": false
+      }
+    },
+    {
+      "elapsed_ms": 30000,
+      "home_assistant_present": true,
+      "admin": true,
+      "websocket_connected": true,
+      "chat_present": true,
+      "session_id_present": false,
+      "busy": false,
+      "assistant_running": false,
+      "setup_restarting": false,
+      "status_key": "failed",
+      "status_is_error": true,
+      "agent": {
+        "queried": false
+      }
+    }
+  ],
+  "chat_prompt_sent": false,
+  "mutations_attempted": false,
+  "elapsed_ms": 30000,
+  "readiness_reached": false
+}

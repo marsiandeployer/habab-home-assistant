@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "apkSourceCommit": "47d4913cb9ead8e078af46e3135a94e8d97484ee",
+  "runtimeSourceCommit": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "runtimeId": "7119388d53035d71",
+  "apkSha256": "44844ad6ac69f6fb98f4953c5e98ad1d4eb0d11303e00f437173d655f32de4a5",
+  "installedVersionCode": 14,
+  "signerMatchesPreviousInstalled": true,
+  "configHashesUnchanged": 4,
+  "runtimeWasReplaced": false
+}

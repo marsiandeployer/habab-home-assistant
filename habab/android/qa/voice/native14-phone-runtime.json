@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "releaseId": "7119388d53035d71",
+  "hababVersion": "0.3.5",
+  "sourceFilesMatched": 59,
+  "frontendVersion": "20260930.4+habab.7",
+  "frontendPayloadFilesMatched": 14816,
+  "configurationHashesUnchangedBeforeLogin": 4,
+  "installationMode": "private ADB offline operator; installed APK ReleaseVerifier+ArchiveFiles",
+  "previousRuntimeRetained": true
+}

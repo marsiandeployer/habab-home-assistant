@@ -1,0 +1,9 @@
+{
+  "installed_version_code": 13,
+  "installed_version_name": "0.1.5-voice-preview",
+  "target_sdk": 28,
+  "candidate_version_code": 14,
+  "apk_signer_matches_installed": true,
+  "source": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "scope": "Pre-install only; no package/runtime change"
+}

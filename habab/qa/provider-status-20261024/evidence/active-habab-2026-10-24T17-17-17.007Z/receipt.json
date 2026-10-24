@@ -1,0 +1,28 @@
+{
+  "target": "https://habab-demo.wpmix.net/habab-ai",
+  "viewport": [
+    1280,
+    800
+  ],
+  "selectedProvider": "habab",
+  "model": "gemini-3.1-flash-lite",
+  "apiStatus": "verified",
+  "apiCheckAt": "2026-10-24T17:13:18+00:00",
+  "editorTab": "habab",
+  "chatClosed": true,
+  "keyField": {
+    "type": "password",
+    "emptyBeforeCapture": true
+  },
+  "forbiddenCommands": {
+    "providerCheck": 0,
+    "providerSave": 0,
+    "chatRun": 0,
+    "chatAbort": 0
+  },
+  "screenshot": "active-habab-status-masked.png",
+  "summaryVisible": true,
+  "apiCheckDateVisible": true,
+  "keyLoadedForAdmin": true,
+  "passed": true
+}

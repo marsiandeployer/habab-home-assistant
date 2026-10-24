@@ -1,0 +1,25 @@
+{
+  "scope": "Current shared server bot, not autonomous Android networking",
+  "transport": "Pyrogram MTProto user client",
+  "pyrogramVersion": "2.0.106",
+  "bot": "manulboxbot",
+  "selectedProviderReadback": {
+    "provider": "habab",
+    "model": "gemini-3.1-flash-lite"
+  },
+  "release": "0.3.5",
+  "status": "PASS",
+  "sentMessageId": 64920,
+  "replyMessageId": 64921,
+  "elapsedSeconds": 15.499,
+  "replyText": "VOICEQA-20261024-204223. Я Habab — ваш единственный встроенный ассистент для управления Home Assistant. Для общения со мной не требуется установка или подключение сторонних ассистентов.",
+  "botApiPollingStarted": false,
+  "configurationChanged": false,
+  "semanticReview": {
+    "reviewed": true,
+    "identity": "Habab single built-in assistant",
+    "externalAssistantRequired": false,
+    "correlation": "exact marker in bot reply",
+    "requestedDeviceActions": false
+  }
+}

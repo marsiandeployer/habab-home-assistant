@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "method": "adb shell -T run-as dd",
+  "bytes": 874456143,
+  "sha256": "0ca0a167aaf704af84c97927f0eafeada73d2cdb149cd6a677e17b73a1a143c0",
+  "seconds": 116.828,
+  "old_exec_in_attempt": "REJECTED_INCOMPLETE_TRANSFER_BEFORE_INSTALL"
+}

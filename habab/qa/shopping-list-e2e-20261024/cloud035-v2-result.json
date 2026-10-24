@@ -1,0 +1,95 @@
+{
+  "target": "https://habab-demo.wpmix.net/owner-test → /home/overview",
+  "image": "habab-home:owner-gemini-0.3.5-9d795359c",
+  "image_sha256": "e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+  "source": "9d795359c22cf2844884caa5affc94209a8120ca",
+  "core": "2026.10.2",
+  "habab": "0.3.5",
+  "fixture_entity": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+  "preserved_v15_fixture_entity": "todo.qa_shopping_list_e2e_20261024",
+  "checks": [
+    {
+      "name": "original_bread_add",
+      "complete": true,
+      "turn_index": 1,
+      "elapsed_ms": 73661,
+      "assistant_result": "Named the exact 0.3.5 list and reported verification=persisted.",
+      "backend": {
+        "active": false,
+        "error": null
+      },
+      "todo_service_events": [
+        {
+          "domain": "todo",
+          "service": "get_items",
+          "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+        },
+        {
+          "domain": "todo",
+          "service": "add_item",
+          "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+        },
+        {
+          "domain": "todo",
+          "service": "get_items",
+          "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5"
+        }
+      ]
+    },
+    {
+      "name": "persistent_api_after_chat",
+      "target": {
+        "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+        "count": 1,
+        "bread_count": 1,
+        "new_uid_count": 1
+      },
+      "preserved_old_fixture": {
+        "entity_id": "todo.qa_shopping_list_e2e_20261024",
+        "count": 2,
+        "bread_count": 2
+      }
+    },
+    {
+      "name": "fresh_ui_reload_first_attempt",
+      "result": "HARNESS_SELECTOR_TIMEOUT_45S",
+      "cause": "queried document-level ha-panel-todo and card.config; current frontend nests panel in shadow roots and stores config in card._config"
+    },
+    {
+      "name": "fresh_ui_reload_corrected_readback",
+      "route": "/todo?entity_id=todo.qa_shopping_list_e2e_20261024_v0_3_5",
+      "panel_entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+      "card_config_entity": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+      "target_selected": true,
+      "items_loaded": true,
+      "item_count": 1,
+      "displayed_bread_count": 1,
+      "independent_api_bread_count": 1,
+      "classification": "PASS"
+    }
+  ],
+  "runtime": {
+    "core": "2026.10.2",
+    "habab": "0.3.5",
+    "state": "running",
+    "chat_session_ready": true,
+    "existing_todo_entity_ids": [
+      "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+      "todo.qa_shopping_list_e2e_20261024"
+    ]
+  },
+  "readbefore": {
+    "target": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024_v0_3_5",
+      "count": 0,
+      "bread_count": 0
+    },
+    "preserved_v15_fixture": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024",
+      "count": 2,
+      "bread_count": 2
+    }
+  },
+  "classification": "CLOUD_035_V2_ORIGINAL_CHAT_SERVICE_PERSISTENCE_UI_PASS",
+  "note": "Same canonical chat retained; old v15 QA fixture preserved at count 2/bread 2. No risk prompts were sent in this original-run phase."
+}

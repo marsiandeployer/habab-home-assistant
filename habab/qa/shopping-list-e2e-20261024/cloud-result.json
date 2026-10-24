@@ -1,0 +1,71 @@
+{
+  "target": "https://habab-demo.wpmix.net/owner-test then /home/overview",
+  "runtime": "habab-owner-test; habab-home:owner-integrated-qa-0.3.4-20261024-v15",
+  "source": "a3c1d3f06",
+  "image_sha256": "47c06194a233b0927f31e31176b332c783636717d82d786bb7b5311ccf762c59",
+  "core": "2026.10.2",
+  "habab": "0.3.4",
+  "frontend": "native13 frontend.7",
+  "negative_case": {
+    "target_list_before_setup": {
+      "state_entities": 0,
+      "registry_entities": 0,
+      "todo_component_loaded": false,
+      "todo_panel_available": false
+    },
+    "user_visible_chat_request": "добавь хлеб в список покупок",
+    "request_completed_in_same_session": true,
+    "assistant_claimed_success": false,
+    "assistant_result": "no_todo_integration; offered standard HA integration setup",
+    "backend_diagnostics": {
+      "active": false,
+      "runtime_status": "running",
+      "error": null
+    },
+    "classification": "NO_FALSE_SUCCESS_TARGET_LIST_ABSENT"
+  },
+  "explicit_fixture": {
+    "creation": "Home Assistant Settings > Integrations > Add integration > Local To-do form",
+    "before": {
+      "todo_state_entities": 0,
+      "todo_registry_entities": 0
+    },
+    "entry_domain": "local_todo",
+    "entry_title": "QA Shopping List E2E 20261024",
+    "entry_state": "loaded",
+    "entity_id": "todo.qa_shopping_list_e2e_20261024",
+    "initial_state": "0"
+  },
+  "positive_case": {
+    "readbefore": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024",
+      "item_count": 0,
+      "matching_item_count": 0
+    },
+    "user_visible_chat_request": "добавь хлеб в список покупок",
+    "assistant_claimed_success": true,
+    "service_event_observer": {
+      "todo_call_service_events_delivered": 0,
+      "exact_service_name_confirmed": false
+    },
+    "persistent_readback_after_chat": {
+      "entity_id": "todo.qa_shopping_list_e2e_20261024",
+      "item_count": 1,
+      "matching_item_count": 1
+    },
+    "todo_ui_after_fresh_authenticated_load": {
+      "route": "/todo",
+      "selected_entity_id": "todo.qa_shopping_list_e2e_20261024",
+      "card_items_loaded": true,
+      "item_count": 1,
+      "displayed_matching_item_count": 1,
+      "independent_api_item_count": 1,
+      "independent_api_matching_item_count": 1
+    },
+    "mutation_result": "confirmed_by_persistent_todo_websocket_readback_and_rendered_ui_after_fresh_load",
+    "harness_note": "The first browser run timed out while waiting for the Todo panel after the chat response; the same entity was then verified in a separate fresh authenticated BrowserContext. No chat request was repeated.",
+    "classification": "CLOUD_POSITIVE_PERSISTENCE_AND_UI_PASS_SERVICE_EVENT_NOT_OBSERVED"
+  },
+  "android_original_list": "REPRODUCED_FALSE_SUCCESS; see p30-result.json",
+  "secrets_or_chat_history_saved": false
+}
