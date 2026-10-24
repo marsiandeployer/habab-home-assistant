@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -12,8 +13,13 @@ from homeassistant.components.habab_home.setup_agent import (
     PROMPT,
     AgentError,
     SetupAgent,
+    VOICE_TURN_EVENT_ID_KEY,
+    VOICE_TURN_HASH_KEY,
+    VOICE_TURN_METADATA_KEY,
+    VOICE_TURN_METADATA_VALUE,
     verify_binary,
 )
+from homeassistant.components.habab_home.voice_history import encode_voice_event
 from homeassistant.components.habab_home.assistant_identity import ASSISTANT_IDENTITY
 from homeassistant.components.habab_home.runtime_context import (
     ANDROID_PROOT_RUNTIME_KIND,
@@ -136,6 +142,35 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             {"type": "text", "text": "private-provider-key private-runtime-password"},
         ]}]
         self.assertEqual(agent.visible(messages), [{"role": "assistant", "text": "[redacted] [redacted]"}])
+
+    def test_visible_projects_individual_voice_events_and_preserves_legacy_pairs(self):
+        agent = self.agent()
+        user_text = "Установи термостат"
+        assistant_text = "Откройте защищённую форму"
+        user_raw, _, user_meta = encode_voice_event("gemini-evt-1", "user", user_text)
+        assistant_raw, _, assistant_meta = encode_voice_event(
+            "gemini-evt-2", "assistant", assistant_text)
+        legacy_raw = json.dumps(
+            {"user": "Старый вопрос", "assistant": "Старый ответ"},
+            ensure_ascii=False, separators=(",", ":"))
+        legacy_hash = hashlib.sha256(legacy_raw.encode("utf-8")).hexdigest()
+        messages = [
+            {"info": {"role": "assistant"}, "parts": [
+                {"type": "text", "text": user_raw, "synthetic": True, "metadata": user_meta},
+                {"type": "text", "text": assistant_raw, "synthetic": True, "metadata": assistant_meta},
+                {"type": "text", "text": legacy_raw, "synthetic": True, "metadata": {
+                    VOICE_TURN_METADATA_KEY: VOICE_TURN_METADATA_VALUE,
+                    VOICE_TURN_EVENT_ID_KEY: "legacy-event",
+                    VOICE_TURN_HASH_KEY: legacy_hash,
+                }},
+            ]},
+        ]
+        self.assertEqual(agent.visible(messages), [
+            {"role": "user", "text": user_text},
+            {"role": "assistant", "text": assistant_text},
+            {"role": "user", "text": "Старый вопрос"},
+            {"role": "assistant", "text": "Старый ответ"},
+        ])
 
     def test_changed_executable_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -29,6 +29,11 @@ from .runtime_context import (
     runtime_fingerprint,
     runtime_prompt,
 )
+from .voice_history import (
+    VOICE_EVENT_PROTOCOL,
+    VOICE_EVENT_PROTOCOL_KEY,
+    decode_voice_event_part,
+)
 
 PORT = 4197
 VOICE_TURN_METADATA_KEY = "habab_voice_turn"
@@ -270,6 +275,14 @@ class SetupAgent:
                 if part.get("type") != "text":
                     continue
                 metadata = part.get("metadata")
+                if (isinstance(metadata, dict)
+                        and metadata.get(VOICE_EVENT_PROTOCOL_KEY) == VOICE_EVENT_PROTOCOL):
+                    event = decode_voice_event_part(part)
+                    if event is not None:
+                        result.append({"role": event["role"],
+                                       "text": self.clean(event["text"])})
+                    # Invalid or untrusted event markers must never expose JSON.
+                    continue
                 if (isinstance(metadata, dict)
                         and metadata.get(VOICE_TURN_METADATA_KEY) == VOICE_TURN_METADATA_VALUE):
                     event_id = metadata.get(VOICE_TURN_EVENT_ID_KEY)

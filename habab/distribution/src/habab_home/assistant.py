@@ -13,6 +13,15 @@ from .setup_agent import (
     AgentError, VOICE_TURN_EVENT_ID_KEY, VOICE_TURN_HASH_KEY,
     VOICE_TURN_METADATA_KEY, VOICE_TURN_METADATA_VALUE,
 )
+from .voice_history import (
+    VOICE_EVENT_ID_KEY,
+    VOICE_EVENT_HASH_KEY,
+    VOICE_EVENT_METADATA_KEY,
+    VOICE_EVENT_PROTOCOL,
+    encode_voice_event,
+    decode_voice_event_part,
+    valid_voice_event_fields,
+)
 
 VOICE_EVENT_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 
@@ -278,6 +287,36 @@ class AssistantService:
         payload_digest = hashlib.sha256(transcript.encode("utf-8")).hexdigest()
         receipt_key = json.dumps([owner, history_epoch, event_id],
                                  ensure_ascii=False, separators=(",", ":"))
+        return await self._record_voice_receipt(
+            owner, session_id, event_id, history_epoch, receipt_key, payload_digest,
+            {"user_text": user_text, "assistant_text": assistant_text},
+        )
+
+    async def record_voice_event(self, owner, session_id, event_id, role, text, *,
+                                 history_epoch, provider="gemini", correlation=None):
+        """Journal one observed provider event without pairing or starting a model."""
+        if (not isinstance(owner, str) or not owner or len(owner) > 128
+                or (session_id is not None and (not isinstance(session_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id)))
+                or not isinstance(event_id, str) or not VOICE_EVENT_ID.fullmatch(event_id)
+                or not valid_voice_event_fields(event_id, role, text, provider, correlation)
+                or type(history_epoch) is not int or history_epoch < 0):
+            raise AgentError("invalid_voice_event")
+        _payload, payload_digest, _metadata = encode_voice_event(
+            event_id, role, text, provider, correlation)
+        receipt_key = json.dumps(
+            [owner, history_epoch, VOICE_EVENT_PROTOCOL, event_id],
+            ensure_ascii=False, separators=(",", ":"))
+        return await self._record_voice_receipt(
+            owner, session_id, event_id, history_epoch, receipt_key, payload_digest,
+            {"protocol": VOICE_EVENT_PROTOCOL, "role": role, "text": text,
+             "provider": provider, "correlation": correlation},
+            protocol=VOICE_EVENT_PROTOCOL,
+        )
+
+    async def _record_voice_receipt(self, owner, session_id, event_id, history_epoch,
+                                    receipt_key, payload_digest, receipt_fields,
+                                    protocol=None):
         async with self.voice_journal_lock:
             await self._require_active_admin(owner)
             context = dict(self._web_context(owner))
@@ -288,8 +327,18 @@ class AssistantService:
                 raise AgentError("not_found")
             receipt = self.voice_receipts.get(receipt_key)
             if receipt is not None:
-                if (not isinstance(receipt, dict)
-                        or receipt.get("payload_sha256") != payload_digest):
+                if not isinstance(receipt, dict):
+                    raise AgentError("voice_event_conflict")
+                expected_fields = receipt_fields
+                if protocol is not None and receipt.get("state") == "complete":
+                    expected_fields = {
+                        key: value for key, value in receipt_fields.items() if key != "text"
+                    }
+                if (receipt.get("payload_sha256") != payload_digest
+                        or (protocol is not None and (
+                            receipt.get("protocol") != protocol
+                            or any(receipt.get(key) != value
+                                   for key, value in expected_fields.items())))):
                     raise AgentError("voice_event_conflict")
                 duplicate = True
             else:
@@ -297,7 +346,7 @@ class AssistantService:
                     "owner": owner, "epoch": history_epoch,
                     "session_id": current_session, "event_id": event_id,
                     "payload_sha256": payload_digest, "state": "pending",
-                    "user_text": user_text, "assistant_text": assistant_text,
+                    **receipt_fields,
                 }
                 updated = dict(self.voice_receipts)
                 updated[receipt_key] = receipt
@@ -331,10 +380,18 @@ class AssistantService:
             if (isinstance(receipt, dict) and receipt.get("state") == "pending"
                     and receipt.get("owner") == owner and receipt.get("epoch") == epoch
                     and receipt.get("session_id") == session_id):
-                projected.extend([
-                    {"role": "user", "text": receipt.get("user_text", "")},
-                    {"role": "assistant", "text": receipt.get("assistant_text", "")},
-                ])
+                if receipt.get("protocol") == VOICE_EVENT_PROTOCOL:
+                    try:
+                        self._voice_materialization(receipt)
+                    except (AgentError, KeyError, TypeError, ValueError):
+                        continue
+                    projected.append({"role": receipt.get("role"),
+                                      "text": receipt.get("text", "")})
+                elif receipt.get("protocol") is None:
+                    projected.extend([
+                        {"role": "user", "text": receipt.get("user_text", "")},
+                        {"role": "assistant", "text": receipt.get("assistant_text", "")},
+                    ])
         return projected[-60:]
 
     async def _materialize_pending_voice(self, owner, session_id, epoch):
@@ -343,9 +400,9 @@ class AssistantService:
             pending = [(key, value) for key, value in self.voice_receipts.items()
                        if isinstance(value, dict) and value.get("state") == "pending"
                        and value.get("owner") == owner
+                       and value.get("epoch") == epoch
                        and (value.get("session_id") == session_id
-                            or (value.get("session_id") is None
-                                and value.get("epoch") == epoch))]
+                            or value.get("session_id") is None)]
             if not pending:
                 return
             unbound = [(key, dict(receipt, session_id=session_id))
@@ -364,50 +421,27 @@ class AssistantService:
                 raise AgentError("runtime_error")
             completions = []
             for key, receipt in pending:
-                transcript = json.dumps(
-                    {"user": receipt["user_text"], "assistant": receipt["assistant_text"]},
-                    ensure_ascii=False, separators=(",", ":"))
+                transcript, digest, metadata, is_event = self._voice_materialization(receipt)
                 event_id = receipt["event_id"]
-                digest = receipt["payload_sha256"]
-                found = False
-                for message in messages:
-                    for part in message.get("parts", []):
-                        metadata = part.get("metadata")
-                        if (isinstance(metadata, dict)
-                                and metadata.get(VOICE_TURN_METADATA_KEY) == VOICE_TURN_METADATA_VALUE
-                                and metadata.get(VOICE_TURN_EVENT_ID_KEY) == event_id):
-                            if (part.get("synthetic") is not True
-                                    or metadata.get(VOICE_TURN_HASH_KEY) != digest
-                                    or part.get("text") != transcript):
-                                raise AgentError("voice_event_conflict")
-                            found = True
+                found = self._has_voice_materialization(
+                    messages, event_id, transcript, digest, is_event)
                 if not found:
                     await self.runtime.request("POST", f"session/{session_id}/message", {
                         "noReply": True,
                         "parts": [{"type": "text", "text": transcript,
-                                   "synthetic": True, "metadata": {
-                                       VOICE_TURN_METADATA_KEY: VOICE_TURN_METADATA_VALUE,
-                                       VOICE_TURN_EVENT_ID_KEY: event_id,
-                                       VOICE_TURN_HASH_KEY: digest,
-                                   }}],
+                                   "synthetic": True, "metadata": metadata}],
                     })
                     messages = await self.runtime.request(
                         "GET", f"session/{session_id}/message?limit=2000")
-                    found = any(
-                        p.get("synthetic") is True
-                        and isinstance(p.get("metadata"), dict)
-                        and p["metadata"].get(VOICE_TURN_METADATA_KEY) == VOICE_TURN_METADATA_VALUE
-                        and p["metadata"].get(VOICE_TURN_EVENT_ID_KEY) == event_id
-                        and p["metadata"].get(VOICE_TURN_HASH_KEY) == digest
-                        and p.get("text") == transcript
-                        for m in messages if isinstance(m, dict)
-                        for p in m.get("parts", []) if isinstance(p, dict))
+                    found = self._has_voice_materialization(
+                        messages, event_id, transcript, digest, is_event)
                     if not found:
                         raise AgentError("runtime_error")
                 completed = dict(receipt)
                 completed.update(state="complete", session_id=session_id)
                 completed.pop("user_text", None)
                 completed.pop("assistant_text", None)
+                completed.pop("text", None)
                 completions.append((key, completed))
             async with self.voice_journal_lock:
                 updated = dict(self.voice_receipts)
@@ -419,6 +453,66 @@ class AssistantService:
                 await self.voice_receipt_store.async_save(updated)
                 self.voice_receipts = updated
             self.web_history_cache[(owner, session_id)] = self.runtime.visible(messages)
+
+    @staticmethod
+    def _voice_materialization(receipt):
+        event_id = receipt.get("event_id")
+        if receipt.get("protocol") == VOICE_EVENT_PROTOCOL:
+            if not valid_voice_event_fields(
+                    event_id, receipt.get("role"), receipt.get("text"),
+                    receipt.get("provider"), receipt.get("correlation")):
+                raise AgentError("voice_event_conflict")
+            transcript, digest, metadata = encode_voice_event(
+                event_id, receipt["role"], receipt["text"],
+                receipt["provider"], receipt["correlation"])
+            if digest != receipt.get("payload_sha256"):
+                raise AgentError("voice_event_conflict")
+            return transcript, digest, metadata, True
+        if receipt.get("protocol") is not None:
+            raise AgentError("voice_event_conflict")
+        transcript = json.dumps(
+            {"user": receipt["user_text"], "assistant": receipt["assistant_text"]},
+            ensure_ascii=False, separators=(",", ":"))
+        digest = receipt["payload_sha256"]
+        return transcript, digest, {
+            VOICE_TURN_METADATA_KEY: VOICE_TURN_METADATA_VALUE,
+            VOICE_TURN_EVENT_ID_KEY: event_id,
+            VOICE_TURN_HASH_KEY: digest,
+        }, False
+
+    @staticmethod
+    def _has_voice_materialization(messages, event_id, transcript, digest, is_event):
+        if not isinstance(messages, list):
+            raise AgentError("runtime_error")
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            parts = message.get("parts", [])
+            if not isinstance(parts, list):
+                continue
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                metadata = part.get("metadata")
+                if not isinstance(metadata, dict):
+                    continue
+                if is_event:
+                    if (metadata.get(VOICE_EVENT_METADATA_KEY) != VOICE_EVENT_PROTOCOL
+                            or metadata.get(VOICE_EVENT_ID_KEY) != event_id):
+                        continue
+                    decoded = decode_voice_event_part(part)
+                    if (decoded is None or part.get("text") != transcript
+                            or metadata.get(VOICE_EVENT_HASH_KEY) != digest):
+                        raise AgentError("voice_event_conflict")
+                    return True
+                if (metadata.get(VOICE_TURN_METADATA_KEY) == VOICE_TURN_METADATA_VALUE
+                        and metadata.get(VOICE_TURN_EVENT_ID_KEY) == event_id):
+                    if (part.get("synthetic") is not True
+                            or metadata.get(VOICE_TURN_HASH_KEY) != digest
+                            or part.get("text") != transcript):
+                        raise AgentError("voice_event_conflict")
+                    return True
+        return False
 
     async def abort(self, owner, channel, session_id, entry_id=None, chat_id=None):
         await self._require_active_admin(owner)

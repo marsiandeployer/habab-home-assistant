@@ -13,6 +13,11 @@ from homeassistant.components.habab_home.setup_agent import (
     AgentError, SetupAgent, VOICE_TURN_EVENT_ID_KEY, VOICE_TURN_HASH_KEY,
     VOICE_TURN_METADATA_KEY, VOICE_TURN_METADATA_VALUE,
 )
+from homeassistant.components.habab_home.voice_history import (
+    VOICE_EVENT_HASH_KEY, VOICE_EVENT_ID_KEY, VOICE_EVENT_METADATA_KEY,
+    VOICE_EVENT_PROTOCOL, VOICE_EVENT_PROVIDER_KEY, decode_voice_event_part,
+    encode_voice_event,
+)
 
 
 class VoiceHistoryTests(unittest.IsolatedAsyncioTestCase):
@@ -269,6 +274,65 @@ class VoiceHistoryTests(unittest.IsolatedAsyncioTestCase):
             {"role": "assistant", "text": self.assistant_text},
             {"role": "user", "text": payload},
         ])
+
+
+class VoiceEventCodecTests(unittest.TestCase):
+    def test_event_round_trips_as_one_provider_role_line(self):
+        raw, _digest, metadata = encode_voice_event(
+            "evt_01", "user", "Проверь освещение", "gemini", None)
+        part = {"type": "text", "text": raw, "synthetic": True, "metadata": metadata}
+        self.assertEqual(decode_voice_event_part(part), {
+            "role": "user", "text": "Проверь освещение",
+        })
+
+    def test_event_protocol_rejects_modified_hash_and_metadata_schema(self):
+        raw, _digest, metadata = encode_voice_event("evt_02", "assistant", "Готово")
+        part = {"type": "text", "text": raw, "synthetic": True, "metadata": metadata}
+        part["text"] = raw + " "
+        self.assertIsNone(decode_voice_event_part(part))
+        part["text"] = raw
+        part["metadata"] = {**metadata, "untrusted": True}
+        self.assertIsNone(decode_voice_event_part(part))
+
+    def test_invalid_unicode_in_marked_part_fails_closed(self):
+        _raw, _digest, metadata = encode_voice_event("evt_surrogate", "user", "Valid")
+        part = {"type": "text", "text": "\ud800", "synthetic": True, "metadata": metadata}
+        self.assertIsNone(decode_voice_event_part(part))
+
+    def test_payload_schema_rejects_fabricated_correlation_even_with_valid_hash(self):
+        payload = {
+            "protocol": VOICE_EVENT_PROTOCOL, "event_id": "evt_03",
+            "role": "user", "text": "Слова пользователя", "provider": "gemini",
+            "correlation": "guessed-response-id",
+        }
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        part = {"type": "text", "text": raw, "synthetic": True, "metadata": {
+            VOICE_EVENT_METADATA_KEY: VOICE_EVENT_PROTOCOL,
+            VOICE_EVENT_ID_KEY: "evt_03", VOICE_EVENT_HASH_KEY: digest,
+            VOICE_EVENT_PROVIDER_KEY: "gemini",
+        }}
+        self.assertIsNone(decode_voice_event_part(part))
+
+    def test_payload_schema_rejects_unknown_role_provider_and_extra_fields(self):
+        for changes in (
+            {"role": "tool"}, {"provider": "openai"}, {"extra": "field"},
+        ):
+            payload = {
+                "protocol": VOICE_EVENT_PROTOCOL, "event_id": "evt_04",
+                "role": "assistant", "text": "Ответ", "provider": "gemini",
+                "correlation": None,
+            }
+            payload.update(changes)
+            raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+            part = {"type": "text", "text": raw, "synthetic": True, "metadata": {
+                VOICE_EVENT_METADATA_KEY: VOICE_EVENT_PROTOCOL,
+                VOICE_EVENT_ID_KEY: "evt_04", VOICE_EVENT_HASH_KEY: digest,
+                VOICE_EVENT_PROVIDER_KEY: payload.get("provider"),
+            }}
+            with self.subTest(changes=changes):
+                self.assertIsNone(decode_voice_event_part(part))
 
 
 if __name__ == "__main__":

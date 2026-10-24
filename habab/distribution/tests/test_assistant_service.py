@@ -80,6 +80,212 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.ensure.assert_not_awaited()
         self.runtime.request.assert_not_awaited()
 
+    async def test_voice_event_records_fast_without_starting_or_calling_runtime(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 3}}
+        result = await self.service.record_voice_event(
+            "alice", "canonical-session", "gemini_evt_001", "user", "Включи свет",
+            history_epoch=3)
+        self.assertEqual(result, {
+            "session_id": "canonical-session",
+            "messages": [{"role": "user", "text": "Включи свет"}],
+            "recorded": True, "duplicate": False, "pending": True,
+        })
+        self.runtime.ensure.assert_not_awaited()
+        self.runtime.request.assert_not_awaited()
+        self.runtime.run.assert_not_awaited()
+        self.stores[3][2].async_save.assert_awaited_once()
+
+    async def test_voice_event_dedupe_conflict_and_receipt_namespace(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 0}}
+        first = await self.service.record_voice_event(
+            "alice", "canonical-session", "shared-id", "user", "Question", history_epoch=0)
+        replay = await self.service.record_voice_event(
+            "alice", "canonical-session", "shared-id", "user", "Question", history_epoch=0)
+        self.assertFalse(first["duplicate"])
+        self.assertTrue(replay["duplicate"])
+        with self.assertRaisesRegex(AgentError, "voice_event_conflict"):
+            await self.service.record_voice_event(
+                "alice", "canonical-session", "shared-id", "assistant", "Changed", history_epoch=0)
+        paired = await self.service.record_voice_turn(
+            "alice", "canonical-session", "shared-id", "Question", "Answer", history_epoch=0)
+        self.assertFalse(paired["duplicate"])
+        self.assertEqual(len(self.service.voice_receipts), 2)
+
+    async def test_unknown_receipt_protocol_is_not_projected_as_a_legacy_pair(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 0}}
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "evt-protocol", "user", "Observed", history_epoch=0)
+        receipt = next(iter(self.service.voice_receipts.values()))
+        receipt["protocol"] = "unknown_voice_protocol"
+        self.assertEqual(self.service._project_pending_voice(
+            "alice", "canonical-session", [], 0), [])
+
+    async def test_voice_event_schema_acl_session_and_epoch_are_enforced_before_persistence(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 4}}
+        invalid = (
+            {"role": "tool"}, {"role": {}}, {"provider": "openai"},
+            {"correlation": "not-observed"}, {"event_id": "not an id"},
+        )
+        for changes in invalid:
+            args = {"role": "user", "event_id": "valid-id", "provider": "gemini",
+                    "correlation": None, "text": "Question"}
+            args.update(changes)
+            with self.subTest(changes=changes), self.assertRaisesRegex(AgentError, "invalid_voice_event"):
+                await self.service.record_voice_event(
+                    "alice", "canonical-session", args["event_id"], args["role"], args["text"],
+                    history_epoch=4, provider=args["provider"], correlation=args["correlation"])
+        with self.assertRaisesRegex(AgentError, "not_found"):
+            await self.service.record_voice_event(
+                "alice", "stale-session", "valid-id", "user", "Question", history_epoch=4)
+        with self.assertRaisesRegex(AgentError, "not_found"):
+            await self.service.record_voice_event(
+                "alice", "canonical-session", "valid-id", "user", "Question", history_epoch=3)
+        self.user.is_active = False
+        with self.assertRaisesRegex(AgentError, "not_allowed"):
+            await self.service.record_voice_event(
+                "alice", "canonical-session", "valid-id", "user", "Question", history_epoch=4)
+        self.assertEqual(self.service.voice_receipts, {})
+        self.stores[3][2].async_save.assert_not_awaited()
+
+    async def test_pending_voice_projects_mixed_events_and_legacy_pairs_in_receipt_order(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 1}}
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "evt-one", "user", "First", history_epoch=1)
+        await self.service.record_voice_turn(
+            "alice", "canonical-session", "pair-two", "Second user", "Second assistant",
+            history_epoch=1)
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "evt-three", "assistant", "Third", history_epoch=1)
+        self.assertEqual(self.service._project_pending_voice(
+            "alice", "canonical-session", [{"role": "assistant", "text": "Existing"}], 1), [
+                {"role": "assistant", "text": "Existing"},
+                {"role": "user", "text": "First"},
+                {"role": "user", "text": "Second user"},
+                {"role": "assistant", "text": "Second assistant"},
+                {"role": "assistant", "text": "Third"},
+            ])
+
+    async def test_mixed_pending_events_materialize_no_reply_once_in_receipt_order(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 0}}
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "evt-one", "user", "First", history_epoch=0)
+        await self.service.record_voice_turn(
+            "alice", "canonical-session", "pair-two", "Second user", "Second assistant",
+            history_epoch=0)
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "evt-three", "assistant", "Third", history_epoch=0)
+        canonical = []
+        posts = []
+
+        async def request(method, _path, payload=None):
+            if method == "GET":
+                return [{"parts": list(canonical)}]
+            self.assertEqual(method, "POST")
+            self.assertTrue(payload["noReply"])
+            part = payload["parts"][0]
+            canonical.append(part)
+            posts.append(part)
+            return {}
+
+        self.runtime.request.side_effect = request
+        await self.service._materialize_pending_voice("alice", "canonical-session", 0)
+        self.assertEqual(posts[0]["metadata"]["habab_voice_event_id"], "evt-one")
+        self.assertEqual(len(posts), 3)
+        self.assertEqual(posts[0]["metadata"]["habab_voice_event_protocol"], "native_gemini_event.v1")
+        self.assertEqual(posts[1]["metadata"], {
+            "habab_voice_turn": "native_realtime.v1",
+            "habab_voice_event_id": "pair-two",
+            "habab_voice_payload_sha256": self.service.voice_receipts[
+                '["alice",0,"pair-two"]']["payload_sha256"],
+        })
+        self.assertEqual(posts[2]["metadata"]["habab_voice_event_id"], "evt-three")
+        self.assertTrue(all(item["synthetic"] for item in posts))
+        self.assertTrue(all(self.service.voice_receipts[key]["state"] == "complete"
+                            for key in self.service.voice_receipts))
+        await self.service._materialize_pending_voice("alice", "canonical-session", 0)
+        self.assertEqual(len(posts), 3)
+        self.assertEqual(self.runtime.run.await_count, 0)
+
+    async def test_cancelled_materialization_recovers_existing_event_without_reposting(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 2}}
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "evt-recovery", "user", "Already heard", history_epoch=2)
+        canonical = []
+        fail_after_post = True
+        posts = 0
+
+        async def request(method, _path, payload=None):
+            nonlocal fail_after_post, posts
+            if method == "GET":
+                return [{"parts": list(canonical)}]
+            posts += 1
+            canonical.extend(payload["parts"])
+            if fail_after_post:
+                fail_after_post = False
+                raise asyncio.CancelledError
+            return {}
+
+        self.runtime.request.side_effect = request
+        with self.assertRaises(asyncio.CancelledError):
+            await self.service._materialize_pending_voice("alice", "canonical-session", 2)
+        self.assertEqual(next(iter(self.service.voice_receipts.values()))["state"], "pending")
+        await self.service._materialize_pending_voice("alice", "canonical-session", 2)
+        self.assertEqual(posts, 1)
+        self.assertEqual(next(iter(self.service.voice_receipts.values()))["state"], "complete")
+        duplicate = await self.service.record_voice_event(
+            "alice", "canonical-session", "evt-recovery", "user", "Already heard", history_epoch=2)
+        self.assertTrue(duplicate["duplicate"])
+        self.assertFalse(duplicate["pending"])
+        self.runtime.run.assert_not_awaited()
+
+    async def test_unbound_event_recovers_from_private_store_into_current_session(self):
+        await self.service.setup()
+        self.service.web_sessions = {}
+        self.service.web_contexts = {"alice": {"session_id": None, "epoch": 5}}
+        result = await self.service.record_voice_event(
+            "alice", None, "evt-deferred", "assistant", "Ожидающий ответ", history_epoch=5)
+        self.assertIsNone(result["session_id"])
+        saved_receipts = json.loads(json.dumps(self.service.voice_receipts))
+        self.stores[0][2].async_load.return_value = {}
+        self.stores[2][2].async_load.return_value = {
+            "alice": {"session_id": None, "epoch": 5},
+        }
+        self.stores[3][2].async_load.return_value = saved_receipts
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "new-canonical-session"}
+        self.service.web_contexts = {
+            "alice": {"session_id": "new-canonical-session", "epoch": 5},
+        }
+        canonical = []
+
+        async def request(method, _path, payload=None):
+            if method == "GET":
+                return [{"parts": list(canonical)}]
+            canonical.extend(payload["parts"])
+            return {}
+
+        self.runtime.request.side_effect = request
+        await self.service._materialize_pending_voice("alice", "new-canonical-session", 5)
+        receipt = next(iter(self.service.voice_receipts.values()))
+        self.assertEqual(receipt["session_id"], "new-canonical-session")
+        self.assertEqual(receipt["state"], "complete")
+        self.assertNotIn("text", receipt)
+        self.runtime.run.assert_not_awaited()
+
     async def test_web_lifecycle_lock_keeps_new_chat_out_until_guarded_run_finishes(self):
         await self.service.setup()
         self.service.web_sessions = {"alice": "canonical-session"}
