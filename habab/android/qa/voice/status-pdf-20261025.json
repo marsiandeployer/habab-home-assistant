@@ -1,0 +1,14 @@
+{
+  "kind": "android_current_status_pdf",
+  "path": "/mnt/data/habab-android-status-20261025.pdf",
+  "sha256": "3a9426029c833d3299e2013fc7aa2253b4a6964a16a407915fa31888e026bd3c",
+  "bytes": 56899,
+  "pages": 2,
+  "final_rendered_pages_opened_and_visually_reviewed": 2,
+  "scope": "interim status report, not physical release acceptance",
+  "phoneUpdate": "APK15 installed; runtime extraction and restart unknown after lost ADB",
+  "cloudImage": "sha256:22ae7a87f5286c37a02257dd61575e55f56ff4424a35d188e956a757c139634d",
+  "nativeStatusFix": "3 focused JVM tests passed; not installed on phone",
+  "secretsIncluded": false,
+  "historicalReportPreserved": true
+}
