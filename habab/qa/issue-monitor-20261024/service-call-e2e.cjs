@@ -8,25 +8,29 @@ const assert = require("node:assert/strict");
 const puppeteer = require("../../node_modules/puppeteer-core");
 const { withOwnedChromium } = require("/root/tools/chrome-daemon/owned-browser.cjs");
 
-const OUTPUT = path.join(__dirname, "service-call-e2e.json");
+// A later separately authorized run must receive a deliberately new unique label.
+const ATTEMPT_LABEL = "20261024-attempt-2";
+const OUTPUT = path.join(__dirname, `service-call-e2e-${ATTEMPT_LABEL}.json`);
 const FIXTURE_NAME = "Habab QA service-call fixture 20261024";
-const FIXTURE_ID_PREFIX = "habab_qa_service_call_20261024";
-const PRIVATE_TRACE_NAME = "service-call-e2e-private.json";
+const PRIVATE_TRACE_NAME = `service-call-e2e-${ATTEMPT_LABEL}-private.json`;
 const ALLOWED_ORIGIN = "https://habab-demo.wpmix.net";
+const FIRST_PUBLIC_OUTPUT = path.join(__dirname, "service-call-e2e.json");
+const FIRST_PRIVATE_TRACE_NAME = "service-call-e2e-private.json";
 
-function hasAcceptedTurn(messages, prompt, transitions) {
-  let observedStart = false;
-  let observedFinish = false;
-  for (const transition of transitions) {
-    if (transition.busy === true) observedStart = true;
-    else if (observedStart && transition.busy === false) observedFinish = true;
-  }
+function hasAcceptedTurn(messages, prompt, probe, currentUi) {
   const userMessage = messages.at(-2);
   const assistantMessage = messages.at(-1);
-  return observedStart && observedFinish
+  return probe?.accepted === true && probe?.completed === true && probe?.final_busy === false
+    && probe.submitted_text === prompt && probe.expected_text === prompt
+    && probe.status_error !== true
+    && currentUi?.busy === false && currentUi?.status_error === false
     && userMessage?.role === "user" && userMessage.text === prompt
     && assistantMessage?.role === "assistant"
     && typeof assistantMessage.text === "string" && assistantMessage.text.trim().length > 0;
+}
+
+function shouldDeferFixtureCleanup(turnMayBeActive, backendActive) {
+  return turnMayBeActive && backendActive !== false;
 }
 
 function args(argv) {
@@ -60,6 +64,23 @@ function readJson(file, code) {
 function privateWrite(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
   fs.chmodSync(file, 0o600);
+}
+
+function preserveFirstFailure(authFile) {
+  const privateDir = path.dirname(path.resolve(authFile));
+  const sourcePublic = FIRST_PUBLIC_OUTPUT;
+  const sourcePrivate = path.join(privateDir, FIRST_PRIVATE_TRACE_NAME);
+  const archivePublic = path.join(__dirname, "service-call-e2e-20261024-attempt-1.json");
+  const archivePrivate = path.join(privateDir, "service-call-e2e-20261024-attempt-1-private.json");
+  const sourcesExist = fs.existsSync(sourcePublic) && fs.existsSync(sourcePrivate);
+  if (!sourcesExist) return;
+  const archivePublicExists = fs.existsSync(archivePublic);
+  const archivePrivateExists = fs.existsSync(archivePrivate);
+  if (archivePublicExists && archivePrivateExists) return;
+  if (archivePublicExists !== archivePrivateExists) throw new Error("prior_attempt_archive_incomplete");
+  fs.copyFileSync(sourcePublic, archivePublic, fs.constants.COPYFILE_EXCL);
+  fs.copyFileSync(sourcePrivate, archivePrivate, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(archivePrivate, 0o600);
 }
 
 function runtimeInputs(options) {
@@ -195,7 +216,7 @@ async function main() {
     target_alias: "accepted-owner-test",
     runtime: status,
     mode: options.runLive ? "chat_e2e" : "read_only_preflight",
-    verdict: options.runLive ? "NOT_RUN" : "PREFLIGHT_PASS",
+    verdict: options.runLive ? "IN_PROGRESS" : "PREFLIGHT_PASS",
     cases: {},
     cleanup: { fixture_created: false, fixture_deleted: false },
     limitations: [
@@ -209,7 +230,8 @@ async function main() {
   }
 
   const privateTracePath = path.join(path.dirname(path.resolve(options["auth-file"])), PRIVATE_TRACE_NAME);
-  if (fs.existsSync(privateTracePath) || fs.existsSync(OUTPUT)) throw new Error("prior_run_artifact_exists");
+  if (fs.existsSync(privateTracePath) || fs.existsSync(OUTPUT)) throw new Error("attempt_output_exists");
+  preserveFirstFailure(options["auth-file"]);
   const privateTrace = {
     runtime: runtime.identity,
     helper_name: FIXTURE_NAME,
@@ -226,10 +248,16 @@ async function main() {
   let entityId;
   let priorHelperIds = new Set();
   let chatTurnMayBeActive = false;
+  let currentCaseName = null;
+  let currentPrompt = null;
+  let currentEventOffset = 0;
+  let capturedCompletionProbe = null;
   let setupError;
   let safeToDeleteFixture = true;
   const persistPrivate = () => privateWrite(privateTracePath, privateTrace);
   const savePublic = () => fs.writeFileSync(OUTPUT, JSON.stringify(report, null, 2) + "\n", { mode: 0o644 });
+  report.attempt = ATTEMPT_LABEL;
+  savePublic();
 
   async function cleanupWhileBrowserOpen(page) {
     if (page && fixtureCreateAttempted && !fixtureCreated) {
@@ -256,20 +284,67 @@ async function main() {
       }
     }
     if (page && chatTurnMayBeActive) {
+      let activity = { active: null, error: "diagnostics_unavailable" };
       try {
-        const active = await page.evaluate(() => {
-          const chat = document.querySelector("habab-setup-chat");
-          if (chat?.busy) chat.shadowRoot.querySelector(".stop")?.click();
-          return !!chat?.busy;
-        });
-        if (active) {
-          await page.waitForFunction(() => !document.querySelector("habab-setup-chat")?.busy,
-            { timeout: 20000 });
-        }
-        chatTurnMayBeActive = false;
+        activity = await page.evaluate(() => window.__hababQaReadDiagnostics
+          ? window.__hababQaReadDiagnostics()
+          : { active: null, error: "diagnostics_unavailable" });
       } catch {
-        report.active_turn_stopped_before_cleanup = false;
+        activity = { active: null, error: "diagnostics_unavailable" };
+      }
+      if (activity.active === true) {
+        try {
+          const stopResult = await page.evaluate(async () => {
+            const chat = document.querySelector("habab-setup-chat");
+            if (typeof chat?.stop !== "function") return "stop_unavailable";
+            let timer;
+            try {
+              return await Promise.race([
+                chat.stop().then(() => "stop_requested"),
+                new Promise((resolve) => {
+                  timer = setTimeout(() => resolve("stop_timeout"), 5000);
+                }),
+              ]);
+            } catch {
+              return "stop_failed";
+            } finally {
+              clearTimeout(timer);
+            }
+          });
+          if (stopResult === "stop_requested") {
+            try {
+              await page.waitForFunction(() => !document.querySelector("habab-setup-chat")?.busy,
+                { timeout: 20000, polling: 100 });
+            } catch {
+              // Backend diagnostics below still decide whether deletion is safe.
+            }
+          }
+        } catch {
+          report.active_turn_stop_attempted = false;
+        }
+        try {
+          activity = await page.evaluate(() => window.__hababQaReadDiagnostics
+            ? window.__hababQaReadDiagnostics()
+            : { active: null, error: "diagnostics_unavailable" });
+        } catch {
+          activity = { active: null, error: "diagnostics_unavailable" };
+        }
+      }
+      if (shouldDeferFixtureCleanup(chatTurnMayBeActive, activity.active)) {
         safeToDeleteFixture = false;
+        report.cleanup.backend_idle_confirmed = false;
+        report.cleanup.backend_status = activity.active === true ? "active" : "unavailable";
+        report.verdict = "FAIL_CLEANUP";
+        privateTrace.cleanup_deferred_backend_state = activity.active;
+        privateTrace.cleanup_deferred_backend_error = activity.error;
+        persistPrivate();
+      } else {
+        chatTurnMayBeActive = false;
+        report.cleanup.backend_idle_confirmed = true;
+        report.cleanup.backend_status = "idle";
+      }
+      if (!safeToDeleteFixture) {
+        report.active_turn_stopped_before_cleanup = false;
       }
     }
     if (page && unsubscribeInstalled) {
@@ -310,14 +385,76 @@ async function main() {
     }
     if (page) {
       try {
-        await page.evaluate(() => {
-          window.__hababQaBusyObserver?.disconnect();
-          localStorage.removeItem("hassTokens");
-        });
+        await page.evaluate(() => localStorage.removeItem("hassTokens"));
       } catch {
         // The owned Chromium profile is removed by withOwnedChromium.
       }
     }
+    savePublic();
+  }
+
+  async function captureFailureSnapshot(page, caseName, prompt, eventOffset) {
+    let ui;
+    try {
+      ui = await page.evaluate(async ({ expectedText, startEvent }) => {
+        const chat = document.querySelector("habab-setup-chat");
+        if (!chat) return { chat_present: false, service_events: (window.__hababQaServiceCalls || []).slice(startEvent) };
+        const messages = Array.isArray(chat.messages) ? chat.messages.slice(-2) : [];
+        const diagnostics = window.__hababQaReadDiagnostics
+          ? await window.__hababQaReadDiagnostics()
+          : { active: null, error: "diagnostics_unavailable" };
+        return {
+          chat_present: true,
+          busy: Boolean(chat.busy),
+          running: Boolean(chat.running),
+          status_error: Boolean(chat.shadowRoot.querySelector("#status")?.classList.contains("error")),
+          turn_probe: chat.__qaTurnProbe || null,
+          latest_messages: messages.map((message) => ({ role: message.role, text: String(message.text || "") })),
+          exact_prompt_at_tail: messages.length === 2 && messages[0]?.role === "user"
+            && messages[0].text === expectedText,
+          assistant_at_tail: messages.length === 2 && messages[1]?.role === "assistant",
+          diagnostics,
+          service_events: (window.__hababQaServiceCalls || []).slice(startEvent),
+        };
+      }, { expectedText: prompt, startEvent: eventOffset });
+    } catch (error) {
+      ui = { snapshot_error: error instanceof Error ? error.name : "UnknownError" };
+    }
+    let fixtureState = null;
+    let fixtureStateReadError = false;
+    if (entityId) {
+      try {
+        fixtureState = await readState(runtime, entityId);
+      } catch {
+        fixtureStateReadError = true;
+      }
+    }
+    privateTrace.failure_snapshot = {
+      case_name: caseName,
+      prompt,
+      captured_at: new Date().toISOString(),
+      completed_probe: capturedCompletionProbe,
+      ui,
+      fixture_state: fixtureState,
+      fixture_state_read_error: fixtureStateReadError,
+    };
+    report.failure_snapshot = {
+      case_name: caseName,
+      ui_snapshot_captured: !ui.snapshot_error,
+      busy: ui.busy ?? null,
+      status_error: ui.status_error ?? null,
+      probe_accepted: ui.turn_probe?.accepted ?? null,
+      probe_completed: ui.turn_probe?.completed ?? null,
+      captured_probe_accepted: capturedCompletionProbe?.accepted ?? null,
+      captured_probe_completed: capturedCompletionProbe?.completed ?? null,
+      exact_prompt_at_tail: ui.exact_prompt_at_tail ?? null,
+      assistant_at_tail: ui.assistant_at_tail ?? null,
+      backend_active: ui.diagnostics?.active ?? null,
+      service_event_count: Array.isArray(ui.service_events) ? ui.service_events.length : null,
+      fixture_readback_state: fixtureState?.state ?? null,
+      fixture_readback_error: fixtureStateReadError,
+    };
+    persistPrivate();
     savePublic();
   }
 
@@ -386,7 +523,7 @@ async function main() {
 
       const entities = await page.evaluate(() => document.querySelector("habab-setup-chat").hass.callWS({ type: "config/entity_registry/list" }));
       const entity = entities.find((item) => item.platform === "input_boolean" && item.unique_id === helperId);
-      assert.ok(entity?.entity_id?.startsWith("input_boolean.habab_qa_service_call_20261024"), "fixture_entity_id_mismatch");
+      assert.ok(entity?.entity_id?.startsWith("input_boolean.habab_qa_service_call_fixture_20261024"), "fixture_entity_id_mismatch");
       entityId = entity.entity_id;
       privateTrace.entity_id = entityId;
       persistPrivate();
@@ -417,16 +554,24 @@ async function main() {
       }, entityId);
       unsubscribeInstalled = true;
       await page.evaluate(() => {
-        const chat = document.querySelector("habab-setup-chat");
-        const send = chat.shadowRoot.querySelector(".send");
-        const stop = chat.shadowRoot.querySelector(".stop");
-        window.__hababQaBusyTransitions = [];
-        window.__hababQaBusyObserver = new MutationObserver(() => {
-          window.__hababQaBusyTransitions.push({ busy: chat.busy, send_disabled: send.disabled,
-            stop_hidden: stop.hidden });
-        });
-        window.__hababQaBusyObserver.observe(send, { attributes: true, attributeFilter: ["disabled"] });
-        window.__hababQaBusyObserver.observe(stop, { attributes: true, attributeFilter: ["hidden"] });
+        window.__hababQaReadDiagnostics = async () => {
+          const chat = document.querySelector("habab-setup-chat");
+          if (!chat?.hass || !chat.sessionId) return { active: null, error: "diagnostics_unavailable" };
+          let timer;
+          try {
+            return await Promise.race([
+              chat.hass.callWS({ type: "habab_home/agent/diagnostics", session_id: chat.sessionId })
+                .then((value) => ({ active: value.active, error: value.error })),
+              new Promise((resolve) => {
+                timer = setTimeout(() => resolve({ active: null, error: "diagnostics_timeout" }), 5000);
+              }),
+            ]);
+          } catch {
+            return { active: null, error: "diagnostics_unavailable" };
+          } finally {
+            clearTimeout(timer);
+          }
+        };
       });
 
       // Calibrate the event observer through native HA helper/service APIs.
@@ -458,62 +603,126 @@ async function main() {
         const start = await page.evaluate(() => {
           const chat = document.querySelector("habab-setup-chat");
           return { busy: chat.busy, send_disabled: chat.shadowRoot.querySelector(".send").disabled,
-            event_count: window.__hababQaServiceCalls.length,
-            transition_count: window.__hababQaBusyTransitions.length };
+            event_count: window.__hababQaServiceCalls.length };
         });
         assert.equal(start.busy, false, `${name}_chat_already_busy`);
         assert.equal(start.send_disabled, false, `${name}_send_disabled_before_submit`);
+        currentCaseName = name;
+        currentPrompt = prompt;
+        currentEventOffset = start.event_count;
         privateTrace.prompts.push({ name, text: prompt });
         persistPrivate();
         chatTurnMayBeActive = true;
-        const submitted = await page.evaluate((text) => {
+        const clicked = await page.evaluate((text) => {
           const chat = document.querySelector("habab-setup-chat");
           const send = chat.shadowRoot.querySelector(".send");
+          if (!chat.__qaOriginalSend) {
+            chat.__qaOriginalSend = chat.send;
+            chat.send = async function (...args) {
+              const probe = this.__qaTurnProbe;
+              const text = typeof args[0] === "string" ? args[0].trim() : this.shadowRoot.querySelector("textarea")?.value?.trim();
+              if (!probe || text !== probe.expected_text) return this.__qaOriginalSend.apply(this, args);
+              const beforeBusy = Boolean(this.busy);
+              const beforeLength = this.messages.length;
+              const startedAt = Date.now();
+              const operation = this.__qaOriginalSend.apply(this, args);
+              const optimistic = this.messages.at(-1);
+              Object.assign(probe, {
+                submitted_text: text,
+                accepted: !beforeBusy && this.busy === true && this.messages.length === beforeLength + 1
+                  && optimistic?.role === "user" && optimistic.text === text,
+                started_at: startedAt,
+              });
+              try {
+                return await operation;
+              } catch (error) {
+                probe.thrown_error_type = error instanceof Error ? error.name : "UnknownError";
+                throw error;
+              } finally {
+                probe.completed = true;
+                probe.finished_at = Date.now();
+                probe.elapsed_ms = probe.finished_at - probe.started_at;
+                probe.final_busy = Boolean(this.busy);
+                probe.status_error = Boolean(this.shadowRoot.querySelector("#status")?.classList.contains("error"));
+                const latest = this.messages.slice(-2);
+                probe.latest_prompt_match = latest.length === 2 && latest[0]?.role === "user"
+                  && latest[0].text === probe.expected_text;
+                probe.assistant_reply_present = latest.length === 2 && latest[1]?.role === "assistant"
+                  && typeof latest[1].text === "string" && Boolean(latest[1].text.trim());
+              }
+            };
+          }
           if (chat.busy || send.disabled) return false;
+          chat.__qaTurnProbe = { expected_text: text, accepted: false, completed: false };
+          if (!chat.shadowRoot.querySelector("dialog")?.open) chat.shadowRoot.querySelector(".launcher")?.click();
           const input = chat.shadowRoot.querySelector("textarea");
           input.focus();
           input.value = text;
-          input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
           send.click();
           return true;
         }, prompt);
-        if (!submitted) {
+        if (!clicked) {
           chatTurnMayBeActive = false;
           throw new Error(`${name}_submit_rejected`);
         }
-        await page.waitForFunction((startCount) => window.__hababQaBusyTransitions
-          .slice(startCount).some((transition) => transition.busy === true),
-        { timeout: 5000 }, start.transition_count);
-        await page.waitForFunction(({ count, prompt }) => {
+        const completedProbeHandle = await page.waitForFunction((expectedText) => {
+          const probe = document.querySelector("habab-setup-chat")?.__qaTurnProbe;
+          if (!probe?.completed || probe.expected_text !== expectedText || probe.submitted_text !== expectedText) return false;
+          return {
+            expected_text: probe.expected_text,
+            submitted_text: probe.submitted_text,
+            accepted: probe.accepted,
+            completed: probe.completed,
+            started_at: probe.started_at,
+            finished_at: probe.finished_at,
+            elapsed_ms: probe.elapsed_ms,
+            final_busy: probe.final_busy,
+            status_error: probe.status_error,
+            latest_prompt_match: probe.latest_prompt_match,
+            assistant_reply_present: probe.assistant_reply_present,
+          };
+        }, { timeout: 210000, polling: 100 }, prompt);
+        let completedProbe;
+        try {
+          completedProbe = await completedProbeHandle.jsonValue();
+        } finally {
+          await completedProbeHandle.dispose();
+        }
+        capturedCompletionProbe = completedProbe;
+        const turn = await page.evaluate(async ({ offset, startedAt }) => {
           const chat = document.querySelector("habab-setup-chat");
-          const error = chat.shadowRoot.querySelector("#status")?.classList.contains("error");
-          const transitions = window.__hababQaBusyTransitions.slice(count);
-          const started = transitions.some((transition) => transition.busy === true);
-          const finished = transitions.some((transition, index) => index > transitions.findIndex((item) => item.busy === true)
-            && transition.busy === false);
-          const latest = chat.messages.slice(-2);
-          const exactPromptAndReply = latest.length === 2 && latest[0]?.role === "user"
-            && latest[0].text === prompt && latest[1]?.role === "assistant"
-            && typeof latest[1].text === "string" && !!latest[1].text.trim();
-          return started && finished && !chat.busy && (exactPromptAndReply || error);
-        }, { timeout: 210000 }, { count: start.transition_count, prompt });
-        chatTurnMayBeActive = false;
-        const reply = await page.evaluate(() => {
-          const chat = document.querySelector("habab-setup-chat");
-          return { role: chat.messages.at(-1)?.role, text: chat.messages.at(-1)?.text || "",
-            error: chat.shadowRoot.querySelector("#status")?.classList.contains("error") || false };
-        });
-        privateTrace.replies.push({ name, text: reply.text });
-        const events = await page.evaluate((offset) => window.__hababQaServiceCalls.slice(offset), start.event_count);
-        const completion = await page.evaluate((offset) => ({
-          messages: document.querySelector("habab-setup-chat").messages.slice(-2),
-          transitions: window.__hababQaBusyTransitions.slice(offset).map((item) => ({ busy: item.busy })),
-        }), start.transition_count);
+          const messages = chat.messages.slice(-2).map((message) => ({ role: message.role, text: String(message.text || "") }));
+          const events = (window.__hababQaServiceCalls || []).slice(offset);
+          const diagnostics = window.__hababQaReadDiagnostics
+            ? await window.__hababQaReadDiagnostics()
+            : { active: null, error: "diagnostics_unavailable" };
+          return {
+            ui: {
+              busy: Boolean(chat.busy),
+              running: Boolean(chat.running),
+              status_error: Boolean(chat.shadowRoot.querySelector("#status")?.classList.contains("error")),
+            },
+            current_node_has_same_probe: chat.__qaTurnProbe?.started_at === startedAt,
+            messages,
+            events,
+            diagnostics,
+          };
+        }, { offset: start.event_count, startedAt: completedProbe.started_at });
+        turn.probe = completedProbe;
+        const reply = turn.messages.at(-1);
+        privateTrace.replies.push({ name, text: reply?.text || "" });
+        const events = turn.events;
         privateTrace.call_service_events.push({ name, events });
         persistPrivate();
-        assert.ok(hasAcceptedTurn(completion.messages, prompt, completion.transitions), `${name}_turn_not_correlated`);
-        assert.equal(reply.role, "assistant", `${name}_assistant_reply_missing_or_failed`);
-        assert.equal(reply.error, false, `${name}_turn_ended_with_error`);
+        chatTurnMayBeActive = turn.diagnostics.active !== false;
+        privateTrace.turn_probes = privateTrace.turn_probes || [];
+        privateTrace.turn_probes.push({ name, probe: turn.probe, ui: turn.ui,
+          current_node_has_same_probe: turn.current_node_has_same_probe, backend: turn.diagnostics });
+        persistPrivate();
+        assert.ok(hasAcceptedTurn(turn.messages, prompt, turn.probe, turn.ui), `${name}_turn_not_correlated`);
+        assert.equal(turn.probe.status_error, false, `${name}_turn_ended_with_error`);
+        assert.equal(turn.diagnostics.active, false, `${name}_backend_not_idle`);
 
         if (expectedService) {
           assert.equal(events.length, 1, `${name}_expected_one_service_call`);
@@ -535,6 +744,11 @@ async function main() {
         assert.equal(state.state, expectedState, `${name}_readback_mismatch`);
         report.cases[name] = { assistant_replied: true, service_call_count: events.length,
           submission_accepted: true,
+          turn_completed: true,
+          turn_elapsed_ms: turn.probe.elapsed_ms,
+          current_node_has_same_probe: turn.current_node_has_same_probe,
+          diagnostics_available: turn.diagnostics.active !== null,
+          backend_idle_confirmed: turn.diagnostics.active === false,
           target_matched: expectedService ? events[0]?.targets_fixture === true : false,
           context_matched: expectedService ? events[0]?.context_user_id === ownerUserId : false,
           readback: state.state };
@@ -545,6 +759,16 @@ async function main() {
       await sendTurn("turn_off", `Выключи только тестовый переключатель ${entityId}. Не меняй другие сущности и после вызова проверь его состояние.`, "off", "turn_off");
       await sendTurn("unknown_target", "Включи устройство с названием «Несуществующая QA цель issue-monitor». Сначала проверь, есть ли оно в Home Assistant. Не выбирай похожее устройство и не выполняй действие, если точной цели нет.", "off", null);
       report.verdict = "ACTIONS_PASS_CLEANUP_PENDING";
+      } catch (error) {
+        report.verdict = "FAIL";
+        report.failure_code = error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
+          ? error.message : "e2e_assertion_failed";
+        try {
+          await captureFailureSnapshot(page, currentCaseName || "setup", currentPrompt, currentEventOffset);
+        } catch {
+          report.failure_snapshot = { case_name: currentCaseName || "setup", ui_snapshot_captured: false };
+        }
+        throw error;
       } finally {
         // withOwnedChromium closes the page after this callback resolves.
         await cleanupWhileBrowserOpen(page);
@@ -572,7 +796,7 @@ async function pageHelperExists(page, helperId) {
   }, helperId);
 }
 
-module.exports = { hasAcceptedTurn };
+module.exports = { hasAcceptedTurn, shouldDeferFixtureCleanup };
 
 if (require.main === module) {
   main().catch((error) => {

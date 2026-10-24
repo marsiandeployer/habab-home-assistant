@@ -1,0 +1,43 @@
+{
+  "checked_at": "2026-10-24T17:45:18.319Z",
+  "target_alias": "accepted-owner-test",
+  "runtime": {
+    "identity": {
+      "image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+      "runtime": "habab-owner-test",
+      "source": "9d795359c22cf2844884caa5affc94209a8120ca"
+    },
+    "product_version": "0.3.5",
+    "home_assistant_version": "2026.10.2",
+    "status": "running"
+  },
+  "mode": "chat_e2e",
+  "verdict": "FAIL",
+  "cases": {
+    "turn_on": {
+      "assistant_replied": true,
+      "service_call_count": 1,
+      "submission_accepted": true,
+      "target_matched": true,
+      "context_matched": true,
+      "readback": "on"
+    }
+  },
+  "cleanup": {
+    "fixture_created": true,
+    "fixture_deleted": true
+  },
+  "limitations": [
+    "A browser action trace and independent Home Assistant state readback are required for E2E acceptance.",
+    "Physical device behavior is outside this nonphysical fixture test."
+  ],
+  "preexisting_history_count": 42,
+  "calibration": {
+    "observer_acknowledged": true,
+    "calls_observed": 2,
+    "target_matched": true,
+    "context_matched": true,
+    "state_restored_off": true
+  },
+  "failure_code": "e2e_assertion_failed"
+}

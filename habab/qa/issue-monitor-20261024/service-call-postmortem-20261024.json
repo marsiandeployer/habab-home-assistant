@@ -1,0 +1,43 @@
+{
+  "scope": "authenticated owner-test nonphysical web-chat service-call E2E",
+  "runtime": {
+    "source": "9d795359c22cf2844884caa5affc94209a8120ca",
+    "image": "sha256:e08f185758287f824bb46eb9c955f2605b10648807939189da663dcbd0dbdd29",
+    "product": "0.3.5",
+    "core": "2026.10.2"
+  },
+  "attempt_1": {
+    "original_verdict": "FAIL",
+    "on_action_readback": "PASS",
+    "off_original_ui_completion": "UNPROVEN",
+    "later_readonly_off_action_and_state": "PASS",
+    "backend_off_completion_seconds": 85.662,
+    "later_ui_reload_persisted_pair": "PASS",
+    "fixture_cleanup": "PASS"
+  },
+  "attempt_2": {
+    "original_verdict": "FAIL",
+    "on_action_context_readback_and_ui_completion": "PASS",
+    "on_elapsed_ms": 6774,
+    "off_action_context_readback_and_ui_completion": "PASS",
+    "off_elapsed_ms": 72407,
+    "unknown_exact_reply_tail": true,
+    "unknown_backend_idle": true,
+    "unknown_observed_service_calls": 0,
+    "unknown_fixture_state": "off",
+    "unknown_completion_correlation": "UNPROVEN_probe_absent_at_final_snapshot",
+    "fixture_cleanup": "PASS"
+  },
+  "independent_attempt_2_cleanup": {
+    "exact_helper_absent_from_storage": true,
+    "exact_entity_state_http": 404
+  },
+  "interpretation": {
+    "positive_on_off_scope": "accepted",
+    "full_suite": "FAIL",
+    "component_replacement": "plausible_not_proven",
+    "physical_devices": "NOT_RUN",
+    "native_integration_flow": "NOT_RUN",
+    "new_live_retry": "NOT_RUN"
+  }
+}
