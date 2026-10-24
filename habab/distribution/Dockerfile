@@ -28,3 +28,8 @@ RUN mkdir -p /opt/habab-telegram/node_modules \
 
 ENTRYPOINT ["/usr/local/bin/habab-home-entrypoint"]
 CMD ["/init"]
+
+# Keep revision metadata in the final image-config layer so normal code layers
+# remain cacheable; release builds must pass the full source commit explicitly.
+ARG HABAB_SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision="${HABAB_SOURCE_REVISION}"

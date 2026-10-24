@@ -35,6 +35,19 @@ docker compose up -d
 docker compose logs -f homeassistant
 ```
 
+Без указания коммита локальная сборка получает OCI label
+`org.opencontainers.image.revision=unknown`. Для релиза используйте чистый
+коммит и передайте его полный SHA:
+
+```sh
+docker compose build --build-arg HABAB_SOURCE_REVISION=<full-clean-commit-sha>
+docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' <release-image-tag>
+```
+
+Подставьте в `<release-image-tag>` тег собранного образа и проверьте совпадение
+label с SHA. При проверке релиза значение `unknown` означает, что источник кода
+не подтверждён. Существующие скрипты сборки без этого аргумента продолжают работать.
+
 При первой сборке Docker скачает закреплённый базовый образ Home Assistant с
 `ghcr.io` — около 2,36 ГБ. На время сборки нужен доступ к этому реестру и
 свободное место на диске. После сборки основной профиль работает локально; для
