@@ -45,12 +45,51 @@ ANDROID_HOME=/opt/android-sdk gradle --no-daemon -p habab/android \
 python3 -m unittest discover -s habab/android/tests -v
 ```
 
+При сборке runtime используйте полный SHA исходного Git-коммита. Он попадает
+в подписанный manifest как `sourceRevision`; release candidate сверяет
+`sourceFiles` с деревом этого коммита.
+
 Ключ создаётся один раз: при повторной сборке используйте существующий файл.
 `package_runtime.py` создаёт архив, JSON-манифест и подпись `.json.sig` в
 `habab/android/dist/`. В APK попадают публичный ключ проверки и адрес выпуска.
 Файл с приватным ключом в APK не входит. Ключ подписи APK и ключ подписи
 серверного архива — разные ключи. Debug APK предназначена для отладки через
 ADB; публикация приложения требует отдельной release-подписи.
+
+Для публикации передайте тот же полный SHA, который указали при сборке runtime;
+он записан в подписанном manifest как `sourceRevision`.
+
+```sh
+python3 habab/android/tools/publish_runtime.py \
+  "habab/android/dist/release-<ID>.json" \
+  --source-revision "<full-frozen-source-commit-SHA>" \
+  --public-key habab/android/app/src/main/assets/release/trusted-key.der
+```
+
+Publisher проверяет подпись, SHA-256 и содержимое нового runtime, публикует
+неизменяемый комплект и вызывает общий release-retention. На VM104 его
+манифест — `/root/tools/release-retention/states/habab-android.json`.
+Сохраняются текущий и предыдущий runtime; старые зарегистрированные артефакты
+и их сборочные копии удаляются без архивирования. При ошибке проверки очистка
+не запускается. На другом хосте задать `--state` и `--retention`, предварительно
+инициализировав текущий и предыдущий выпуски по общим инструкциям сервера.
+Публикация runtime не публикует APK и не обновляет устройство. Версии APK
+и runtime учитываются отдельно: два последовательных APK могут использовать
+один runtime. Незавершённые сборки в манифест хранения не добавлять.
+
+После выпуска APK зарегистрируйте файл в retention-манифесте под новым ID.
+Замените `apk-release-id` и имя файла фактическими значениями выпущенного APK
+(путь в примере указан относительно `/root`):
+
+```sh
+python3 /root/tools/release-retention/retention.py \
+  --state /root/tools/release-retention/states/habab-android-apk.json \
+  --release apk-release-id \
+  --artifact "homeassistent/habab/android/dist/<имя-APK-файла>.apk" --apply
+```
+
+Артефакт текущего и предыдущего APK хранить на постоянном диске. RAM-каталог
+с незавершённой сборкой не использовать как единственную копию для отката.
 
 PRoot и его библиотеки берутся из пакетов Termux с закреплёнными SHA-256.
 `prepare_native.py` меняет пути динамических библиотек на `$ORIGIN` и
