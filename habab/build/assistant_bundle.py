@@ -83,23 +83,55 @@ def render_entrypoint(html, module_url):
     return html.replace(LEGACY_TAG, replacement, 1)
 
 
+def _ensure_public_root(public_dir):
+    """Require a real public root and give only that root public traversal."""
+    if public_dir.is_symlink():
+        raise ValueError('assistant public root must not be a symlink')
+    if public_dir.exists():
+        if not public_dir.is_dir():
+            raise ValueError('assistant public root must be a directory')
+    else:
+        public_dir.mkdir(parents=True, mode=0o755)
+    public_dir.chmod(0o755)
+
+
+def _ensure_public_directory(public_dir, directory):
+    """Create and normalize only directories owned by the assistant bundle."""
+    relative = directory.relative_to(public_dir)
+    current = public_dir
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError('assistant public directory must not be a symlink')
+        current.mkdir(mode=0o755, exist_ok=True)
+        current.chmod(0o755)
+
+
 def publish_assistant(public_dir, source):
     public_dir = Path(public_dir)
     modules = _local_module_closure(source)
     release = _release(modules)
+    _ensure_public_root(public_dir)
     release_dir = (public_dir / release['relative_path']).parent
     for relative, data in modules.items():
         target = release_dir / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists() and target.read_bytes() != data:
-            raise ValueError('immutable assistant module differs')
-        if not target.exists():
+        _ensure_public_directory(public_dir, target.parent)
+        if target.is_symlink():
+            raise ValueError('assistant public module must not be a symlink')
+        if target.exists():
+            if not target.is_file():
+                raise ValueError('assistant public module must be a regular file')
+            if target.read_bytes() != data:
+                raise ValueError('immutable assistant module differs')
+        else:
             target.write_bytes(data)
+        target.chmod(0o644)
     # Cached HTML can still import this address; it forwards to the same UI.
     shim = public_dir / 'integrations/setup-chat.js'
-    shim.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_public_directory(public_dir, shim.parent)
     temporary = shim.with_suffix('.js.next')
     temporary.write_text('// Generated compatibility entry; source: distribution/src/habab_home/frontend/setup-chat.js.\n'
                          + f'import "{release["module_url"]}";\n', encoding='utf-8')
+    temporary.chmod(0o644)
     os.replace(temporary, shim)
     return release

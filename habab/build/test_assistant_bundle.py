@@ -1,3 +1,5 @@
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,6 +77,104 @@ class SharedAssistantTests(unittest.TestCase):
             source.write_text('import "./missing.js";\n')
             with self.assertRaisesRegex(ValueError, 'missing assistant import'):
                 assistant_release(source)
+
+    def test_publish_modes_stay_public_under_restrictive_umask_without_chmodding_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source_dir = base / 'frontend'
+            source_dir.mkdir()
+            nested = source_dir / 'nested'
+            nested.mkdir()
+            source = source_dir / 'setup-chat.js'
+            strings = source_dir / 'strings.js'
+            voice = nested / 'voice.js'
+            source.write_text('import "./strings.js";\nimport "./nested/voice.js";\n')
+            strings.write_text('export const strings = {};\n')
+            voice.write_text('export const voice = {};\n')
+            for path in (source, strings, voice):
+                path.chmod(0o600)
+
+            public = base / 'public'
+            private_sibling = base / 'private-sibling'
+            private_sibling.mkdir()
+            private_sibling.chmod(0o700)
+            sibling_file = private_sibling / 'private.json'
+            sibling_file.write_text('{}\n')
+            sibling_file.chmod(0o600)
+            previous_umask = os.umask(0o077)
+            try:
+                release = publish_assistant(public, source)
+            finally:
+                os.umask(previous_umask)
+
+            release_dir = (public / release['relative_path']).parent
+            for directory_path in (public, public / 'assistant', public / 'assistant/releases', release_dir,
+                                   release_dir / 'nested',
+                                   public / 'integrations'):
+                self.assertEqual(stat.S_IMODE(directory_path.stat().st_mode), 0o755,
+                    directory_path.relative_to(public).as_posix())
+            for relative in ('setup-chat.js', 'strings.js', 'nested/voice.js'):
+                output = release_dir / relative
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o644, relative)
+                self.assertEqual(output.read_bytes(), (source_dir / relative).read_bytes())
+            private_module = release_dir / 'setup-chat.js'
+            original_bytes = private_module.read_bytes()
+            private_module.chmod(0o600)
+            previous_umask = os.umask(0o077)
+            try:
+                repaired_release = publish_assistant(public, source)
+            finally:
+                os.umask(previous_umask)
+            self.assertEqual(repaired_release['sha256'], release['sha256'])
+            self.assertEqual(private_module.read_bytes(), original_bytes)
+            self.assertEqual(stat.S_IMODE(private_module.stat().st_mode), 0o644)
+            shim = public / 'integrations/setup-chat.js'
+            self.assertEqual(stat.S_IMODE(shim.stat().st_mode), 0o644)
+            for path in (source, strings, voice):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600,
+                    path.relative_to(source_dir).as_posix())
+            self.assertEqual(stat.S_IMODE(private_sibling.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(sibling_file.stat().st_mode), 0o600)
+
+    def test_invalid_public_root_fails_before_writing_bundle_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = base / 'setup-chat.js'
+            source.write_text('export const oneComponent = true;\n')
+
+            symlink_target = base / 'target'
+            symlink_target.mkdir()
+            public_symlink = base / 'public-link'
+            public_symlink.symlink_to(symlink_target, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, 'public root must not be a symlink'):
+                publish_assistant(public_symlink, source)
+            self.assertEqual(list(symlink_target.iterdir()), [])
+
+            public_file = base / 'public-file'
+            public_file.write_bytes(b'keep')
+            with self.assertRaisesRegex(ValueError, 'public root must be a directory'):
+                publish_assistant(public_file, source)
+            self.assertEqual(public_file.read_bytes(), b'keep')
+
+    def test_existing_module_symlink_is_rejected_without_touching_its_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = base / 'setup-chat.js'
+            source.write_text('export const oneComponent = true;\n')
+            public = base / 'public'
+            public.mkdir()
+            release = assistant_release(source)
+            module = (public / release['relative_path'])
+            module.parent.mkdir(parents=True)
+            target = base / 'private-target.js'
+            target.write_bytes(b'private')
+            module.symlink_to(target)
+
+            with self.assertRaisesRegex(ValueError, 'public module must not be a symlink'):
+                publish_assistant(public, source)
+            self.assertTrue(module.is_symlink())
+            self.assertEqual(target.read_bytes(), b'private')
+            self.assertFalse((public / 'integrations/setup-chat.js').exists())
 
 
 if __name__ == '__main__':
