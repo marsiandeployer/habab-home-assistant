@@ -25,8 +25,15 @@ from .assistant_identity import ASSISTANT_IDENTITY
 from .assistant_status import get_assistant_status
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
-from .providers import PROVIDERS, provider_api_base
+from .providers import (
+    PROVIDERS,
+    ProviderContract,
+    ProviderError,
+    provider_api_base,
+    resolve_provider_contract,
+)
 from .runtime_context import (
+    ANDROID_PROOT_RUNTIME_KIND,
     DOCKER_RUNTIME_KIND,
     RUNTIME_KIND_ENV,
     runtime_fingerprint,
@@ -48,6 +55,17 @@ EXA_CAPABILITY_CHUNK_BYTES = 4096
 EXA_MCP_TIMEOUT = 30_000
 EXA_MCP_NAME = "exa"
 EXA_MCP_ENV_KEY = "HABAB_HABAB_KEY"
+ANDROID_RUNTIME_STARTUP_TIMEOUT = 30.0
+
+
+def resolved_runtime_fingerprint(settings, contract, runtime_kind):
+    resolved_settings = {
+        **settings,
+        "resolved_protocol": contract.protocol,
+        "resolved_model": contract.model,
+        "resolved_base_url": contract.base_url,
+    }
+    return runtime_fingerprint(resolved_settings, runtime_kind)
 VOICE_TURN_METADATA_KEY = "habab_voice_turn"
 VOICE_TURN_METADATA_VALUE = "native_realtime.v1"
 VOICE_TURN_EVENT_ID_KEY = "habab_voice_event_id"
@@ -276,7 +294,7 @@ class SetupAgent:
         except (ClientError, ValueError) as error:
             raise AgentError("runtime_error") from error
 
-    async def ensure(self):
+    async def ensure(self, settings=None):
         runtime_kind = os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND)
         try:
             prompt = runtime_prompt(runtime_kind, PROMPT)
@@ -284,20 +302,28 @@ class SetupAgent:
             await self.close()
             raise AgentError("unsupported_runtime") from error
 
-        settings = self.settings()
+        settings = settings or self.settings()
         provider = settings["provider"]
         is_deepseek = provider == "deepseek"
-        is_gemini = provider in {"gemini", "habab"}
         provider_id = "habab-" + provider
         key_name = "HABAB_" + provider.upper() + "_KEY"
-        fingerprint = runtime_fingerprint(settings, runtime_kind)
+        try:
+            contract = await resolve_provider_contract(
+                async_get_clientsession(self.hass) if provider == "habab" else None,
+                settings,
+            )
+        except ProviderError as error:
+            raise AgentError(error.code) from None
+        if contract.text_ready is False:
+            raise AgentError("provider_not_ready")
+        fingerprint = resolved_runtime_fingerprint(settings, contract, runtime_kind)
         same_runtime = (self.process and self.process.returncode is None
                         and fingerprint == self.fingerprint)
         if same_runtime:
             if (provider != "habab" or self.external_search_status.get("state") != "unavailable"
                     or self.external_search_retry_at is None
                     or time.monotonic() < self.external_search_retry_at):
-                return
+                return contract
         mcp = {}
         if provider == "habab":
             exa_available = await fetch_habab_exa_capability(
@@ -317,7 +343,7 @@ class SetupAgent:
                     "reason": "capability_check_failed",
                 }
                 if same_runtime:
-                    return
+                    return contract
         else:
             self.external_search_retry_at = None
             self.external_search_status = {
@@ -334,14 +360,14 @@ class SetupAgent:
             "$schema": "https://opencode.ai/config.json", "autoupdate": False,
             "share": "disabled", "snapshot": False, "plugin": [], "mcp": mcp,
             "lsp": False, "formatter": False, "enabled_providers": [provider_id],
-            "model": f"{provider_id}/{settings['model']}",
+            "model": f"{provider_id}/{contract.model}",
             "permission": {"*": "allow"},
             "provider": {provider_id: {
-                "npm": "@ai-sdk/google" if is_gemini else "@ai-sdk/openai-compatible",
+                "npm": "@ai-sdk/google" if contract.protocol == "google" else "@ai-sdk/openai-compatible",
                 "name": PROVIDERS[provider]["name"],
-                "options": {"baseURL": provider_api_base(provider),
+                "options": {"baseURL": contract.base_url,
                             "apiKey": "{env:" + key_name + "}"},
-                "models": {settings["model"]: {"name": settings["model"],
+                "models": {contract.model: {"name": contract.model,
                     "limit": {"context": 131072, "output": 4096},
                     "options": {"thinking": {"type": "disabled"}} if is_deepseek else {}}},
             }},
@@ -369,16 +395,37 @@ class SetupAgent:
         except OSError as error:
             raise AgentError("runtime_start_failed") from error
         self.fingerprint = fingerprint
-        for _ in range(40):
-            if self.process.returncode is not None:
-                raise AgentError("runtime_start_failed")
-            try:
-                await self.request("GET", "global/health", timeout=1)
-                return
-            except AgentError:
-                await asyncio.sleep(.25)
-        await self.close()
-        raise AgentError("runtime_start_failed")
+        if runtime_kind == ANDROID_PROOT_RUNTIME_KIND:
+            deadline = time.monotonic() + ANDROID_RUNTIME_STARTUP_TIMEOUT
+            while True:
+                if self.process.returncode is not None:
+                    raise AgentError("runtime_start_failed")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    await self.close()
+                    raise AgentError("runtime_start_failed")
+                try:
+                    await self.request("GET", "global/health", timeout=min(1.0, remaining))
+                    return contract
+                except AgentError:
+                    if self.process.returncode is not None:
+                        raise AgentError("runtime_start_failed") from None
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        await self.close()
+                        raise AgentError("runtime_start_failed") from None
+                    await asyncio.sleep(min(0.25, remaining))
+        else:
+            for _ in range(40):
+                if self.process.returncode is not None:
+                    raise AgentError("runtime_start_failed")
+                try:
+                    await self.request("GET", "global/health", timeout=1)
+                    return contract
+                except AgentError:
+                    await asyncio.sleep(.25)
+            await self.close()
+            raise AgentError("runtime_start_failed")
 
     def prepare_directories(self):
         for name in ("", "home", "config", "data", "state", "cache", "workspace"):
@@ -451,13 +498,16 @@ class SetupAgent:
             raise AgentError("busy")
         async with self.lock:
             settings = self.settings()
-            await self.ensure()
+            contract = await self.ensure(settings)
             self.active = (owner, session_id)
             try:
                 status = await get_assistant_status(self.hass, owner, settings, verify_telegram=False)
                 status["external_search"] = dict(self.external_search_status)
                 response = await self.request("POST", f"session/{session_id}/message", {
-                    "agent": "build", "model": {"providerID": "habab-" + settings["provider"], "modelID": settings["model"]},
+                    "agent": "build", "model": {
+                        "providerID": "habab-" + settings["provider"],
+                        "modelID": contract.model if isinstance(contract, ProviderContract) else settings["model"],
+                    },
                     "system": runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT),
                     "parts": [
                         {"type": "text", "synthetic": True,

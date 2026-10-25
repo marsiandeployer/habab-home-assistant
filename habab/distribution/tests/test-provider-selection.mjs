@@ -9,7 +9,7 @@ Object.defineProperty(globalThis, "customElements", {
   configurable: true,
   value: { get: (name) => definitions.get(name), define: (name, value) => definitions.set(name, value) },
 });
-await import("../src/habab_home/frontend/ai-panel.js?provider-selection-test");
+const { providerModelPresentation } = await import("../src/habab_home/frontend/ai-panel.js?provider-selection-test");
 const HababAIPanel = definitions.get("habab-ai-panel");
 if (originalHTMLElement) Object.defineProperty(globalThis, "HTMLElement", originalHTMLElement);
 else delete globalThis.HTMLElement;
@@ -83,4 +83,36 @@ test("a clean first load selects the saved provider once", async () => {
     : { pipelines: [] });
   await panel.refresh();
   assert.equal(panel.provider, "habab");
+});
+
+test("Habab model presentation follows effective metadata without changing stored legacy input", () => {
+  const managed = providerModelPresentation("habab", {
+    model: "gemini-3.1-flash-lite",
+    managed_model: "habab-chat",
+    effective_model: "habab-chat",
+    protocol: "openai_compatible",
+    text_ready: false,
+  }, "ru");
+  assert.equal(managed.readOnly, true);
+  assert.equal(managed.label, "Сохранённое значение для совместимости");
+  assert.match(managed.help, /habab-chat/);
+  assert.match(managed.help, /OpenAI-совместимый API/);
+  assert.match(managed.help, /не готово/);
+
+  const legacy = providerModelPresentation("habab", {
+    model: "gemini-3.1-flash-lite",
+    managed_model: null,
+    effective_model: "gemini-3.1-flash-lite",
+    protocol: "google",
+    text_ready: true,
+  }, "en");
+  assert.equal(legacy.readOnly, false);
+  assert.match(legacy.help, /Google Gemini/);
+  assert.match(legacy.help, /gemini-3.1-flash-lite/);
+
+  assert.deepEqual(providerModelPresentation("deepseek", { model: "deepseek-flash" }, "en"), {
+    readOnly: false,
+    label: null,
+    help: null,
+  });
 });

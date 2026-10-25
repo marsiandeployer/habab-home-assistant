@@ -21,17 +21,20 @@ from urllib.parse import urlsplit
 from aiohttp import ClientSession, ClientTimeout, ClientWSTimeout, WSMsgType, web
 
 GEMINI_TEXT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
+DEEPSEEK_CHAT_COMPLETIONS = 'https://api.deepseek.com/chat/completions'
 GEMINI_TOKEN_URL = 'https://generativelanguage.googleapis.com/v1beta/auth_tokens'
 GEMINI_CONSTRAINED_UPSTREAM = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
 GEMINI_MODEL = 'gemini-3.8-live'
 GEMINI_TEXT_MODEL = 'gemini-3.1-flash-lite'
 GEMINI_TEXT_MODELS = (GEMINI_TEXT_MODEL, 'gemini-3.8-flash')
+HABAB_TEXT_MODEL = 'habab-chat'
+DEEPSEEK_TEXT_MODEL = 'deepseek-flash'
 GEMINI_WEBSOCKET = 'wss://habab-voice.wpmix.net/gemini/ws'
 TOKEN_RESPONSE_MAX = 64 * 1024
 VOICE_FIRST_FRAME_TIMEOUT = 10
 VOICE_SETUP_MAX_BYTES = 64 * 1024
 BROWSER_VOICE_AUTH_TYPE = 'habab.voice.auth.v1'
-LEGACY_OPENAI_ROUTES = {'chat/completions', 'audio/speech', 'audio/transcriptions', 'realtime/client_secrets', 'models'}
+LEGACY_OPENAI_ROUTES = {'audio/speech', 'audio/transcriptions', 'realtime/client_secrets'}
 TELEGRAM_METHODS = ('getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction')
 TELEGRAM_BOT_TOKEN = re.compile(r'[0-9]{1,20}:[A-Za-z0-9_-]{20,256}\Z')
 TELEGRAM_API_BASE = 'https://api.telegram.org/bot'
@@ -83,7 +86,8 @@ async def redacted_stream(content, secret, max_bytes):
 
 
 class Gateway:
-    def __init__(self, key_hash, *, upstream_key=None, control_socket=None, browser_origins=()):
+    def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
+                 browser_origins=()):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         if not isinstance(browser_origins, (list, tuple, set, frozenset)):
@@ -92,6 +96,7 @@ class Gateway:
             raise ValueError('Invalid browser origin')
         self.key_hash = key_hash
         self.upstream_key = upstream_key
+        self.text_upstream_key = text_upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
         self.browser_origins = frozenset(browser_origins)
         self.gemini_credentials = {}
@@ -138,6 +143,7 @@ class Gateway:
                 await control.wait_closed()
                 self.control_socket.unlink(missing_ok=True)
             self.upstream_key = None
+            self.text_upstream_key = None
             self.gemini_credentials.clear()
             await self.client.close()
 
@@ -150,9 +156,15 @@ class Gateway:
                 raise ValueError('Wrong enrollment owner')
             payload = json.loads(await asyncio.wait_for(reader.readline(), 3))
             key = payload.get('upstream_key')
+            purpose = payload.get('purpose', 'voice')
+            if set(payload) - {'upstream_key', 'purpose'} or purpose not in {'voice', 'text'}:
+                raise ValueError('Invalid enrollment purpose')
             if not isinstance(key, str) or not 8 <= len(key) <= 2048 or any(ord(c) < 33 or ord(c) > 126 for c in key):
                 raise ValueError('Invalid enrollment')
-            self.upstream_key = key
+            if purpose == 'text':
+                self.text_upstream_key = key
+            else:
+                self.upstream_key = key
             writer.write(b'{"enrolled":true}\n')
         except Exception:
             writer.write(b'{"enrolled":false}\n')
@@ -185,6 +197,116 @@ class Gateway:
             'telegram': {'protocol': 'telegram-bot-api-relay-v1', 'base': '/telegram',
                          'methods': list(TELEGRAM_METHODS)},
         }, headers={'Cache-Control': 'no-store'})
+
+    async def text_capabilities(self, request):
+        _, digest = self.authorization(request)
+        if not self.owner(digest):
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if request.method != 'GET':
+            return web.json_response({'error': {'code': 'relay_http_method_not_allowed'}}, status=405)
+        if request.query:
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        ready = self.text_upstream_key is not None
+        return web.json_response({
+            'protocol': 'openai_compatible', 'model': HABAB_TEXT_MODEL, 'api_path': '/v1',
+            'managed': True, 'configured': ready, 'ready': ready,
+        }, headers={'Cache-Control': 'no-store'})
+
+    async def text_models(self, request):
+        _, digest = self.authorization(request)
+        if not self.owner(digest):
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if request.method != 'GET':
+            return web.json_response({'error': {'code': 'relay_http_method_not_allowed'}}, status=405)
+        if request.query or request.content_length not in (None, 0) or request.headers.get('Transfer-Encoding'):
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        return web.json_response({
+            'object': 'list',
+            'data': [{'id': HABAB_TEXT_MODEL, 'object': 'model', 'owned_by': 'habab'}],
+        }, headers={'Cache-Control': 'no-store'})
+
+    async def text_chat_completions(self, request):
+        service_key, digest = self.authorization(request)
+        if not self.owner(digest):
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if request.method != 'POST':
+            return web.json_response({'error': {'code': 'relay_http_method_not_allowed'}}, status=405)
+        if request.query:
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        if request.content_type != 'application/json':
+            return web.json_response({'error': {'code': 'relay_invalid_request'}}, status=400)
+        try:
+            body = await request.read()
+            payload = json.loads(body)
+            if (not body or len(body) > 2 * 1024 * 1024 or not isinstance(payload, dict)
+                    or service_key.encode() in body):
+                raise ValueError
+            if payload.get('model') != HABAB_TEXT_MODEL:
+                return web.json_response({'error': {'code': 'relay_unknown_model'}}, status=404)
+            if not isinstance(payload.get('messages'), list) or not payload['messages']:
+                raise ValueError
+            streaming = payload.get('stream', False)
+            if not isinstance(streaming, bool):
+                raise ValueError
+        except (ValueError, UnicodeError, TypeError):
+            return web.json_response({'error': {'code': 'relay_invalid_request'}}, status=400)
+        if self.text_upstream_key is None:
+            return web.json_response({'error': {'code': 'habab_text_upstream_not_ready'}}, status=503)
+        upstream_key = self.text_upstream_key
+        if upstream_key.encode() in body:
+            return web.json_response({'error': {'code': 'relay_invalid_request'}}, status=400)
+        if self.inflight >= 6:
+            return web.json_response({'error': {'code': 'relay_busy'}}, status=429)
+        payload['model'] = DEEPSEEK_TEXT_MODEL
+        upstream_body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        self.inflight += 1
+        result = None
+        try:
+            async with self.client.post(DEEPSEEK_CHAT_COMPLETIONS,
+                    headers={'Authorization': 'Bearer ' + upstream_key, 'Content-Type': 'application/json'},
+                    data=upstream_body, allow_redirects=False,
+                    timeout=ClientTimeout(total=120, sock_read=60)) as response:
+                headers = {'Content-Type': response.headers.get('Content-Type', 'application/json'),
+                           'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+                if streaming and response.status == 200:
+                    result = web.StreamResponse(status=response.status, headers=headers)
+                    await result.prepare(request)
+                    try:
+                        async for block in redacted_stream(response.content, upstream_key.encode(), 16 * 1024 * 1024):
+                            await result.write(block)
+                    except ValueError:
+                        await result.write(b'data: {"error":{"code":"relay_response_too_large"}}\n\n')
+                    await result.write_eof()
+                    return result
+                response_body = bytearray()
+                async for block in response.content.iter_chunked(65536):
+                    response_body.extend(block)
+                    if len(response_body) > 8 * 1024 * 1024:
+                        return web.json_response({'error': {'code': 'relay_response_too_large'}}, status=502)
+                safe = bytes(response_body).replace(upstream_key.encode(), b'[redacted]')
+                return web.Response(body=safe, status=response.status, headers=headers)
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            if result is not None and result.prepared:
+                try:
+                    await result.write(b'data: {"error":{"code":"relay_upstream_timeout"}}\n\n')
+                    await result.write_eof()
+                except Exception:
+                    pass
+                return result
+            return web.json_response({'error': {'code': 'relay_upstream_timeout'}}, status=504)
+        except Exception:
+            if result is not None and result.prepared:
+                try:
+                    await result.write(b'data: {"error":{"code":"relay_upstream_unavailable"}}\n\n')
+                    await result.write_eof()
+                except Exception:
+                    pass
+                return result
+            return web.json_response({'error': {'code': 'relay_upstream_unavailable'}}, status=502)
+        finally:
+            self.inflight -= 1
 
     async def telegram(self, request):
         auth_values = request.headers.getall('Authorization', [])
@@ -551,6 +673,9 @@ class Gateway:
         app.cleanup_ctx.append(self.lifecycle)
         app.router.add_get('/health', self.health)
         app.router.add_get('/v1/capabilities', self.capabilities)
+        app.router.add_route('*', '/text/capabilities', self.text_capabilities)
+        app.router.add_route('*', '/v1/models', self.text_models)
+        app.router.add_route('*', '/v1/chat/completions', self.text_chat_completions)
         app.router.add_route('*', '/telegram/{method}', self.telegram)
         app.router.add_post('/v1/realtime/bootstrap', self.gemini_bootstrap)
         app.router.add_get('/gemini/ws', self.gemini_voice)

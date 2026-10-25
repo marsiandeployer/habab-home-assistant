@@ -14,7 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
-from .providers import ProviderClient, ProviderError
+from .providers import ProviderClient, ProviderError, resolve_provider_contract
 from .setup_agent import AgentError
 
 
@@ -22,7 +22,7 @@ _API_CHECK_OPTION = "habab_api_check"
 _API_CHECK_STATUSES = {"verified", "rejected", "unknown"}
 _API_CHECK_REASONS = {
     "invalid_provider", "invalid_auth", "quota", "invalid_model", "cannot_connect", "timeout",
-    "invalid_response", "tools_unsupported",
+    "invalid_response", "provider_not_ready", "tools_unsupported",
 }
 
 
@@ -157,11 +157,39 @@ async def list_connections(hass, connection, msg):
             for item in er.async_entries_for_config_entry(registry, entry.entry_id)
             if not item.disabled
         }
+        if entry is not selected_entry and entry.data["provider"] == "habab":
+            text_metadata = {
+                "managed_model": None,
+                "effective_model": None,
+                "protocol": None,
+                "text_ready": None,
+                "text_error": "not_selected",
+            }
+        else:
+            try:
+                contract = await resolve_provider_contract(
+                    async_get_clientsession(hass) if entry.data["provider"] == "habab" else None,
+                    entry.data,
+                )
+                text_metadata = {
+                    "managed_model": contract.managed_model,
+                    "effective_model": contract.model,
+                    "protocol": contract.protocol,
+                    "text_ready": contract.text_ready,
+                }
+            except ProviderError as error:
+                text_metadata = {
+                    "managed_model": None,
+                    "effective_model": None,
+                    "protocol": "unavailable",
+                    "text_ready": False,
+                    "text_error": error.code,
+                }
         entries.append({
             "entry_id": entry.entry_id, "provider": entry.data["provider"],
             "model": entry.data["model"], "state": entry.state.value,
             "assistant_selected": entry is selected_entry,
-            "entities": entities, **_api_check_readback(entry),
+            "entities": entities, **_api_check_readback(entry), **text_metadata,
         })
     connection.send_result(msg["id"], {"connections": entries})
 

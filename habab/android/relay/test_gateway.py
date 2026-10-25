@@ -43,9 +43,34 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.telegram_started = asyncio.Event()
         self.telegram_finished = asyncio.Event()
         self.telegram_large_response = False
+        self.deepseek_calls = []
+        self.deepseek_status = 200
+        self.deepseek_echo_secret = False
+        self.deepseek_stream = False
         self.gemini_frames = []
         self.gemini_connections = 0
         async def upstream(request):
+            if request.path == '/deepseek/chat/completions':
+                body = await request.read()
+                self.deepseek_calls.append((request.method, request.path, request.query_string,
+                                            request.headers.get('Authorization'),
+                                            request.headers.get('x-goog-api-key'), body))
+                if self.deepseek_stream:
+                    result = web.StreamResponse(status=self.deepseek_status,
+                                                headers={'Content-Type': 'text/event-stream'})
+                    await result.prepare(request)
+                    echo = 'synthetic-deepseek-vendor' if self.deepseek_echo_secret else 'stream-ok'
+                    middle = len(echo) // 2
+                    await result.write(b'data: {"content":"' + echo[:middle].encode())
+                    await result.write(echo[middle:].encode() + b'"}\n\n')
+                    await result.write_eof()
+                    return result
+                if self.deepseek_echo_secret:
+                    return web.json_response({'echo': request.headers.get('Authorization')},
+                                             status=self.deepseek_status)
+                return web.json_response({'id': 'chatcmpl-test', 'model': 'deepseek-flash',
+                                          'choices': [{'message': {'role': 'assistant', 'content': 'OK'}}]},
+                                         status=self.deepseek_status)
             if request.path.startswith('/bot'):
                 body = await request.read()
                 bot_path, _, bot_method = request.path.rpartition('/')
@@ -113,6 +138,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.upstream.start_server()
         self.browser_origin = 'https://habab-demo.wpmix.net'
         self.gateway = Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), upstream_key='synthetic-vendor',
+                               text_upstream_key='synthetic-deepseek-vendor',
                                browser_origins=[self.browser_origin])
         self.patch = patch('openai_gateway.GEMINI_TEXT_BASE', str(self.upstream.make_url('/v1beta/models')).rstrip('/'))
         self.patch.start()
@@ -122,6 +148,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.token_patch.start()
         self.telegram_patch = patch('openai_gateway.TELEGRAM_API_BASE', str(self.upstream.make_url('/bot')).rstrip('/'))
         self.telegram_patch.start()
+        self.deepseek_patch = patch('openai_gateway.DEEPSEEK_CHAT_COMPLETIONS',
+                                    str(self.upstream.make_url('/deepseek/chat/completions')))
+        self.deepseek_patch.start()
         self.client = TestClient(TestServer(self.gateway.app(), handler_cancellation=True))
         await self.client.start_server()
 
@@ -132,6 +161,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.gemini_patch.stop()
         self.token_patch.stop()
         self.telegram_patch.stop()
+        self.deepseek_patch.stop()
         self.outbound_guard.stop()
 
     async def bootstrap(self, setup=None, headers=None, path='/v1/realtime/bootstrap'):
@@ -524,16 +554,86 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await response.json())['error']['code'], 'habab_upstream_not_ready')
         self.assertEqual(self.calls, [])
 
-    async def test_legacy_openai_compatible_paths_reject_without_fallback(self):
+    async def test_managed_chat_route_rejects_unknown_model_and_other_legacy_routes_without_fallback(self):
         headers = {'Authorization': 'Bearer synthetic-owner'}
         response = await self.client.post('/v1/chat/completions', headers=headers, json={'model': 'gpt-4.1-mini'})
-        self.assertEqual(response.status, 426)
-        self.assertEqual((await response.json())['error']['code'], 'habab_api_upgrade_required')
+        self.assertEqual(response.status, 404)
+        self.assertEqual((await response.json())['error']['code'], 'relay_unknown_model')
         response = await self.client.post('/v1/realtime/client_secrets', headers=headers,
                                           json={'session': {'model': 'gpt-realtime-mini'}})
         self.assertEqual(response.status, 426)
         response = await self.client.get('/v1/realtime?model=gpt-realtime-mini', headers=headers)
         self.assertEqual(response.status, 404)
+        self.assertEqual(self.calls, [])
+
+    async def test_managed_text_capabilities_and_models_are_authenticated_and_hide_upstream(self):
+        headers = {'Authorization': 'Bearer synthetic-owner'}
+        response = await self.client.get('/text/capabilities', headers={'Authorization': 'Bearer wrong'})
+        self.assertEqual(response.status, 401)
+        response = await self.client.get('/text/capabilities', headers=headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.json(), {
+            'protocol': 'openai_compatible', 'model': 'habab-chat', 'api_path': '/v1',
+            'managed': True, 'configured': True, 'ready': True,
+        })
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        response = await self.client.get('/v1/models', headers=headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual((await response.json())['data'], [
+            {'id': 'habab-chat', 'object': 'model', 'owned_by': 'habab'}])
+        response = await self.client.get('/v1/models?key=blocked', headers=headers)
+        self.assertEqual(response.status, 400)
+        response = await self.client.post('/v1/chat/completions',
+            headers={'Authorization': 'Bearer wrong'},
+            json={'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}]})
+        self.assertEqual(response.status, 401)
+        self.gateway.text_upstream_key = None
+        response = await self.client.get('/text/capabilities', headers=headers)
+        self.assertEqual((await response.json())['ready'], False)
+        response = await self.client.post('/v1/chat/completions', headers=headers,
+            json={'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}]})
+        self.assertEqual(response.status, 503)
+        self.assertEqual((await response.json())['error']['code'], 'habab_text_upstream_not_ready')
+        self.assertEqual(self.deepseek_calls, [])
+
+    async def test_managed_text_passthrough_maps_alias_and_uses_separate_bearer_key(self):
+        headers = {'Authorization': 'Bearer synthetic-owner'}
+        request = {'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}],
+                   'temperature': 0.2, 'max_tokens': 24}
+        response = await self.client.post('/v1/chat/completions', headers=headers, json=request)
+        self.assertEqual(response.status, 200)
+        self.assertEqual((await response.json())['choices'][0]['message']['content'], 'OK')
+        method, path, query, auth, google_key, body = self.deepseek_calls[0]
+        self.assertEqual((method, path, query), ('POST', '/deepseek/chat/completions', ''))
+        self.assertEqual(auth, 'Bearer synthetic-deepseek-vendor')
+        self.assertIsNone(google_key)
+        forwarded = json.loads(body)
+        self.assertEqual(forwarded['model'], 'deepseek-flash')
+        self.assertEqual(forwarded['messages'], request['messages'])
+        self.assertEqual(forwarded['max_tokens'], 24)
+        self.assertEqual(self.calls, [])
+
+    async def test_managed_text_stream_redacts_split_upstream_key_and_releases_slot(self):
+        self.deepseek_stream = True
+        self.deepseek_echo_secret = True
+        response = await self.client.post('/v1/chat/completions',
+            headers={'Authorization': 'Bearer synthetic-owner'},
+            json={'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}], 'stream': True})
+        payload = await response.read()
+        self.assertEqual(response.status, 200)
+        self.assertIn(b'[redacted]', payload)
+        self.assertNotIn(b'synthetic-deepseek-vendor', payload)
+        self.assertEqual(response.headers['Content-Type'], 'text/event-stream')
+        self.assertEqual(self.gateway.inflight, 0)
+
+    async def test_managed_text_upstream_error_is_forwarded_without_google_fallback(self):
+        self.deepseek_status = 503
+        response = await self.client.post('/v1/chat/completions',
+            headers={'Authorization': 'Bearer synthetic-owner'},
+            json={'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}]})
+        self.assertEqual(response.status, 503)
+        self.assertEqual((await response.json())['model'], 'deepseek-flash')
+        self.assertEqual(len(self.deepseek_calls), 1)
         self.assertEqual(self.calls, [])
 
     async def test_telegram_token_does_not_authorize_gemini_service(self):
@@ -706,12 +806,23 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 writer.close()
                 await writer.wait_closed()
                 self.assertEqual(gateway.upstream_key, 'synthetic-enrolled-vendor')
+                self.assertIsNone(gateway.text_upstream_key)
+                reader, writer = await asyncio.open_unix_connection(str(path))
+                writer.write(json.dumps({'upstream_key': 'synthetic-text-vendor',
+                                         'purpose': 'text'}).encode() + b'\n')
+                await writer.drain()
+                self.assertEqual(json.loads(await reader.readline()), {'enrolled': True})
+                writer.close()
+                await writer.wait_closed()
+                self.assertEqual(gateway.upstream_key, 'synthetic-enrolled-vendor')
+                self.assertEqual(gateway.text_upstream_key, 'synthetic-text-vendor')
                 response = await client.post('/gemini/v1beta/models/gemini-3.1-flash-lite:generateContent',
                     headers={'x-goog-api-key': 'synthetic-owner'}, json={'contents': []})
                 self.assertEqual(response.status, 200)
                 self.assertEqual(self.calls[-1][1], 'synthetic-enrolled-vendor')
                 self.assertEqual(list(Path(directory).iterdir()), [path])
             self.assertIsNone(gateway.upstream_key)
+            self.assertIsNone(gateway.text_upstream_key)
             self.assertFalse(path.exists())
 
 

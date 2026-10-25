@@ -8,6 +8,65 @@ const providers = {
   gemini: { name: "Google Gemini", model: "gemini-3.1-flash-lite", keyUrl: "https://aistudio.google.com/api-keys" },
 };
 
+const modelCopy = {
+  ru: {
+    compatibilityLabel: "Сохранённое значение для совместимости",
+    managed: "Модель выбирает Habab. Сейчас используется {model} ({protocol}).",
+    managedNotReady: "Модель выбирает Habab. Эффективная модель: {model} ({protocol}), подключение пока не готово.",
+    pending: "Модель определит сервис при проверке подключения.",
+    unavailable: "Не удалось подтвердить фактическую модель Habab. Сохранённое значение оставлено для совместимости.",
+    legacy: "Текущий маршрут: {protocol}, модель {model}.",
+    protocolGoogle: "Google Gemini",
+    protocolOpenAI: "OpenAI-совместимый API",
+    protocolUnavailable: "не подтверждён",
+  },
+  en: {
+    compatibilityLabel: "Saved compatibility value",
+    managed: "Habab selects the model. The current model is {model} ({protocol}).",
+    managedNotReady: "Habab selects the model. Effective model: {model} ({protocol}); the connection is not ready.",
+    pending: "The service will choose the model when you check the connection.",
+    unavailable: "The effective Habab model could not be confirmed. The saved value is kept for compatibility.",
+    legacy: "Current route: {protocol}, model {model}.",
+    protocolGoogle: "Google Gemini",
+    protocolOpenAI: "OpenAI-compatible API",
+    protocolUnavailable: "unconfirmed",
+  },
+};
+
+export function providerModelPresentation(provider, entry, language) {
+  if (provider !== "habab") return { readOnly: false, label: null, help: null };
+  const copy = modelCopy[language === "ru" ? "ru" : "en"];
+  const compatibility = { readOnly: true, label: copy.compatibilityLabel };
+  if (!entry) return { readOnly: true, label: null, help: copy.pending };
+
+  const managedModel = typeof entry.managed_model === "string" && entry.managed_model
+    ? entry.managed_model : null;
+  if (managedModel) {
+    const effectiveModel = typeof entry.effective_model === "string" && entry.effective_model
+      ? entry.effective_model : managedModel;
+    const protocol = entry.protocol === "google" ? copy.protocolGoogle
+      : entry.protocol === "openai_compatible" ? copy.protocolOpenAI : copy.protocolUnavailable;
+    const template = entry.text_ready === false ? copy.managedNotReady : copy.managed;
+    return {
+      ...compatibility,
+      help: template.replace("{model}", effectiveModel).replace("{protocol}", protocol),
+    };
+  }
+
+  if (typeof entry.effective_model === "string" && entry.effective_model &&
+      typeof entry.protocol === "string" && entry.protocol !== "unavailable") {
+    const protocol = entry.protocol === "google" ? copy.protocolGoogle
+      : entry.protocol === "openai_compatible" ? copy.protocolOpenAI : copy.protocolUnavailable;
+    return {
+      readOnly: false,
+      label: null,
+      help: copy.legacy.replace("{protocol}", protocol).replace("{model}", entry.effective_model),
+    };
+  }
+
+  return { ...compatibility, help: copy.unavailable };
+}
+
 class HababAIPanel extends HTMLElement {
   constructor() {
     super();
@@ -92,7 +151,7 @@ class HababAIPanel extends HTMLElement {
       <section aria-labelledby="provider-title"><p class="status" id="assistant-provider-status" role="status" aria-live="polite"></p><h2 id="provider-title"></h2><p class="status" id="connection-status"></p><p class="status" id="api-status" role="status" aria-live="polite"></p>
       <a id="key-link" target="_blank" rel="noopener noreferrer">${this.t("getKey")}</a>
       <h3>${this.t("guide")}</h3><ol id="guide"></ol>
-      <form><label for="model">${this.t("model")}</label><input id="model" name="model" required maxlength="128" autocomplete="off" aria-describedby="model-help"><p class="help" id="model-help">${this.t("modelHelp")}</p>
+      <form><label id="model-label" for="model">${this.t("model")}</label><input id="model" name="model" required maxlength="128" autocomplete="off" aria-describedby="model-help"><p class="help" id="model-help">${this.t("modelHelp")}</p>
       <label for="key">${this.t("key")}</label><div class="key-row"><input id="key" name="api_key" type="password" required maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="key-help"><button type="button" id="reveal" aria-label="${this.t("show")}" aria-pressed="false"><ha-icon icon="mdi:eye"></ha-icon></button></div>
       <p class="help" id="key-help">${this.t("keyHelp")}</p><div class="actions"><button class="primary" type="submit">${this.t("save")}</button><button type="button" id="check">${this.t("check")}</button></div><p class="help">${this.t("cost")}</p></form>
       <div id="feedback" role="status" aria-live="polite" hidden></div></section></div>
@@ -136,6 +195,10 @@ class HababAIPanel extends HTMLElement {
       this.q("#model").value = this.entry()?.model || provider.model;
       this.modelEdited = false;
     }
+    const modelPresentation = providerModelPresentation(this.provider, this.entry(), this.language);
+    this.q("#model").readOnly = modelPresentation.readOnly;
+    this.q("#model-label").textContent = modelPresentation.label || this.t("model");
+    this.q("#model-help").textContent = modelPresentation.help || this.t("modelHelp");
     if (!preserveDraft || !this.keyEdited) {
       this.q("#key").value = "";
       this.keyEdited = false;

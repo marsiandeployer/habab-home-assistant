@@ -7,9 +7,15 @@ Authenticated `GET /v1/capabilities` объявляет нативный Gemini 
 `/models/{model}:generateContent`; потоковый режим использует
 `/models/{model}:streamGenerateContent?alt=sse`. Habab credential принимается
 в `x-goog-api-key` и заменяется на Google master key только в upstream header.
-OpenAI-совместимые `/v1/chat/completions`, models и audio endpoints явно
-отклоняются кодом `habab_api_upgrade_required`; Gemini response JSON/SSE
-передаётся без OpenAI-совместимой обёртки.
+Для текста relay также предоставляет OpenAI-совместимые `GET /v1/models` и
+`POST /v1/chat/completions`, но публикует только managed alias `habab-chat`.
+Он направляется на фиксированную модель DeepSeek `deepseek-flash`; upstream
+URL нельзя задать через запрос. Auth-защищённый `GET /text/capabilities`
+сообщает `protocol=openai_compatible`, `model=habab-chat`, `api_path=/v1` и
+фактические `configured`/`ready`. Текстовый ключ хранится отдельно в RAM и не
+заменяет Google key, используемый голосовым relay. Legacy audio и OpenAI
+Realtime endpoints по-прежнему отклоняются кодом `habab_api_upgrade_required`;
+Gemini response JSON/SSE передаётся без OpenAI-совместимой обёртки.
 
 Нативный голосовой протокол Habab — Gemini Live: capabilities публикуют
 `provider=gemini`, `transport=habab` и разрешённую модель `gemini-3.8-live`.
@@ -68,8 +74,10 @@ Google API key: сервер использует отдельный ключ о
 Оператор передаёт upstream-ключ через Unix-сокет `control.sock` в том же
 приватном каталоге. Сокет имеет права 0600; процесс проверяет UID отправителя.
 `enroll_upstream.py --socket PATH` читает ограниченный JSON из приватного stdin
-и выводит только результат операции. Не передавайте секрет в аргументах
-команды, журнале или файле репозитория.
+и выводит только результат операции. Без `--purpose` ключ остаётся Google
+upstream key для Gemini text/voice; `--purpose text` записывает отдельный
+DeepSeek text key. Не передавайте секрет в аргументах команды, журнале или
+файле репозитория.
 
 Upstream-ключ остаётся в памяти процесса. Сервис не записывает его в конфиг,
 переменные окружения или новый файл. После перезапуска требуется повторная

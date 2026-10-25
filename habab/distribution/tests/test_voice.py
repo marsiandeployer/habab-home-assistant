@@ -190,8 +190,50 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["api_check_status"], "unknown")
         self.assertEqual(result["api_check_at"], "2026-10-24T12:00:00+00:00")
         self.assertEqual(result["api_check_reason"], "quota")
+        self.assertIsNone(result["managed_model"])
+        self.assertEqual(result["effective_model"], "gpt-4.1-mini")
+        self.assertEqual(result["protocol"], "openai_compatible")
+        self.assertIsNone(result["text_ready"])
         self.assertNotIn("fixture-saved-key", str(result))
         self.assertNotIn("fingerprint", result)
+
+    async def test_provider_list_reports_managed_habab_effective_model_and_readiness(self):
+        from homeassistant.components.habab_home.const import DOMAIN
+        from homeassistant.components.habab_home.providers import ProviderContract
+
+        entry = SimpleNamespace(
+            entry_id="managed-habab", domain=DOMAIN,
+            data={"provider": "habab", "api_key": "fixture-saved-key", "model": "gemini-3.1-flash-lite"},
+            state=SimpleNamespace(value="loaded"), options={"assistant_selected": True},
+        )
+        unselected = SimpleNamespace(
+            entry_id="inactive-habab", domain=DOMAIN,
+            data={"provider": "habab", "api_key": "fixture-inactive-key", "model": "gemini-3.1-flash-lite"},
+            state=SimpleNamespace(value="loaded"), options={},
+        )
+        hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=Mock(return_value=[entry, unselected])))
+        connection = Mock()
+        contract = ProviderContract(
+            "habab", "openai_compatible", "habab-chat", "https://habab-voice.wpmix.net/v1",
+            managed_model="habab-chat", text_ready=False,
+        )
+        with patch.object(websocket.er, "async_get", return_value=Mock()), \
+             patch.object(websocket.er, "async_entries_for_config_entry", return_value=[]), \
+             patch.object(websocket, "async_get_clientsession", return_value=object()), \
+             patch.object(websocket, "resolve_provider_contract", new=AsyncMock(return_value=contract)) as resolver:
+            await inspect.unwrap(websocket.list_connections)(hass, connection, {"id": 6})
+        resolver.assert_awaited_once()
+
+        result, inactive_result = connection.send_result.call_args.args[1]["connections"]
+        self.assertEqual(result["model"], "gemini-3.1-flash-lite")
+        self.assertEqual(result["managed_model"], "habab-chat")
+        self.assertEqual(result["effective_model"], "habab-chat")
+        self.assertEqual(result["protocol"], "openai_compatible")
+        self.assertFalse(result["text_ready"])
+        self.assertIsNone(inactive_result["effective_model"])
+        self.assertIsNone(inactive_result["protocol"])
+        self.assertIsNone(inactive_result["text_ready"])
+        self.assertEqual(inactive_result["text_error"], "not_selected")
 
     async def test_provider_list_marks_effective_provider_for_legacy_and_explicit_entries(self):
         from homeassistant.components.habab_home.const import DOMAIN

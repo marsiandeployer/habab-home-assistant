@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.habab_home.setup_agent import (
+    ANDROID_RUNTIME_STARTUP_TIMEOUT,
     EXA_CAPABILITY_MAX_BYTES,
     EXA_CAPABILITY_CHUNK_BYTES,
     EXA_CAPABILITY_PROTOCOL,
@@ -25,8 +26,10 @@ from homeassistant.components.habab_home.setup_agent import (
     exa_mcp_config,
     fetch_habab_exa_capability,
     habab_service_origin,
+    resolved_runtime_fingerprint,
     verify_binary,
 )
+from homeassistant.components.habab_home.providers import ProviderContract
 from homeassistant.components.habab_home.agent_diagnostics import AgentDiagnostics
 from homeassistant.components.habab_home.voice_history import encode_voice_event
 from homeassistant.components.habab_home.assistant_identity import ASSISTANT_IDENTITY
@@ -273,11 +276,30 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(agent.request.await_args_list[0].args[2]["model"],
                              {"providerID": "habab-" + provider, "modelID": "gpt-4.1-mini"})
 
+    async def test_run_payload_uses_the_resolved_managed_model_alias(self):
+        agent = self.agent()
+        settings = {
+            "provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-key",
+        }
+        contract = ProviderContract(
+            "habab", "openai_compatible", "habab-chat", "https://habab-voice.wpmix.net/v1",
+            managed_model="habab-chat", text_ready=True,
+        )
+        agent.settings = Mock(return_value=settings)
+        agent.ensure = AsyncMock(return_value=contract)
+
+        await agent.run("alice", "ses_alice", "test")
+
+        payload = agent.request.await_args_list[0].args[2]
+        self.assertEqual(payload["model"], {"providerID": "habab-habab", "modelID": "habab-chat"})
+        self.assertEqual(settings["model"], "gemini-3.1-flash-lite")
+        agent.ensure.assert_awaited_once_with(settings)
+
     async def test_selection_changed_during_startup_applies_to_next_turn(self):
         agent = self.agent()
         old = {"provider": "deepseek", "model": "deepseek-flash", "api_key": "fixture-key"}
         agent.settings = Mock(return_value=old)
-        async def change_selection():
+        async def change_selection(_settings=None):
             agent.settings.return_value = {"provider": "habab", "model": "gpt-4.1-mini", "api_key": "fixture-new-key"}
         agent.ensure = change_selection
         await agent.run("alice", "ses_alice", "test")
@@ -477,9 +499,93 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             agent.fingerprint,
-            runtime_fingerprint(settings, ANDROID_PROOT_RUNTIME_KIND),
+            resolved_runtime_fingerprint(
+                settings,
+                ProviderContract("deepseek", "openai_compatible", "deepseek-flash", "https://api.deepseek.com"),
+                ANDROID_PROOT_RUNTIME_KIND,
+            ),
         )
         self.assertEqual(json.loads(spawn.await_args.kwargs["env"]["OPENCODE_CONFIG_CONTENT"])["mcp"], {})
+
+    async def test_android_startup_deadline_allows_slow_ready_and_bounds_refusal(self):
+        async def exercise_ready_after_13_seconds():
+            clock = [0.0]
+            probe_timeouts = []
+            calls = [0]
+            settings = {"provider": "deepseek", "model": "deepseek-flash", "api_key": "fixture-key"}
+            agent = object.__new__(SetupAgent)
+            agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
+            agent.password = "private-password"; agent.control_token = "private-control"
+            agent.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
+            agent.settings = Mock(return_value=settings)
+            agent.prepare_directories = Mock(); agent.close = AsyncMock()
+
+            async def probe(_method, _route, *, timeout):
+                calls[0] += 1
+                probe_timeouts.append(timeout)
+                if calls[0] < 11:
+                    clock[0] += 1.0
+                    raise AgentError("runtime_timeout")
+                clock[0] += 0.9
+                return {}
+
+            async def sleep(delay):
+                self.assertLessEqual(clock[0] + delay, ANDROID_RUNTIME_STARTUP_TIMEOUT)
+                clock[0] += delay
+
+            agent.request = AsyncMock(side_effect=probe)
+            process = SimpleNamespace(returncode=None)
+            with patch.dict("os.environ", {"HABAB_RUNTIME_KIND": ANDROID_PROOT_RUNTIME_KIND}):
+                with patch("homeassistant.components.habab_home.setup_agent.time.monotonic",
+                           side_effect=lambda: clock[0]):
+                    with patch("homeassistant.components.habab_home.setup_agent.asyncio.sleep", new=sleep):
+                        with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
+                                   new_callable=AsyncMock, return_value=process):
+                            await agent.ensure()
+            self.assertEqual(calls[0], 11)
+            self.assertAlmostEqual(clock[0], 13.4)
+            self.assertLessEqual(max(probe_timeouts), 1.0)
+            self.assertEqual(agent.close.await_count, 1)
+
+        async def exercise_refusal_stops_at_deadline():
+            clock = [0.0]
+            probe_timeouts = []
+            settings = {"provider": "deepseek", "model": "deepseek-flash", "api_key": "fixture-key"}
+            agent = object.__new__(SetupAgent)
+            agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
+            agent.password = "private-password"; agent.control_token = "private-control"
+            agent.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
+            agent.settings = Mock(return_value=settings)
+            agent.prepare_directories = Mock(); agent.close = AsyncMock()
+
+            async def probe(_method, _route, *, timeout):
+                probe_timeouts.append(timeout)
+                self.assertLessEqual(timeout, ANDROID_RUNTIME_STARTUP_TIMEOUT - clock[0])
+                clock[0] += timeout
+                raise AgentError("runtime_timeout")
+
+            async def sleep(delay):
+                self.assertLessEqual(clock[0] + delay, ANDROID_RUNTIME_STARTUP_TIMEOUT)
+                clock[0] += delay
+
+            agent.request = AsyncMock(side_effect=probe)
+            process = SimpleNamespace(returncode=None)
+            with patch.dict("os.environ", {"HABAB_RUNTIME_KIND": ANDROID_PROOT_RUNTIME_KIND}):
+                with patch("homeassistant.components.habab_home.setup_agent.time.monotonic",
+                           side_effect=lambda: clock[0]):
+                    with patch("homeassistant.components.habab_home.setup_agent.asyncio.sleep", new=sleep):
+                        with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
+                                   new_callable=AsyncMock, return_value=process):
+                            with self.assertRaises(AgentError) as error:
+                                await agent.ensure()
+            self.assertEqual(error.exception.code, "runtime_start_failed")
+            self.assertAlmostEqual(clock[0], ANDROID_RUNTIME_STARTUP_TIMEOUT)
+            self.assertTrue(probe_timeouts)
+            self.assertLessEqual(max(probe_timeouts), 1.0)
+            self.assertEqual(agent.close.await_count, 2)
+
+        await exercise_ready_after_13_seconds()
+        await exercise_refusal_stops_at_deadline()
 
     async def test_selected_provider_search_route_and_private_key_despite_old_relay_env(self):
         providers = (
@@ -499,18 +605,22 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
                 "HABAB_OPENAI_BASE_URL": "https://voice.example.test/v1",
                 "OPENCODE_ENABLE_EXA": "0", "EXA_API_KEY": "fixture-host-exa-key",
             }):
-                with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                           new=AsyncMock(return_value=True)) as capability:
-                    with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                               return_value=object()):
-                        with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
-                            await agent.ensure()
-                            if provider == "habab":
+                protocol = "google" if expected_npm == "@ai-sdk/google" else "openai_compatible"
+                contract = ProviderContract(provider, protocol, model, expected_base)
+                with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
+                           new=AsyncMock(return_value=contract)):
+                    with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
+                               new=AsyncMock(return_value=True)) as capability:
+                        with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                                   return_value=object()):
+                            with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
                                 await agent.ensure()
-                    if provider == "habab":
-                        capability.assert_awaited_once()
-                    else:
-                        capability.assert_not_awaited()
+                                if provider == "habab":
+                                    await agent.ensure()
+                        if provider == "habab":
+                            capability.assert_awaited_once()
+                        else:
+                            capability.assert_not_awaited()
             env = spawn.await_args.kwargs["env"]
             config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
             self.assertEqual(config["permission"], {"*": "allow"})
@@ -527,6 +637,40 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("HABAB_DEEPSEEK_KEY", env)
             self.assertNotIn("fixture-selected-key", env["OPENCODE_CONFIG_CONTENT"])
 
+    async def test_habab_managed_contract_selects_alias_and_openai_compatible_sdk(self):
+        settings = {
+            "provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-selected-key",
+        }
+        contract = ProviderContract(
+            "habab", "openai_compatible", "habab-chat", "https://habab-voice.wpmix.net/v1",
+            managed_model="habab-chat", text_ready=True,
+        )
+        agent = object.__new__(SetupAgent)
+        agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
+        agent.password = "private-password"; agent.control_token = "private-control"
+        agent.hass = SimpleNamespace(data={}, async_add_executor_job=AsyncMock())
+        agent.settings = Mock(return_value=settings)
+        agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
+        with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
+                   new=AsyncMock(return_value=contract)):
+            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
+                       new=AsyncMock(return_value=False)):
+                with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                           return_value=object()):
+                    with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
+                               new_callable=AsyncMock,
+                               return_value=SimpleNamespace(returncode=None)) as spawn:
+                        await agent.ensure()
+
+        config = json.loads(spawn.await_args.kwargs["env"]["OPENCODE_CONFIG_CONTENT"])
+        provider = config["provider"]["habab-habab"]
+        self.assertEqual(config["model"], "habab-habab/habab-chat")
+        self.assertEqual(provider["npm"], "@ai-sdk/openai-compatible")
+        self.assertEqual(provider["options"]["baseURL"], "https://habab-voice.wpmix.net/v1")
+        self.assertIn("habab-chat", provider["models"])
+        self.assertEqual(settings["model"], "gemini-3.1-flash-lite")
+        self.assertEqual(agent.fingerprint, resolved_runtime_fingerprint(settings, contract, "docker"))
+
     async def test_habab_exa_outage_leaves_normal_runtime_enabled_but_marks_search_unavailable(self):
         agent = object.__new__(SetupAgent)
         agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
@@ -535,13 +679,18 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         agent.settings = Mock(return_value={
             "provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-key"})
         agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
-        with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                   new=AsyncMock(return_value=False)):
-            with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                       return_value=object()):
-                with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
-                           new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
-                    await agent.ensure()
+        legacy = ProviderContract(
+            "habab", "google", "gemini-3.1-flash-lite",
+            "https://habab-voice.wpmix.net/gemini/v1beta")
+        with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
+                   new=AsyncMock(return_value=legacy)):
+            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
+                       new=AsyncMock(return_value=False)):
+                with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                           return_value=object()):
+                    with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
+                               new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
+                        await agent.ensure()
 
         env = spawn.await_args.kwargs["env"]
         config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
@@ -553,9 +702,12 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_habab_exa_retry_is_bounded_and_restarts_only_after_verified_recovery(self):
         settings = {"provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-key"}
+        legacy = ProviderContract(
+            "habab", "google", "gemini-3.1-flash-lite",
+            "https://habab-voice.wpmix.net/gemini/v1beta")
         agent = object.__new__(SetupAgent)
         agent.process = SimpleNamespace(returncode=None)
-        agent.fingerprint = runtime_fingerprint(settings, "docker")
+        agent.fingerprint = resolved_runtime_fingerprint(settings, legacy, "docker")
         agent.external_search_status = {
             "mode": "habab_exa_mcp_relay", "state": "unavailable",
             "reason": "capability_check_failed"}
@@ -569,36 +721,43 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         agent.request = AsyncMock(return_value={})
 
         with patch("homeassistant.components.habab_home.setup_agent.time.monotonic", return_value=199.0):
-            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                       new=AsyncMock(return_value=True)) as capability:
-                with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession") as session:
-                    await agent.ensure()
-                capability.assert_not_awaited()
-                session.assert_not_called()
+            with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
+                       new=AsyncMock(return_value=legacy)) as resolver:
+                with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
+                           new=AsyncMock(return_value=True)) as capability:
+                    with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                               return_value=object()):
+                        await agent.ensure()
+                    resolver.assert_awaited_once()
+                    capability.assert_not_awaited()
         agent.close.assert_not_awaited()
 
         with patch("homeassistant.components.habab_home.setup_agent.time.monotonic",
                    side_effect=[200.0, 200.0]):
-            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                       new=AsyncMock(return_value=False)) as capability:
-                with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                           return_value=object()):
-                    await agent.ensure()
-                capability.assert_awaited_once()
+            with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
+                       new=AsyncMock(return_value=legacy)):
+                with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
+                           new=AsyncMock(return_value=False)) as capability:
+                    with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                               return_value=object()):
+                        await agent.ensure()
+                    capability.assert_awaited_once()
         self.assertEqual(agent.external_search_retry_at, 200.0 + EXA_CAPABILITY_RETRY_SECONDS)
         agent.close.assert_not_awaited()
 
         with patch("homeassistant.components.habab_home.setup_agent.time.monotonic",
                    side_effect=[200.0 + EXA_CAPABILITY_RETRY_SECONDS] * 2):
-            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                       new=AsyncMock(return_value=True)) as capability:
-                with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                           return_value=object()):
-                    with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
-                               new_callable=AsyncMock,
-                               return_value=SimpleNamespace(returncode=None)) as spawn:
-                        await agent.ensure()
-                capability.assert_awaited_once()
+            with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
+                       new=AsyncMock(return_value=legacy)):
+                with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
+                           new=AsyncMock(return_value=True)) as capability:
+                    with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                               return_value=object()):
+                        with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
+                                   new_callable=AsyncMock,
+                                   return_value=SimpleNamespace(returncode=None)) as spawn:
+                            await agent.ensure()
+                    capability.assert_awaited_once()
 
         agent.close.assert_awaited_once()
         self.assertEqual(agent.external_search_status["state"], "capability_verified")

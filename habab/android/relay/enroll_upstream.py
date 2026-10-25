@@ -8,6 +8,7 @@ import sys
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--socket', required=True)
+    parser.add_argument('--purpose', choices=('voice', 'text'))
     args = parser.parse_args()
     raw = sys.stdin.buffer.readline(4097)
     if len(raw) > 4096:
@@ -19,7 +20,10 @@ def main():
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as control:
         control.settimeout(5)
         control.connect(args.socket)
-        control.sendall(json.dumps({'upstream_key': key}).encode() + b'\n')
+        payload = {'upstream_key': key}
+        if args.purpose is not None:
+            payload['purpose'] = args.purpose
+        control.sendall(json.dumps(payload).encode() + b'\n')
         with control.makefile('rb') as response:
             result = json.loads(response.readline(513))
     if result != {'enrolled': True}:
