@@ -1,4 +1,4 @@
-"""Save explicitly consented feedback from the current owner web-chat turn."""
+"""Save explicitly consented feedback from the current owner-mapped chat turn."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from .const import DOMAIN
 from .diagnostics import (
     MAX_MESSAGES,
     ProjectionBudget,
+    _mapping_is_current,
     _mapped_sessions,
     _redact_text,
     _session_data,
@@ -25,7 +26,7 @@ from .feedback import (
 
 
 async def save_feedback_action(hass, setup_agent, owner: str, body: dict) -> dict:
-    """Save a feedback receipt for the server-mapped web session in this turn.
+    """Save a receipt for the current server-mapped owner session in this turn.
 
     The model supplies feedback, explicit consent, and an idempotency UUID. It
     cannot select an owner, channel, or session ID.
@@ -66,14 +67,12 @@ async def save_feedback_action(hass, setup_agent, owner: str, body: dict) -> dic
     if assistant is None or not isinstance(manager, FeedbackManager):
         raise FeedbackError("feedback_unavailable")
 
-    # SetupAgent.active is the trusted local-call context. Require its session
-    # to remain the owner's current web mapping; Telegram sessions are rejected.
-    if getattr(assistant, "web_sessions", {}).get(owner) != session_id:
-        raise FeedbackError("feedback_web_session_required")
+    # SetupAgent.active comes from the local authenticated action bridge. Resolve
+    # the channel only from the server's owner mappings; the model cannot choose it.
     mappings = [
         mapping
         for mapping in _mapped_sessions(assistant, owner)
-        if mapping["channel"] == "web" and mapping["session_id"] == session_id
+        if mapping["session_id"] == session_id
     ]
     if len(mappings) != 1:
         raise FeedbackError("feedback_session_unavailable")
@@ -82,6 +81,9 @@ async def save_feedback_action(hass, setup_agent, owner: str, body: dict) -> dic
     normalized_feedback = feedback.strip()
     digest = _digest(session_id, normalized_feedback)
     existing = await manager.idempotent_record(owner, key, digest)
+    if (getattr(setup_agent, "active", None) != active
+            or not _mapping_is_current(assistant, owner, mapping)):
+        raise FeedbackError("feedback_session_unavailable")
     if existing is not None:
         return _public_receipt(existing, duplicate=True)
 
@@ -90,7 +92,7 @@ async def save_feedback_action(hass, setup_agent, owner: str, body: dict) -> dic
         hass, owner, mapping, budget=budget)
     if (
         getattr(setup_agent, "active", None) != active
-        or getattr(assistant, "web_sessions", {}).get(owner) != session_id
+        or not _mapping_is_current(assistant, owner, mapping)
     ):
         raise FeedbackError("feedback_session_unavailable")
 

@@ -404,9 +404,27 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(PROMPT.startswith(ASSISTANT_IDENTITY))
         self.assertEqual(
             hashlib.sha256(PROMPT.removeprefix(ASSISTANT_IDENTITY).encode()).hexdigest(),
-            "bc685f0609500b7479dafcdfb9906af86a580ee244b7b70f4de7a256f9dbd041",
+            "e9c640f608423af1590301aad210a24e08ec3353ad1af386576bc872b41d29b7",
         )
         self.assertIs(runtime_prompt("docker", PROMPT), PROMPT)
+
+    def test_feedback_action_uses_only_the_current_mapped_chat(self):
+        instruction = next(
+            line
+            for line in PROMPT.splitlines()
+            if line.startswith("Сохраняй отзыв через save_feedback")
+        )
+        self.assertIn("текущего server-mapped веб-чата или Telegram-чата", instruction)
+        self.assertIn(
+            "owner, session_id и channel не передавай", instruction
+        )
+        self.assertIn(
+            "state=saved_locally и issue_state=not_configured", instruction
+        )
+        self.assertIn(
+            "не утверждай, что отзыв отправлен разработчикам или что issue создан",
+            instruction,
+        )
 
     def test_android_prompt_uses_proot_sandbox_facts_and_shared_tools(self):
         prompt = runtime_prompt(ANDROID_PROOT_RUNTIME_KIND, PROMPT)

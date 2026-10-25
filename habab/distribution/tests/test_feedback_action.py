@@ -1,4 +1,4 @@
-"""The chat feedback action saves only the owner's current web session."""
+"""The chat feedback action saves only a unique current owner-mapped session."""
 
 import unittest
 import uuid
@@ -22,10 +22,10 @@ class FakeStore:
         self.data = data
 
 
-def make_context():
+def make_context(channel="web"):
     return (
         {
-            "channel": "web",
+            "channel": channel,
             "provider_models": [],
             "created_at": None,
             "updated_at": None,
@@ -96,19 +96,58 @@ class FeedbackActionTests(unittest.IsolatedAsyncioTestCase):
         load_context.assert_not_awaited()
         self.assertIsNone(self.store.data)
 
-    async def test_telegram_or_another_owner_session_is_rejected(self):
+    async def test_current_mapped_telegram_session_saves_locally(self):
+        self.setup_agent.active = ("alice", "tg-alice")
+        with patch.object(
+            feedback_action, "_session_data",
+            AsyncMock(return_value=make_context("telegram")),
+        ) as load_context:
+            result = await execute(self.hass, self.setup_agent, "alice", self.body)
+
+        self.assertEqual(result["state"], "saved_locally")
+        self.assertEqual(result["issue_state"], "not_configured")
+        self.assertFalse(result["duplicate"])
+        record = self.store.data["records"][result["receipt_id"]]
+        self.assertEqual(record["context"]["channel"], "telegram")
+        self.assertEqual(
+            record["context"]["source"]["kind"], "owner_mapped_current_session"
+        )
+        load_context.assert_awaited_once()
+
+    async def test_unmapped_or_ambiguous_telegram_session_is_rejected(self):
         with patch.object(
             feedback_action, "_session_data", AsyncMock(return_value=make_context())
         ) as load_context:
-            self.setup_agent.active = ("alice", "tg-alice")
+            self.setup_agent.active = ("alice", "tg-unmapped")
             result = await execute(self.hass, self.setup_agent, "alice", self.body)
-            self.assertEqual(result["error"], "feedback_web_session_required")
+            self.assertEqual(result["error"], "feedback_session_unavailable")
+
+            self.setup_agent.active = ("alice", "tg-alice")
+            self.assistant.web_sessions["alice"] = "tg-alice"
+            result = await execute(self.hass, self.setup_agent, "alice", self.body)
+            self.assertEqual(result["error"], "feedback_session_unavailable")
 
             self.setup_agent.active = ("bob", "web-alice")
             result = await execute(self.hass, self.setup_agent, "alice", self.body)
             self.assertEqual(result["error"], "feedback_session_unavailable")
 
         load_context.assert_not_awaited()
+        self.assertIsNone(self.store.data)
+
+    async def test_telegram_mapping_must_remain_current_after_history_read(self):
+        self.setup_agent.active = ("alice", "tg-alice")
+
+        async def read_then_revoke(*args, **kwargs):
+            self.assistant.telegram_sessions.clear()
+            return make_context("telegram")
+
+        with patch.object(
+            feedback_action, "_session_data", AsyncMock(side_effect=read_then_revoke)
+        ) as load_context:
+            result = await execute(self.hass, self.setup_agent, "alice", self.body)
+
+        self.assertEqual(result["error"], "feedback_session_unavailable")
+        load_context.assert_awaited_once()
         self.assertIsNone(self.store.data)
 
 
