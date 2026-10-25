@@ -163,6 +163,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
         payload = await response.json()
         self.assertEqual(payload['chat']['protocol'], 'google-generative-language-v1beta')
+        self.assertEqual(payload['chat']['models'], ['gemini-3.1-flash-lite', 'gemini-3.8-flash'])
         self.assertEqual(payload['chat']['default_model'], 'gemini-3.1-flash-lite')
         self.assertEqual(payload['chat']['api_base'], 'https://habab-voice.wpmix.net/gemini/v1beta')
         self.assertEqual(payload['realtime']['transport'], 'habab')
@@ -444,6 +445,17 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('synthetic-owner', repr(self.calls))
         self.assertNotIn('synthetic-vendor', self.calls[-1][2])
 
+    async def test_gemini_text_allowlist_forwards_each_model_to_fixed_google_host(self):
+        headers = {'x-goog-api-key': 'synthetic-owner'}
+        for model in ('gemini-3.1-flash-lite', 'gemini-3.8-flash'):
+            response = await self.client.post(
+                f'/gemini/v1beta/models/{model}:generateContent',
+                headers=headers, json={'contents': []})
+            self.assertEqual(response.status, 200)
+            self.assertEqual(self.calls[-1], (
+                f'/v1beta/models/{model}:generateContent', 'synthetic-vendor', ''))
+        self.assertEqual(len(self.calls), 2)
+
     async def test_gemini_sse_is_streamed_and_redacts_secret_across_chunks(self):
         response = await self.client.post(
             '/gemini/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse',
@@ -480,6 +492,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_gemini_text_rejects_bad_route_query_and_request_without_upstream(self):
         headers = {'x-goog-api-key': 'synthetic-owner'}
         cases = [('/gemini/v1beta/models/gemini-3.8-live:generateContent', {}, 404),
+                 ('/gemini/v1beta/models/gemini-3.8-flash-preview:generateContent', {}, 404),
                  ('/gemini/v1beta/models/gemini-3.1-flash-lite:generateContent?key=bad', {'contents': []}, 400),
                  ('/gemini/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent', {'contents': []}, 400),
                  ('/gemini/v1beta/models/gemini-3.1-flash-lite:generateContent',

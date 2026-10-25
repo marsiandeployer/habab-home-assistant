@@ -1,0 +1,19 @@
+{
+  "checked_at": "2026-10-25T15:16:58.391Z",
+  "provider": "habab",
+  "model": "gemini-3.1-flash-lite",
+  "protocol": "Gemini native generateContent v1beta",
+  "timeout_seconds": 30,
+  "retry_count": 0,
+  "http_status": 401,
+  "duration_ms": 190,
+  "provider_key_value_recorded": false,
+  "request_or_response_body_recorded": false,
+  "verdict": "HTTP_ERROR",
+  "api_error_code": null,
+  "api_error_status": null,
+  "error_category": "credential_or_permission_rejected",
+  "probe_validity": "invalid_auth_transport",
+  "interpretation": "Key-in-query differs from the runtime x-goog-api-key protocol; this HTTP 401 does not establish provider credential failure.",
+  "superseded_by": "provider-direct-completion-corrected-attempt1.json"
+}

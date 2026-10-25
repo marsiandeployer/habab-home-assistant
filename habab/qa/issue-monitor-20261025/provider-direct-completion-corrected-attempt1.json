@@ -1,0 +1,28 @@
+{
+  "checked_at": "2026-10-25T15:20:51.173Z",
+  "target": "Habab Gemini generateContent relay",
+  "protocol": {
+    "method": "POST",
+    "path": "/gemini/v1beta/models/{selected-gemini-model}:generateContent",
+    "queryParameters": 0,
+    "requestHeaderNames": [
+      "content-length",
+      "content-type",
+      "x-goog-api-key"
+    ],
+    "authScheme": "raw API key header"
+  },
+  "httpStatus": 503,
+  "durationMs": 12328,
+  "errorCode": null,
+  "errorStatus": "UNAVAILABLE",
+  "responseTopLevelFields": [
+    "error"
+  ],
+  "scope": {
+    "model_provider_check": "single_direct_request_only",
+    "provider_response_text_recorded": false,
+    "request_body_recorded": false,
+    "key_recorded": false
+  }
+}

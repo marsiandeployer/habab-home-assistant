@@ -25,6 +25,7 @@ GEMINI_TOKEN_URL = 'https://generativelanguage.googleapis.com/v1beta/auth_tokens
 GEMINI_CONSTRAINED_UPSTREAM = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
 GEMINI_MODEL = 'gemini-3.8-live'
 GEMINI_TEXT_MODEL = 'gemini-3.1-flash-lite'
+GEMINI_TEXT_MODELS = (GEMINI_TEXT_MODEL, 'gemini-3.8-flash')
 GEMINI_WEBSOCKET = 'wss://habab-voice.wpmix.net/gemini/ws'
 TOKEN_RESPONSE_MAX = 64 * 1024
 VOICE_FIRST_FRAME_TIMEOUT = 10
@@ -174,7 +175,7 @@ class Gateway:
             'provider': 'habab',
             'chat': {'provider': 'gemini', 'protocol': 'google-generative-language-v1beta',
                      'api_base': 'https://habab-voice.wpmix.net/gemini/v1beta',
-                     'models': [GEMINI_TEXT_MODEL], 'default_model': GEMINI_TEXT_MODEL,
+                     'models': list(GEMINI_TEXT_MODELS), 'default_model': GEMINI_TEXT_MODEL,
                      'streaming': True},
             'realtime': {'provider': 'gemini', 'transport': 'habab', 'models': [GEMINI_MODEL],
                          'default_model': GEMINI_MODEL, 'protocol': 'google-generative-language-bidi-v1beta',
@@ -343,12 +344,12 @@ class Gateway:
             return web.json_response({'error': {'code': 'habab_upstream_not_ready'}}, status=503)
         upstream_key = self.upstream_key
         match = re.fullmatch(
-            r'/gemini/v1beta/models/(gemini-3\.1-flash-lite):(generateContent|streamGenerateContent)',
+            r'/gemini/v1beta/models/(gemini-3\.1-flash-lite|gemini-3\.8-flash):(generateContent|streamGenerateContent)',
             request.path,
         )
         if request.method != 'POST' or match is None:
             return web.json_response({'error': {'code': 'relay_route_not_allowed'}}, status=404)
-        action = match.group(2)
+        model, action = match.groups()
         streaming = action == 'streamGenerateContent'
         if ((streaming and (len(request.query) != 1 or request.query.get('alt') != 'sse'))
                 or (not streaming and len(request.query) != 0)):
@@ -365,7 +366,7 @@ class Gateway:
         if self.inflight >= 6:
             return web.json_response({'error': {'code': 'relay_busy'}}, status=429)
         self.inflight += 1
-        upstream_url = GEMINI_TEXT_BASE + '/' + GEMINI_TEXT_MODEL + ':' + action
+        upstream_url = GEMINI_TEXT_BASE + '/' + model + ':' + action
         query = {'alt': 'sse'} if streaming else None
         result = None
         try:
