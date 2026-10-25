@@ -11,14 +11,18 @@ dialog fallback remains available.
 
 Released `.7` patch SHA-256: `06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da19afcf36c4267bb`.
 
-## `.8` candidate artifact
+## `.8` promoted release and `.9` source candidate
 
-The current `bridge.patch` is the `.8` source candidate with SHA-256
-`c47ee0a56a56f4b8c260ea3b4db3d6111da22e9a6f7d29b1d428882f50ec4010`.
-`build-wheel.sh` targets `20260930.4+habab.8`. The change adds
-`window.haRegisterDirtyStateProvider`, backed by `DirtyStateProviderMixin`, so an
-external frontend component can register unsaved state with Home Assistant's
-service-worker reload guard and defer reload until it is safe.
+`distribution/native-frontend-release.json` and the current owner runtime use
+the `.8` wheel below. The current `bridge.patch` is an unbuilt `.9` source
+candidate with SHA-256
+`c8939ff5d04041587db53fbe7eadf97e573ac89b5e6ee4c9f8ec01ea1fa51954`.
+`build-wheel.sh` targets `20260930.4+habab.9` in a fresh
+`habab-native-frontend9-build` worktree. The candidate keeps the dirty-state
+reload provider and moves the native UI bridge import into the app entrypoint,
+so the bridge and its lazy native-form imports have one app runtime owner. This
+is source/build intent only: `.9` has not been built, published, or checked in
+an owner browser.
 
 The `.8` wheel was built privately as
 `home_assistant_frontend-20260930.4+habab.8-py3-none-any.whl`: 111,324,155 bytes,
@@ -39,15 +43,16 @@ preparation, so the result does not prove that an unmodified canonical builder
 reproduces the wheel. The license asset was reused byte-for-byte from `.7` because
 the `gen-licenses` cache index was unavailable; license generation was not rerun.
 
-The immutable `.8` candidate is available on the artifact server, with its full
-HTTPS body verified against the digest and size. It has not been deployed to
-an owner installation. A local candidate image was built from clean commit
+The immutable `.8` artifact is available on the artifact server, with its full
+HTTPS body verified against the digest and size. It remains the promoted
+manifest version and is installed in the current owner runtime. A local
+candidate image was built from clean commit
 `f803277c68511622e3ad780d10a8a046cb9ef478` on branch
 `qa/owner-frontend8-20261025`: all 44 component files matched and 80 baked backend
 tests passed without a source overlay. See
 [`frontend8-candidate-image-independent.json`](../qa/issue-monitor-20261024/frontend8-candidate-image-independent.json).
-Build and archive readback are not live acceptance. `distribution/native-frontend-release.json`
-continues to identify the published `.7` wheel below.
+Build and archive readback are not live acceptance. The release manifest stays
+on `.8` until a later candidate is built and promoted.
 
 ## Rebuild
 
@@ -62,7 +67,7 @@ git fetch https://github.com/home-assistant/frontend.git \
 test "$(git rev-parse 'refs/tags/20260930.4^{commit}')" = \
   26690e06b0bf64a1487929245c32842ef92c62b5
 git worktree add --detach \
-  /root/.local/share/habab-native-frontend-vacuum-build \
+  /root/.local/share/habab-native-frontend9-build \
   26690e06b0bf64a1487929245c32842ef92c62b5
 
 cid="$(docker create --entrypoint /bin/true \
@@ -81,7 +86,7 @@ matching translation directory with Russian catalogs, Node `24.21.0`, and pnpm
 matching stock catalogs and hashes into generated translation metadata before
 Rspack bundles it, verifies every declared locale and fragment resolves to a
 stock file, then packages the assets as
-`home_assistant_frontend-20260930.4+habab.8-py3-none-any.whl`.
+`home_assistant_frontend-20260930.4+habab.9-py3-none-any.whl`.
 
 The pinned patch also fixes Roboto copying in `gather-static`: the filter keeps
 directories and `.woff2` files, so absolute source paths under dotted parents

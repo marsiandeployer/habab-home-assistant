@@ -2,13 +2,13 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-frontend-vacuum-build}"
+worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-frontend9-build}"
 translations="${HABAB_NATIVE_FRONTEND_TRANSLATIONS:-/root/.local/share/habab-native-frontend-translations-official/translations}"
 source_commit="26690e06b0bf64a1487929245c32842ef92c62b5"
 patch_file="$repo_root/habab/native-frontend/bridge.patch"
-patch_sha="c47ee0a56a56f4b8c260ea3b4db3d6111da22e9a6f7d29b1d428882f50ec4010"
+patch_sha="c8939ff5d04041587db53fbe7eadf97e573ac89b5e6ee4c9f8ec01ea1fa51954"
 catalog_sha="154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce"
-wheel_version="20260930.4+habab.8"
+wheel_version="20260930.4+habab.9"
 wheel_name="home_assistant_frontend-${wheel_version}-py3-none-any.whl"
 staging="$(mktemp -d /root/.local/share/habab-native-frontend-wheel.XXXXXX)"
 pyproject_backup="$staging/pyproject.toml"
@@ -77,6 +77,7 @@ pnpm exec eslint \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
   src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts \
+  src/entrypoints/app.ts \
   src/entrypoints/core.ts \
   src/panels/lovelace/hui-root.ts \
   src/data/preloads.ts \
@@ -101,6 +102,7 @@ pnpm exec prettier --check \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
   src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts \
+  src/entrypoints/app.ts \
   src/entrypoints/core.ts \
   src/panels/lovelace/hui-root.ts \
   src/data/preloads.ts \

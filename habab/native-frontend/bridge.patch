@@ -1068,8 +1068,18 @@ index 5be85357f..58d0ad70d 100644
    if (hass.auth.external?.config.hasAssist) {
      hass.auth.external!.fireMessage({
        type: "assist/show",
+diff --git a/src/entrypoints/app.ts b/src/entrypoints/app.ts
+index a54eca9d9..b6624b12c 100644
+--- a/src/entrypoints/app.ts
++++ b/src/entrypoints/app.ts
+@@ -1,4 +1,5 @@
+ import "@webcomponents/scoped-custom-element-registry/scoped-custom-element-registry.min";
++import "../habab/native-ui-bridge";
+ import "../layouts/home-assistant";
+ 
+ import("../resources/append-ha-style");
 diff --git a/src/entrypoints/core.ts b/src/entrypoints/core.ts
-index d6eb603a6..deb70626b 100644
+index d6eb603a6..f2ae5df55 100644
 --- a/src/entrypoints/core.ts
 +++ b/src/entrypoints/core.ts
 @@ -15,7 +15,6 @@ import { fetchConfig } from "../data/lovelace/config/types";
@@ -1080,14 +1090,6 @@ index d6eb603a6..deb70626b 100644
  import { subscribeRepairsIssueRegistry } from "../data/repairs";
  import { subscribeAreaRegistry } from "../data/ws-area_registry";
  import { subscribeDeviceRegistry } from "../data/ws-device_registry";
-@@ -25,6 +24,7 @@ import { subscribePanels } from "../data/ws-panels";
- import { subscribeThemes } from "../data/ws-themes";
- import { subscribeUser } from "../data/ws-user";
- import type { ExternalAuth } from "../external_app/external_auth";
-+import "../habab/native-ui-bridge";
- 
- window.name = MAIN_WINDOW_NAME;
- (window as any).frontendVersion = __VERSION__;
 @@ -138,8 +138,6 @@ window.hassConnection.then(({ conn }) => {
    subscribeRepairsIssueRegistry(conn, noop);
  
