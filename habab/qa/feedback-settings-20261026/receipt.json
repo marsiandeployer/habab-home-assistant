@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "kind": "isolated_feedback_settings_fixture_ui",
+  "fixture": "actual distribution ai-panel.js/strings.js/telemetry-panel.js",
+  "browser": "existing Puppeteer Core + owned headless Chromium",
+  "externalPageRequestsBlocked": 0,
+  "viewport": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "sectionVisible": true,
+      "horizontalOverflowPx": 0
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "sectionVisible": true,
+      "horizontalOverflowPx": 0
+    }
+  },
+  "focus": {
+    "beforeRefresh": true,
+    "afterMetadataRefresh": true,
+    "typingAfterMetadataRefresh": true,
+    "afterLocaleRerender": true,
+    "draftAfterLocaleRerenderPreserved": true,
+    "typingAfterLocaleRerender": true
+  },
+  "actions": {
+    "commands": [
+      "habab_home/feedback_delivery/save",
+      "habab_home/feedback_delivery/enable",
+      "habab_home/feedback_delivery/enable",
+      "habab_home/feedback_delivery/clear"
+    ],
+    "saveConfigured": true,
+    "saveDraftCleared": true,
+    "enabledOn": true,
+    "enabledOff": true,
+    "clearUnconfigured": true,
+    "clearDraftCleared": true,
+    "statusError": false,
+    "unexpectedWsCommandCount": 0
+  },
+  "commandTrace": {
+    "count": 4,
+    "types": [
+      "habab_home/feedback_delivery/save",
+      "habab_home/feedback_delivery/enable",
+      "habab_home/feedback_delivery/enable",
+      "habab_home/feedback_delivery/clear"
+    ]
+  },
+  "blocking": {
+    "externalRequestsBlocked": 0,
+    "unexpectedExternalRequestCount": 0,
+    "pageErrorCount": 0
+  },
+  "status": "PASS",
+  "findings": []
+}

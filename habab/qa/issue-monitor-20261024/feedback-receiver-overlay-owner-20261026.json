@@ -1,0 +1,123 @@
+{
+  "before_installed": {
+    "absent_markers": [
+      "feedback_transport.py"
+    ],
+    "backup_path": "/root/.local/share/habab-owner-test/runtime-before-installed-ee11572891b0",
+    "present_file_count": 8
+  },
+  "boundaries": {
+    "no_config_or_provider_changes": true,
+    "no_device_actions": true,
+    "no_external_feedback_delivery": true,
+    "no_feedback_token_saved": true,
+    "no_model_calls": true,
+    "no_other_services_restarted": true,
+    "no_screenshots_or_dom_dump": true,
+    "no_session_ids_or_history": true,
+    "no_telegram_calls": true,
+    "no_voice_calls": true
+  },
+  "container": {
+    "id": "ee11572891b035cb2517369b014be8d56a81d219b3f8cd1fee4cf9f39a7a7da1",
+    "image_id": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "name": "habab-owner-test",
+    "restart_count": 1
+  },
+  "feedback_delivery": {
+    "credential_configured": false,
+    "credential_saved": false,
+    "delivery_enabled_by_test": false,
+    "enabled": false,
+    "ready": false
+  },
+  "overlay": {
+    "files_copied": 9,
+    "mode_0644": 9,
+    "post_copy_hash_matches": 9,
+    "served_ai_panel_hash_matches": true,
+    "served_ai_panel_status": 200,
+    "served_strings_hash_matches": true,
+    "served_strings_status": 200,
+    "target": "/usr/src/homeassistant/homeassistant/components/habab_home"
+  },
+  "post_restart": {
+    "admin": true,
+    "automation_entity_count": 0,
+    "component_loaded": true,
+    "ha_version": "2026.10.2",
+    "owner": true,
+    "vacuum_count": 1,
+    "vacuum_states": [
+      "docked"
+    ]
+  },
+  "pre_restart_gate": {
+    "busy": 0,
+    "idle": 0,
+    "opencode_serve_process_count": 1,
+    "retry": 0,
+    "status_shape": "valid",
+    "total": 0
+  },
+  "recorded_at_utc": "2026-10-25T23:35:03Z",
+  "scope": "owner-only custom component source overlay and one HA container restart",
+  "source": {
+    "accepted_commit": "3bdc03b6d13f41d142550703e698591bf032563d",
+    "file_count": 9,
+    "file_hashes": [
+      {
+        "path": "habab/distribution/src/habab_home/diagnostics.py",
+        "sha256": "542276f742ad5175207617c3526519fdddb05332d9e8bf47a5648b1aa58bd6e5"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/feedback.py",
+        "sha256": "10face4b4886872fed1572f7b7db7fef2b5365e3749742d76845b4e1a47ab482"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/feedback_action.py",
+        "sha256": "9ae8b739e22a13c76afdee3a0dadb866f9aa235c55c3ae0fb706d544ff948260"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/setup_agent.py",
+        "sha256": "5a8a286fdb6565f345a7aef1ba12f180508226ad4e626b308c8c6f5918eef1c1"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/realtime.py",
+        "sha256": "91f2f37ca04a3d5afc9dd136b8d155e71364f59dfefe7f627a38ae4249dc06b1"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/websocket.py",
+        "sha256": "556fc8b4eb2be9856dcf7707e3fce06b60ce8f18be42a8e513146c655d2de109"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/frontend/ai-panel.js",
+        "sha256": "ec27892341774190a88a069e0fcaaad258517c363416dd73a44e4caa964fdc94"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/frontend/strings.js",
+        "sha256": "bd924ba9c44ba3073863a7384468a15668ff6c632135f2e7bcb60dcf8d7de1a7"
+      },
+      {
+        "path": "habab/distribution/src/habab_home/feedback_transport.py",
+        "sha256": "429b2568fda09aead3b376800787e5f33a397f57d1d5ffc6b966d6824e4ddca4"
+      }
+    ],
+    "freeze_path": "/root/.local/share/habab-owner-test/source-freeze-3bdc03b6d13f41d142550703e698591bf032563d"
+  },
+  "ui_readback": {
+    "autocomplete": "new-password",
+    "clear_disabled": true,
+    "draft_length": 0,
+    "enabled_checked": false,
+    "enabled_disabled": true,
+    "input_disabled": false,
+    "input_type": "password",
+    "label": "Ключ получателя отзывов",
+    "panel_present": true,
+    "route": "/habab-ai",
+    "save_disabled": true,
+    "status": "Ключ получателя не настроен. Отправка выключена.",
+    "title": "Отзывы разработчикам"
+  }
+}
