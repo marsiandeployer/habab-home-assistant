@@ -1,0 +1,52 @@
+{
+  "checked_at": "2026-10-25T11:43:01.167Z",
+  "target_route": "/habab-diagnostics",
+  "runtime": "existing owner-test frontend; verified by authenticated admin session",
+  "verdict": "FAIL",
+  "admin_verified": true,
+  "panel_accessible": true,
+  "selected_export_downloaded_in_memory": true,
+  "download_verdict": "PASS_SELECTED_EXPORT_BYTES_VALIDATED_IN_MEMORY",
+  "export_requests": 1,
+  "archive": {
+    "status": "passed",
+    "archive_bytes": 14777,
+    "entries": [
+      "history.json",
+      "history.txt",
+      "manifest.json",
+      "opencode/availability.json"
+    ],
+    "session_count": 1,
+    "event_count": 56,
+    "audio_included": false,
+    "checks": {
+      "archive_under_1_mib": true,
+      "expanded_files_under_1_mib": true,
+      "session_count_within_five": true,
+      "event_count_within_two_hundred": true,
+      "messages_per_session_within_sixty": true,
+      "runtime_response_limit_two_megabytes": true,
+      "archive_limit_one_mib": true,
+      "audio_excluded": true,
+      "required_redaction_disclosures": true,
+      "credential_patterns_absent": true
+    }
+  },
+  "no_application_http_writes_except_export": true,
+  "forbidden_websocket_write_types": [],
+  "browser_errors": {
+    "console": 13,
+    "page": 4,
+    "failed_requests": 12,
+    "http_errors": 0
+  },
+  "no_archive_saved": true,
+  "no_model_calls": true,
+  "no_device_actions": true,
+  "no_settings_writes": true,
+  "audio_included": false,
+  "system_log_write_count": 4,
+  "failure": "browser_errors_observed",
+  "finished_at": "2026-10-25T11:43:08.043Z"
+}

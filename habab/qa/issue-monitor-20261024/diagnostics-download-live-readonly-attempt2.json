@@ -1,0 +1,61 @@
+{
+  "checked_at": "2026-10-25T11:53:02.952Z",
+  "target_route": "/habab-diagnostics",
+  "runtime_identity": {
+    "runtime": "habab-owner-test",
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "home_assistant_version": "2026.10.2",
+    "frontend_version": "20260930.4+habab.8",
+    "product_version": "0.3.6",
+    "mode": "base_image_plus_forward_hotfix",
+    "diagnostics_backend_overlay_sha256": "6b38e0f0584148115271b7b1420e1cff1d49c803aa7a158c3fdb2f3ccd5aaf2d",
+    "diagnostics_panel_asset_sha256": "18d2af5500c959796e2c8c9ead8521473cefd42bc2654ccdc9817123e2f380e4"
+  },
+  "verdict": "PASS_READ_ONLY_LIVE_DIAGNOSTICS_EXPORT",
+  "admin_verified": true,
+  "panel_accessible": true,
+  "selected_export_downloaded_in_memory": true,
+  "download_verdict": "PASS_SELECTED_EXPORT_BYTES_VALIDATED_IN_MEMORY",
+  "export_requests": 1,
+  "archive": {
+    "status": "passed",
+    "archive_bytes": 14777,
+    "entries": [
+      "history.json",
+      "history.txt",
+      "manifest.json",
+      "opencode/availability.json"
+    ],
+    "session_count": 1,
+    "event_count": 56,
+    "audio_included": false,
+    "checks": {
+      "archive_under_1_mib": true,
+      "expanded_files_under_1_mib": true,
+      "session_count_within_five": true,
+      "event_count_within_two_hundred": true,
+      "messages_per_session_within_sixty": true,
+      "runtime_response_limit_two_megabytes": true,
+      "archive_limit_one_mib": true,
+      "audio_excluded": true,
+      "required_redaction_disclosures": true,
+      "credential_patterns_absent": true
+    }
+  },
+  "no_application_http_writes_except_export": true,
+  "forbidden_websocket_write_types": [],
+  "browser_errors": {
+    "console": 0,
+    "page": 0,
+    "failed_requests": 0,
+    "http_errors": 0
+  },
+  "no_archive_saved": true,
+  "no_model_calls": true,
+  "no_device_actions": true,
+  "no_settings_writes": true,
+  "audio_included": false,
+  "system_log_write_count": 0,
+  "finished_at": "2026-10-25T11:53:09.216Z"
+}
