@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-10-25T07:21:11.141181+00:00",
+  "image": "sha256:1c690f0da9002a65ea55525a8bcc2ef28390691094745bbf97f87b30598b7cc4",
+  "source": "df03d51e1d6b4c435d283c6340bf94196f0d8b50",
+  "clean_git_archive": true,
+  "baked_component_files_matched": 44,
+  "network_during_build": "none; existing cached base/native wheel layers",
+  "baked_diagnostics_tests_passed": 16,
+  "source_overlay": false,
+  "deployed": false,
+  "active_owner_unchanged": true,
+  "next": "coordinate owner idle and sole Telegram poller before rollout; then authenticated panel/export and ACL acceptance"
+}
