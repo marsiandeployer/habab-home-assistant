@@ -1,0 +1,117 @@
+{
+  "checked_at": "2026-10-25T09:25:10.895Z",
+  "target_alias": "accepted-owner-test",
+  "runtime": {
+    "identity": {
+      "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+      "runtime": "habab-owner-test",
+      "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+      "frontend_version": "20260930.4+habab.8",
+      "init_py_sha256": "b594844a055cab6b677788e69720f66450227474743b3db0b786ab7e97d980d1",
+      "hotfix_source_commit": "527ba9e43",
+      "mode": "base_image_plus_forward_hotfix",
+      "origin": "https://habab-demo.wpmix.net"
+    },
+    "product_version": "0.3.6",
+    "home_assistant_version": "2026.10.2",
+    "status": "running"
+  },
+  "mode": "chat_e2e",
+  "verdict": "PASS_PENDING_MANUAL_REVIEW",
+  "cases": {
+    "turn_on": {
+      "assistant_replied": true,
+      "service_call_count": 1,
+      "submission_accepted": true,
+      "turn_completed": true,
+      "turn_elapsed_ms": 7712,
+      "same_document_and_chat": true,
+      "backend_idle_confirmed": true,
+      "connection_identity": 67387798837014,
+      "uninterrupted_observation": true,
+      "target_matched": true,
+      "context_matched": true,
+      "readback": "on"
+    },
+    "turn_off": {
+      "assistant_replied": true,
+      "service_call_count": 1,
+      "submission_accepted": true,
+      "turn_completed": true,
+      "turn_elapsed_ms": 3062,
+      "same_document_and_chat": true,
+      "backend_idle_confirmed": true,
+      "connection_identity": 67387798837014,
+      "uninterrupted_observation": true,
+      "target_matched": true,
+      "context_matched": true,
+      "readback": "off"
+    },
+    "unknown_target": {
+      "assistant_replied": true,
+      "service_call_count": 0,
+      "submission_accepted": true,
+      "turn_completed": true,
+      "turn_elapsed_ms": 3061,
+      "same_document_and_chat": true,
+      "backend_idle_confirmed": true,
+      "connection_identity": 67387798837014,
+      "uninterrupted_observation": true,
+      "target_matched": false,
+      "context_matched": false,
+      "readback": "off"
+    },
+    "device_inventory": {
+      "assistant_replied": true,
+      "service_call_count": 0,
+      "submission_accepted": true,
+      "turn_completed": true,
+      "turn_elapsed_ms": 3022,
+      "same_document_and_chat": true,
+      "backend_idle_confirmed": true,
+      "connection_identity": 67387798837014,
+      "uninterrupted_observation": true,
+      "target_matched": false,
+      "context_matched": false,
+      "readback": "off",
+      "device_registry_count_before": 4,
+      "device_registry_count_after": 4,
+      "device_registry_count_unchanged": true,
+      "answer_semantic_review": "MANUAL_REVIEW_REQUIRED"
+    }
+  },
+  "cleanup": {
+    "fixture_created": true,
+    "fixture_deleted": true
+  },
+  "limitations": [
+    "A browser action trace and independent Home Assistant state readback are required for E2E acceptance.",
+    "Physical device behavior is outside this nonphysical fixture test."
+  ],
+  "attempt": "20261025-attempt-8",
+  "owner_test_pathname": "/home/overview",
+  "browser_pathname": "/home/overview",
+  "preexisting_history_count": 36,
+  "current_assistant_provider_verified": true,
+  "service_observer": {
+    "authenticated_owner_match": true,
+    "subscribed": true,
+    "connection_identity": 67387798837014,
+    "connected": true
+  },
+  "calibration": {
+    "observer_acknowledged": true,
+    "calls_observed": 2,
+    "target_matched": true,
+    "context_matched": true,
+    "state_restored_off": true,
+    "connection_identity": 67387798837014,
+    "uninterrupted": true
+  },
+  "document_monitoring": {
+    "marker_present": true,
+    "loader_present": true,
+    "chat_instance_present": true,
+    "path": "/home/overview"
+  }
+}

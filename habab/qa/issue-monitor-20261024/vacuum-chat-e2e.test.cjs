@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   sameDeviceBinding,
   hasOwnedStart,
+  latestTurnMessageEvidence,
   hasVerifiedSendCompletion,
   canAttemptEmergencyStop,
   canAttemptEmergencyDock,
@@ -73,7 +74,34 @@ test('unverified dock call remains incomplete even if the readback later says do
     dockCall: {ws_result: true, event_verified: true}, dockedState}), true);
 });
 
-test('send callback proof survives capped or replaced history without retaining old message objects', () => {
+test('current turn correlation accepts multiple assistant bubbles in capped or replaced history', () => {
+  const prompt = 'Run this vacuum action through chat';
+  const capped = Array.from({length: 57}, (_, index) => ({role: index % 2 ? 'assistant' : 'user', text: `old ${index}`}));
+  capped.push({role: 'user', text: prompt},
+    {role: 'assistant', text: 'I am checking the request.'},
+    {role: 'assistant', text: 'The requested action is complete.'});
+  assert.equal(capped.length, 60);
+  assert.deepEqual(latestTurnMessageEvidence(capped, prompt), {
+    latest_user_match: true, assistant_present: true, assistant_reply: 'The requested action is complete.',
+  });
+
+  const replaced = [
+    {role: 'assistant', text: 'Historical assistant response.'},
+    {role: 'user', text: prompt},
+    {role: 'assistant', text: 'Tool preface.'},
+    {role: 'assistant', text: 'Current final answer.'},
+  ];
+  assert.deepEqual(latestTurnMessageEvidence(replaced, prompt), {
+    latest_user_match: true, assistant_present: true, assistant_reply: 'Current final answer.',
+  }, 'use the latest prompt and assistant messages after it after the history array is replaced');
+  assert.equal(latestTurnMessageEvidence([
+    {role: 'user', text: prompt}, {role: 'assistant', text: 'Old answer.'},
+    {role: 'user', text: 'A newer prompt.'}, {role: 'assistant', text: 'New answer.'},
+  ], prompt).latest_user_match, false, 'reject a newer different user message');
+  assert.equal(latestTurnMessageEvidence([
+    {role: 'assistant', text: 'Stale answer.'}, {role: 'user', text: prompt},
+  ], prompt).assistant_present, false, 'do not use a stale assistant answer before the latest user');
+
   const baseline = {documentMarker: 'doc-1', chatInstanceId: 'chat-1'};
   const events = [
     {...callbacks[0]},
@@ -83,17 +111,26 @@ test('send callback proof survives capped or replaced history without retaining 
       document_marker: 'doc-1', chat_instance_id: 'chat-1', session_id: 'session-1', owner_id: ownerId,
       assistant_reply: 'Готово'},
   ];
-  assert.equal(hasVerifiedSendCompletion(events, 'case-1', baseline), true);
+  assert.equal(hasVerifiedSendCompletion(events, 'case-1', baseline, replaced, prompt), true);
+  assert.equal(hasVerifiedSendCompletion(events, 'case-1', baseline, [
+    {role: 'user', text: prompt}, {role: 'assistant', text: 'Stale response'},
+    {role: 'user', text: 'Newer input'}, {role: 'assistant', text: 'Newer response'},
+  ], prompt), false, 'callback cannot override a superseding user message in the current UI history');
 });
 
 test('missing, failed, or replaced-document send callback cannot prove completion', () => {
   const baseline = {documentMarker: 'doc-1', chatInstanceId: 'chat-1'};
+  const messages = [{role: 'user', text: 'Run this vacuum action through chat'},
+    {role: 'assistant', text: 'Done.'}];
   const complete = [...callbacks, {kind: 'send_completed', case_id: 'case-1', completed: true,
     accepted: true, final_busy: false, status_error: false, latest_user_match: true, assistant_present: true,
     document_marker: 'doc-1', chat_instance_id: 'chat-1', session_id: 'session-1', owner_id: ownerId}];
-  assert.equal(hasVerifiedSendCompletion(complete.slice(0, 2), 'case-1', baseline), false);
+  assert.equal(hasVerifiedSendCompletion(complete.slice(0, 2), 'case-1', baseline, messages,
+    'Run this vacuum action through chat'), false);
   assert.equal(hasVerifiedSendCompletion(complete.map((event) => event.kind === 'send_accepted'
-    ? {...event, accepted: false} : event), 'case-1', baseline), false);
+    ? {...event, accepted: false} : event), 'case-1', baseline, messages,
+  'Run this vacuum action through chat'), false);
   assert.equal(hasVerifiedSendCompletion(complete.map((event) => event.kind === 'send_completed'
-    ? {...event, document_marker: 'replacement-doc'} : event), 'case-1', baseline), false);
+    ? {...event, document_marker: 'replacement-doc'} : event), 'case-1', baseline, messages,
+  'Run this vacuum action through chat'), false);
 });

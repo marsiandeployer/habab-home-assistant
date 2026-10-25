@@ -192,12 +192,23 @@ function hasOwnedStart(events, entityId, ownerId, turn, callbackEvents = []) {
   return events.slice(turn.event_offset).filter((event) => eventMatches(event, entityId, 'start', ownerId)).length === 1;
 }
 
-function hasVerifiedSendCompletion(events, caseId, baseline) {
+function latestTurnMessageEvidence(messages, expectedText) {
+  if (!Array.isArray(messages)) return {latest_user_match: false, assistant_present: false, assistant_reply: ''};
+  const latestUserIndex = messages.findLastIndex((message) => message?.role === 'user');
+  const latestUser = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
+  const assistants = latestUserIndex >= 0 ? messages.slice(latestUserIndex + 1).filter((message) =>
+    message?.role === 'assistant' && typeof message.text === 'string' && message.text.trim()) : [];
+  return {latest_user_match: latestUser?.text === expectedText,
+    assistant_present: assistants.length > 0, assistant_reply: assistants.at(-1)?.text || ''};
+}
+
+function hasVerifiedSendCompletion(events, caseId, baseline, messages, expectedText) {
   const completed = events.filter((event) => event.case_id === caseId && event.kind === 'send_completed');
+  const currentTurn = latestTurnMessageEvidence(messages, expectedText);
   return hasCompletedSendCallbacks(events, caseId, {document_marker: baseline?.documentMarker,
     chat_instance_id: baseline?.chatInstanceId}) && completed.length === 1 &&
     completed[0].accepted === true && completed[0].latest_user_match === true &&
-    completed[0].assistant_present === true;
+    completed[0].assistant_present === true && currentTurn.latest_user_match && currentTurn.assistant_present;
 }
 
 function canAttemptEmergencyStop({ownedStart, bindingMatches, mappedSession, ownerAdmin, state}) {
@@ -440,18 +451,22 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
           errorClass = error instanceof Error ? error.name : 'UnknownError';
           throw error;
         } finally {
-          const latest = this.messages?.slice(-2) || [];
+          const messages = Array.isArray(this.messages) ? this.messages : [];
+          const latestUserIndex = messages.findLastIndex((message) => message?.role === 'user');
+          const latestUser = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
+          const assistantsAfterLatestUser = latestUserIndex >= 0 ? messages.slice(latestUserIndex + 1).filter((message) =>
+            message?.role === 'assistant' && typeof message.text === 'string' && message.text.trim()) : [];
+          const latestAssistant = assistantsAfterLatestUser.at(-1);
           const statusError = Boolean(this.shadowRoot?.querySelector('#status')?.classList.contains('error'));
           const completed = {kind: 'send_completed', case_id: active.case_id,
             document_marker: window.__hababVacuumDocumentMarker,
             chat_instance_id: this.__hababVacuumQaId, session_id: this.sessionId,
             owner_id: this.hass?.user?.id, accepted: active.accepted, completed: true,
             final_busy: Boolean(this.busy), status_error: statusError,
-            latest_user_match: latest.length === 2 && latest[0]?.role === 'user' && latest[0].text === active.expected_text,
-            assistant_present: latest.length === 2 && latest[1]?.role === 'assistant' &&
-              typeof latest[1].text === 'string' && Boolean(latest[1].text.trim()),
-            assistant_reply: latest.at(-1)?.role === 'assistant' ? String(latest.at(-1).text || '') : '',
-            assistant_length: latest.at(-1)?.role === 'assistant' ? String(latest.at(-1).text || '').length : 0,
+            latest_user_match: latestUser?.text === active.expected_text,
+            assistant_present: assistantsAfterLatestUser.length > 0,
+            assistant_reply: String(latestAssistant?.text || ''),
+            assistant_length: String(latestAssistant?.text || '').length,
             elapsed_ms: Date.now() - startedAt, error_class: errorClass};
           active.completed = true;
           emit(completed);
@@ -488,13 +503,13 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
   trace.accepted = true;
   const completed = await waitForSignal('send_completed', LIMIT.chatReply, 'chat_send_completion_timeout');
   const callbackSnapshot = callbackEvents.filter((event) => event.case_id === caseId);
-  if (!hasVerifiedSendCompletion(callbackSnapshot, caseId, baseline) ||
-      completed.document_marker !== baseline.documentMarker || completed.chat_instance_id !== baseline.chatInstanceId ||
-      completed.session_id !== baseline.sessionId || completed.owner_id !== baseline.ownerId ||
-      completed.status_error || completed.final_busy) throw fail('chat_send_completion_mismatch');
   const turn = await page.evaluate(({sessionId, ownerId, chatInstanceId, documentMarker}) => {
     const chat = window.__hababQaFind('habab-setup-chat');
-    return {same_chat: chat === window.__hababVacuumBaseline?.chat && chat?.__hababVacuumQaId === chatInstanceId,
+    const messages = Array.isArray(chat?.messages) ? chat.messages.map((message) => ({
+      role: message?.role, text: typeof message?.text === 'string' ? message.text : '',
+    })) : [];
+    return {messages,
+      same_chat: chat === window.__hababVacuumBaseline?.chat && chat?.__hababVacuumQaId === chatInstanceId,
       same_document: window.__hababVacuumDocumentMarker === documentMarker,
       same_service_worker: window.__hababQaServiceWorkerStable?.() === true,
       same_session: chat?.sessionId === sessionId,
@@ -505,11 +520,23 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
       path: location.pathname};
   }, {sessionId: expectedSession, ownerId: expectedOwner,
     chatInstanceId: baseline.chatInstanceId, documentMarker: baseline.documentMarker});
+  const messageEvidence = latestTurnMessageEvidence(turn.messages, prompt);
+  if (!hasVerifiedSendCompletion(callbackSnapshot, caseId, baseline, turn.messages, prompt) ||
+      completed.document_marker !== baseline.documentMarker || completed.chat_instance_id !== baseline.chatInstanceId ||
+      completed.session_id !== baseline.sessionId || completed.owner_id !== baseline.ownerId ||
+      completed.status_error || completed.final_busy || !messageEvidence.latest_user_match ||
+      !messageEvidence.assistant_present) {
+    throw fail('chat_send_completion_mismatch');
+  }
+  turn.latest_user_match = messageEvidence.latest_user_match;
+  turn.assistant_present = messageEvidence.assistant_present;
+  turn.assistant_reply = messageEvidence.assistant_reply;
+  delete turn.messages;
   if (!turn.same_chat || !turn.same_document || !turn.same_service_worker || !turn.same_session ||
       !turn.same_owner || !turn.idle || !turn.no_ui_error || turn.path !== '/home/overview') {
     throw fail('chat_turn_identity_or_completion_mismatch');
   }
-  turn.assistant_reply = completed.assistant_reply;
+  turn.assistant_reply = messageEvidence.assistant_reply;
   turn.assistant_reply_length = completed.assistant_length;
   trace.turn = turn;
   trace.completed = true;
@@ -1064,7 +1091,7 @@ async function main() {
   }
 }
 
-module.exports = {sameDeviceBinding, hasOwnedStart, hasVerifiedSendCompletion,
+module.exports = {sameDeviceBinding, hasOwnedStart, latestTurnMessageEvidence, hasVerifiedSendCompletion,
   canAttemptEmergencyStop, canAttemptEmergencyDock, emergencyRecoveryComplete, deriveDeviceIdentity};
 
 if (require.main === module) {

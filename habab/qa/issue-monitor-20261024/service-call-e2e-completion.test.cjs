@@ -8,18 +8,69 @@ const { EventEmitter } = require("node:events");
 const { hasAcceptedTurn, hasContinuousObserver, sameDeviceInventoryCount,
   isReadyToSubmit, shouldDeferFixtureCleanup, hasSameDocument,
   hasNoDocumentNavigation, hasCompletedSendCallbacks, observedEventsIfContinuous, serviceEventProjection,
-  serviceEventTargetsOnlyEntity, writePublicReport,
+  serviceEventTargetsOnlyEntity, writePublicReport, matchesRuntimeIdentity, selectedAssistantProvider,
   NativeHaServiceObserver } = require("./service-call-e2e.cjs");
 
 const prompt = "Turn on the disposable QA helper";
 const cappedTail = Array.from({ length: 58 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `old ${index}` }));
 cappedTail.push({ role: "user", text: prompt }, { role: "assistant", text: "The helper is on." });
+const cappedMultiAssistantTurn = Array.from({ length: 57 }, (_, index) => ({
+  role: index % 2 ? "assistant" : "user", text: `old ${index}`,
+}));
+cappedMultiAssistantTurn.push({ role: "user", text: prompt },
+  { role: "assistant", text: "I am checking the request." },
+  { role: "assistant", text: "The helper is on." });
 const completedProbe = { expected_text: prompt, submitted_text: prompt, accepted: true,
   completed: true, final_busy: false, status_error: false };
 const idleUi = { busy: false, status_error: false };
 
+const hotfixIdentity = {image: 'sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928',
+  source: 'f803277c68511622e3ad780d10a8a046cb9ef478', runtime: 'habab-owner-test',
+  frontend_version: '20260930.4+habab.8',
+  init_py_sha256: 'b594844a055cab6b677788e69720f66450227474743b3db0b786ab7e97d980d1',
+  hotfix_source_commit: '527ba9e43', mode: 'base_image_plus_forward_hotfix',
+  origin: 'https://habab-demo.wpmix.net'};
+assert.equal(matchesRuntimeIdentity({...hotfixIdentity}, hotfixIdentity), true,
+  'accept only the attested image, source, frontend, and forward-hotfix identity');
+assert.equal(matchesRuntimeIdentity({...hotfixIdentity, init_py_sha256: '0'.repeat(64)}, hotfixIdentity), false,
+  'reject runtime without exact init hotfix');
+assert.equal(matchesRuntimeIdentity({...hotfixIdentity, frontend_version: '20260930.4+habab.7'}, hotfixIdentity), false,
+  'reject different frontend asset build');
+assert.equal(matchesRuntimeIdentity({...hotfixIdentity, source: 'a'.repeat(40)}, hotfixIdentity), false,
+  'reject different source commit');
+assert.equal(matchesRuntimeIdentity({...hotfixIdentity, hotfix_source_commit: 'another'}, hotfixIdentity), false,
+  'reject different forward-hotfix source');
+assert.equal(matchesRuntimeIdentity({...hotfixIdentity, mode: 'baked_image'}, hotfixIdentity), false,
+  'reject a different runtime installation mode');
+assert.equal(matchesRuntimeIdentity({...hotfixIdentity, origin: 'https://other.example'}, hotfixIdentity), false,
+  'reject runtime attested for another origin');
+
+const selectedProvider = {entry_id: 'provider-entry', provider: 'deepseek', model: 'qa-model',
+  state: 'loaded', assistant_selected: true};
+assert.deepEqual(selectedAssistantProvider({connections: [selectedProvider]}),
+  {entry_id: 'provider-entry', provider: 'deepseek', model: 'qa-model'},
+  'read only the active selected provider/model');
+assert.throws(() => selectedAssistantProvider({connections: [selectedProvider,
+  {...selectedProvider, entry_id: 'second-entry'}]}), /selected_provider_unavailable_or_ambiguous/,
+  'reject ambiguous selected providers');
+assert.throws(() => selectedAssistantProvider({connections: [{...selectedProvider, state: 'not_loaded'}]}),
+  /selected_provider_unavailable_or_ambiguous/, 'reject unloaded provider');
+
 assert.equal(cappedTail.length, 60);
 assert.equal(hasAcceptedTurn(cappedTail, prompt, completedProbe, idleUi), true, "accept completed pair at 60-item cap");
+assert.equal(cappedMultiAssistantTurn.length, 60);
+assert.equal(hasAcceptedTurn(cappedMultiAssistantTurn, prompt, completedProbe, idleUi), true,
+  "accept a current turn with multiple assistant messages at the 60-item history cap");
+assert.equal(hasAcceptedTurn([
+  { role: "user", text: prompt }, { role: "assistant", text: "Older answer." },
+  { role: "user", text: "A newer unrelated prompt." }, { role: "assistant", text: "Newer answer." },
+], prompt, completedProbe, idleUi), false, "reject a newer user message that supersedes the submitted prompt");
+assert.equal(hasAcceptedTurn([
+  { role: "assistant", text: "Stale answer." }, { role: "user", text: prompt },
+], prompt, completedProbe, idleUi), false, "do not count a stale assistant message before the current user");
+assert.equal(hasAcceptedTurn([
+  { role: "user", text: prompt }, { role: "assistant", text: "   " },
+], prompt, completedProbe, idleUi), false, "reject an empty assistant message after the current user");
 assert.equal(hasAcceptedTurn(cappedTail, prompt, { ...completedProbe, accepted: false }, idleUi), false,
   "reject identical preexisting pair when submit was skipped");
 assert.equal(hasAcceptedTurn(cappedTail, prompt, { ...completedProbe, completed: false }, idleUi), false,
@@ -96,7 +147,8 @@ const callbackEvents = ["send_started", "send_accepted", "send_completed"].map((
   kind, case_id: "attempt:turn_on", document_marker: documentIdentity.document_marker,
   chat_instance_id: documentIdentity.chat_instance_id,
   ...(kind === "send_accepted" ? { accepted: true } : {}),
-  ...(kind === "send_completed" ? { completed: true, final_busy: false, error_class: null } : {}),
+  ...(kind === "send_completed" ? { completed: true, final_busy: false, error_class: null,
+    latest_user_match: true, assistant_present: true } : {}),
 }));
 assert.equal(hasCompletedSendCallbacks(callbackEvents, "attempt:turn_on", documentIdentity), true,
   "accept actual settled send callbacks from current document and chat");
@@ -110,6 +162,12 @@ assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event
 assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
   ...(event.kind === "send_completed" ? { final_busy: true } : {}) })),
 "attempt:turn_on", documentIdentity), false, "reject a settled callback that remains busy");
+assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
+  ...(event.kind === "send_completed" ? { latest_user_match: false } : {}) })),
+"attempt:turn_on", documentIdentity), false, "reject completion whose latest user differs from submitted prompt");
+assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
+  ...(event.kind === "send_completed" ? { assistant_present: false } : {}) })),
+"attempt:turn_on", documentIdentity), false, "reject completion without a nonempty assistant after the latest user");
 assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
   ...(event.kind === "send_completed" ? { document_marker: "new-document" } : {}) })),
 "attempt:turn_on", documentIdentity), false, "reject callback from a changed document");

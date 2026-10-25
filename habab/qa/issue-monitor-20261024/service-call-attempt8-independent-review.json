@@ -1,0 +1,19 @@
+{
+  "checked_at": "2026-10-25T09:29:48.172244+00:00",
+  "original_report": "service-call-e2e-20261025-attempt-8.json",
+  "original_verdict_preserved": "PASS_PENDING_MANUAL_REVIEW",
+  "independent_cleanup": {
+    "helper_absent": true,
+    "entity_registry_absent": true,
+    "state_http404": true
+  },
+  "semantic_review": {
+    "turn_on": "matches observed exact service/on",
+    "turn_off": "matches observed exact service/off",
+    "unknown_target": "accurate refusal; zero service events",
+    "inventory_count": "correct4registryrecords",
+    "inventory_classification": "FAIL: calls cloud weather record a physical-sounding weather station"
+  },
+  "overall_scoped_verdict": "PARTIAL_INVENTORY_SEMANTICS_FAIL",
+  "physical_vacuum_acceptance": "NOT_RUN"
+}

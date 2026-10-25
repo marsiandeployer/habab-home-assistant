@@ -11,7 +11,7 @@ const WebSocket = require("../../node_modules/ws");
 const { withOwnedChromium } = require("/root/tools/chrome-daemon/owned-browser.cjs");
 
 // A later separately authorized run must receive a deliberately new unique label.
-const ATTEMPT_LABEL = "20261025-attempt-6";
+const ATTEMPT_LABEL = "20261025-attempt-8";
 const OUTPUT = path.join(__dirname, `service-call-e2e-${ATTEMPT_LABEL}.json`);
 const FIXTURE_NAME = "Habab QA service-call fixture 20261024";
 const PRIVATE_TRACE_NAME = `service-call-e2e-${ATTEMPT_LABEL}-private.json`;
@@ -21,15 +21,18 @@ const FIRST_PRIVATE_TRACE_NAME = "service-call-e2e-private.json";
 const NATIVE_WS_URL = "ws://127.0.0.1:8395/api/websocket";
 
 function hasAcceptedTurn(messages, prompt, probe, currentUi) {
-  const userMessage = messages.at(-2);
-  const assistantMessage = messages.at(-1);
+  const latestUserIndex = Array.isArray(messages)
+    ? messages.findLastIndex((message) => message?.role === "user") : -1;
+  const latestUser = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
+  const hasAssistantAfterLatestUser = latestUserIndex >= 0 && messages.slice(latestUserIndex + 1)
+    .some((message) => message?.role === "assistant"
+      && typeof message.text === "string" && message.text.trim().length > 0);
   return probe?.accepted === true && probe?.completed === true && probe?.final_busy === false
     && probe.submitted_text === prompt && probe.expected_text === prompt
     && probe.status_error !== true
     && currentUi?.busy === false && currentUi?.status_error === false
-    && userMessage?.role === "user" && userMessage.text === prompt
-    && assistantMessage?.role === "assistant"
-    && typeof assistantMessage.text === "string" && assistantMessage.text.trim().length > 0;
+    && latestUser?.text === prompt
+    && hasAssistantAfterLatestUser;
 }
 
 function shouldDeferFixtureCleanup(turnMayBeActive, backendActive) {
@@ -80,6 +83,7 @@ function hasCompletedSendCallbacks(events, caseId, baseline) {
   const completed = current.filter((event) => event.kind === "send_completed");
   return started.length === 1 && accepted.length === 1 && completed.length === 1
     && accepted[0].accepted === true && completed[0].completed === true
+    && completed[0].latest_user_match === true && completed[0].assistant_present === true
     && !completed[0].error_class
     && completed[0].final_busy === false
     && [started[0], accepted[0], completed[0]].every((event) =>
@@ -445,10 +449,16 @@ function args(argv) {
     }
     parsed[key.slice(2)] = argv[++i];
   }
-  for (const key of ["auth-file", "runtime-identity", "expected-image", "expected-source", "expected-runtime", "expected-product-version", "expected-ha-version"]) {
+  for (const key of ["auth-file", "runtime-identity", "expected-image", "expected-source", "expected-runtime",
+    "expected-product-version", "expected-ha-version", "expected-frontend-version", "expected-init-hotfix-sha256",
+    "expected-hotfix-source"]) {
     if (typeof parsed[key] !== "string" || !parsed[key]) throw new Error("missing_required_argument");
   }
   if (parsed.runLive && !parsed["execution-window-id"]) throw new Error("execution_window_required");
+  if (!/^sha256:[a-f0-9]{64}$/.test(parsed["expected-image"])) throw new Error("expected_image_invalid");
+  if (!/^[a-f0-9]{40}$/.test(parsed["expected-source"])) throw new Error("expected_source_invalid");
+  if (!/^[a-f0-9]{64}$/.test(parsed["expected-init-hotfix-sha256"])) throw new Error("expected_init_hotfix_invalid");
+  if (!/^[a-f0-9]{7,40}$/.test(parsed["expected-hotfix-source"])) throw new Error("expected_hotfix_source_invalid");
   return parsed;
 }
 
@@ -458,6 +468,15 @@ function readJson(file, code) {
   } catch {
     throw new Error(code);
   }
+}
+
+function matchesRuntimeIdentity(identity, expected) {
+  const image = identity?.image || identity?.image_sha256;
+  return image === expected.image && identity?.source === expected.source &&
+    identity?.runtime === expected.runtime && identity?.frontend_version === expected.frontend_version &&
+    identity?.init_py_sha256 === expected.init_py_sha256 &&
+    identity?.hotfix_source_commit === expected.hotfix_source_commit &&
+    identity?.mode === "base_image_plus_forward_hotfix" && identity?.origin === ALLOWED_ORIGIN;
 }
 
 function privateWrite(file, value) {
@@ -509,15 +528,19 @@ function runtimeInputs(options) {
   const identity = readJson(options["runtime-identity"], "runtime_identity_unreadable");
   const image = identity.image || identity.image_sha256;
   const runtimeName = identity.runtime;
-  if (image !== options["expected-image"] || identity.source !== options["expected-source"]
-      || runtimeName !== options["expected-runtime"]) {
+  if (!matchesRuntimeIdentity(identity, {image: options["expected-image"], source: options["expected-source"],
+    runtime: options["expected-runtime"], frontend_version: options["expected-frontend-version"],
+    init_py_sha256: options["expected-init-hotfix-sha256"],
+    hotfix_source_commit: options["expected-hotfix-source"]})) {
     throw new Error("runtime_identity_mismatch");
   }
   return {
     auth,
     base: `${ALLOWED_ORIGIN}/owner-test`,
     origin: ALLOWED_ORIGIN,
-    identity: { image, runtime: runtimeName, source: identity.source },
+    identity: { image, runtime: runtimeName, source: identity.source,
+      frontend_version: identity.frontend_version, init_py_sha256: identity.init_py_sha256,
+      hotfix_source_commit: identity.hotfix_source_commit, mode: identity.mode, origin: identity.origin },
   };
 }
 
@@ -616,6 +639,21 @@ async function preflight(runtime, options) {
   };
 }
 
+function selectedAssistantProvider(response) {
+  const connections = Array.isArray(response?.connections) ? response.connections : [];
+  const selected = connections.filter((connection) => connection.assistant_selected === true);
+  if (selected.length !== 1 || selected[0].state !== "loaded"
+      || typeof selected[0].entry_id !== "string" || typeof selected[0].provider !== "string"
+      || typeof selected[0].model !== "string") throw new Error("selected_provider_unavailable_or_ambiguous");
+  return {entry_id: selected[0].entry_id, provider: selected[0].provider, model: selected[0].model};
+}
+
+async function readSelectedAssistantProvider(page) {
+  const response = await page.evaluate(() => document.querySelector("habab-setup-chat")?.hass
+    ?.callWS({ type: "habab_home/providers/list" }));
+  return selectedAssistantProvider(response);
+}
+
 async function main() {
   const options = args(process.argv);
   const runtime = runtimeInputs(options);
@@ -660,6 +698,7 @@ async function main() {
   let documentBaseline;
   let currentOwnerUserId;
   let currentSessionId;
+  let currentAssistantProvider;
   const pendingTurns = new Map();
   let fixtureCreateAttempted = false;
   let fixtureCreated = false;
@@ -828,7 +867,12 @@ async function main() {
         };
         const chat = document.querySelector("habab-setup-chat");
         if (!chat) return { ...documentState, chat_present: false };
-        const messages = Array.isArray(chat.messages) ? chat.messages.slice(-2) : [];
+        const messages = Array.isArray(chat.messages) ? chat.messages : [];
+        const latestUserIndex = messages.findLastIndex((message) => message?.role === "user");
+        const latestUser = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
+        const assistantsAfterLatestUser = latestUserIndex >= 0
+          ? messages.slice(latestUserIndex + 1).filter((message) => message?.role === "assistant"
+            && typeof message.text === "string" && message.text.trim()) : [];
         return {
           ...documentState,
           chat_present: true,
@@ -844,10 +888,9 @@ async function main() {
           session_id: chat.sessionId || null,
           hook_available: window.hababAssistant?.available === true,
           turn_probe: chat.__hababQaAttempt5Probe || null,
-          latest_messages: messages.map((message) => ({ role: message.role, text: String(message.text || "") })),
-          exact_prompt_at_tail: messages.length === 2 && messages[0]?.role === "user"
-            && messages[0].text === expectedText,
-          assistant_at_tail: messages.length === 2 && messages[1]?.role === "assistant",
+          latest_message_roles: messages.slice(-6).map((message) => message.role || null),
+          latest_user_match: latestUser?.text === expectedText,
+          assistant_after_latest_user: assistantsAfterLatestUser.length > 0,
         };
       }, { expectedText: prompt });
     } catch (error) {
@@ -924,8 +967,9 @@ async function main() {
       send_callback_completed: callbackCompleted,
       probe_present: ui.turn_probe !== undefined && ui.turn_probe !== null,
       probe_completed: ui.turn_probe?.completed ?? null,
-      exact_prompt_at_tail: ui.exact_prompt_at_tail ?? null,
-      assistant_at_tail: ui.assistant_at_tail ?? null,
+      latest_user_match: ui.latest_user_match ?? null,
+      assistant_after_latest_user: ui.assistant_after_latest_user ?? null,
+      latest_message_roles: ui.latest_message_roles ?? null,
       backend_active: diagnostics.active,
       observer_identity: observerEnd?.connection_identity ?? null,
       observer_connected: observerEnd?.connected ?? null,
@@ -1014,6 +1058,11 @@ async function main() {
       assert.ok(typeof currentSessionId === "string" && currentSessionId, "authenticated_session_id_missing");
       privateTrace.owner_user_id = ownerUserId;
       privateTrace.session_id = currentSessionId;
+      currentAssistantProvider = await readSelectedAssistantProvider(page);
+      privateTrace.assistant_provider = currentAssistantProvider;
+      report.current_assistant_provider_verified = true;
+      persistPrivate();
+      savePublic();
 
       currentStage = "observer_setup";
       nativeObserver = new NativeHaServiceObserver(runtime.auth.access_token);
@@ -1138,6 +1187,8 @@ async function main() {
         currentCaseId = `${ATTEMPT_LABEL}:${name}`;
         currentPrompt = prompt;
         currentStage = options.verifyDeviceInventory ? "device_inventory_read_before" : "submit_preconditions";
+        assert.deepEqual(await readSelectedAssistantProvider(page), currentAssistantProvider,
+          `${name}_assistant_provider_changed_before`);
         let deviceRegistryCountBefore = null;
         let deviceRegistryCountAfter = null;
         if (options.verifyDeviceInventory) {
@@ -1311,16 +1362,19 @@ async function main() {
                 probe.elapsed_ms = probe.finished_at - startedAt;
                 probe.final_busy = Boolean(this.busy);
                 probe.status_error = Boolean(this.shadowRoot.querySelector("#status")?.classList.contains("error"));
-                const latest = this.messages.slice(-2);
-                probe.latest_user_match = latest.length === 2 && latest[0]?.role === "user"
-                  && latest[0].text === probe.expected_text;
-                probe.assistant_present = latest.length === 2 && latest[1]?.role === "assistant"
-                  && typeof latest[1].text === "string" && Boolean(latest[1].text.trim());
+                const latestUserIndex = this.messages.findLastIndex((message) => message?.role === "user");
+                const latestUser = latestUserIndex >= 0 ? this.messages[latestUserIndex] : null;
+                const assistantsAfterLatestUser = latestUserIndex >= 0
+                  ? this.messages.slice(latestUserIndex + 1).filter((message) => message?.role === "assistant"
+                    && typeof message.text === "string" && message.text.trim()) : [];
+                const finalAssistant = assistantsAfterLatestUser.at(-1);
+                probe.latest_user_match = latestUser?.text === probe.expected_text;
+                probe.assistant_present = assistantsAfterLatestUser.length > 0;
                 emit({ kind: "send_completed", case_id: probe.case_id, document_marker: window.__hababQaDocumentMarker,
                   chat_instance_id: this.__hababQaChatInstanceId, accepted: probe.accepted, completed: true,
                   final_busy: probe.final_busy, status_error: probe.status_error,
                   latest_user_match: probe.latest_user_match, assistant_present: probe.assistant_present,
-                  assistant_length: latest.at(-1)?.role === "assistant" ? String(latest.at(-1).text || "").length : 0,
+                  assistant_length: String(finalAssistant?.text || "").length,
                   elapsed_ms: probe.elapsed_ms, error_class: probe.error_class || null });
               }
             };
@@ -1424,12 +1478,19 @@ async function main() {
         assert.equal(callback.final_busy, false, `${name}_send_promise_ended_busy`);
         const callbackEvents = privateTrace.send_callbacks.filter((event) => event.case_id === currentCaseId);
         assert.ok(hasCompletedSendCallbacks(callbackEvents, currentCaseId, documentBaseline), `${name}_send_callback_invalid`);
+        assert.deepEqual(await readSelectedAssistantProvider(page), currentAssistantProvider,
+          `${name}_assistant_provider_changed_during_turn`);
 
         const turn = await page.evaluate((expectedText, expectedCaseId) => {
           const chat = document.querySelector("habab-setup-chat");
           if (!chat) return { chat_present: false, messages: [] };
-          const messages = Array.isArray(chat.messages) ? chat.messages.slice(-2)
-            .map((message) => ({ role: message.role, text: String(message.text || "") })) : [];
+          const messages = Array.isArray(chat.messages)
+            ? chat.messages.map((message) => ({ role: message.role, text: String(message.text || "") })) : [];
+          const latestUserIndex = messages.findLastIndex((message) => message?.role === "user");
+          const latestUser = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
+          const assistantsAfterLatestUser = latestUserIndex >= 0
+            ? messages.slice(latestUserIndex + 1).filter((message) => message?.role === "assistant"
+              && typeof message.text === "string" && message.text.trim()) : [];
           return {
             chat_present: true,
             document_marker: window.__hababQaDocumentMarker || null,
@@ -1444,9 +1505,10 @@ async function main() {
             busy: Boolean(chat.busy), running: Boolean(chat.running),
             status_error: Boolean(chat.shadowRoot.querySelector("#status")?.classList.contains("error")),
             messages,
-            exact_prompt_at_tail: messages.length === 2 && messages[0]?.role === "user" && messages[0].text === expectedText,
-            assistant_at_tail: messages.length === 2 && messages[1]?.role === "assistant"
-              && typeof messages[1].text === "string" && Boolean(messages[1].text.trim()),
+            latest_user_match: latestUser?.text === expectedText,
+            assistant_after_latest_user: assistantsAfterLatestUser.length > 0,
+            assistant_messages_after_latest_user: assistantsAfterLatestUser.length,
+            latest_assistant_after_user: assistantsAfterLatestUser.at(-1)?.text || "",
             current_node_has_same_probe: chat.__hababQaAttempt5Probe?.case_id === expectedCaseId,
           };
         }, prompt, currentCaseId);
@@ -1468,8 +1530,8 @@ async function main() {
         assert.equal(turn.owner_admin, true, `${name}_owner_not_admin_after_turn`);
         assert.equal(turn.owner_context_current, true, `${name}_owner_context_changed`);
         assert.equal(turn.hook_available, true, `${name}_chat_hook_unavailable_after_turn`);
-        assert.equal(turn.exact_prompt_at_tail, true, `${name}_exact_prompt_not_at_tail`);
-        assert.equal(turn.assistant_at_tail, true, `${name}_assistant_reply_missing`);
+        assert.equal(turn.latest_user_match, true, `${name}_latest_user_not_exact_prompt`);
+        assert.equal(turn.assistant_after_latest_user, true, `${name}_assistant_reply_missing_after_latest_user`);
         const completedProbe = {
           expected_text: prompt, submitted_text: prompt, accepted: callback.accepted,
           completed: callback.completed, final_busy: callback.final_busy,
@@ -1513,8 +1575,7 @@ async function main() {
             "device_registry_count_changed_or_unavailable");
         }
 
-        const reply = turn.messages.at(-1);
-        privateTrace.replies.push({ name, text: reply?.text || "" });
+        privateTrace.replies.push({ name, text: turn.latest_assistant_after_user });
         privateTrace.call_service_events.push({ name, events });
         privateTrace.service_observer_events = nativeObserver.events;
         privateTrace.turn_probes = privateTrace.turn_probes || [];
@@ -1616,7 +1677,7 @@ module.exports = { hasAcceptedTurn, hasContinuousObserver, isReadyToSubmit,
   sameDeviceInventoryCount, shouldDeferFixtureCleanup, hasSameDocument,
   hasNoDocumentNavigation, hasCompletedSendCallbacks, observedEventsIfContinuous,
   serviceEventProjection, serviceEventTargetsOnlyEntity, writePublicReport,
-  NativeHaServiceObserver };
+  NativeHaServiceObserver, matchesRuntimeIdentity, selectedAssistantProvider };
 
 if (require.main === module) {
   main().catch((error) => {
