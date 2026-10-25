@@ -1,0 +1,17 @@
+{
+  "kind": "p30_native16_authenticated_core_lan_alias_readback",
+  "checkedAt": "2026-10-25T08:03:34.658Z",
+  "coreState": "RUNNING",
+  "coreVersion": "2026.10.2",
+  "hababVersion": "0.3.6",
+  "lanAlias": {
+    "hostname": "homeassistant.local",
+    "status": "announced"
+  },
+  "internalUrlConfigured": false,
+  "externalUrlConfigured": false,
+  "externalLanClientResolutionTested": false,
+  "oauthFlowCompleted": false,
+  "newInference": false,
+  "temporaryOwnerSessionRevoked": true
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "p30_native16_voice_stop_final_status_and_restore",
+  "checkedAt": "2026-10-25T08:02:02.979284+00:00",
+  "newInference": false,
+  "audioOrTranscriptPersisted": false,
+  "preflightIdleVerified": true,
+  "failure": "CalledProcessError",
+  "voiceRestored": true,
+  "restoredStatus": {
+    "phase": "wake",
+    "active": true,
+    "recordedAt": 1792915330560,
+    "screenOn": false,
+    "captureFrames": 1
+  },
+  "corePidPreserved": true,
+  "result": "INCOMPLETE"
+}

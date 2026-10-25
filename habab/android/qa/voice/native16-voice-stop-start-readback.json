@@ -1,0 +1,27 @@
+{
+  "kind": "p30_native16_voice_stop_final_status_and_restore",
+  "checkedAt": "2026-10-25T08:03:18.095874+00:00",
+  "newInference": false,
+  "audioOrTranscriptPersisted": false,
+  "preflightIdleVerified": true,
+  "stopCommandExitCode": 255,
+  "stoppedFinalStatus": {
+    "phase": "off",
+    "active": false,
+    "recordedAt": 1792915400758,
+    "screenOn": false,
+    "captureFrames": 3506
+  },
+  "serviceAbsentAfterStop": true,
+  "coreUnchangedDuringVoiceStop": true,
+  "voiceRestored": true,
+  "restoredStatus": {
+    "phase": "wake",
+    "active": true,
+    "recordedAt": 1792915408630,
+    "screenOn": false,
+    "captureFrames": 1
+  },
+  "corePidPreserved": true,
+  "result": "PASS"
+}
