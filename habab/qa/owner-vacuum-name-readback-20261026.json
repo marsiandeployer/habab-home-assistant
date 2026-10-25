@@ -1,0 +1,23 @@
+{
+  "observed_at_utc": "2026-10-25T22:39:17+00:00",
+  "scope": "owner HA server 127.0.0.1:8395; read-only UI verification after approved entity-name metadata update",
+  "entity_domain": "vacuum",
+  "automation_entity_count_before_update": 0,
+  "metadata_readback": {
+    "custom_name": "Пылесос Xiaomi S10",
+    "friendly_name": "Пылесос Xiaomi S10",
+    "state_unchanged": true,
+    "state": "docked"
+  },
+  "ui_readback": {
+    "route": "/home/overview",
+    "document_title": "Overview – Home Assistant",
+    "card_type": "hui-tile-card",
+    "visible_label": "Пылесос Xiaomi S10",
+    "visible_state": "docked"
+  },
+  "device_actions": "none",
+  "physical_device_proof": false,
+  "credentials_or_entity_ids_in_receipt": false,
+  "browser": "owned headless Chromium; separate Incognito context; profile cleaned"
+}
