@@ -1,0 +1,19 @@
+{
+  "checked_at": "2026-10-25T08:13:09.444486+00:00",
+  "scope": "shared voice executor delegation source candidate; not live acceptance",
+  "issue": 2,
+  "source_sha256": "dc340e8de6302f69da101414a76604785ea1e3415b223f91c7ef6275c5c3c4f0",
+  "executor_permissions_changed": false,
+  "new_tools_added": false,
+  "client_keyword_routing_added": false,
+  "quality_risk_cases_not_run": [
+    "bounded authorized file task reaches shared executor",
+    "public website check returns actual availability/error",
+    "greeting remains local",
+    "host escape and secret requests denied",
+    "feedback has no invented persistence receipt",
+    "final thanks and continued question still follow issue20 policy"
+  ],
+  "actual_model_quality": "NOT_RUN",
+  "deployment": "NOT_RUN"
+}
