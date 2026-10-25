@@ -70,6 +70,9 @@ def scope_javascript(content, *, legacy=False):
 
 
 def scope_html(html):
+    if html.count('<title>Home Assistant Demo</title>') != 1:
+        raise ValueError('Pinned demo title changed; review Habab branding')
+    html = html.replace('<title>Home Assistant Demo</title>', '<title>Habab Home</title>')
     for quote in ('"', "'"):
         for directory in ('static', 'frontend_latest', 'frontend_es5'):
             for old in ('./..//', './/', './', '/'):
@@ -122,6 +125,8 @@ def main():
     manifest = STAGE / 'manifest.json'
     if manifest.exists():
         data = json.loads(manifest.read_text(encoding='utf-8'))
+        data['name'] = 'Habab Home'
+        data['short_name'] = 'Habab Home'
         data['start_url'] = '/demos/home-assistant/?homescreen=1'
         for icon in data.get('icons', []):
             icon['src'] = './' + icon['src'].lstrip('/')
