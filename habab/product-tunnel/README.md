@@ -39,6 +39,9 @@ The relay-side source examples are [sshd-home.example.conf](sshd-home.example.co
 and [nginx-home.example.conf](nginx-home.example.conf). They show the sample
 home `habab-home-example`, hostname `home-example.remote.habab.ru`, and
 loopback port `32001`; replace these with values provisioned for one home.
+The Nginx example is for a relay where TLS terminates locally. The operator
+tool defaults to `--tls-termination edge`, matching this deployment's TLS edge
+and HTTP backend; it does not generate or install the edge's own TLS vhost.
 With this reverse tunnel, the SSH client on the home computer connects to
 Home Assistant at `127.0.0.1`, so HA's immediate TCP peer is expected to be
 `127.0.0.1`. Confirm that peer on the target installation before trusting only
@@ -66,12 +69,32 @@ python3 habab/product-tunnel/manage_home.py provision \
   --sandbox-root /tmp/product-relay-root
 ```
 
+`edge` is the default: the generated VM backend vhost listens on HTTP port 80
+and contains no certificate paths. Public TLS must already terminate at the
+edge for this exact hostname. `--tls-termination local` instead generates the
+standalone relay's previous `listen 443 ssl` vhost with local certificate
+paths. The edge's own exact-host TLS vhost is a separate deployment artifact
+and is not provisioned by this tool.
+
+For `edge` mode, configure the edge to forward only its HTTPS route and
+overwrite or sanitize incoming `X-Forwarded-For`. The generated backend sets
+`X-Forwarded-Proto: https`; make sure only the observed edge peer can reach this
+HTTP vhost so direct HTTP clients cannot use that assertion. Before configuring
+Nginx RealIP, verify the immediate peer and forwarded-header chain; trust only
+that observed peer, not a broad network. Verify the resulting scheme and client
+address through to HA. In the reverse SSH path HA is expected to see its
+immediate peer as `127.0.0.1`, but confirm that on the target installation before
+setting `trusted_proxies`. Keep normal HA login enabled and do not enable
+anonymous or trusted-network authentication.
+
 Review the unified diff. To write the snippets and local ownership state into
 that sandbox, repeat the command with `--apply`. Repeating the same provision
 is idempotent. A different home cannot claim a hostname or port already
 present in the managed state. Existing files without a matching ownership
 manifest are left untouched. If a managed file has changed since generation,
-the tool refuses to overwrite or remove it.
+the tool refuses to overwrite or remove it. The manifest records
+`tls_termination`; changing modes changes that home's nginx fragment, so review
+the preview before applying a mode change.
 
 Revoke also previews by default and removes only the files for the named home
 when explicitly applied:
@@ -89,8 +112,10 @@ The key file is written mode `0600` in the sandbox; production installation
 must preserve root ownership and restrictive directory permissions. Include
 the sshd fragment from the relay's `sshd_config` and run `sshd -t` before
 reload. The nginx fragment relies on the one shared `$connection_upgrade` map
-from [nginx-home.example.conf](nginx-home.example.conf); install it in the
-existing TLS relay's `http` configuration, then run `nginx -t` before reload.
+from [nginx-home.example.conf](nginx-home.example.conf); install edge-mode
+output in the VM backend's `http` configuration and run `nginx -t` before
+reload. For local mode, install the generated TLS vhost where that relay
+terminates HTTPS and has the referenced certificate files.
 The tool does not reload either daemon. Confirm DNS and certificate readiness
 separately. Revocation removes snippets and the key file, but the operator
 must reload sshd/nginx to apply the revocation; terminate an already connected

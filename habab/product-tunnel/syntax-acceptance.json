@@ -1,0 +1,102 @@
+{
+  "acceptance": "product-tunnel generated config syntax in isolated temporary sandbox",
+  "cleanup": {
+    "live_dns_nginx_sshd_accounts_listeners_or_systemd_touched": false,
+    "method": "Python TemporaryDirectory context manager",
+    "status": "completed",
+    "temporary_sandbox_keys_certificates_and_configs_removed": true
+  },
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "habab/product-tunnel/manage_home.py",
+        "provision",
+        "--home-id",
+        "syntax-check",
+        "--host",
+        "home-syntax-check.remote.habab.ru",
+        "--port",
+        "32055",
+        "--public-key",
+        "<synthetic fixture key omitted>",
+        "--sandbox-root",
+        "<TMP>/sandbox",
+        "--apply"
+      ],
+      "result": "generated fixture files in isolated sandbox",
+      "status": 0
+    },
+    {
+      "argv": [
+        "ssh-keygen",
+        "-q",
+        "-t",
+        "ed25519",
+        "-N",
+        "",
+        "-f",
+        "<TMP>/fixture_ssh_hostkey"
+      ],
+      "result": "temporary sshd host key fixture only",
+      "status": 0
+    },
+    {
+      "argv": [
+        "/usr/sbin/sshd",
+        "-t",
+        "-f",
+        "<TMP>/sshd_config"
+      ],
+      "result": "PASS",
+      "status": 0
+    },
+    {
+      "argv": [
+        "/usr/bin/openssl",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        "<TMP>/fixture-ssl-key.pem",
+        "-out",
+        "<TMP>/fixture-cert.pem",
+        "-subj",
+        "/CN=home-syntax-check.remote.habab.ru",
+        "-days",
+        "1"
+      ],
+      "result": "temporary nginx syntax-test certificate only",
+      "status": 0
+    },
+    {
+      "argv": [
+        "/usr/sbin/nginx",
+        "-t",
+        "-p",
+        "<TMP>/",
+        "-c",
+        "<TMP>/nginx.conf"
+      ],
+      "result": "PASS",
+      "status": 0
+    }
+  ],
+  "fixture": {
+    "client_public_key": "synthetic-valid-ed25519-wire-blob; no client private key created",
+    "home_id": "syntax-check",
+    "host": "home-syntax-check.remote.habab.ru",
+    "loopback_port": 32055,
+    "nginx_context": "isolated http{} prefix with the shared $connection_upgrade map and generated server fragment",
+    "sshd_host_key": "temporary synthetic Ed25519 host key; removed after validation",
+    "tls_certificate": "temporary self-signed fixture; generated nginx test paths only; removed after validation"
+  },
+  "live_outside_access": "NOT RUN",
+  "source": {
+    "git_head": "9e22386e9a0d64527fadaba5290b5b6758792e11",
+    "path": "habab/product-tunnel/manage_home.py",
+    "sha256": "50a18d4c6f61ddaa5610ec0cc74a0b17a58b92ad65706e03ef7fe18c18b41f55"
+  }
+}

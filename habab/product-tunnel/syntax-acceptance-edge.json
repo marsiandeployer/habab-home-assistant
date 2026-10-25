@@ -1,0 +1,55 @@
+{
+  "acceptance": "default edge-termination Nginx backend template syntax",
+  "cleanup": {
+    "generated_sandbox_and_config_removed": true,
+    "nginx_daemon_or_listener_started": false,
+    "status": "completed by TemporaryDirectory"
+  },
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "habab/product-tunnel/manage_home.py",
+        "provision",
+        "--home-id",
+        "edge-syntax",
+        "--host",
+        "home-edge-syntax.remote.habab.ru",
+        "--port",
+        "32077",
+        "--public-key",
+        "<synthetic fixture key omitted>",
+        "--sandbox-root",
+        "<TMP>/sandbox",
+        "--apply"
+      ],
+      "status": 0
+    },
+    {
+      "argv": [
+        "/usr/sbin/nginx",
+        "-t",
+        "-p",
+        "<TMP>/",
+        "-c",
+        "<TMP>/nginx.conf"
+      ],
+      "status": 0,
+      "stderr": "nginx: the configuration file /tmp/product-edge-nginx-ct3je1hq/nginx.conf syntax is ok\nnginx: configuration file /tmp/product-edge-nginx-ct3je1hq/nginx.conf test is successful"
+    }
+  ],
+  "fixture": {
+    "home_id": "edge-syntax",
+    "host": "home-edge-syntax.remote.habab.ru",
+    "loopback_port": 32077,
+    "public_key": "synthetic valid Ed25519 wire blob; no private key",
+    "sandbox": "temporary and removed"
+  },
+  "nginx_fixture": "http{} with shared $connection_upgrade map and generated edge-mode server fragment; no TLS cert directives expected",
+  "scope": "nginx template syntax only; no DNS, edge TLS, sshd, account, or live config checked in this run",
+  "source": {
+    "git_head": "ee98ca116778765465091f7ca4182061a58a3a9d",
+    "path": "habab/product-tunnel/manage_home.py",
+    "sha256": "b6bc821fff21e0904c9e541d621b4097d6ae68cd49df6189c88ab479f38905b5"
+  }
+}

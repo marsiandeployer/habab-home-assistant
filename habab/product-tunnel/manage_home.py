@@ -24,7 +24,9 @@ HOST_SUFFIX = ".remote.habab.ru"
 ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
 HOST_RE = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
 KEY_RE = re.compile(r"^ssh-ed25519 ([A-Za-z0-9+/]+={0,2})(?: ([^\r\n]*))?$")
-MARKER = "habab-product-tunnel-managed-v1"
+LEGACY_MARKER = "habab-product-tunnel-managed-v1"
+MARKER = "habab-product-tunnel-managed-v2"
+MANIFEST_VERSION = 2
 
 
 class ManageError(Exception):
@@ -65,7 +67,7 @@ def public_key_blob(public_key: str) -> bytes:
     return base64.b64decode(match.group(1), validate=True)
 
 
-def render(home_id: str, host: str, port: int, public_key: str) -> dict[Path, bytes]:
+def render(home_id: str, host: str, port: int, public_key: str, tls_termination: str = "edge") -> dict[Path, bytes]:
     user = f"habab-home-{home_id}"
     key_line = (
         f'restrict,port-forwarding,permitlisten="127.0.0.1:{port}",'
@@ -91,7 +93,29 @@ Match User {user}
     ForceCommand /usr/bin/false
 Match all
 """
-    nginx = f"""# {MARKER}; generated for {home_id}
+    if tls_termination == "edge":
+        nginx = f"""# {MARKER}; generated for {home_id}; TLS terminates at the public edge
+server {{
+    listen 80;
+    server_name {host};
+    if ($host != {host}) {{ return 444; }}
+
+    location / {{
+        proxy_pass http://127.0.0.1:{port};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+    }}
+}}
+"""
+    elif tls_termination == "local":
+        nginx = f"""# {MARKER}; generated for {home_id}; TLS terminates on this relay
 server {{
     listen 443 ssl;
     server_name {host};
@@ -114,6 +138,8 @@ server {{
     }}
 }}
 """
+    else:
+        raise ManageError("tls termination must be edge or local")
     return {
         SSH_DIR / f"80-habab-product-{home_id}.conf": sshd.encode(),
         KEY_DIR / home_id: key_line.encode(),
@@ -162,16 +188,26 @@ def _load_manifest(root: Path, home_id: str) -> dict | None:
         manifest = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as err:
         raise ManageError(f"invalid managed state for {home_id}") from err
-    if (not isinstance(manifest, dict) or manifest.get("marker") != MARKER
+    if (not isinstance(manifest, dict) or manifest.get("marker") not in (MARKER, LEGACY_MARKER)
             or manifest.get("home_id") != home_id or not isinstance(manifest.get("files"), dict)):
         raise ManageError(f"state does not prove ownership of {home_id}")
+    if manifest["marker"] == MARKER:
+        if manifest.get("manifest_version") != MANIFEST_VERSION:
+            raise ManageError(f"unsupported managed state version for {home_id}")
+        tls_termination = manifest.get("tls_termination")
+    else:
+        tls_termination = manifest.get("tls_termination", "local")
+        if tls_termination != "local":
+            raise ManageError(f"invalid legacy managed state for {home_id}")
+    if tls_termination not in ("edge", "local"):
+        raise ManageError(f"invalid TLS termination mode for {home_id}")
     try:
         _, host, port, public_key = validate_home(
             home_id, manifest["host"], manifest["port"], manifest["public_key"]
         )
     except (KeyError, TypeError) as err:
         raise ManageError(f"invalid managed state for {home_id}") from err
-    expected_paths = {str(path) for path in render(home_id, host, port, public_key)}
+    expected_paths = {str(path) for path in render(home_id, host, port, public_key, tls_termination)}
     if set(manifest["files"]) != expected_paths:
         raise ManageError(f"managed state paths are invalid for {home_id}")
     for relative, digest in manifest["files"].items():
@@ -236,13 +272,16 @@ def _apply(root: Path, files: dict[Path, bytes], manifest_path: Path, manifest: 
     _atomic_write(root / manifest_path, manifest or b"", 0o600)
 
 
-def _manifest(home_id: str, host: str, port: int, public_key: str, files: dict[Path, bytes]) -> bytes:
+def _manifest(home_id: str, host: str, port: int, public_key: str, tls_termination: str,
+              files: dict[Path, bytes]) -> bytes:
     data = {
         "marker": MARKER,
+        "manifest_version": MANIFEST_VERSION,
         "home_id": home_id,
         "host": host,
         "port": port,
         "public_key": public_key,
+        "tls_termination": tls_termination,
         "files": {str(path): hashlib.sha256(content).hexdigest() for path, content in files.items()},
     }
     return (json.dumps(data, sort_keys=True, indent=2) + "\n").encode()
@@ -251,7 +290,7 @@ def _manifest(home_id: str, host: str, port: int, public_key: str, files: dict[P
 def provision(args: argparse.Namespace) -> int:
     home_id, host, port, public_key = validate_home(args.home_id, args.host, args.port, args.public_key)
     root = _root(args.sandbox_root)
-    files = render(home_id, host, port, public_key)
+    files = render(home_id, host, port, public_key, args.tls_termination)
     manifest_path = _manifest_path(home_id)
     old_manifest = _load_manifest(root, home_id)
     for other in _all_manifests(root, skip_id=home_id):
@@ -263,7 +302,7 @@ def provision(args: argparse.Namespace) -> int:
         _check_no_symlinks(root, relative)
         if _read(root, relative) is not None and old_manifest is None:
             raise ManageError(f"refusing to replace unmanaged path: {relative}")
-    state = _manifest(home_id, host, port, public_key, files)
+    state = _manifest(home_id, host, port, public_key, args.tls_termination, files)
     diffs = "".join(_diff(path, _read(root, path), content) for path, content in files.items())
     diffs += _diff(manifest_path, _read(root, manifest_path), state)
     if diffs:
@@ -312,6 +351,8 @@ def main() -> int:
     add.add_argument("--port", required=True, type=int)
     add.add_argument("--public-key", required=True)
     add.add_argument("--sandbox-root", required=True)
+    add.add_argument("--tls-termination", choices=("edge", "local"), default="edge",
+                     help="where HTTPS terminates (default: edge; local emits a TLS vhost)")
     add.add_argument("--apply", action="store_true", help="write files; default behavior is preview only")
     add.set_defaults(run=provision)
     remove = subparsers.add_parser("revoke", help="preview or remove one managed home's files")

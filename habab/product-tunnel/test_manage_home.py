@@ -23,13 +23,17 @@ class ManageHomeTest(unittest.TestCase):
             text=True,
         )
 
-    def provision(self, root: Path, home_id: str, port: int, public_key: str) -> None:
-        self.run_cli(
+    def provision(self, root: Path, home_id: str, port: int, public_key: str,
+                  tls_termination: str | None = None) -> None:
+        arguments = [
             "provision", "--home-id", home_id,
             "--host", f"home-{home_id}.remote.habab.ru",
             "--port", str(port), "--public-key", public_key,
             "--sandbox-root", str(root), "--apply",
-        )
+        ]
+        if tls_termination is not None:
+            arguments.extend(["--tls-termination", tls_termination])
+        self.run_cli(*arguments)
 
     def test_idempotency_isolation_and_revoke(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -37,11 +41,22 @@ class ManageHomeTest(unittest.TestCase):
             alpha_key_value = fake_key(1, "operator@alpha")
             beta_key_value = fake_key(2, "operator@beta")
             self.provision(root, "alpha", 32041, alpha_key_value)
-            self.provision(root, "beta", 32042, beta_key_value)
+            self.provision(root, "beta", 32042, beta_key_value, tls_termination="local")
             alpha_key = root / "etc/habab-product-tunnel/keys/alpha"
             beta_key = root / "etc/habab-product-tunnel/keys/beta"
+            alpha_nginx = root / "etc/nginx/conf.d/habab-product-alpha.conf"
+            beta_nginx = root / "etc/nginx/conf.d/habab-product-beta.conf"
             alpha_before = alpha_key.read_bytes()
             beta_before = beta_key.read_bytes()
+            self.assertIn(b"listen 80;", alpha_nginx.read_bytes())
+            self.assertNotIn(b"ssl_certificate", alpha_nginx.read_bytes())
+            self.assertIn(b"listen 443 ssl;", beta_nginx.read_bytes())
+            self.assertIn(b"ssl_certificate ", beta_nginx.read_bytes())
+            alpha_manifest = (root / "var/lib/habab-product-tunnel/homes/alpha.json").read_text()
+            beta_manifest = (root / "var/lib/habab-product-tunnel/homes/beta.json").read_text()
+            self.assertIn('"manifest_version": 2', alpha_manifest)
+            self.assertIn('"tls_termination": "edge"', alpha_manifest)
+            self.assertIn('"tls_termination": "local"', beta_manifest)
 
             preview = self.run_cli(
                 "provision", "--home-id", "alpha",
