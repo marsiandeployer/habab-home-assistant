@@ -1,5 +1,36 @@
 # I-Digital SMS для Habab Home
 
+## Проверка нативного REST пути (2026-10-25)
+
+До отдельной интеграции проверен встроенный `rest_command`. Он принимает
+шаблонизируемые URL, заголовки и payload и отдаёт automation response с HTTP
+status/body. Поэтому REST-команда может отправить ровно один Direct API объект
+и отдельным GET прочитать статус по UUID. Копируемый рецепт и пределы описаны
+в [SMS_REST_SETUP.md](SMS_REST_SETUP.md), YAML находится в
+[`sms_rest_commands.yaml`](sms_rest_commands.yaml).
+
+Это достаточно для ручной отправки и простых автоматизаций с ограниченным
+операторским процессом. Это не исполняет все требования issue #17: нет UI
+настройки, мобильной валидации, атомарной защиты от повторов, лимита частоты,
+подтверждения точных номера/текста в assistant и надёжного состояния попытки
+после сетевого таймаута. Поэтому рецепт не даёт оснований объявлять интеграцию
+или встроенный Assist готовыми. Для этих требований отдельный native REST
+adapter нужен; до такой реализации POST нельзя повторять автоматически.
+
+`notify.rest` также не выбран для этого минимального пути: его штатные поля —
+message/title/target и дополнительная map `data`, а Direct SMS API требует
+массив объектов запроса и возвращает UUID, нужный для дальнейшей проверки
+статуса. `rest_command` подходит к форме API и позволяет automation обработать
+ответ. Официальный переход HA к notify entities пока описывает только
+`notify.send_message` с `message`; recipient-support остаётся отдельной задачей.
+
+Штатные SMS-интеграции, рассмотренные для сравнения, — [ClickSend SMS](https://www.home-assistant.io/integrations/clicksend)
+и [Twilio SMS](https://www.home-assistant.io/integrations/twilio_sms). Они
+документированы как legacy YAML notify-платформы; ClickSend конфигурирует
+получателя в YAML, а не передаёт произвольный recipient в каждом современном
+notify entity action. Они показывают привычный путь уведомлений HA, но не дают
+I-Digital Direct-полей и статуса доставки для этого issue.
+
 ## Решение
 
 Добавить отдельную интеграцию Home Assistant `idigital_sms` с UI config flow и

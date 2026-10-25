@@ -1,0 +1,96 @@
+# Copy both top-level sections into a Home Assistant package or configuration.yaml.
+# Put the actual provider authorization value in secrets.yaml; never commit it.
+rest_command:
+  idigital_sms_send:
+    url: https://direct.i-dgtl.ru/api/v1/message
+    method: POST
+    headers:
+      Authorization: !secret idigital_sms_authorization
+      Content-Type: application/json
+    content_type: application/json
+    timeout: 70
+    payload: >-
+      {{ [{'channelType': 'SMS', 'senderName': 'sms_promo', 'destination': target | replace('+', ''), 'content': message}] | tojson }}
+
+  idigital_sms_status:
+    url: https://direct.i-dgtl.ru/api/v1/message/{{ message_uuid | urlencode }}
+    method: GET
+    headers:
+      Authorization: !secret idigital_sms_authorization
+      Accept: application/json
+    timeout: 10
+
+# Put this script section in a Home Assistant package alongside rest_command.
+# It accepts values per invocation and returns a small response mapping.
+script:
+  idigital_sms_send:
+    alias: I-Digital SMS
+    description: Send one explicitly addressed SMS and return provider acceptance state.
+    mode: single
+    fields:
+      target:
+        name: Recipient phone number
+        description: One E.164 phone number, with or without a leading plus.
+        required: true
+        selector:
+          text:
+      message:
+        name: Message
+        description: SMS text to send.
+        required: true
+        selector:
+          text:
+    sequence:
+      - variables:
+          sms_target: "{{ target | default('', true) }}"
+          sms_text: "{{ message | default('', true) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >-
+                  {{ sms_target is string and sms_target | trim | length > 0
+                     and ',' not in sms_target and ';' not in sms_target
+                     and '\n' not in sms_target and '\r' not in sms_target
+                     and sms_text is string and sms_text | trim | length > 0 }}
+            sequence:
+              - action: rest_command.idigital_sms_send
+                continue_on_error: true
+                data:
+                  target: "{{ sms_target | trim }}"
+                  message: "{{ sms_text }}"
+                response_variable: sms_http_response
+              - variables:
+                  sms_result_status: >-
+                    {% set http_status = sms_http_response.status | default(0, true) %}
+                    {% set body = sms_http_response.content | default({}, true) %}
+                    {% set items = body.get('items', []) if body is mapping else [] %}
+                    {% set uuid = items[0].get('messageUuid', '') if items is sequence and items is not string and items | length == 1 and items[0] is mapping else '' %}
+                    {% if http_status == 200 and body is mapping and body.get('errors') == false and uuid is string and uuid | length > 0 %}
+                      accepted
+                    {% elif 400 <= http_status < 500 or (http_status == 200 and body is mapping and body.get('errors') == true) %}
+                      rejected
+                    {% else %}
+                      unknown
+                    {% endif %}
+                  sms_result_uuid: >-
+                    {% set body = sms_http_response.content | default({}, true) %}
+                    {% set items = body.get('items', []) if body is mapping else [] %}
+                    {% if items is sequence and items is not string and items | length == 1 and items[0] is mapping %}
+                      {{ items[0].get('messageUuid', '') }}
+                    {% endif %}
+                  sms_result_http_status: "{{ sms_http_response.status | default(0, true) }}"
+              - variables:
+                  sms_response:
+                    status: "{{ sms_result_status | trim }}"
+                    message_uuid: "{{ sms_result_uuid | trim }}"
+                    http_status: "{{ sms_result_http_status }}"
+              - stop: Return provider acceptance state
+                response_variable: sms_response
+        default:
+          - variables:
+              sms_response:
+                status: rejected
+                message_uuid: ""
+                http_status: 0
+          - stop: Recipient and message must be non-empty; recipient must be one scalar value
+            response_variable: sms_response
