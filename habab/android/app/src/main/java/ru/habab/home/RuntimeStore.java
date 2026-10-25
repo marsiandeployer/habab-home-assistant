@@ -114,6 +114,7 @@ final class RuntimeStore {
     }
 
     void seedConfig() throws Exception {
+        GuestHostsFile.seedIfEmpty(root().toPath().resolve("etc"));
         config().mkdirs(); Os.chmod(config().toString(), 0700);
         File target = new File(config(), "configuration.yaml");
         if (!target.exists()) Files.copy(new File(root(), "usr/local/share/habab-home/configuration.yaml").toPath(), target.toPath());

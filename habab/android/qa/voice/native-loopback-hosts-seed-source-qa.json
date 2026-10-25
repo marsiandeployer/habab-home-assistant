@@ -1,0 +1,49 @@
+{
+  "kind": "future_native_guest_hosts_seed_source_qa",
+  "based_on_commit": "a61454a1989350bc82b29fd5ffc842db96db7bac",
+  "parent_reported_live_evidence": {
+    "before": "guest runtime /etc/hosts was a regular empty file",
+    "after_guarded_seed": "unauthenticated loopback GET /api/ returned HTTP 401 in 0.38185 seconds",
+    "core_restarted": false,
+    "other_live_changes": "none reported"
+  },
+  "source_change": {
+    "wiring": "RuntimeStore.seedConfig calls GuestHostsFile.seedIfEmpty(root/etc) before Core launch",
+    "missing_or_empty": "atomically publish standard IPv4 and IPv6 loopback host entries",
+    "nonempty_regular_file": "preserve byte-for-byte",
+    "symlinks": "refuse symbolic /etc directory or hosts file without following",
+    "replacement": "same-directory temporary file and ATOMIC_MOVE; no non-atomic fallback"
+  },
+  "focused_junit": {
+    "version": "4.13.2",
+    "tests": 6,
+    "result": "PASS",
+    "coverage": [
+      "missing file seed",
+      "empty regular file seed",
+      "nonempty custom bytes preserved",
+      "repeat call is idempotent",
+      "symlink refusal for hosts and /etc directory",
+      "failed atomic replacement preserves sentinel and cleans temporary file"
+    ],
+    "runner": "direct javac and JUnitCore in an owned temporary directory using existing JUnit and Hamcrest jars",
+    "temporary_directory": "removed after test"
+  },
+  "limitations": {
+    "android_device_test": "NOT RUN",
+    "gradle_or_apk_build": "NOT RUN",
+    "runtime_archive_or_install": "NOT RUN",
+    "live_core_restart_or_acceptance": "NOT RUN",
+    "release": "future candidate16 only; fix not in installed APK15"
+  },
+  "parent_verification": {
+    "independent_junit_cases": 6,
+    "result": "PASS",
+    "java8_api_compile": "PASS"
+  },
+  "source_sha256": {
+    "habab/android/app/src/main/java/ru/habab/home/GuestHostsFile.java": "a265d59d2234c9b9861a7a55f33c8265e08904ae73d2798dcafb38c65cf7f1a0",
+    "habab/android/app/src/test/java/ru/habab/home/GuestHostsFileTest.java": "7c9ef9916d7d7a734ba58e370f3ef4750a7fd8ceb4075d4a32c19f9b788acda7",
+    "habab/android/app/src/main/java/ru/habab/home/RuntimeStore.java": "7eed503832735fcd3cb1be3285f4d7468f94ceb48ee55502b07d9594adc4ef69"
+  }
+}
