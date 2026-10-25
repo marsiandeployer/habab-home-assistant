@@ -1,0 +1,33 @@
+{
+  "checked_at": "2026-10-25T10:27:01.654Z",
+  "target": "owner-test",
+  "verdict": "PASS_PENDING_SNAPSHOT_REVIEW",
+  "runtime_image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+  "runtime_source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+  "current_setup_agent_sha256": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+  "purpose": "fresh_home_snapshot_read_only_acceptance",
+  "preserve_existing_session_history": true,
+  "result": "browser_turns_complete_snapshot_parts_pending_review",
+  "prompts_completed": 2,
+  "prompts_expected": 2,
+  "owner_admin_verified": true,
+  "existing_session_reused": true,
+  "selected_provider_verified": true,
+  "native_service_observer_continuous": true,
+  "service_calls_during_run": 0,
+  "registry_unchanged": true,
+  "backend_idle_at_end": true,
+  "limitations": [
+    "Raw mapped turns must show a fresh home snapshot in synthetic runtime-status parts; answers alone are not snapshot evidence."
+  ],
+  "runtime_forward_hotfix_file_count_verified": 17,
+  "runtime_forward_hotfix_commits": [
+    "ba370aeaa",
+    "d2f8090e2",
+    "2aaf42ac3",
+    "3b59bd8df",
+    "1cc3c52b0",
+    "a66578237"
+  ],
+  "runtime_forward_hotfix_files_match_live_container": true
+}

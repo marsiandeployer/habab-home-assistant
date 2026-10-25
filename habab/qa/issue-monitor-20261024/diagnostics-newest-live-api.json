@@ -1,0 +1,20 @@
+{
+  "status": "SCOPED_LIVE_API_PASS",
+  "session_GET": 200,
+  "export_POST": 200,
+  "zip_crc": true,
+  "cache_no_store": true,
+  "audio_included": false,
+  "configured_provider_keys_absent": true,
+  "archive_bytes": 14229,
+  "archive_files": [
+    "manifest.json",
+    "history.json",
+    "history.txt",
+    "opencode/availability.json"
+  ],
+  "projection_truncated": true,
+  "nonadmin_live_check": "NOT_RUN",
+  "browser_download": "NOT_RUN",
+  "multi_session_live": "NOT_RUN"
+}

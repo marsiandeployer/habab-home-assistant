@@ -1,0 +1,23 @@
+{
+  "checked_at": "2026-10-25T09:59:36.734Z",
+  "target": "owner-test",
+  "verdict": "PASS_PENDING_TOOL_REVIEW",
+  "runtime_image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+  "runtime_source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+  "current_setup_agent_sha256": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+  "purpose": "actual_webfetch_and_websearch_tool_acceptance",
+  "build_boundary_between_prior_turn_and_remaining_turns": false,
+  "result": "browser_turns_complete_tool_parts_pending_review",
+  "prompts_completed": 2,
+  "prompts_expected": 2,
+  "owner_admin_verified": true,
+  "existing_session_reused": true,
+  "selected_provider_verified": true,
+  "native_service_observer_continuous": true,
+  "service_calls_during_run": 0,
+  "registry_unchanged": true,
+  "backend_idle_at_end": true,
+  "limitations": [
+    "Raw mapped OpenCode tool parts must confirm webfetch and websearch; model text alone is not tool evidence."
+  ]
+}

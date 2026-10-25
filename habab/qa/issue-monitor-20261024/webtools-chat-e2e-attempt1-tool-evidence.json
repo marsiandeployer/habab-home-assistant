@@ -1,0 +1,117 @@
+{
+  "checked_at": "2026-10-25T09:59:52.284585+00:00",
+  "source": "read-only current mapped OpenCode session",
+  "setup_agent_sha256": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+  "turns": [
+    {
+      "question_index": 1,
+      "assistant_message_count": 2,
+      "tools": [
+        {
+          "tool": "webfetch",
+          "status": "completed",
+          "description_present": true,
+          "output_present": true,
+          "url_host": "www.home-assistant.io",
+          "query_length": 0,
+          "is_webfetch": true,
+          "is_websearch": false,
+          "is_shell_tool": false
+        }
+      ]
+    },
+    {
+      "question_index": 2,
+      "assistant_message_count": 2,
+      "tools": [
+        {
+          "tool": "websearch",
+          "status": "completed",
+          "description_present": true,
+          "output_present": true,
+          "url_host": null,
+          "query_length": 59,
+          "is_webfetch": false,
+          "is_websearch": true,
+          "is_shell_tool": false
+        }
+      ]
+    }
+  ],
+  "webfetch_exact_official_host_completed": true,
+  "websearch_completed": true,
+  "verdict": "PASS",
+  "source_review": [
+    {
+      "question_index": 1,
+      "assistant_answer_length": 1352,
+      "assistant_answer_sha256": "279a694887f39112074cd4a65b5c330d7ffd8acbcb315df4a7c130ca111754bc",
+      "answer_version_mentions": [],
+      "answer_date_mentions": [],
+      "answer_urls": [],
+      "tool_calls": [
+        {
+          "name": "webfetch",
+          "status": "completed",
+          "requested_url_exact": true,
+          "output_present": true
+        }
+      ]
+    },
+    {
+      "question_index": 2,
+      "assistant_answer_length": 308,
+      "assistant_answer_sha256": "56a37720fbe90c8fd1dd4ed80012e1f7ef1d956d66477fcc1a875d03e11266ce",
+      "answer_version_mentions": [
+        "2026.10.4"
+      ],
+      "answer_date_mentions": [
+        "24 октября 2026"
+      ],
+      "answer_urls": [
+        "https://github.com/home-assistant/core/releases"
+      ],
+      "tool_calls": [
+        {
+          "name": "websearch",
+          "status": "completed",
+          "query_length": 59,
+          "official_source_urls": [
+            "https://github.com/home-assistant/core/releases",
+            "https://www.home-assistant.io/blog/2026/10/07/release-202610/",
+            "https://www.home-assistant.io/changelogs/core-2026.10",
+            "https://www.home-assistant.io/faq/release/"
+          ],
+          "output_present": true
+        }
+      ]
+    }
+  ],
+  "webfetch_exact_url_confirmed": true,
+  "websearch_official_sources_present": true,
+  "runtime": {
+    "binary": "/opt/habab-opencode/opencode",
+    "version": "1.14.21",
+    "config_permission": {
+      "*": "allow"
+    },
+    "exa_enabled": true,
+    "child_env_key_names": [
+      "OPENCODE_CONFIG_CONTENT",
+      "OPENCODE_DISABLE_AUTOUPDATE",
+      "OPENCODE_DISABLE_PROJECT_CONFIG",
+      "OPENCODE_ENABLE_EXA",
+      "OPENCODE_SERVER_PASSWORD"
+    ],
+    "secret_values_captured": false
+  },
+  "official_release_sources_checked": [
+    "https://www.home-assistant.io/blog/2026/10/07/release-202610/",
+    "https://www.home-assistant.io/changelogs/core-2026.10"
+  ],
+  "latest_release_claim": {
+    "version": "2026.10.4",
+    "date": "24 октября 2026",
+    "assistant_answer_has_official_github_release_link": true
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-10-25T10:17:14.055173+00:00",
+  "bot_username": "manulboxbot",
+  "dialog": "existing_private_bot_chat",
+  "question_sent": true,
+  "result": "bot_reply_received",
+  "reply_message_count": 1
+}

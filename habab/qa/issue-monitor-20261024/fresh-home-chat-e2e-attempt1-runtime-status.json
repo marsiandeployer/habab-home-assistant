@@ -1,0 +1,60 @@
+{
+  "checked_at": "2026-10-25T10:27:19.526003+00:00",
+  "source": "exact current mapped OpenCode turns; read-only session GET",
+  "setup_agent_sha256": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+  "turns": [
+    {
+      "question_index": 1,
+      "synthetic_status_count": 1,
+      "home_snapshot_present": true,
+      "snapshot_generated_at": "2026-10-25T13:26:54+03:00",
+      "snapshot_expires_at": "2026-10-25T13:27:24+03:00",
+      "vacuum_state": "docked",
+      "snapshot_age_at_prompt_seconds": 0.21,
+      "snapshot_valid_at_assistant_completion": true,
+      "assistant_reply_length": 175,
+      "assistant_mentions_docked": true,
+      "assistant_mentions_cleaning": false,
+      "tool_parts": 0
+    },
+    {
+      "question_index": 2,
+      "synthetic_status_count": 1,
+      "home_snapshot_present": true,
+      "snapshot_generated_at": "2026-10-25T13:26:58+03:00",
+      "snapshot_expires_at": "2026-10-25T13:27:28+03:00",
+      "vacuum_state": "docked",
+      "snapshot_age_at_prompt_seconds": 0.09,
+      "snapshot_valid_at_assistant_completion": true,
+      "assistant_reply_length": 298,
+      "assistant_mentions_docked": true,
+      "assistant_mentions_cleaning": false,
+      "tool_parts": 0
+    }
+  ],
+  "home_snapshot_checks_pending_shape_review": false,
+  "browser_readback": {
+    "owner_admin_verified": true,
+    "same_existing_session_reused": true,
+    "selected_provider_verified": true,
+    "service_events": 0,
+    "native_service_observer_continuous": true,
+    "registry_unchanged": true,
+    "backend_idle_at_end": true,
+    "runtime_image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "runtime_source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "setup_agent_sha256": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+    "runtime_forward_hotfix_file_count_verified": 17,
+    "runtime_forward_hotfix_commits": [
+      "ba370aeaa",
+      "d2f8090e2",
+      "2aaf42ac3",
+      "3b59bd8df",
+      "1cc3c52b0",
+      "a66578237"
+    ],
+    "runtime_forward_hotfix_files_match_live_container": true
+  },
+  "manual_reply_review_pending": true,
+  "verdict": "PASS_PENDING_MANUAL_REPLY_REVIEW"
+}

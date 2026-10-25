@@ -1,0 +1,12 @@
+{
+  "status": "SCOPED_DM_ROUNDTRIP_PASS",
+  "existing_dialog": true,
+  "one_sent_question": true,
+  "one_bot_reply": true,
+  "reply_ids_after_request": true,
+  "exact_question_in_native_telegram_session": true,
+  "fresh_devices_tool_completed": true,
+  "correlation": "same bot DM, bot sender, message after request; transport has no reply_to id",
+  "group_message_command_execution": "NOT_IMPLEMENTED_BY_DESIGN_GROUP_IS_ACL",
+  "device_state_mutations_requested": false
+}

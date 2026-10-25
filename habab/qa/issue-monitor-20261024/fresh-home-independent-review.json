@@ -1,0 +1,22 @@
+{
+  "status": "SCOPED_READONLY_STATE_PASS",
+  "root_read_actual_replies": true,
+  "same_existing_history_with_prior_cleaning_claim": true,
+  "turns": [
+    {
+      "snapshot_age_seconds": 0.21,
+      "snapshot_vacuum": "docked",
+      "reply": "correctly states docked using snapshot time"
+    },
+    {
+      "snapshot_age_seconds": 0.09,
+      "snapshot_vacuum": "docked",
+      "reply": "corrects prior cleaning assertion to docked"
+    }
+  ],
+  "snapshots_unexpired_at_completion": true,
+  "service_calls": 0,
+  "registry_unchanged": true,
+  "backend_idle": true,
+  "action_execution_acceptance": "NOT_PROVEN_BY_READONLY_CASE"
+}

@@ -1,0 +1,14 @@
+{
+  "status": "SCOPED_LIVE_PROCESS_CONFIG_PASS",
+  "target": "owner-test",
+  "opencode_pid": 164,
+  "permission_allow_all": true,
+  "exa_enabled": true,
+  "project_config_disabled": true,
+  "host_exa_key_inherited": false,
+  "environment_credential_values_printed": false,
+  "webfetch_actual": "PASS",
+  "websearch_actual": "PASS",
+  "android_runtime": "NOT_CHANGED",
+  "root_read_raw_completed_tool_parts": true
+}
