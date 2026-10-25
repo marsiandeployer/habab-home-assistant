@@ -1,8 +1,13 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { hasAcceptedTurn, hasContinuousObserver, sameDeviceInventoryCount,
-  isReadyToSubmit, shouldDeferFixtureCleanup } = require("./service-call-e2e.cjs");
+  isReadyToSubmit, shouldDeferFixtureCleanup, hasSameDocument,
+  hasNoDocumentNavigation, hasCompletedSendCallbacks, observedEventsIfContinuous, serviceEventProjection,
+  serviceEventTargetsOnlyEntity, writePublicReport } = require("./service-call-e2e.cjs");
 
 const prompt = "Turn on the disposable QA helper";
 const cappedTail = Array.from({ length: 58 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `old ${index}` }));
@@ -37,7 +42,8 @@ assert.equal(shouldDeferFixtureCleanup(true, null), true, "retain fixture when b
 assert.equal(shouldDeferFixtureCleanup(true, false), false, "allow cleanup after backend idle confirmation");
 assert.equal(shouldDeferFixtureCleanup(false, null), false, "no active turn guard when no turn may be running");
 
-const observerStart = { connection_identity: 4, disconnected_count: 0, same_connection: true, connected: true };
+const observerStart = { connection_identity: 4, disconnected_count: 0, same_connection: true,
+  connected: true, owner_matches: true };
 assert.equal(hasContinuousObserver(observerStart, { ...observerStart }), true,
   "accept same connected observer without disconnects");
 assert.equal(hasContinuousObserver(observerStart, { ...observerStart, disconnected_count: 1 }), false,
@@ -50,6 +56,87 @@ assert.equal(hasContinuousObserver(observerStart, { ...observerStart, connected:
   "reject currently disconnected observer");
 assert.equal(hasContinuousObserver({ ...observerStart, disconnected_count: 1 },
   { ...observerStart, disconnected_count: 1 }), false, "reject observer that disconnected before case start");
+assert.equal(hasContinuousObserver(observerStart, { ...observerStart, owner_matches: false }), false,
+  "reject observer whose authenticated owner differs");
+assert.deepEqual(observedEventsIfContinuous(observerStart, { ...observerStart }, []), [],
+  "continuous observer may prove zero events");
+assert.equal(observedEventsIfContinuous(observerStart, { ...observerStart, connected: false }, []), null,
+  "disconnected observer silence is unknown, not zero events");
+
+const documentIdentity = {
+  document_marker: "marker-a", main_frame_id: "frame-a", main_loader_id: "loader-a",
+  pathname: "/home/overview", chat_instance_id: 1, same_host_as_baseline: true,
+  owner_user_id: "owner-a", session_id: "session-a",
+};
+assert.equal(hasSameDocument(documentIdentity, { ...documentIdentity }), true,
+  "accept stable document, route, owner, session, and chat instance");
+assert.equal(hasNoDocumentNavigation([]), true, "accept no recorded navigation");
+assert.equal(hasNoDocumentNavigation([{ kind: "chat_host_attached" }]), true,
+  "accept DOM changes that keep the document");
+for (const event of [
+  { kind: "cdp_document_request" }, { kind: "cdp_frame_navigated", main: true },
+  { kind: "puppeteer_frame_navigated", main: true }, { kind: "pagehide" },
+  { kind: "beforeunload" }, { kind: "document_domcontentloaded" },
+  { kind: "cdp_navigated_within_document" },
+]) {
+  assert.equal(hasNoDocumentNavigation([event]), false, `reject document transition ${event.kind}`);
+}
+for (const [field, value] of [
+  ["document_marker", "marker-b"], ["main_frame_id", "frame-b"], ["main_loader_id", "loader-b"],
+  ["pathname", "/login"], ["chat_instance_id", 2], ["same_host_as_baseline", false],
+  ["owner_user_id", "owner-b"], ["session_id", "session-b"],
+]) {
+  assert.equal(hasSameDocument(documentIdentity, { ...documentIdentity, [field]: value }), false,
+    `reject changed document identity field ${field}`);
+}
+
+const callbackEvents = ["send_started", "send_accepted", "send_completed"].map((kind) => ({
+  kind, case_id: "attempt:turn_on", document_marker: documentIdentity.document_marker,
+  chat_instance_id: documentIdentity.chat_instance_id,
+  ...(kind === "send_accepted" ? { accepted: true } : {}),
+  ...(kind === "send_completed" ? { completed: true, final_busy: false, error_class: null } : {}),
+}));
+assert.equal(hasCompletedSendCallbacks(callbackEvents, "attempt:turn_on", documentIdentity), true,
+  "accept actual settled send callbacks from current document and chat");
+assert.equal(hasCompletedSendCallbacks(callbackEvents.slice(0, 2), "attempt:turn_on", documentIdentity), false,
+  "reject missing Promise settlement callback");
+assert.equal(hasCompletedSendCallbacks(callbackEvents, "attempt:other", documentIdentity), false,
+  "reject callbacks from another prompt");
+assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
+  ...(event.kind === "send_accepted" ? { accepted: false } : {}) })),
+"attempt:turn_on", documentIdentity), false, "reject send that was not accepted");
+assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
+  ...(event.kind === "send_completed" ? { final_busy: true } : {}) })),
+"attempt:turn_on", documentIdentity), false, "reject a settled callback that remains busy");
+assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
+  ...(event.kind === "send_completed" ? { document_marker: "new-document" } : {}) })),
+"attempt:turn_on", documentIdentity), false, "reject callback from a changed document");
+assert.equal(hasCompletedSendCallbacks(callbackEvents.map((event) => ({ ...event,
+  ...(event.kind === "send_completed" ? { error_class: "NetworkError" } : {}) })),
+"attempt:turn_on", documentIdentity), false, "reject settled Promise failure");
+
+const projectedCall = serviceEventProjection({ event_type: "call_service", context: { user_id: "owner-a", id: "ctx-a" },
+  data: { domain: "input_boolean", service: "turn_on", service_data: { entity_id: "input_boolean.qa_fixture" },
+    target: { entity_id: ["input_boolean.qa_fixture"] } } }, 0);
+assert.equal(serviceEventTargetsOnlyEntity(projectedCall, "input_boolean.qa_fixture"), true,
+  "accept call targeted only at the exact fixture");
+assert.equal(serviceEventTargetsOnlyEntity({ ...projectedCall, device_ids: ["device-x"] },
+  "input_boolean.qa_fixture"), false, "reject additional device targets");
+assert.equal(serviceEventTargetsOnlyEntity({ ...projectedCall, entity_ids: ["input_boolean.other"] },
+  "input_boolean.qa_fixture"), false, "reject a different entity target");
+
+const reservationDir = fs.mkdtempSync(path.join(os.tmpdir(), "habab-attempt-reservation-"));
+const reservationFile = path.join(reservationDir, "attempt.json");
+try {
+  writePublicReport(reservationFile, { owner: "first" }, true);
+  const original = fs.readFileSync(reservationFile, "utf8");
+  assert.throws(() => writePublicReport(reservationFile, { owner: "second" }, true),
+    (error) => error.message === "attempt_output_exists", "reject concurrent attempt reservation");
+  assert.equal(fs.readFileSync(reservationFile, "utf8"), original,
+    "reservation collision must not truncate or overwrite the winner");
+} finally {
+  fs.rmSync(reservationDir, { recursive: true, force: true });
+}
 
 assert.equal(sameDeviceInventoryCount(12, 12), true, "accept unchanged device registry count");
 assert.equal(sameDeviceInventoryCount(12, 13), false, "reject device registry count change");
