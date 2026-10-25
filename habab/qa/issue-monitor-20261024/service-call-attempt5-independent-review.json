@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-10-25T06:33:22.164164+00:00",
+  "original_report": "service-call-e2e-20261025-attempt-5.json",
+  "original_verdict_preserved": "FAIL",
+  "failure_stage": "observer_setup",
+  "verified_failure_cause": "Node crypto.randomInt upper bound exceeded before observer connection or chat prompts",
+  "model_prompts_sent": 0,
+  "helper_absent": true,
+  "entity_registry_absent": true,
+  "state_http404": true,
+  "runtime_source": "aaeab54b5eb8910406ec97e4e3ab987123608349",
+  "next": "valid random range and transport-lifecycle smoke test; observer authenticated before helper creation; separate attempt6"
+}

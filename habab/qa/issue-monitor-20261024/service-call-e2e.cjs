@@ -11,7 +11,7 @@ const WebSocket = require("../../node_modules/ws");
 const { withOwnedChromium } = require("/root/tools/chrome-daemon/owned-browser.cjs");
 
 // A later separately authorized run must receive a deliberately new unique label.
-const ATTEMPT_LABEL = "20261025-attempt-5";
+const ATTEMPT_LABEL = "20261025-attempt-6";
 const OUTPUT = path.join(__dirname, `service-call-e2e-${ATTEMPT_LABEL}.json`);
 const FIXTURE_NAME = "Habab QA service-call fixture 20261024";
 const PRIVATE_TRACE_NAME = `service-call-e2e-${ATTEMPT_LABEL}-private.json`;
@@ -135,8 +135,8 @@ async function readBackendDiagnostics(observer, sessionId) {
 }
 
 class NativeHaServiceObserver {
-  constructor(accessToken) {
-    this.connectionIdentity = crypto.randomInt(1, Number.MAX_SAFE_INTEGER);
+  constructor(accessToken, socketFactory = (url) => new WebSocket(url)) {
+    this.connectionIdentity = crypto.randomInt(1, 2 ** 47);
     this.connected = false;
     this.ownerMatches = false;
     this.disconnectedCount = 0;
@@ -146,7 +146,7 @@ class NativeHaServiceObserver {
     this.pending = new Map();
     this.eventHandlers = new Map();
     this.events = [];
-    this.ws = new WebSocket(NATIVE_WS_URL);
+    this.ws = socketFactory(NATIVE_WS_URL);
     this.ready = new Promise((resolve, reject) => {
       let timer = setTimeout(() => reject(new Error("native_ws_auth_timeout")), 15000);
       const fail = (code) => {
@@ -1007,6 +1007,23 @@ async function main() {
       assert.equal(ready.draft_empty, true, "existing_draft_present");
       report.preexisting_history_count = ready.history_count;
 
+      const ownerUserId = await page.evaluate(() => document.querySelector("habab-setup-chat").hass.user?.id);
+      assert.ok(typeof ownerUserId === "string" && ownerUserId, "authenticated_user_id_missing");
+      currentOwnerUserId = ownerUserId;
+      currentSessionId = await page.evaluate(() => document.querySelector("habab-setup-chat")?.sessionId || null);
+      assert.ok(typeof currentSessionId === "string" && currentSessionId, "authenticated_session_id_missing");
+      privateTrace.owner_user_id = ownerUserId;
+      privateTrace.session_id = currentSessionId;
+
+      currentStage = "observer_setup";
+      nativeObserver = new NativeHaServiceObserver(runtime.auth.access_token);
+      await nativeObserver.authenticateOwner(ownerUserId);
+      await nativeObserver.subscribeCallService();
+      const observerReady = nativeObserver.snapshot();
+      assert.ok(hasContinuousObserver(observerReady, observerReady), "native_service_observer_unavailable");
+      report.service_observer = { authenticated_owner_match: true, subscribed: true,
+        connection_identity: observerReady.connection_identity, connected: true };
+
       currentStage = "fixture_setup";
       const helpersBefore = await page.evaluate(() => document.querySelector("habab-setup-chat").hass.callWS({ type: "input_boolean/list" }));
       assert.ok(Array.isArray(helpersBefore), "input_boolean_list_unavailable");
@@ -1042,22 +1059,6 @@ async function main() {
       const initial = await readState(runtime, entityId);
       assert.equal(initial?.friendly_name, FIXTURE_NAME, "fixture_name_mismatch");
       assert.equal(initial.state, "off", "fixture_initial_state_not_off");
-      const ownerUserId = await page.evaluate(() => document.querySelector("habab-setup-chat").hass.user?.id);
-      assert.ok(typeof ownerUserId === "string" && ownerUserId, "authenticated_user_id_missing");
-      currentOwnerUserId = ownerUserId;
-      currentSessionId = await page.evaluate(() => document.querySelector("habab-setup-chat")?.sessionId || null);
-      assert.ok(typeof currentSessionId === "string" && currentSessionId, "authenticated_session_id_missing");
-      privateTrace.owner_user_id = ownerUserId;
-      privateTrace.session_id = currentSessionId;
-
-      currentStage = "observer_setup";
-      nativeObserver = new NativeHaServiceObserver(runtime.auth.access_token);
-      await nativeObserver.authenticateOwner(ownerUserId);
-      await nativeObserver.subscribeCallService();
-      const observerReady = nativeObserver.snapshot();
-      assert.ok(hasContinuousObserver(observerReady, observerReady), "native_service_observer_unavailable");
-      report.service_observer = { authenticated_owner_match: true, subscribed: true,
-        connection_identity: observerReady.connection_identity, connected: true };
 
       // Calibrate the event observer through native HA helper/service APIs.
       // These two direct calls are apparatus only, never counted as chat proof.
@@ -1614,7 +1615,8 @@ async function pageHelperExists(page, helperId) {
 module.exports = { hasAcceptedTurn, hasContinuousObserver, isReadyToSubmit,
   sameDeviceInventoryCount, shouldDeferFixtureCleanup, hasSameDocument,
   hasNoDocumentNavigation, hasCompletedSendCallbacks, observedEventsIfContinuous,
-  serviceEventProjection, serviceEventTargetsOnlyEntity, writePublicReport };
+  serviceEventProjection, serviceEventTargetsOnlyEntity, writePublicReport,
+  NativeHaServiceObserver };
 
 if (require.main === module) {
   main().catch((error) => {

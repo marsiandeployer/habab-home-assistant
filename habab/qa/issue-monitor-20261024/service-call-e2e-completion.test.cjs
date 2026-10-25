@@ -4,10 +4,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { EventEmitter } = require("node:events");
 const { hasAcceptedTurn, hasContinuousObserver, sameDeviceInventoryCount,
   isReadyToSubmit, shouldDeferFixtureCleanup, hasSameDocument,
   hasNoDocumentNavigation, hasCompletedSendCallbacks, observedEventsIfContinuous, serviceEventProjection,
-  serviceEventTargetsOnlyEntity, writePublicReport } = require("./service-call-e2e.cjs");
+  serviceEventTargetsOnlyEntity, writePublicReport,
+  NativeHaServiceObserver } = require("./service-call-e2e.cjs");
 
 const prompt = "Turn on the disposable QA helper";
 const cappedTail = Array.from({ length: 58 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", text: `old ${index}` }));
@@ -164,4 +166,104 @@ for (const [field, value] of [
   assert.equal(isReadyToSubmit({ ...readyToSubmit, [field]: value }), false, `reject submit when ${field} is unsafe`);
 }
 
-process.stdout.write("completion correlation, observer continuity, inventory, and submit readiness checks passed\n");
+class FakeNativeSocket extends EventEmitter {
+  constructor(ownerId = "owner-test") {
+    super();
+    this.ownerId = ownerId;
+    this.readyState = 0;
+    this.unsubscribed = false;
+    setImmediate(() => {
+      this.readyState = 1;
+      this.emit("message", Buffer.from(JSON.stringify({ type: "auth_required" })));
+    });
+  }
+
+  send(raw, callback) {
+    const command = JSON.parse(raw);
+    callback?.();
+    if (command.type === "auth") {
+      setImmediate(() => this.emit("message", Buffer.from(JSON.stringify({ type: "auth_ok" }))));
+      return;
+    }
+    let result;
+    if (command.type === "auth/current_user") {
+      result = { id: this.ownerId, is_admin: true };
+    } else {
+      result = {};
+    }
+    setImmediate(() => this.emit("message", Buffer.from(JSON.stringify({
+      type: "result", id: command.id, success: true, result,
+    }))));
+    if (command.type === "subscribe_events") {
+      setImmediate(() => this.emit("message", Buffer.from(JSON.stringify({
+        type: "event", id: command.id,
+        event: {
+          event_type: "call_service",
+          context: { user_id: this.ownerId, id: "context-test" },
+          data: { domain: "input_boolean", service: "turn_on",
+            service_data: { entity_id: "input_boolean.qa_fixture" },
+            target: { entity_id: ["input_boolean.qa_fixture"] } },
+        },
+      }))));
+    }
+    if (command.type === "unsubscribe_events") this.unsubscribed = true;
+  }
+
+  close() {
+    this.readyState = 3;
+    setImmediate(() => this.emit("close"));
+  }
+
+  disconnect() {
+    this.readyState = 3;
+    this.emit("close");
+  }
+}
+
+async function testNativeObserverProtocol() {
+  const token = "test-token-do-not-log";
+  let requestedUrl = null;
+  let socket;
+  const observer = new NativeHaServiceObserver(token, (url) => {
+    requestedUrl = url;
+    socket = new FakeNativeSocket();
+    return socket;
+  });
+  await observer.authenticateOwner("owner-test");
+  await observer.subscribeCallService();
+  const observed = await observer.waitForEventAfter(0, 1000);
+  assert.equal(requestedUrl, "ws://127.0.0.1:8395/api/websocket",
+    "production observer keeps the fixed native Core URL");
+  assert.equal(observer.snapshot().owner_matches, true, "authenticate the same admin owner");
+  assert.equal(observed.event_type, "call_service", "receive the subscribed service event");
+  assert.equal(observed.context_user_id, "owner-test", "retain event owner context");
+  assert.ok(serviceEventTargetsOnlyEntity(observed, "input_boolean.qa_fixture"),
+    "retain exact service target from the native event");
+  const started = observer.snapshot();
+  socket.disconnect();
+  const ended = observer.snapshot();
+  assert.equal(ended.disconnected_count, 1, "record native observer disconnect");
+  assert.equal(observedEventsIfContinuous(started, ended, observer.eventsSince(0)), null,
+    "disconnected observer event history cannot prove a zero-event result");
+  await observer.close();
+  assert.equal(socket.readyState, 3, "close disconnected socket during cleanup");
+
+  let cleanupSocket;
+  const cleanupObserver = new NativeHaServiceObserver(token, () => {
+    cleanupSocket = new FakeNativeSocket();
+    return cleanupSocket;
+  });
+  await cleanupObserver.authenticateOwner("owner-test");
+  await cleanupObserver.subscribeCallService();
+  await cleanupObserver.waitForEventAfter(0, 1000);
+  await cleanupObserver.close();
+  assert.equal(cleanupSocket.unsubscribed, true, "unsubscribe and close a healthy observer");
+  assert.equal(cleanupSocket.readyState, 3, "healthy observer leaves no open socket");
+}
+
+testNativeObserverProtocol().then(() => {
+  process.stdout.write("completion correlation, observer protocol/continuity, inventory, and submit readiness checks passed\n");
+}).catch((error) => {
+  process.stderr.write(`${error.stack || error}\n`);
+  process.exitCode = 1;
+});
