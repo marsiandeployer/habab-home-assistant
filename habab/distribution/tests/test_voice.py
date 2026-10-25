@@ -174,7 +174,8 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                 "assistant_selected": True,
                 "habab_api_check": {
                     "fingerprint": websocket._settings_fingerprint(data),
-                    "status": "verified", "checked_at": "2026-10-24T12:00:00+00:00",
+                    "status": "unknown", "checked_at": "2026-10-24T12:00:00+00:00",
+                    "reason": "quota",
                 },
             },
         )
@@ -186,8 +187,9 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
         result = connection.send_result.call_args.args[1]["connections"][0]
         self.assertEqual(result["assistant_selected"], True)
-        self.assertEqual(result["api_check_status"], "verified")
+        self.assertEqual(result["api_check_status"], "unknown")
         self.assertEqual(result["api_check_at"], "2026-10-24T12:00:00+00:00")
+        self.assertEqual(result["api_check_reason"], "quota")
         self.assertNotIn("fixture-saved-key", str(result))
         self.assertNotIn("fingerprint", result)
 
@@ -276,7 +278,15 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         entry = SimpleNamespace(
             entry_id="checked-entry", domain=DOMAIN,
             data={"provider": "openai", "api_key": "fixture-saved-key", "model": "gpt-4.1-mini"},
-            options={"assistant_selected": True},
+            options={
+                "assistant_selected": True,
+                "habab_api_check": {
+                    "fingerprint": websocket._settings_fingerprint({
+                        "provider": "openai", "api_key": "fixture-saved-key", "model": "gpt-4.1-mini",
+                    }),
+                    "status": "unknown", "checked_at": "2026-10-24T11:00:00+00:00", "reason": "quota",
+                },
+            },
         )
         config_entries = SimpleNamespace(
             async_get_entry=Mock(return_value=entry),
@@ -302,6 +312,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(websocket._api_check_readback(entry), {
             "api_check_status": result["api_check_status"],
             "api_check_at": result["api_check_at"],
+            "api_check_reason": None,
         })
 
     async def test_rejected_check_persists_rejection_for_the_saved_key(self):
@@ -330,6 +341,58 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
         connection.send_error.assert_called_once_with(3, "invalid_auth", "invalid_auth")
         self.assertEqual(websocket._api_check_readback(entry)["api_check_status"], "rejected")
+        self.assertEqual(websocket._api_check_readback(entry)["api_check_reason"], "invalid_auth")
+
+    async def test_provider_check_persists_safe_failure_reasons(self):
+        from homeassistant.components.habab_home.const import DOMAIN
+
+        for error_code in (
+            "invalid_provider", "quota", "invalid_model", "cannot_connect", "timeout", "invalid_response",
+        ):
+            with self.subTest(error_code=error_code):
+                data = {"provider": "openai", "api_key": "fixture-saved-key", "model": "gpt-4.1-mini"}
+                entry = SimpleNamespace(
+                    entry_id="failed-check-entry", domain=DOMAIN, data=data, options={},
+                )
+                config_entries = SimpleNamespace(
+                    async_get_entry=Mock(return_value=entry),
+                    async_update_entry=Mock(
+                        side_effect=lambda current, options: setattr(current, "options", options)),
+                )
+                hass = SimpleNamespace(
+                    data={"habab_home": {"settings_lock": asyncio.Lock()}},
+                    config_entries=config_entries,
+                )
+                connection = Mock()
+                with patch.object(websocket, "async_get_clientsession", return_value=Mock()), \
+                     patch.object(websocket, "ProviderClient") as client:
+                    client.return_value.check = AsyncMock(side_effect=ProviderError(error_code))
+                    await inspect.unwrap(websocket.check_connection)(hass, connection, {
+                        "id": 30, "entry_id": "failed-check-entry",
+                    })
+
+                connection.send_error.assert_called_once_with(30, error_code, error_code)
+                readback = websocket._api_check_readback(entry)
+                self.assertEqual(readback["api_check_status"], "unknown")
+                self.assertEqual(readback["api_check_reason"], error_code)
+                self.assertNotIn("fixture-saved-key", str(readback))
+                self.assertNotIn("fingerprint", str(readback))
+
+    def test_api_check_readback_drops_unrecognized_persisted_reason(self):
+        data = {"provider": "openai", "api_key": "fixture-saved-key", "model": "gpt-4.1-mini"}
+        entry = SimpleNamespace(
+            data=data,
+            options={"habab_api_check": {
+                "fingerprint": websocket._settings_fingerprint(data),
+                "status": "unknown", "checked_at": "2026-10-24T12:00:00+00:00",
+                "reason": "upstream says fixture-private-error-and-key",
+            }},
+        )
+        self.assertEqual(websocket._api_check_readback(entry), {
+            "api_check_status": "unknown",
+            "api_check_at": "2026-10-24T12:00:00+00:00",
+            "api_check_reason": None,
+        })
 
     def test_api_check_readback_becomes_unknown_after_saved_settings_change(self):
         data = {"provider": "openai", "api_key": "fixture-saved-key", "model": "gpt-4.1-mini"}
@@ -337,7 +400,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             data=data,
             options={"habab_api_check": {
                 "fingerprint": websocket._settings_fingerprint(data),
-                "status": "verified", "checked_at": "2026-10-24T12:00:00+00:00",
+                "status": "verified", "checked_at": "2026-10-24T12:00:00+00:00", "reason": "quota",
             }},
         )
         for change in (
@@ -349,6 +412,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                 entry.data = {**data, **change}
                 self.assertEqual(websocket._api_check_readback(entry), {
                     "api_check_status": "unknown", "api_check_at": None,
+                    "api_check_reason": None,
                 })
 
     async def test_check_result_is_not_attached_to_settings_rotated_during_request(self):
@@ -383,6 +447,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         config_entries.async_update_entry.assert_not_called()
         self.assertEqual(websocket._api_check_readback(entry), {
             "api_check_status": "unknown", "api_check_at": None,
+            "api_check_reason": None,
         })
 
     async def test_provider_removed_during_save_returns_safe_error(self):

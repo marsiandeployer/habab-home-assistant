@@ -20,6 +20,10 @@ from .setup_agent import AgentError
 
 _API_CHECK_OPTION = "habab_api_check"
 _API_CHECK_STATUSES = {"verified", "rejected", "unknown"}
+_API_CHECK_REASONS = {
+    "invalid_provider", "invalid_auth", "quota", "invalid_model", "cannot_connect", "timeout",
+    "invalid_response", "tools_unsupported",
+}
 
 
 def _settings_fingerprint(data):
@@ -35,18 +39,20 @@ def _api_check_readback(entry):
     """Return only a matching check outcome; never return the settings fingerprint."""
     record = entry.options.get(_API_CHECK_OPTION)
     if not isinstance(record, dict) or record.get("fingerprint") != _settings_fingerprint(entry.data):
-        return {"api_check_status": "unknown", "api_check_at": None}
+        return {"api_check_status": "unknown", "api_check_at": None, "api_check_reason": None}
     status = record.get("status")
     if status not in _API_CHECK_STATUSES:
-        return {"api_check_status": "unknown", "api_check_at": None}
+        return {"api_check_status": "unknown", "api_check_at": None, "api_check_reason": None}
     checked_at = record.get("checked_at")
+    reason = record.get("reason")
     return {
         "api_check_status": status,
         "api_check_at": checked_at if isinstance(checked_at, str) else None,
+        "api_check_reason": reason if isinstance(reason, str) and reason in _API_CHECK_REASONS else None,
     }
 
 
-def _record_api_check(hass, entry, fingerprint, status):
+def _record_api_check(hass, entry, fingerprint, status, reason=None):
     """Persist a terminal result for one exact provider/model/key combination."""
     if _settings_fingerprint(entry.data) != fingerprint:
         return False
@@ -56,6 +62,7 @@ def _record_api_check(hass, entry, fingerprint, status):
             "fingerprint": fingerprint,
             "status": status if status in _API_CHECK_STATUSES else "unknown",
             "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "reason": reason if isinstance(reason, str) and reason in _API_CHECK_REASONS else None,
         },
     }
     hass.config_entries.async_update_entry(entry, options=options)
@@ -252,6 +259,7 @@ async def check_connection(hass, connection, msg):
                 _record_api_check(
                     hass, current, fingerprint,
                     "rejected" if err.code == "invalid_auth" else "unknown",
+                    reason=err.code,
                 )
             elif current is None or _settings_fingerprint(current.data) != fingerprint:
                 connection.send_error(msg["id"], "connection_changed", "connection_changed")

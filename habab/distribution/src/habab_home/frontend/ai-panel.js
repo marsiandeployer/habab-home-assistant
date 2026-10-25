@@ -218,7 +218,9 @@ class HababAIPanel extends HTMLElement {
       this.q("#connection-status").textContent = this.t(entry.assistant_selected ? "savedForAssistant" : "saved");
       const pending = this.connectionCheckStates.get(this.checkStateKey(entry)) === "checking";
       const result = pending ? { status: "checking" } : {
-        status: entry.api_check_status || "unknown", checked_at: entry.api_check_at,
+        status: entry.api_check_status || "unknown",
+        checked_at: entry.api_check_at,
+        reason: entry.api_check_reason,
       };
       const time = this.checkTime(result.checked_at);
       const state = result.status || "unknown";
@@ -226,8 +228,15 @@ class HababAIPanel extends HTMLElement {
         checking: "apiChecking",
         verified: time ? "apiVerifiedAt" : "apiVerified",
         rejected: time ? "apiRejectedAt" : "apiRejected",
-        unknown: time ? "apiUnknownAt" : "apiUnknown",
-      }[state];
+      }[state] || ({
+        invalid_provider: time ? "apiInvalidProviderAt" : "apiInvalidProvider",
+        quota: time ? "apiQuotaAt" : "apiQuota",
+        invalid_model: time ? "apiInvalidModelAt" : "apiInvalidModel",
+        cannot_connect: time ? "apiUnavailableAt" : "apiUnavailable",
+        timeout: time ? "apiUnavailableAt" : "apiUnavailable",
+        invalid_response: time ? "apiInvalidResponseAt" : "apiInvalidResponse",
+        tools_unsupported: time ? "apiToolsUnsupportedAt" : "apiToolsUnsupported",
+      }[result.reason] || (time ? "apiUnknownAt" : "apiUnknown"));
       this.q("#api-status").textContent = this.t(statusKey).replace("{time}", time || "");
     }
     const openAssistant = this.q("#open-assistant");

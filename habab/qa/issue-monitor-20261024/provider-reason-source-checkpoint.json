@@ -1,0 +1,26 @@
+{
+  "issue": 13,
+  "status": "SOURCE_TESTS_PASS_LIVE_NOT_RUN",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/websocket.py": "0019e9b99257bd9a3ca83f21edd85625246e2d9c655a9b5b27034bad80855218",
+    "habab/distribution/src/habab_home/frontend/ai-panel.js": "d0f018ebe0279cab39fc10e4653d59b95841a194bf3f8d123b077c3d01496e2c",
+    "habab/distribution/src/habab_home/frontend/strings.js": "b36b3bd60c1dae1b1d0a6a5ad8a7dcf3c4bfe25b6ac754941acddb5088e7941f",
+    "habab/distribution/tests/test_voice.py": "45e70656fca058f6ebb224fbc31ac94657680a0cf689dcef3eb399b1a35cd07c"
+  },
+  "root_independent_tests": {
+    "test_voice": 21,
+    "node_syntax": [
+      "ai-panel.js",
+      "strings.js"
+    ]
+  },
+  "verified_contract": [
+    "Persist only finite ProviderError reason codes",
+    "Readback only if provider/model/key fingerprint still matches",
+    "Success clears previous reason",
+    "Panel uses localized explanation for last saved validation outcome",
+    "No raw upstream message or credentials returned"
+  ],
+  "deployment": "NOT_RUN",
+  "browser_reload_acceptance": "NOT_RUN"
+}
