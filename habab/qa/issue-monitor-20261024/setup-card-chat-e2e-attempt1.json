@@ -1,0 +1,30 @@
+{
+  "checked_at": "2026-10-25T11:15:01.377Z",
+  "target": "owner-test",
+  "verdict": "FAIL",
+  "runtime_image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+  "runtime_source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+  "current_setup_agent_sha256": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+  "purpose": "show_and_cancel_one_native_mqtt_form_without_values",
+  "execution_window_id": "owner-mqtt-20261025-1",
+  "form_values_read": false,
+  "form_submitted": false,
+  "broker_connected": false,
+  "cleanup_complete": false,
+  "result": "technical_failure",
+  "prompts_completed": 0,
+  "prompts_expected": 1,
+  "owner_admin_verified": true,
+  "existing_session_reused": true,
+  "selected_provider_verified": true,
+  "native_service_observer_continuous": true,
+  "service_calls_during_run": 3,
+  "registry_unchanged": null,
+  "backend_idle_at_end": null,
+  "mqtt_entry_count_unchanged": null,
+  "mqtt_flow_cancelled": false,
+  "limitations": [
+    "No MQTT credentials are entered and no config entry/broker connection is created."
+  ],
+  "failure_code": "qa_failed"
+}

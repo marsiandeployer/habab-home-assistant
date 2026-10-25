@@ -1,0 +1,238 @@
+{
+  "checked_at": "2026-10-25T11:37:07.759Z",
+  "target": "authenticated owner-test /habab-ai",
+  "verdict": "FAIL",
+  "runtime": {
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "forward_hotfix_count": 18,
+    "ai_panel_sha256": "64a613d9b3a82df4f3da2ae0156facb832efb4d3643b0888e8bf2b5c4300fded",
+    "forward_hotfix_commits": [
+      "ba370aeaa",
+      "d2f8090e2",
+      "2aaf42ac3",
+      "3b59bd8df",
+      "1cc3c52b0",
+      "a66578237",
+      "273ebf28a",
+      "e4becc63e"
+    ]
+  },
+  "owner_admin_verified": true,
+  "route_verified": true,
+  "backend_selected_match_ui": true,
+  "initial_active_tab_matches_backend": true,
+  "reload_active_tab_matches_backend": true,
+  "key_read_completed": true,
+  "key_value_observed": false,
+  "eye_toggle_verified": true,
+  "reload_selected_provider_stable": true,
+  "save_or_check_requests": 0,
+  "agent_run_requests": 0,
+  "page_errors": [
+    "DOMException",
+    "DOMException",
+    "DOMException",
+    "DOMException",
+    "DOMException",
+    "DOMException",
+    "DOMException"
+  ],
+  "failed_responses": [
+    {
+      "path": "/unknown/node_modules/.pnpm/@webcomponents+scoped-custom-element-registry@0.0.10/node_modules/@webcomponents/scoped-custom-element-registry/src/scoped-custom-element-registry.ts",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/tslib@2.8.1/node_modules/tslib/tslib.es6.mjs",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/webpack/runtime/async_module",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@lit+reactive-element@2.1.2/node_modules/@lit/reactive-element/src/decorators/custom-element.ts",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/frontend_latest/48167.717ed81a0676a49d.js",
+      "request_failure": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/core-js@3.50.0/node_modules/core-js/modules/es.iterator.flat-map.js",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@home-assistant+webawesome@3.7.0-ha.1_@floating-ui+utils@0.2.12/node_modules/@home-assistant/webawesome/dist/components/icon/icon.js",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@lit+reactive-element@2.1.2/node_modules/@lit/reactive-element/src/decorators/custom-element.ts",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/tslib@2.8.1/node_modules/tslib/tslib.es6.mjs",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/webpack/runtime/async_module",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@webcomponents+scoped-custom-element-registry@0.0.10/node_modules/@webcomponents/scoped-custom-element-registry/src/scoped-custom-element-registry.ts",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/core-js@3.50.0/node_modules/core-js/modules/es.iterator.flat-map.js",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/tslib@2.8.1/node_modules/tslib/tslib.es6.mjs",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/webpack/runtime/async_module",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@lit+reactive-element@2.1.2/node_modules/@lit/reactive-element/src/decorators/custom-element.ts",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@home-assistant+webawesome@3.7.0-ha.1_@floating-ui+utils@0.2.12/node_modules/@home-assistant/webawesome/dist/components/icon/icon.js",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@webcomponents+scoped-custom-element-registry@0.0.10/node_modules/@webcomponents/scoped-custom-element-registry/src/scoped-custom-element-registry.ts",
+      "request_failure": "net::ERR_NAME_NOT_RESOLVED"
+    }
+  ],
+  "main_document_navigations": [
+    {
+      "path": "/"
+    },
+    {
+      "path": "/home"
+    },
+    {
+      "path": "/habab-ai"
+    },
+    {
+      "path": "/habab-ai"
+    }
+  ],
+  "checks": [],
+  "served_ai_panel": {
+    "path": "/habab-home/ai-panel.js",
+    "status": 200,
+    "sha256": "64a613d9b3a82df4f3da2ae0156facb832efb4d3643b0888e8bf2b5c4300fded"
+  },
+  "initial": {
+    "admin": true,
+    "selected_count": 1,
+    "provider": "habab",
+    "model": "gemini-3.1-flash-lite",
+    "state": "loaded",
+    "ui_assistant_status": "Для чата выбрано: Habab, модель gemini-3.1-flash-lite.",
+    "ui_status_matches": true,
+    "connection_status": "Подключение сохранено и выбрано для чата",
+    "api_status": "Сохранённые ключ и модель прошли проверку API 24 окт. 2026 г., 20:13.",
+    "panel_provider": "habab",
+    "entry_present": true,
+    "key_type": "text",
+    "key_nonempty": true,
+    "provider_selection_applied": true,
+    "active_tab_matches": true,
+    "eye_pressed": "true",
+    "route": "/habab-ai"
+  },
+  "selected_provider_panel": {
+    "provider": "habab",
+    "key_type": "text",
+    "eye_pressed": "true",
+    "connection_status": "Подключение сохранено и выбрано для чата",
+    "api_status": "Сохранённые ключ и модель прошли проверку API 24 окт. 2026 г., 20:13.",
+    "key_nonempty": true,
+    "saved_entry_present": true,
+    "active_tab_matches": true
+  },
+  "eye_toggle": {
+    "hidden_type": "password",
+    "restored_type": "text",
+    "restored_aria_pressed": "true",
+    "verified": true
+  },
+  "after_reload": {
+    "backend": {
+      "admin": true,
+      "selected_count": 1,
+      "provider": "habab",
+      "model": "gemini-3.1-flash-lite",
+      "state": "loaded",
+      "ui_assistant_status": "Для чата выбрано: Habab, модель gemini-3.1-flash-lite.",
+      "ui_status_matches": true,
+      "connection_status": "Подключение сохранено и выбрано для чата",
+      "api_status": "Сохранённые ключ и модель прошли проверку API 24 окт. 2026 г., 20:13.",
+      "panel_provider": "habab",
+      "entry_present": true,
+      "key_type": "text",
+      "key_nonempty": true,
+      "provider_selection_applied": true,
+      "active_tab_matches": true,
+      "eye_pressed": "true",
+      "route": "/habab-ai"
+    },
+    "panel": {
+      "provider": "habab",
+      "key_type": "text",
+      "eye_pressed": "true",
+      "key_nonempty": true,
+      "saved_entry_present": true,
+      "active_tab_matches": true
+    },
+    "key_read_response_success": true
+  },
+  "outgoing_ws_type_counts": {
+    "auth": 3,
+    "supported_features": 3,
+    "subscribe_entities": 3,
+    "subscribe_events": 36,
+    "config/entity_registry/list_for_display": 3,
+    "config/device_registry/list": 3,
+    "config/area_registry/list": 3,
+    "config/floor_registry/list": 3,
+    "get_config": 3,
+    "get_services": 3,
+    "get_panels": 3,
+    "frontend/get_themes": 3,
+    "auth/current_user": 3,
+    "frontend/subscribe_user_data": 14,
+    "repairs/list_issues": 3,
+    "lovelace/config": 1,
+    "lovelace/resources": 1,
+    "frontend/subscribe_system_data": 3,
+    "brands/access_token": 3,
+    "frontend/get_translations": 6,
+    "http/config": 3,
+    "habab_home/realtime/subscribe": 3,
+    "habab_home/agent/session": 3,
+    "labs/subscribe": 3,
+    "habab_home/xiaomi/get": 3,
+    "habab_home/setup/status": 6,
+    "call_service": 7,
+    "persistent_notification/subscribe": 2,
+    "habab_home/telemetry/get": 2,
+    "habab_home/providers/list": 6,
+    "assist_pipeline/pipeline/list": 4,
+    "habab_home/providers/key": 4
+  },
+  "key_read_requests": 4,
+  "key_read_responses": 4,
+  "key_read_successes": 4,
+  "key_read_errors": 0,
+  "no_provider_mutation_commands": true,
+  "failure_class": "Error",
+  "failure_code": "browser_errors_observed",
+  "finished_at": "2026-10-25T11:37:17.331Z"
+}

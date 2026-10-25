@@ -1,0 +1,52 @@
+{
+  "checked_at": "2026-10-25T11:03:14.595Z",
+  "target": "authenticated owner-test global chat browser voice",
+  "verdict": "FAIL",
+  "runtime": {
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "voice_js_sha256": "9e2bdf68820959558469a4756e81e47ca60bb3ae7f4253b12fa7511ee188ca51",
+    "hotfix_commit": "273ebf28a"
+  },
+  "synthetic_audio": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "sample_width_bits": 16,
+    "duration_seconds": 12,
+    "synthetic_silence": true,
+    "fixture_removed_after_run": true
+  },
+  "owner_admin_verified": true,
+  "existing_session_reused": true,
+  "selected_provider_verified": true,
+  "start_cue_completed": true,
+  "bootstrap_after_start_cue": true,
+  "gateway_first_auth_frame": true,
+  "setup_complete": true,
+  "microphone_opened_after_setup": true,
+  "pcm_frames_between_cues": 127,
+  "outbound_audio_frames_between_cues": 127,
+  "trusted_stop_clicked": true,
+  "pcm_live_window_ms": 1000,
+  "outbound_audio_live_window_ms": 1000,
+  "trusted_stop_event_received": false,
+  "end_cue_completed": false,
+  "socket_closed": true,
+  "native_voice_stop_response": true,
+  "late_sendAudio_guard_verified": false,
+  "new_chat_messages": 0,
+  "forbidden_chat_or_device_actions": 0,
+  "page_errors": [
+    "Error",
+    "Error"
+  ],
+  "failed_responses": [],
+  "served_voice_js": {
+    "status": 200,
+    "sha256": "9e2bdf68820959558469a4756e81e47ca60bb3ae7f4253b12fa7511ee188ca51"
+  },
+  "failure_class": "TimeoutError",
+  "failure_code": "qa_failed",
+  "finished_at": "2026-10-25T11:03:40.583Z",
+  "private_trace": "/root/.local/share/habab-owner-test/browser-voice-live-e2e/attempt3-trace.json"
+}

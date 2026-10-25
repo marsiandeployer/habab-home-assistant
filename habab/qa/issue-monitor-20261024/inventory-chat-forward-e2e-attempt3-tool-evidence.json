@@ -1,0 +1,36 @@
+{
+  "checked_at": "2026-10-25T09:57:38.886159+00:00",
+  "source": "read-only current mapped OpenCode session",
+  "runtime_setup_agent_sha256": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+  "turns": [
+    {
+      "question_index": 2,
+      "assistant_message_count": 2,
+      "tool_invocations": [
+        {
+          "tool": "bash",
+          "action": "devices",
+          "status": "completed",
+          "description_present": true,
+          "output_present": true,
+          "output_length": 8224
+        }
+      ]
+    },
+    {
+      "question_index": 3,
+      "assistant_message_count": 1,
+      "tool_invocations": []
+    },
+    {
+      "question_index": 4,
+      "assistant_message_count": 1,
+      "tool_invocations": []
+    },
+    {
+      "question_index": 5,
+      "assistant_message_count": 1,
+      "tool_invocations": []
+    }
+  ]
+}

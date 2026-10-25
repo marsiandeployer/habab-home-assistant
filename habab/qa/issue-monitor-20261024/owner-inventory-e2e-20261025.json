@@ -1,0 +1,47 @@
+{
+  "checked_at": "2026-10-25T07:29:12.505Z",
+  "target": "https://habab-demo.wpmix.net/owner-test",
+  "case": "one actual web-chat read-only device and integration inventory query",
+  "verdict": "PARTIAL_OR_FAILED",
+  "source": "authenticated native HA device/entity/config-entry registries plus original owner web-chat send",
+  "baseline": {
+    "config_entry_count": null,
+    "config_entry_domains": [],
+    "device_count": null,
+    "entity_count": null,
+    "entities_without_device_count": null,
+    "service_entity_domains": [],
+    "device_entity_domains": []
+  },
+  "after": {
+    "config_entry_count": null,
+    "config_entry_domains": [],
+    "device_count": null,
+    "entity_count": null
+  },
+  "checks": {
+    "authenticated_admin": true,
+    "one_send_accepted_completed": false,
+    "backend_idle": false,
+    "registry_unchanged": null,
+    "service_call_count": null,
+    "main_document_navigation_during_turn": 0,
+    "document_requests_during_turn": 0,
+    "page_errors": 0,
+    "failed_responses": 0,
+    "device_names_in_reply": 0,
+    "device_count": 0,
+    "device_model_mentions": 0,
+    "integration_labels_in_reply": 0,
+    "integration_label_count": 0,
+    "assistant_reply_characters": null,
+    "service_worker_settled_before_query": false,
+    "service_worker_controller_changes_before_query": 0,
+    "service_worker_controller_changes_during_turn": false,
+    "native_chat_user_row_present": false
+  },
+  "limitations": [
+    "No physical-device commands or actuator verification.",
+    "Tool-call metadata requires independent review of the same mapped OpenCode session."
+  ]
+}

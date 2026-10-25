@@ -1,0 +1,101 @@
+{
+  "checked_at": "2026-10-25T11:34:01.675Z",
+  "target": "authenticated owner-test global chat browser voice",
+  "verdict": "FAIL",
+  "runtime": {
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "voice_js_sha256": "9e2bdf68820959558469a4756e81e47ca60bb3ae7f4253b12fa7511ee188ca51",
+    "hotfix_commit": "273ebf28a"
+  },
+  "synthetic_audio": {
+    "sample_rate": 16000,
+    "channels": 1,
+    "sample_width_bits": 16,
+    "duration_seconds": 12,
+    "synthetic_silence": true,
+    "fixture_removed_after_run": true
+  },
+  "owner_admin_verified": true,
+  "existing_session_reused": true,
+  "selected_provider_verified": true,
+  "start_cue_completed": false,
+  "bootstrap_after_start_cue": false,
+  "gateway_first_auth_frame": false,
+  "setup_complete": false,
+  "microphone_opened_after_setup": false,
+  "pcm_frames_between_cues": 0,
+  "outbound_audio_frames_between_cues": 0,
+  "trusted_stop_clicked": false,
+  "pcm_live_window_ms": 0,
+  "outbound_audio_live_window_ms": 0,
+  "trusted_stop_event_received": false,
+  "stop_finish_sequence_order": false,
+  "end_cue_completed": false,
+  "socket_closed": false,
+  "native_voice_stop_response": false,
+  "late_sendAudio_guard_verified": false,
+  "new_chat_messages": 0,
+  "forbidden_chat_or_device_actions": 0,
+  "observer_errors": 0,
+  "page_errors": [
+    "DOMException",
+    "DOMException",
+    "DOMException",
+    "DOMException"
+  ],
+  "failed_responses": [
+    {
+      "path": "/unknown/webpack/runtime/async_module",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@lit+reactive-element@2.1.2/node_modules/@lit/reactive-element/src/decorators/custom-element.ts",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/tslib@2.8.1/node_modules/tslib/tslib.es6.mjs",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@webcomponents+scoped-custom-element-registry@0.0.10/node_modules/@webcomponents/scoped-custom-element-registry/src/scoped-custom-element-registry.ts",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/frontend_latest/54859.a0077d466a794298.js",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/core-js@3.50.0/node_modules/core-js/modules/es.iterator.flat-map.js",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/webpack/runtime/async_module",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/tslib@2.8.1/node_modules/tslib/tslib.es6.mjs",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@lit+reactive-element@2.1.2/node_modules/@lit/reactive-element/src/decorators/custom-element.ts",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@home-assistant+webawesome@3.7.0-ha.1_@floating-ui+utils@0.2.12/node_modules/@home-assistant/webawesome/dist/components/icon/icon.js",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    },
+    {
+      "path": "/unknown/node_modules/.pnpm/@webcomponents+scoped-custom-element-registry@0.0.10/node_modules/@webcomponents/scoped-custom-element-registry/src/scoped-custom-element-registry.ts",
+      "failure": "net::ERR_NAME_NOT_RESOLVED"
+    }
+  ],
+  "served_voice_js": {
+    "status": 200,
+    "sha256": "9e2bdf68820959558469a4756e81e47ca60bb3ae7f4253b12fa7511ee188ca51"
+  },
+  "failure_class": "Error",
+  "failure_code": "voice_start_guard_or_hit_test_failed",
+  "finished_at": "2026-10-25T11:34:09.379Z",
+  "private_trace": "/root/.local/share/habab-owner-test/browser-voice-live-e2e/attempt5-trace.json"
+}
