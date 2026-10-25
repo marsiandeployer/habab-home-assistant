@@ -6,11 +6,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from homeassistant.config_entries import ConfigEntryChange
 from homeassistant.components.habab_telegram import TelegramManager
 from homeassistant.components.habab_telegram.config_flow import get_bot
 from homeassistant.components.habab_telegram.const import (
     BOT_ONBOARDING_MESSAGE, OWNER_PAIRING_COMPLETE_MESSAGE, UNKNOWN_MEMBER_MESSAGE,
 )
+from homeassistant.components.habab_home.effective_provider import effective_provider_entry
 
 
 class SessionBoundaryTests(unittest.IsolatedAsyncioTestCase):
@@ -70,6 +72,14 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.cancelled_through = {}
         manager.cancel_epochs = {}
         manager.pending_sends = {}
+        manager.provider_config_epoch = 0
+        manager.provider_entry_unsubscribers = {}
+        manager.unavailable_provider_entries = set()
+        manager.selected_provider_entry_id = None
+        manager.provider_refresh_task = None
+        manager.transport_errors = {}
+        manager._unsubscribe_provider_changes = lambda: None
+        manager._closed = False
         return manager
 
     async def test_entry_polling_is_backgrounded_and_explicitly_stopped(self):
@@ -97,6 +107,9 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.hass.async_create_background_task = create_background_task
         manager.hass.async_block_till_done = async_block_till_done
         manager.consumer_tasks = {}
+        manager.hass.data["habab_home"]["setup_agent"].settings = Mock(return_value={
+            "provider": "habab", "api_key": "fixture-service-key",
+        })
 
         blocked = asyncio.Event()
 
@@ -119,7 +132,17 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "homeassistant.components.habab_telegram.asyncio.create_subprocess_exec",
             new=AsyncMock(return_value=process),
-        ):
+        ) as create_process, patch(
+            "homeassistant.components.habab_telegram.async_get_clientsession",
+            return_value=object(),
+        ), patch(
+            "homeassistant.components.habab_telegram.resolve_telegram_transport",
+            new=AsyncMock(return_value=({
+                "mode": "habab_relay", "base_url": "https://habab-voice.wpmix.net",
+                "service_key": "fixture-service-key",
+                "protocol": "telegram-bot-api-relay-v1",
+            }, "habab")),
+        ), patch.dict("os.environ", {"HABAB_TELEGRAM_RELAY": "https://legacy.test"}):
             await manager.async_setup_entry(entry)
 
         await asyncio.wait_for(manager.hass.async_block_till_done(), timeout=0.1)
@@ -137,7 +160,156 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(task.cancelled() for task in background_tasks))
         self.assertEqual(process.stdin.write.call_count, 2)  # configure, then shutdown
         self.assertEqual(process.stdin.write.call_args.args[0], b'{"type":"shutdown"}\n')
+        configure = json.loads(process.stdin.write.call_args_list[0].args[0])
+        self.assertEqual(configure["token"], "fixture-token")
+        self.assertEqual(configure["telegram_transport"], {
+            "mode": "habab_relay", "base_url": "https://habab-voice.wpmix.net",
+            "service_key": "fixture-service-key",
+            "protocol": "telegram-bot-api-relay-v1",
+        })
+        self.assertNotIn("token", create_process.call_args.kwargs["env"])
+        self.assertNotIn("fixture-service-key", str(create_process.call_args.kwargs["env"]))
+        self.assertNotIn("HABAB_TELEGRAM_RELAY", create_process.call_args.kwargs["env"])
         process.wait.assert_awaited_once_with()
+
+    async def test_provider_change_reloads_worker_route(self):
+        manager = self.manager()
+        manager.entries["entry"]["transport_identity"] = ("direct",)
+        manager.hass.data["habab_home"]["setup_agent"].settings = Mock(return_value={
+            "provider": "habab", "api_key": "fixture-service-key",
+        })
+        config_entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice"})
+        manager.hass.config_entries = SimpleNamespace(
+            async_entries=lambda domain: [config_entry] if domain == "habab_telegram" else [],
+            async_reload=AsyncMock(),
+        )
+
+        def reloaded(entry_id):
+            manager.entries[entry_id]["transport_identity"] = (
+                "habab_relay", "https://habab-voice.wpmix.net", "fixture-service-key")
+            return True
+
+        manager.hass.config_entries.async_reload.side_effect = reloaded
+        manager.hass.async_create_task = asyncio.create_task
+        manager._provider_config_changed()
+        await manager.provider_refresh_task
+        manager.hass.config_entries.async_reload.assert_awaited_once_with("entry")
+
+    async def test_provider_status_only_update_does_not_restart_direct_worker(self):
+        manager = self.manager()
+        manager.entries["entry"]["transport_identity"] = ("direct",)
+        config_entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice"})
+        manager.hass.config_entries = SimpleNamespace(
+            async_entries=lambda domain: [config_entry] if domain == "habab_telegram" else [],
+            async_reload=AsyncMock(return_value=True),
+        )
+        manager.hass.async_create_task = asyncio.create_task
+        manager._provider_config_changed()
+        await manager.provider_refresh_task
+        manager.hass.config_entries.async_reload.assert_not_awaited()
+
+    async def test_habab_provider_unload_closes_relay_and_loaded_event_restarts_it(self):
+        manager = self.manager()
+        manager.selected_provider_entry_id = "provider-a"
+        manager.entries["entry"]["transport_identity"] = (
+            "habab_relay", "https://habab-voice.wpmix.net", "fixture-service-key",
+        )
+        manager.entries["proxy"] = {"transport_identity": ("direct_proxy",)}
+        provider_a = SimpleNamespace(
+            entry_id="provider-a", domain="habab_home", data={"provider": "habab"},
+            options={"assistant_selected": True}, state=SimpleNamespace(value="loaded"),
+        )
+        provider_b = SimpleNamespace(
+            entry_id="provider-b", domain="habab_home", data={"provider": "habab"},
+            options={"assistant_selected": False}, state=SimpleNamespace(value="not_loaded"),
+        )
+        telegram_entries = [
+            SimpleNamespace(entry_id="entry", data={"owner_id": "alice"}),
+            SimpleNamespace(entry_id="proxy", data={"owner_id": "bob", "proxy_url": "http://proxy.test"}),
+        ]
+        manager.hass.config_entries = SimpleNamespace(
+            async_entries=lambda domain: (
+                [provider_a, provider_b] if domain == "habab_home" else telegram_entries
+            ),
+            async_reload=AsyncMock(return_value=True),
+        )
+        manager.hass.async_create_task = asyncio.create_task
+
+        async def close_entry(entry_id):
+            manager.entries.pop(entry_id, None)
+
+        with patch.object(manager, "close_entry", new=AsyncMock(side_effect=close_entry)) as close:
+            self.assertIs(effective_provider_entry([provider_a, provider_b]), provider_a)
+            manager._provider_entry_changed(ConfigEntryChange.UPDATED, provider_b)
+            self.assertIsNone(manager.provider_refresh_task)
+            self.assertEqual(manager.unavailable_provider_entries, set())
+            close.assert_not_awaited()
+
+            provider_a.state = SimpleNamespace(value="not_loaded")
+            manager._provider_entry_changed(ConfigEntryChange.UPDATED, provider_a)
+            await manager.provider_refresh_task
+
+            close.assert_awaited_once_with("entry")
+            self.assertNotIn("entry", manager.entries)
+            self.assertIn("proxy", manager.entries)
+            self.assertEqual(manager.transport_errors["entry"], "provider_unavailable")
+            manager.hass.config_entries.async_reload.assert_not_awaited()
+
+            provider_a.state = SimpleNamespace(value="loaded")
+            manager._provider_entry_changed(ConfigEntryChange.UPDATED, provider_a)
+            await manager.provider_refresh_task
+
+        manager.hass.config_entries.async_reload.assert_awaited_once_with("entry")
+
+    async def test_removed_habab_provider_keeps_relay_stopped_without_direct_fallback(self):
+        manager = self.manager()
+        manager.entries["entry"]["transport_identity"] = (
+            "habab_relay", "https://habab-voice.wpmix.net", "fixture-service-key",
+        )
+        manager.selected_provider_entry_id = "provider-a"
+        provider_a = SimpleNamespace(
+            entry_id="provider-a", domain="habab_home", data={"provider": "habab"},
+            options={"assistant_selected": True}, state=SimpleNamespace(value="not_loaded"),
+        )
+        provider_b = SimpleNamespace(
+            entry_id="provider-b", domain="habab_home", data={"provider": "deepseek"},
+            options={"assistant_selected": False}, state=SimpleNamespace(value="loaded"),
+        )
+        telegram_entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice"})
+        manager.hass.config_entries = SimpleNamespace(
+            async_entries=lambda domain: [provider_b] if domain == "habab_home" else [telegram_entry],
+            async_reload=AsyncMock(return_value=True),
+        )
+        manager.hass.async_create_task = asyncio.create_task
+        unsubscribe = Mock()
+        manager.provider_entry_unsubscribers["provider-a"] = unsubscribe
+
+        async def close_entry(entry_id):
+            manager.entries.pop(entry_id, None)
+
+        with patch.object(manager, "close_entry", new=AsyncMock(side_effect=close_entry)) as close:
+            manager._provider_entry_changed(ConfigEntryChange.REMOVED, provider_a)
+            await manager.provider_refresh_task
+
+        close.assert_awaited_once_with("entry")
+        unsubscribe.assert_called_once_with()
+        self.assertNotIn("entry", manager.entries)
+        self.assertEqual(manager.transport_errors["entry"], "provider_unavailable")
+        self.assertEqual(manager.unavailable_provider_entries, {"provider-a"})
+        manager.hass.config_entries.async_reload.assert_not_awaited()
+
+        # Falling back to an unselected legacy provider after removal is blocked.
+        manager._provider_entry_changed(ConfigEntryChange.UPDATED, provider_b)
+        self.assertEqual(manager.unavailable_provider_entries, {"provider-a"})
+        manager.hass.config_entries.async_reload.assert_not_awaited()
+
+        # An explicit provider selection is an authorized route change.
+        provider_b.options["assistant_selected"] = True
+        manager._provider_entry_changed(ConfigEntryChange.UPDATED, provider_b)
+        await manager.provider_refresh_task
+        self.assertEqual(manager.selected_provider_entry_id, "provider-b")
+        self.assertEqual(manager.unavailable_provider_entries, set())
+        manager.hass.config_entries.async_reload.assert_awaited_once_with("entry")
 
     def group_entry(self):
         entry = SimpleNamespace(entry_id="entry", data={

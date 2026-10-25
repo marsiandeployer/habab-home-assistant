@@ -1,0 +1,36 @@
+{
+  "issue": 5,
+  "status": "SOURCE_TESTS_PASS_DEPLOYMENT_NOT_RUN",
+  "source_sha256": {
+    "habab/distribution/src/habab_telegram/__init__.py": "c1887c86218b00fcbe9b96b4749661a1dfa657070423b0e7ddc3c3c966dfb47f",
+    "habab/distribution/src/habab_telegram/config_flow.py": "ec666f0fbc27fa2d8404da8c070b49ce6b93c44edfbf0ea40df2169a15a8ef52",
+    "habab/distribution/src/habab_telegram/transport.py": "344742a87bf4025069b5180d6d6c8cda0e9039a20741497b09ddf2a5612d12df",
+    "habab/distribution/tests/test_telegram_backend.py": "aa0bfc8f4873948f78af90f0334828ed75151a42b30d370dffc8d71c3ea02d4e",
+    "habab/distribution/tests/test_telegram_proxy.py": "8f78fffccee32d5c2f40b5dea71ce5591c44d02a3767ec2d3f6d0221f0fa5ebd",
+    "habab/distribution/telegram-agent/worker.mjs": "e17513d5b02dc9e3b5d629ba779d57f5e98819856a78e97a4041d448ce6d105d",
+    "habab/distribution/telegram-agent/relay-fetch.mjs": "cd86cb8932343f984bd82e12b3a0adf55bb5fd112c7a65424459a12a0ba5b53f",
+    "habab/distribution/telegram-agent/test/relay-fetch.test.mjs": "fecd77af8fcd48aac0041580008e27d0db10b77848e7b370758c96a0237255b5"
+  },
+  "protocol": "telegram-bot-api-relay-v1",
+  "independent_tests": {
+    "python": 52,
+    "node": 16,
+    "python_environment": "pinned Core network none readonly source mounts"
+  },
+  "reviewed_contract": [
+    "Explicit single stdin telegram_transport field",
+    "Selected Habab uses fixed server capabilities and separate service/bot credentials",
+    "Other providers direct; explicit per-bot proxy overrides Habab route",
+    "No silent direct fallback on relay failure or selected provider removal",
+    "Exact effective provider watcher ignores unrelated unavailable entries",
+    "Selected provider unload/removal closes old worker before replacement; explicit selection needed after removal",
+    "One installation owns polling; gateway performs no autonomous polling"
+  ],
+  "deployment_order": [
+    "Gateway capabilities live acceptance",
+    "Core integration and paired Node worker deployment",
+    "Actual single-poller bot roundtrip"
+  ],
+  "live_bot_roundtrip": "NOT_RUN",
+  "secrets": "No credential values retained in receipt"
+}

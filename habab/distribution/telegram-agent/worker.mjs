@@ -1,10 +1,13 @@
 import { createInterface } from 'node:readline';
 import { TelegramTransport } from 'noxon-telegram';
-import { createTelegramRelayFetch } from './relay-fetch.mjs';
+import { createTelegramRelayFetch, telegramTransportConfig } from './relay-fetch.mjs';
 
 const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
-const relay = createTelegramRelayFetch({relayBase: process.env.HABAB_TELEGRAM_RELAY});
-const transport = new TelegramTransport({ emit, fetchImpl: relay.fetch });
+let relay;
+const transport = new TelegramTransport({ emit, fetchImpl: (...args) => {
+  if (!relay) throw new Error('configure_required');
+  return relay.fetch(...args);
+} });
 let configured = false;
 let configuring = false;
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -17,6 +20,7 @@ input.on('line', async (line) => {
   try {
     if (!configured && !configuring && command?.type === 'configure') {
       configuring = true;
+      relay = createTelegramRelayFetch({ config: telegramTransportConfig(command) });
       await relay.withOperation('configure', () => transport.configure(command.token));
       configured = true;
       configuring = false;

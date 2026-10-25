@@ -8,14 +8,24 @@ import time
 import uuid
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.config_entries import ConfigEntryChange, SIGNAL_CONFIG_ENTRY_CHANGED
+from homeassistant.core import callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     BOT_ONBOARDING_MESSAGE, DOMAIN, GROUP_PAIR_TTL, MAX_LINE,
     OWNER_PAIRING_COMPLETE_MESSAGE, PAIR_TTL, UNKNOWN_MEMBER_MESSAGE,
 )
 from .websocket import async_register_commands
-from .transport import worker_proxy_env
+from .transport import (
+    TransportError, resolve_telegram_transport, telegram_transport_identity,
+    worker_proxy_env,
+)
+
+
+PROVIDER_DOMAIN = "habab_home"
 
 
 class TelegramManager:
@@ -49,6 +59,14 @@ class TelegramManager:
         self.group_bindings_store = Store(hass, 1, "habab_telegram.group_bindings", private=True)
         self.group_bindings = {}
         self.group_member_chats = {}
+        self.provider_config_epoch = 0
+        self.provider_entry_unsubscribers = {}
+        self.unavailable_provider_entries = set()
+        self.selected_provider_entry_id = None
+        self.provider_refresh_task = None
+        self.transport_errors = {}
+        self._unsubscribe_provider_changes = lambda: None
+        self._closed = False
 
     async def setup(self):
         self.dedupe_order = await self.store.async_load() or []
@@ -58,6 +76,139 @@ class TelegramManager:
         self.group_bindings = await self.group_bindings_store.async_load() or {}
         async_register_commands(self.hass)
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self.close)
+        self._unsubscribe_provider_changes = async_dispatcher_connect(
+            self.hass, SIGNAL_CONFIG_ENTRY_CHANGED, self._provider_entry_changed)
+        provider_entries = self.hass.config_entries.async_entries(PROVIDER_DOMAIN)
+        selected_provider = self._effective_provider_entry(provider_entries)
+        self.selected_provider_entry_id = (
+            getattr(selected_provider, "entry_id", None) if selected_provider else None
+        )
+        for entry in provider_entries:
+            self._observe_provider_entry(entry)
+
+    @staticmethod
+    def _effective_provider_entry(entries):
+        from homeassistant.components.habab_home.effective_provider import effective_provider_entry
+
+        return effective_provider_entry(entries)
+
+    @callback
+    def _observe_provider_entry(self, entry):
+        entry_id = getattr(entry, "entry_id", None)
+        add_listener = getattr(entry, "add_update_listener", None)
+        if (not isinstance(entry_id, str) or entry_id in self.provider_entry_unsubscribers
+                or not callable(add_listener)):
+            return
+        unsubscribe = add_listener(self._provider_entry_updated)
+        if callable(unsubscribe):
+            self.provider_entry_unsubscribers[entry_id] = unsubscribe
+
+    @callback
+    def _provider_entry_changed(self, change, entry):
+        if getattr(entry, "domain", None) != PROVIDER_DOMAIN:
+            return
+        entry_id = getattr(entry, "entry_id", None)
+        state = getattr(getattr(entry, "state", None), "value", None)
+        if change == ConfigEntryChange.REMOVED:
+            unsubscribe = self.provider_entry_unsubscribers.pop(entry_id, None)
+            if unsubscribe:
+                unsubscribe()
+        if state == "loaded":
+            self._observe_provider_entry(entry)
+            selected = self._effective_provider_entry(
+                self.hass.config_entries.async_entries(PROVIDER_DOMAIN)
+            )
+            selected_id = getattr(selected, "entry_id", None) if selected else None
+            if self.unavailable_provider_entries:
+                if selected_id in self.unavailable_provider_entries:
+                    self.unavailable_provider_entries.discard(selected_id)
+                elif (selected is not None
+                      and getattr(selected, "options", {}).get("assistant_selected")):
+                    self.unavailable_provider_entries.clear()
+                else:
+                    return
+            self.selected_provider_entry_id = selected_id
+            self._provider_config_changed()
+            return
+
+        relay_in_use = any(
+            state.get("transport_identity", (None,))[0] == "habab_relay"
+            for state in self.entries.values()
+        )
+        if (entry_id == self.selected_provider_entry_id
+                and (entry.data.get("provider") == "habab" or relay_in_use)
+                and isinstance(entry_id, str)):
+            self.unavailable_provider_entries.add(entry_id)
+            self._provider_config_changed()
+
+    async def _provider_entry_updated(self, _hass, _entry):
+        self._provider_config_changed()
+
+    @callback
+    def _provider_config_changed(self):
+        self.provider_config_epoch += 1
+        if (self._closed or self.provider_refresh_task
+                and not self.provider_refresh_task.done()):
+            return
+        self.provider_refresh_task = self.hass.async_create_task(
+            self._reload_telegram_for_provider_change())
+
+    async def _reload_telegram_for_provider_change(self):
+        epoch = self.provider_config_epoch
+        try:
+            await asyncio.sleep(0.2)
+            epoch = self.provider_config_epoch
+            if self.unavailable_provider_entries:
+                for entry_id, state in tuple(self.entries.items()):
+                    if (self.provider_config_epoch != epoch):
+                        break
+                    identity = state.get("transport_identity")
+                    if not identity or identity[0] == "direct_proxy":
+                        continue
+                    self.transport_errors[entry_id] = "provider_unavailable"
+                    await self.close_entry(entry_id)
+            for entry_id, state in tuple(self.entries.items()):
+                if self.provider_config_epoch != epoch:
+                    break
+                entry = next((item for item in self.hass.config_entries.async_entries(DOMAIN)
+                              if item.entry_id == entry_id), None)
+                if entry is None:
+                    continue
+                try:
+                    identity = telegram_transport_identity(
+                        self.hass, entry.data.get("proxy_url"))
+                except TransportError as error:
+                    self.transport_errors[entry_id] = error.code
+                    await self.close_entry(entry_id)
+                    continue
+                if identity == state.get("transport_identity"):
+                    continue
+                try:
+                    reloaded = await self.hass.config_entries.async_reload(entry_id)
+                except Exception:
+                    reloaded = False
+                if not reloaded:
+                    self.transport_errors[entry_id] = "transport_reload_failed"
+                    await self.close_entry(entry_id)
+            if not self.unavailable_provider_entries:
+                for entry in self.hass.config_entries.async_entries(DOMAIN):
+                    if self.provider_config_epoch != epoch:
+                        break
+                    entry_id = entry.entry_id
+                    if (entry_id in self.entries
+                            or self.transport_errors.get(entry_id) != "provider_unavailable"):
+                        continue
+                    try:
+                        reloaded = await self.hass.config_entries.async_reload(entry_id)
+                    except Exception:
+                        reloaded = False
+                    if not reloaded:
+                        self.transport_errors[entry_id] = "transport_reload_failed"
+        finally:
+            self.provider_refresh_task = None
+            if not self._closed and epoch != self.provider_config_epoch:
+                self.provider_refresh_task = self.hass.async_create_task(
+                    self._reload_telegram_for_provider_change())
 
     def entry_for_owner(self, owner):
         return next((entry for entry in self.hass.config_entries.async_entries(DOMAIN)
@@ -77,7 +228,8 @@ class TelegramManager:
             phase = "connected"
         elif binding:
             phase = "error"
-            if state is not None and not state.get("error"):
+            if (not self.transport_errors.get(entry.entry_id)
+                    and state is not None and not state.get("error")):
                 state["error"] = "worker_not_ready"
         else:
             if not pair or time.monotonic() > pair["expires"]:
@@ -92,6 +244,8 @@ class TelegramManager:
             result["pairing_url"] = pair["url"]
         if state and state.get("error"):
             result["error"] = state["error"]
+        elif self.transport_errors.get(entry.entry_id):
+            result["error"] = self.transport_errors[entry.entry_id]
         return result
 
     async def configure(self, owner, token, proxy_url=""):
@@ -658,18 +812,30 @@ class TelegramManager:
                         "Очередь занята. Попробуйте позже.")
 
     async def async_setup_entry(self, entry):
-        env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE", "HABAB_TELEGRAM_RELAY") if k in os.environ}
+        proxy = entry.data.get("proxy_url")
+        try:
+            route_identity = telegram_transport_identity(self.hass, proxy)
+            transport, _provider_id = await resolve_telegram_transport(
+                self.hass, async_get_clientsession(self.hass), proxy)
+            if route_identity != telegram_transport_identity(self.hass, proxy):
+                raise TransportError("selected_provider_changed")
+        except TransportError as error:
+            self.transport_errors[entry.entry_id] = error.code
+            raise
+        env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE") if k in os.environ}
         env.update({"HOME": "/config/.habab-telegram", "NODE_NO_WARNINGS": "1"})
         proxy_env = worker_proxy_env(entry.data.get("proxy_url"))
         if proxy_env:
-            env.pop("HABAB_TELEGRAM_RELAY", None)
             env.update(proxy_env)
         proc = await asyncio.create_subprocess_exec(
             "node", "/opt/habab-telegram/worker.mjs", stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             env=env, start_new_session=True,
         )
-        proc.stdin.write((json.dumps({"type": "configure", "token": entry.data["token"]}) + "\n").encode())
+        proc.stdin.write((json.dumps({
+            "type": "configure", "token": entry.data["token"],
+            "telegram_transport": transport,
+        }) + "\n").encode())
         await proc.stdin.drain()
         binding = self.bindings.get(entry.entry_id, {})
         if binding.get("bot_id") != entry.data.get("bot_id"):
@@ -682,7 +848,9 @@ class TelegramManager:
             self.group_candidates.pop(entry.entry_id, None)
             await self._clear_group_binding(entry)
         state = {"process": proc, "chat_id": binding.get("chat_id"),
-                 "user_id": binding.get("user_id"), "username": entry.data["bot_username"]}
+                 "user_id": binding.get("user_id"), "username": entry.data["bot_username"],
+                 "transport_identity": route_identity}
+        self.transport_errors.pop(entry.entry_id, None)
         self.entries[entry.entry_id] = state
         self.queues[entry.entry_id] = asyncio.Queue(maxsize=5)
         self.tasks[entry.entry_id] = self.hass.async_create_background_task(
@@ -1233,6 +1401,14 @@ class TelegramManager:
                 await self.hass.config_entries.async_remove(entry.entry_id)
 
     async def close(self, _event=None):
+        self._closed = True
+        if self.provider_refresh_task and not self.provider_refresh_task.done():
+            self.provider_refresh_task.cancel()
+            await asyncio.gather(self.provider_refresh_task, return_exceptions=True)
+        self._unsubscribe_provider_changes()
+        for unsubscribe in self.provider_entry_unsubscribers.values():
+            unsubscribe()
+        self.provider_entry_unsubscribers.clear()
         await asyncio.gather(*(self.close_entry(entry_id) for entry_id in list(self.entries)))
 
 

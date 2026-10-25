@@ -1,15 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTelegramRelayFetch } from '../relay-fetch.mjs';
+import { createTelegramRelayFetch, telegramTransportConfig } from '../relay-fetch.mjs';
 import { TelegramTransport } from '../vendor/noxon-telegram/src/index.mjs';
 
-const TOKEN = '12345678901234567890:unit_test_token_abcdefghijklmnop';
+const BOT_TOKEN = '12345678901234567890:unit_test_token_abcdefghijklmnop';
+const SERVICE_KEY = 'service-key-unit-test-opaque';
+const relayConfig = (overrides = {}) => ({
+  mode: 'habab_relay', base_url: 'https://relay.example.test',
+  service_key: SERVICE_KEY, protocol: 'telegram-bot-api-relay-v1', ...overrides,
+});
 const response = (result, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,
   json: async () => ({ ok: status < 300, result }),
 });
-const botApiUrl = (method) => `https://api.telegram.org/bot${TOKEN}/${method}`;
+const botApiUrl = (method) => `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
 const aborted = (signal) => new Promise((resolve, reject) => {
   if (signal.aborted) {
     reject(signal.reason);
@@ -18,68 +23,125 @@ const aborted = (signal) => new Promise((resolve, reject) => {
   signal.addEventListener('abort', () => reject(signal.reason), { once: true });
 });
 
-test('direct default passes the original fetch call through without deadlines', async () => {
-  const options = { method: 'POST', marker: true };
+test('explicit direct mode preserves Bot API URL and uses the supplied fetch implementation', async () => {
+  const calls = [];
   const result = response({ result: 'direct' });
-  let call;
   const relay = createTelegramRelayFetch({
-    fetchImpl: async (...args) => { call = args; return result; },
-    operationTimeouts: { send: 1 }, requestTimeouts: { api: 1 },
+    config: { mode: 'direct' },
+    fetchImpl: async (...args) => { calls.push(args); return result; },
+    operationTimeouts: { send: 100 }, requestTimeouts: { api: 100 },
   });
-  const waited = await relay.withOperation('send', async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    return relay.fetch(botApiUrl('sendMessage'), options);
-  });
-  assert.equal(waited, result);
-  assert.deepEqual(call, [botApiUrl('sendMessage'), options]);
+  const returned = await relay.withOperation('send', () => relay.fetch(
+    botApiUrl('sendMessage'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+  ));
+  assert.equal(returned.json instanceof Function, true);
+  assert.deepEqual(calls.map(([url]) => url), [botApiUrl('sendMessage')]);
+  assert.equal(calls[0][1].body, '{}');
+  assert.equal(calls[0][1].headers.authorization, undefined);
+  assert.equal(calls[0][1].headers['x-habab-telegram-bot-token'], undefined);
+  assert.equal(calls[0][1].redirect, undefined, "direct mode retains fetch's default redirect behavior");
 });
 
-test('relay rewrites only allowlisted Telegram methods and carries the token only as bearer auth', async () => {
+test('relay requires strict versioned configuration and separate service and bot credentials', async () => {
   const calls = [];
   const relay = createTelegramRelayFetch({
-    relayBase: 'https://relay.example.test/',
-    fetchImpl: async (...args) => { calls.push(args); return response({ username: 'test_bot' }); },
+    config: relayConfig(),
+    fetchImpl: async (...args) => { calls.push(args); return response({ result: 'ok' }); },
   });
   for (const method of ['getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction']) {
-    const result = await relay.fetch(botApiUrl(method), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const result = await relay.fetch(botApiUrl(method), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
     assert.equal((await result.json()).ok, true);
   }
   assert.equal(calls.length, 5);
   for (const [url, options] of calls) {
     assert.equal(url.startsWith('https://relay.example.test/telegram/'), true);
-    assert.equal(url.includes(TOKEN), false);
-    assert.equal(options.headers.get('authorization'), `Bearer ${TOKEN}`);
+    assert.equal(url.includes(BOT_TOKEN), false);
+    assert.equal(url.includes(SERVICE_KEY), false);
+    assert.equal(options.headers.get('authorization'), `Bearer ${SERVICE_KEY}`);
+    assert.equal(options.headers.get('x-habab-telegram-bot-token'), BOT_TOKEN);
     assert.equal(options.redirect, 'error');
     assert.equal(options.method, 'POST');
+    assert.equal(options.body, '{}');
   }
+  assert.equal(JSON.stringify(calls.map(([url]) => url)).includes(BOT_TOKEN), false);
+  const sameCredential = createTelegramRelayFetch({
+    config: relayConfig({ service_key: BOT_TOKEN }), fetchImpl: async () => response({}),
+  });
+  await assert.rejects(sameCredential.fetch(botApiUrl('getMe'), { method: 'POST' }), { message: 'invalid_telegram_transport' });
 });
 
-test('relay URL, origin, method, and HTTP verb validation reject unsafe targets', async () => {
+test('invalid or ambiguous transport config fails closed without inferring direct mode', () => {
   const fetchImpl = async () => response({});
-  for (const relayBase of [
-    'http://relay.example.test',
-    'https://user:pass@relay.example.test',
-    'https://relay.example.test/path',
-    'https://relay.example.test/?key=value',
-    'https://relay.example.test/#fragment',
+  for (const config of [
+    undefined,
+    { mode: 'direct', service_key: SERVICE_KEY },
+    { mode: 'habab_relay', base_url: 'http://relay.example.test', service_key: SERVICE_KEY, protocol: 'telegram-bot-api-relay-v1' },
+    { mode: 'habab_relay', base_url: 'https://user:pass@relay.example.test', service_key: SERVICE_KEY, protocol: 'telegram-bot-api-relay-v1' },
+    { mode: 'habab_relay', base_url: 'https://relay.example.test/path', service_key: SERVICE_KEY, protocol: 'telegram-bot-api-relay-v1' },
+    { mode: 'habab_relay', base_url: 'https://relay.example.test?token=x', service_key: SERVICE_KEY, protocol: 'telegram-bot-api-relay-v1' },
+    { mode: 'habab_relay', base_url: 'https://relay.example.test#fragment', service_key: SERVICE_KEY, protocol: 'telegram-bot-api-relay-v1' },
+    { mode: 'habab_relay', base_url: 'https://relay.example.test', service_key: SERVICE_KEY, protocol: 'wrong-version' },
   ]) {
-    assert.throws(() => createTelegramRelayFetch({ relayBase, fetchImpl }), { message: 'invalid_telegram_relay' });
+    assert.throws(() => createTelegramRelayFetch({ config, fetchImpl }), { message: 'invalid_telegram_transport' });
   }
-  const relay = createTelegramRelayFetch({ relayBase: 'https://relay.example.test', fetchImpl });
-  await assert.rejects(relay.fetch('https://attacker.example/bot123:token/getMe', { method: 'POST' }), { message: 'invalid_telegram_operation' });
-  await assert.rejects(relay.fetch(botApiUrl('getWebhookInfo'), { method: 'POST' }), { message: 'invalid_telegram_operation' });
-  await assert.rejects(relay.fetch(botApiUrl('sendMessage'), { method: 'GET' }), { message: 'invalid_telegram_operation' });
+  assert.throws(() => telegramTransportConfig({ type: 'configure' }), { message: 'invalid_telegram_transport' });
+  assert.throws(() => telegramTransportConfig({
+    type: 'configure', transport: { mode: 'direct' },
+  }), { message: 'invalid_telegram_transport' });
+  assert.deepEqual(telegramTransportConfig({
+    type: 'configure', telegram_transport: { mode: 'direct' },
+  }), { mode: 'direct' });
+  assert.throws(() => telegramTransportConfig({
+    type: 'configure', token: BOT_TOKEN,
+    telegram_transport: relayConfig({ service_key: BOT_TOKEN }),
+  }), { message: 'invalid_telegram_transport' });
+  assert.throws(() => createTelegramRelayFetch({
+    config: relayConfig({ service_key: 'bad\r\nheader' }), fetchImpl,
+  }), { message: 'invalid_telegram_transport' });
+});
+
+test('explicit direct mode preserves direct endpoint and missing mode fails closed', async () => {
+  const explicit = telegramTransportConfig({
+    type: 'configure', telegram_transport: { mode: 'direct' },
+  });
+  const directCalls = [];
+  const direct = createTelegramRelayFetch({ config: explicit, fetchImpl: async (...args) => {
+    directCalls.push(args); return response({ username: 'direct_bot' });
+  }});
+  await direct.fetch(botApiUrl('getMe'), { method: 'POST', body: '{}' });
+  assert.equal(directCalls[0][0], botApiUrl('getMe'));
+  assert.throws(() => telegramTransportConfig({ type: 'configure' }), { message: 'invalid_telegram_transport' });
+});
+
+test('401 relay response does not fall back to direct Telegram or reflect credentials', async () => {
+  const calls = [];
+  const events = [];
+  const relay = createTelegramRelayFetch({ config: relayConfig(), fetchImpl: async (...args) => {
+    calls.push(args);
+    return response({ ok: false, description: 'private upstream text' }, 401);
+  }});
+  const transport = new TelegramTransport({ fetchImpl: relay.fetch, emit: (event) => events.push(event) });
+  await assert.rejects(relay.withOperation('configure', () => transport.configure(BOT_TOKEN)), { message: 'telegram_api_error' });
+  await transport.shutdown();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'https://relay.example.test/telegram/getMe');
+  assert.ok(!JSON.stringify(events).includes(BOT_TOKEN));
+  assert.ok(!JSON.stringify(events).includes(SERVICE_KEY));
+  assert.ok(!JSON.stringify(events).includes('private upstream text'));
 });
 
 test('request deadlines abort hung response headers and JSON body reads', async () => {
+  const config = relayConfig();
   const headersRelay = createTelegramRelayFetch({
-    relayBase: 'https://relay.example.test', requestTimeouts: { api: 15, poll: 50 },
+    config, requestTimeouts: { api: 15, poll: 50 },
     fetchImpl: (_url, options) => aborted(options.signal),
   });
   await assert.rejects(headersRelay.fetch(botApiUrl('getMe'), { method: 'POST' }));
 
   const bodyRelay = createTelegramRelayFetch({
-    relayBase: 'https://relay.example.test', requestTimeouts: { api: 15, poll: 50 },
+    config, requestTimeouts: { api: 15, poll: 50 },
     fetchImpl: (_url, options) => Promise.resolve({
       ok: true, status: 200,
       json: () => aborted(options.signal),
@@ -94,8 +156,8 @@ test('logical send deadline bounds multi-chunk SDK work without canceling long p
   let blockSend = true;
   let pollSignal;
   const relay = createTelegramRelayFetch({
-    relayBase: 'https://relay.example.test',
-    operationTimeouts: { configure: 100, send: 35, typing: 20 },
+    config: relayConfig(),
+    operationTimeouts: { configure: 100, send: 35, typing: 20, member: 30 },
     requestTimeouts: { api: 1_000, poll: 1_000 },
     fetchImpl: async (url, options) => {
       const method = url.split('/').at(-1);
@@ -109,7 +171,7 @@ test('logical send deadline bounds multi-chunk SDK work without canceling long p
     },
   });
   const transport = new TelegramTransport({ fetchImpl: relay.fetch, emit: (event) => events.push(event), pollTimeout: 25 });
-  await relay.withOperation('configure', () => transport.configure(TOKEN));
+  await relay.withOperation('configure', () => transport.configure(BOT_TOKEN));
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(pollSignal && !pollSignal.aborted, 'getUpdates is live after configure leaves its logical scope');
 

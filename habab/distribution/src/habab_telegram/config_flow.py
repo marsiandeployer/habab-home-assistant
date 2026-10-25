@@ -9,30 +9,48 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
-from .transport import get_me_request, proxy_url
+from .transport import (
+    get_me_request, proxy_url, resolve_telegram_transport,
+)
 
 
-async def get_bot(session, token, proxy=None):
+async def get_bot(session, token, proxy=None, telegram_transport=None):
     """Validate a token without exposing Telegram's response or URL."""
     if not isinstance(token, str) or not re.fullmatch(r"[0-9]{1,20}:[A-Za-z0-9_-]{20,256}", token):
         raise ValueError("invalid_token")
     proxy = proxy_url(proxy)
     try:
-        url, headers = get_me_request(token, proxy)
+        route = telegram_transport or {"mode": "direct"}
+        url, headers = get_me_request(token, proxy, route)
+        use_relay = not proxy and route.get("mode") == "habab_relay"
         async with session.get(
             url, headers=headers,
             **({"proxy": proxy} if proxy else {}),
             timeout=aiohttp.ClientTimeout(total=10), allow_redirects=False,
         ) as response:
+            try:
+                payload = await response.json(content_type=None)
+            except Exception:
+                raise ValueError("cannot_validate") from None
             if response.status != 200:
+                if use_relay:
+                    telegram_rejection = (
+                        isinstance(payload, dict) and payload.get("ok") is False
+                        and payload.get("error_code") == 401)
+                    if telegram_rejection:
+                        raise ValueError("invalid_token")
+                    code = "relay_auth_failed" if response.status in (401, 403) else "cannot_validate"
+                    raise ValueError(code)
                 raise ValueError("invalid_token" if response.status in (401, 404) else "cannot_validate")
-            payload = await response.json(content_type=None)
+            if use_relay and isinstance(payload, dict):
+                if payload.get("ok") is False and payload.get("error_code") == 401:
+                    raise ValueError("invalid_token")
             bot = payload.get("result", {}) if payload.get("ok") is True else {}
             if not isinstance(bot.get("id"), int) or not isinstance(bot.get("username"), str):
                 raise ValueError("invalid_token")
             return {"id": bot["id"], "username": bot["username"]}
     except ValueError as err:
-        if str(err) in ("invalid_token", "cannot_validate"):
+        if str(err) in ("invalid_token", "cannot_validate", "relay_auth_failed"):
             raise
         raise ValueError("cannot_validate") from None
     except Exception:
@@ -57,7 +75,10 @@ class HababTelegramConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 try:
                     proxy = proxy_url(user_input.get("proxy_url", "").strip())
-                    bot = await get_bot(async_get_clientsession(self.hass), token, proxy)
+                    session = async_get_clientsession(self.hass)
+                    transport, _provider = await resolve_telegram_transport(
+                        self.hass, session, proxy)
+                    bot = await get_bot(session, token, proxy, transport)
                 except ValueError as err:
                     errors["base"] = str(err)
                 else:
