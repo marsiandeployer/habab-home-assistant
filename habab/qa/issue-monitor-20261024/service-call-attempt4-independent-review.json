@@ -1,0 +1,22 @@
+{
+  "checked_at": "2026-10-25T06:15:04.428401+00:00",
+  "scope": "read-only postmortem of original web attempt4; no retry or extra model request",
+  "original_report": "service-call-e2e-20261024-attempt-4.json",
+  "original_verdict_preserved": "FAIL_CLEANUP",
+  "exact_original_prompt_in_mapped_opencode_session": true,
+  "completed_actions": [
+    "call_service",
+    "states"
+  ],
+  "only_direct_habab_ha_json_commands": true,
+  "target_only_created_fixture": true,
+  "service_domain": "input_boolean",
+  "service": "turn_on",
+  "tool_state_readback": "on",
+  "restart_reload_commands": false,
+  "ui_reply_tail_present": true,
+  "original_send_completion_and_observer_continuity": "UNPROVEN",
+  "cause_of_lost_browser_instrumentation": "UNPROVEN",
+  "operator_cleanup": "service-call-attempt4-operator-cleanup.json",
+  "private_trace_sha256": "63f6e060494c694687434d3e106e065744413b828f58ac7fc7d37c25aec0a7b9"
+}
