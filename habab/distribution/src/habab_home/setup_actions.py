@@ -13,6 +13,7 @@ from .const import DOMAIN
 from .assistant_status import get_assistant_status
 
 _LOGGER = logging.getLogger(__name__)
+DEVICE_LIST_LIMIT = 200
 
 
 class AssistExposureError(ValueError):
@@ -220,10 +221,33 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
     if action == "devices":
         devices = device_registry.async_get(hass)
         entities = entity_registry.async_get(hass)
-        return {"devices": [{"id": d.id, "name": d.name_by_user or d.name, "model": d.model,
-            "manufacturer": d.manufacturer, "area_id": d.area_id,
-            "entities": [e.entity_id for e in entity_registry.async_entries_for_device(entities, d.id)]}
-            for d in islice(devices.devices, 200)]}
+        registry_entries = devices.devices
+        total_count = len(registry_entries)
+        config_entry_domains = {
+            entry.entry_id: entry.domain for entry in hass.config_entries.async_entries()
+        }
+        listed = list(islice(registry_entries, DEVICE_LIST_LIMIT))
+        records = []
+        for device in listed:
+            entry_type = getattr(device.entry_type, "value", device.entry_type)
+            records.append({
+                "id": device.id,
+                "name": device.name_by_user or device.name,
+                "model": device.model,
+                "manufacturer": device.manufacturer,
+                "area_id": device.area_id,
+                "entry_type": entry_type,
+                "integration_domain": config_entry_domains.get(device.config_entry_id),
+                "entities": [entity.entity_id for entity in
+                             entity_registry.async_entries_for_device(entities, device.id)],
+            })
+        return {
+            "devices": records,
+            "count": len(records),
+            "total_count": total_count,
+            "limit": DEVICE_LIST_LIMIT,
+            "truncated": total_count > len(records),
+        }
     if action == "discovered_flows":
         return {"flows": discovered_flows(hass, manager)}
     if action == "states":

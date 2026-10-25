@@ -1,0 +1,33 @@
+{
+  "checked_at": "2026-10-25T07:39:28.690035+00:00",
+  "scope": "inventory context source candidate; not deployed acceptance",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/setup_actions.py": "388561d55d1a7c8f6a93524f3df093f8034b312df48b175a221dc008c6884225",
+    "habab/distribution/src/habab_home/setup_agent.py": "06208b21144c9e00660a522030231d142de2aaec7d8068301f7c7c3bc43bc1f6",
+    "habab/distribution/tests/test_setup_actions.py": "dbb5235b375b438429f9f83f8ea049d63b068f4922634bc04ec1dfb47a420c5c"
+  },
+  "independent_tests": {
+    "pinned_core_setup_actions": 17,
+    "network": "none",
+    "source_overlay": true
+  },
+  "source_review": "no count/cap/type-evidence blocker; current-turn inventory freshness rule added",
+  "technical_contract": [
+    "returned count",
+    "full total_count",
+    "limit200",
+    "explicit truncated",
+    "Core entry_type and owning integration domain"
+  ],
+  "semantic_classifier_added": false,
+  "quality_risk_cases_not_run": [
+    "original Russian inventory question",
+    "service/weather record must not imply physical weather station",
+    "registry total vs confirmed physical count",
+    "over200 registry entries",
+    "old history/tool output must not replace current-turn reads"
+  ],
+  "deployment": "NOT_RUN",
+  "actual_model_quality": "NOT_RUN",
+  "original_partial_report": "owner-inventory-e2e-20261025-attempt2.json"
+}

@@ -13,6 +13,7 @@ from homeassistant.helpers.device_registry import (
     ActiveDeviceRegistryItems,
     DeviceEntry,
     DeviceRegistry,
+    DeviceEntryType,
     _DeprecatedDeviceRegistryItemsView,
 )
 from homeassistant.components.habab_home.setup_actions import (
@@ -88,7 +89,8 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_devices_uses_iterable_device_entries_and_resolves_entities(self):
         device = DeviceEntry(config_entry_id="entry-id", id="device-id",
             identifiers={("test", "device")}, name="Sensor", name_by_user="Kitchen",
-            model="Model X", manufacturer="Maker", area_id="kitchen")
+            model="Model X", manufacturer="Maker", area_id="kitchen",
+            entry_type=DeviceEntryType.SERVICE)
         items = ActiveDeviceRegistryItems()
         items[device.id] = device
         device_registry = object.__new__(DeviceRegistry)
@@ -104,10 +106,47 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
                    return_value=entity_registry), \
              patch("homeassistant.components.habab_home.setup_actions.entity_registry.async_entries_for_device",
                    return_value=entries) as entries_for_device:
-            result = await execute(None, None, "alice", {"action": "devices"})
+            hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda: [
+                SimpleNamespace(entry_id="entry-id", domain="test_domain")]))
+            result = await execute(hass, None, "alice", {"action": "devices"})
         entries_for_device.assert_called_once_with(entity_registry, "device-id")
-        self.assertEqual(result, {"devices": [{"id": "device-id", "name": "Kitchen", "model": "Model X",
-            "manufacturer": "Maker", "area_id": "kitchen", "entities": ["sensor.kitchen_temperature"]}]})
+        self.assertEqual(result, {
+            "devices": [{"id": "device-id", "name": "Kitchen", "model": "Model X",
+                "manufacturer": "Maker", "area_id": "kitchen", "entry_type": "service",
+                "integration_domain": "test_domain", "entities": ["sensor.kitchen_temperature"]}],
+            "count": 1, "total_count": 1, "limit": 200, "truncated": False,
+        })
+        json.dumps(result)
+
+    async def test_devices_count_and_truncation_describe_full_registry(self):
+        item_count = 201
+        items = ActiveDeviceRegistryItems()
+        config_entries = []
+        for index in range(item_count):
+            entry_id = f"entry-{index}"
+            device = DeviceEntry(config_entry_id=entry_id, id=f"device-{index}",
+                                 identifiers={("test", str(index))})
+            items[device.id] = device
+            config_entries.append(SimpleNamespace(entry_id=entry_id, domain="fixture"))
+        registry = object.__new__(DeviceRegistry)
+        registry._devices = items
+        registry.devices = _DeprecatedDeviceRegistryItemsView(items)
+        entity_registry = object()
+        with patch("homeassistant.components.habab_home.setup_actions.device_registry.async_get",
+                   return_value=registry), \
+             patch("homeassistant.components.habab_home.setup_actions.entity_registry.async_get",
+                   return_value=entity_registry), \
+             patch("homeassistant.components.habab_home.setup_actions.entity_registry.async_entries_for_device",
+                   return_value=[]):
+            hass = SimpleNamespace(config_entries=SimpleNamespace(
+                async_entries=lambda: config_entries))
+            result = await execute(hass, None, "alice", {"action": "devices"})
+        self.assertEqual(result["count"], 200)
+        self.assertEqual(result["total_count"], item_count)
+        self.assertEqual(result["limit"], 200)
+        self.assertIs(result["truncated"], True)
+        self.assertEqual(len(result["devices"]), 200)
+        self.assertEqual(result["devices"][0]["integration_domain"], "fixture")
         json.dumps(result)
 
     async def test_discovered_flows_lists_only_unowned_native_discovery_summaries(self):
