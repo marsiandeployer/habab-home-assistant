@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from homeassistant.components.habab_home import feedback, feedback_action
 from homeassistant.components.habab_home.feedback import FeedbackManager
+from homeassistant.components.habab_home.feedback_transport import FeedbackDeliveryResult
 from homeassistant.components.habab_home.setup_actions import execute
 
 
@@ -42,6 +43,11 @@ def make_context(channel="web"):
 class FeedbackActionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.hass = SimpleNamespace(data={"habab_home": {}})
+
+        async def run_executor(job):
+            return job()
+
+        self.hass.async_add_executor_job = AsyncMock(side_effect=run_executor)
         self.assistant = SimpleNamespace(
             web_sessions={"alice": "web-alice"},
             telegram_sessions={"alice:entry:1": "tg-alice"},
@@ -89,6 +95,7 @@ class FeedbackActionTests(unittest.IsolatedAsyncioTestCase):
             for body in (
                 {**self.body, "session_id": "tg-alice"},
                 {**self.body, "consent": False},
+                {**self.body, "send_to_habab": 1},
             ):
                 with self.subTest(body=body):
                     result = await execute(self.hass, self.setup_agent, "alice", body)
@@ -113,6 +120,118 @@ class FeedbackActionTests(unittest.IsolatedAsyncioTestCase):
             record["context"]["source"]["kind"], "owner_mapped_current_session"
         )
         load_context.assert_awaited_once()
+
+    async def test_local_only_and_unconfigured_explicit_delivery_never_call_sender(self):
+        with patch.object(
+            feedback_action, "_session_data", AsyncMock(return_value=make_context())
+        ), patch.object(feedback, "send_feedback") as sender:
+            local = await execute(self.hass, self.setup_agent, "alice", self.body)
+            remote_requested = await execute(
+                self.hass, self.setup_agent, "alice",
+                {**self.body, "idempotency_key": str(uuid.uuid4()), "send_to_habab": True},
+            )
+            await self.feedback_manager.async_set_feedback_delivery_credential("C" * 40)
+            disabled = await execute(
+                self.hass, self.setup_agent, "alice",
+                {**self.body, "idempotency_key": str(uuid.uuid4()), "send_to_habab": True},
+            )
+
+        self.assertEqual(local, {
+            "receipt_id": local["receipt_id"], "state": "saved_locally",
+            "issue_state": "not_configured", "created_at": local["created_at"],
+            "duplicate": False,
+        })
+        self.assertEqual(remote_requested["state"], "saved_locally")
+        self.assertEqual(set(remote_requested), set(local))
+        self.assertEqual(remote_requested["issue_state"], "not_configured")
+        sender.assert_not_called()
+        self.hass.async_add_executor_job.assert_not_awaited()
+
+        self.assertEqual(set(disabled), set(local))
+        self.assertEqual(disabled["issue_state"], "not_configured")
+        sender.assert_not_called()
+        self.hass.async_add_executor_job.assert_not_awaited()
+
+    async def test_explicit_delivery_stores_only_sanitized_server_receipt_and_short_circuits(self):
+        token = "T" * 40
+        await self.feedback_manager.async_set_feedback_delivery_credential(token)
+        await self.feedback_manager.async_set_feedback_delivery_enabled(True)
+        package = self.body | {"send_to_habab": True}
+        with patch.object(
+            feedback_action, "_session_data", AsyncMock(return_value=make_context())
+        ), patch.object(
+            feedback_action, "_redact_text", return_value="Очищенный отзыв"
+        ), patch.object(
+            feedback, "send_feedback", return_value=FeedbackDeliveryResult(
+                status="saved_on_server", receipt_id="server-r-1",
+                issue_state="pending_issue", duplicate=False, attempts=1,
+            ),
+        ) as sender:
+            result = await execute(self.hass, self.setup_agent, "alice", package)
+            repeat = await execute(self.hass, self.setup_agent, "alice", package)
+
+        self.assertEqual(result["delivery_status"], "saved_on_server")
+        self.assertEqual(result["server_issue_state"], "pending_issue")
+        self.assertNotIn(token, repr(result))
+        self.assertEqual(repeat["delivery_status"], "saved_on_server")
+        self.assertTrue(repeat["duplicate"])
+        sender.assert_called_once()
+        call = sender.call_args
+        sent_package, sent_token = call.args
+        self.assertEqual(sent_token, token)
+        self.assertEqual(sent_package["feedback"], "Очищенный отзыв")
+        self.assertEqual(sent_package["idempotency_key"], package["idempotency_key"])
+        record = self.store.data["records"][result["receipt_id"]]
+        self.assertEqual(record["delivery_status"], "saved_on_server")
+        self.assertEqual(record["server_issue_state"], "pending_issue")
+        self.assertNotIn("token", record)
+
+    async def test_explicit_same_key_retry_reuses_stored_projection_and_uuid(self):
+        await self.feedback_manager.async_set_feedback_delivery_credential("R" * 40)
+        await self.feedback_manager.async_set_feedback_delivery_enabled(True)
+        package = self.body | {"send_to_habab": True}
+        sender_results = [
+            FeedbackDeliveryResult(status="pending", attempts=1, error_code="timeout"),
+            FeedbackDeliveryResult(
+                status="saved_on_server", receipt_id="server-r-2",
+                issue_state="pending_issue", duplicate=True, attempts=1,
+            ),
+        ]
+        with patch.object(
+            feedback_action, "_session_data", AsyncMock(return_value=make_context())
+        ) as load_context, patch.object(
+            feedback_action, "_redact_text", return_value="Первичная проекция"
+        ), patch.object(
+            feedback, "send_feedback", side_effect=sender_results
+        ) as sender:
+            first = await execute(self.hass, self.setup_agent, "alice", package)
+            second = await execute(self.hass, self.setup_agent, "alice", package)
+
+        self.assertEqual(first["delivery_status"], "pending")
+        self.assertEqual(second["delivery_status"], "saved_on_server")
+        self.assertTrue(second["duplicate"])
+        load_context.assert_awaited_once()
+        self.assertEqual(sender.call_count, 2)
+        first_call, second_call = sender.call_args_list
+        self.assertEqual(first_call.args[0], second_call.args[0])
+        self.assertEqual(first_call.args[0]["feedback"], "Первичная проекция")
+        self.assertEqual(first_call.args[0]["idempotency_key"], package["idempotency_key"])
+        self.assertFalse(first_call.kwargs["retry_ambiguous"])
+        self.assertTrue(second_call.kwargs["retry_ambiguous"])
+
+    async def test_foreign_active_owner_cannot_trigger_remote_delivery(self):
+        await self.feedback_manager.async_set_feedback_delivery_credential("O" * 40)
+        await self.feedback_manager.async_set_feedback_delivery_enabled(True)
+        self.setup_agent.active = ("bob", "web-alice")
+        with patch.object(feedback, "send_feedback") as sender:
+            result = await execute(
+                self.hass, self.setup_agent, "alice",
+                {**self.body, "send_to_habab": True},
+            )
+
+        self.assertEqual(result["error"], "feedback_session_unavailable")
+        sender.assert_not_called()
+        self.assertEqual(self.feedback_manager.records, {})
 
     async def test_unmapped_or_ambiguous_telegram_session_is_rejected(self):
         with patch.object(

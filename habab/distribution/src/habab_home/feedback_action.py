@@ -28,20 +28,26 @@ from .feedback import (
 async def save_feedback_action(hass, setup_agent, owner: str, body: dict) -> dict:
     """Save a receipt for the current server-mapped owner session in this turn.
 
-    The model supplies feedback, explicit consent, and an idempotency UUID. It
-    cannot select an owner, channel, or session ID.
+    The model supplies feedback, explicit local consent, an idempotency UUID,
+    and a separate optional explicit request for server delivery. It cannot
+    select an owner, channel, or session ID.
     """
     if (
         not isinstance(body, dict)
-        or set(body) != {"action", "feedback", "consent", "idempotency_key"}
+        or not {"action", "feedback", "consent", "idempotency_key"}.issubset(body)
+        or not set(body).issubset({
+            "action", "feedback", "consent", "idempotency_key", "send_to_habab",
+        })
     ):
         raise FeedbackError("invalid_feedback")
     feedback = body.get("feedback")
     key = body.get("idempotency_key")
+    send_to_habab = body.get("send_to_habab", False)
     if (
         not isinstance(feedback, str)
         or not 1 <= len(feedback.strip()) <= MAX_FEEDBACK_CHARS
         or body.get("consent") is not True
+        or type(send_to_habab) is not bool
         or not isinstance(key, str)
         or not IDEMPOTENCY_KEY.fullmatch(key)
     ):
@@ -80,12 +86,24 @@ async def save_feedback_action(hass, setup_agent, owner: str, body: dict) -> dic
 
     normalized_feedback = feedback.strip()
     digest = _digest(session_id, normalized_feedback)
+    # Load the purpose-specific credential into the existing runtime redactor
+    # before projecting any session text. This is still a local-only read.
+    delivery_ready = False
+    if send_to_habab:
+        delivery_ready = (await manager.async_feedback_delivery_status())["ready"]
     existing = await manager.idempotent_record(owner, key, digest)
     if (getattr(setup_agent, "active", None) != active
             or not _mapping_is_current(assistant, owner, mapping)):
         raise FeedbackError("feedback_session_unavailable")
     if existing is not None:
-        return _public_receipt(existing, duplicate=True)
+        result = _public_receipt(existing, duplicate=True)
+        if send_to_habab and delivery_ready:
+            delivery = await manager._async_deliver_record(
+                existing,
+                retry_ambiguous=existing.get("delivery_status") == "pending",
+            )
+            result.update(delivery)
+        return result
 
     budget = ProjectionBudget(max_bytes=MAX_CONTEXT_BYTES, max_events=MAX_CONTEXT_EVENTS)
     session, events, _messages = await _session_data(
@@ -123,4 +141,7 @@ async def save_feedback_action(hass, setup_agent, owner: str, body: dict) -> dic
         feedback=safe_feedback,
         context=context,
     )
-    return _public_receipt(record)
+    result = _public_receipt(record)
+    if send_to_habab and delivery_ready:
+        result.update(await manager._async_deliver_record(record))
+    return result

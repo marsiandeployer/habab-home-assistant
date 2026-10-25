@@ -1,8 +1,10 @@
-"""Optional synchronous sender for an already redacted feedback package.
+"""Optional transport for explicitly requested, locally saved feedback.
 
-This module is deliberately not wired into the local feedback action. A caller
-may pass an operator-provisioned, installation-specific receiver token in
-memory. No credential means no network request.
+The shared feedback action invokes this sender through the Home Assistant
+executor only when remote delivery is requested. It accepts a purpose-specific
+installation token in memory; absent or disabled credentials cause no request.
+A durable receiver receipt reports ``pending_issue`` and does not imply that a
+GitHub issue was created.
 """
 
 from __future__ import annotations

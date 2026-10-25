@@ -216,7 +216,10 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
             store.fail_save = False
             self.assertIsNone(await manager.async_receipt("alice", receipt_id))
 
-        self.assertEqual(store.data, {"records": {}})
+        self.assertEqual(store.data, {
+            "records": {},
+            "feedback_delivery": {"enabled": False, "token": None},
+        })
         self.assertEqual(store.async_save.await_count, 2)
 
     async def test_registration_installs_private_manager_and_both_authenticated_views(self):
@@ -233,3 +236,35 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
             "/api/habab_home/feedback/{receipt_id}",
         ])
         self.assertTrue(all(view.requires_auth for view in registrations))
+
+    async def test_delivery_credential_and_enable_state_stay_private_and_migrate_legacy_store(self):
+        hass, _assistant, _runtime = make_runtime()
+        legacy_record = {
+            "receipt_id": str(uuid.uuid4()), "owner_id": "alice",
+            "idempotency_key": str(uuid.uuid4()), "digest": "d" * 64,
+            "created_at": feedback._iso(feedback._now()), "state": "saved_locally",
+            "feedback": "legacy", "context": {},
+        }
+        store = FakeStore({"records": {legacy_record["receipt_id"]: legacy_record}})
+        manager, store = self.make_manager(hass, store)
+
+        self.assertEqual(await manager.async_feedback_delivery_status(), {
+            "enabled": False, "credential_configured": False, "ready": False,
+        })
+        token = "T" * 40
+        self.assertEqual(await manager.async_set_feedback_delivery_credential(token), {
+            "enabled": False, "credential_configured": True, "ready": False,
+        })
+        self.assertEqual(await manager.async_set_feedback_delivery_enabled(True), {
+            "enabled": True, "credential_configured": True, "ready": True,
+        })
+        self.assertEqual(await manager.async_feedback_delivery_status(), {
+            "enabled": True, "credential_configured": True, "ready": True,
+        })
+        self.assertIn(legacy_record["receipt_id"], store.data["records"])
+        self.assertEqual(store.data["feedback_delivery"], {"enabled": True, "token": token})
+
+        self.assertEqual(await manager.async_clear_feedback_delivery_credential(), {
+            "enabled": False, "credential_configured": False, "ready": False,
+        })
+        self.assertEqual(store.data["feedback_delivery"], {"enabled": False, "token": None})

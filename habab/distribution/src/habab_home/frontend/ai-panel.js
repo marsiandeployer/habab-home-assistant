@@ -82,6 +82,9 @@ class HababAIPanel extends HTMLElement {
     this.keyVisibilityPreference = null;
     this.keyEdited = false;
     this.modelEdited = false;
+    this.feedbackCredentialDraft = "";
+    this.feedbackDeliveryState = { enabled: false, credential_configured: false, ready: false };
+    this.feedbackDeliveryBusy = false;
     this.onAssistantAvailability = () => this.updateControls();
   }
 
@@ -112,6 +115,9 @@ class HababAIPanel extends HTMLElement {
     this.busy = false;
     const key = this.shadowRoot.querySelector("#key");
     if (key) key.value = "";
+    this.feedbackCredentialDraft = "";
+    const feedbackKey = this.shadowRoot.querySelector("#feedback-delivery-token");
+    if (feedbackKey) feedbackKey.value = "";
   }
 
   t(key) { return strings[this.language || "en"][key] || strings[this.language || "en"].unknown; }
@@ -140,6 +146,7 @@ class HababAIPanel extends HTMLElement {
       .help,.status{color:var(--secondary-text-color);font-size:13px}.status{margin-block:var(--ha-space-2,8px)}ol{padding-inline-start:22px;margin:8px 0 16px}li{padding-inline-start:4px;margin-block:8px}
       form{margin-block-start:var(--ha-space-6,24px)}label{display:block;font-weight:500;margin:var(--ha-space-4,16px) 0 var(--ha-space-2,8px)}input,textarea{width:100%;min-width:0;padding:12px;border:1px solid var(--secondary-text-color);border-radius:6px;background:var(--card-background-color);color:var(--primary-text-color);caret-color:var(--primary-color)}
       input{height:48px}.key-row{display:flex;gap:8px}.key-row input{flex:1}.key-row button{display:inline-flex;flex:none;align-items:center;justify-content:center;min-width:48px;padding:8px}.key-row ha-icon{--mdc-icon-size:20px}textarea{resize:vertical;min-height:88px}input::placeholder,textarea::placeholder{color:var(--secondary-text-color);opacity:1}
+      #feedback-delivery-enabled{width:auto;min-width:auto;height:auto;margin-inline-end:8px}label:has(#feedback-delivery-enabled){display:flex;align-items:center;gap:4px}
       .actions{display:flex;flex-wrap:wrap;gap:var(--ha-space-2,8px);margin-block:var(--ha-space-4,16px)}.primary{background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color));border-color:transparent;color:var(--ha-color-on-primary-loud,var(--text-primary-color))}.primary:hover{filter:brightness(.93);background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color))}
       #feedback{padding:var(--ha-space-4,16px);border:1px solid var(--divider-color);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}#feedback[data-error=true]{color:var(--error-color)}[hidden]{display:none!important}
       .assistant{padding-block-start:var(--ha-space-8,32px);border-block-start:1px solid var(--divider-color)}.links{display:flex;flex-wrap:wrap;gap:12px 24px;margin-block:16px}.disclosure{margin-block-start:32px}
@@ -158,8 +165,21 @@ class HababAIPanel extends HTMLElement {
       <section class="assistant" aria-labelledby="assistant-title"><h2 id="assistant-title">${this.t("assistantTitle")}</h2><p>${this.t("assistantHelp")}</p>
       <div class="actions"><button type="button" id="open-assistant" class="primary">${this.t("openAssistant")}</button></div><p class="help status" id="assistant-status" role="status" aria-live="polite"></p>
       <div class="links"><a href="/config/voice-assistants/expose">${this.t("expose")}</a><a href="/config/voice-assistants/assistants">${this.t("pipelineSettings")}</a></div>
-      <p class="help" id="pipeline-status"></p></section><p class="help disclosure">${this.t("cloud")}</p>
+      <p class="help" id="pipeline-status"></p></section>
+      <section class="assistant" aria-labelledby="feedback-delivery-title"><h2 id="feedback-delivery-title">${this.t("feedbackDeliveryTitle")}</h2>
+      <p>${this.t("feedbackDeliveryHelp")}</p><p class="help" id="feedback-delivery-endpoint"></p>
+      <p class="status" id="feedback-delivery-state" role="status" aria-live="polite"></p>
+      <label for="feedback-delivery-token">${this.t("feedbackDeliveryToken")}</label>
+      <input id="feedback-delivery-token" type="password" maxlength="512" autocomplete="new-password" spellcheck="false" autocapitalize="off" aria-describedby="feedback-delivery-key-help">
+      <p class="help" id="feedback-delivery-key-help">${this.t("feedbackDeliveryTokenHelp")}</p>
+      <div class="actions"><button type="button" id="feedback-delivery-save" class="primary">${this.t("feedbackDeliverySave")}</button>
+      <button type="button" id="feedback-delivery-clear">${this.t("feedbackDeliveryClear")}</button></div>
+      <label><input id="feedback-delivery-enabled" type="checkbox"> ${this.t("feedbackDeliveryEnable")}</label>
+      <p class="help disclosure">${this.t("feedbackDeliveryPrivacy")}</p></section>
+      <p class="help disclosure">${this.t("cloud")}</p>
       <habab-telemetry-panel></habab-telemetry-panel></main>`;
+    this.q("#feedback-delivery-token").value = this.feedbackCredentialDraft;
+    this.q("#feedback-delivery-endpoint").textContent = this.t("feedbackDeliveryEndpoint");
     this.q("ha-menu-button").hass = this._hass;
     this.q("habab-telemetry-panel").hass = this._hass;
     this.q("nav").addEventListener("click", (event) => {
@@ -182,6 +202,15 @@ class HababAIPanel extends HTMLElement {
     });
     this.q("#check").addEventListener("click", () => this.check());
     this.q("#open-assistant").addEventListener("click", () => this.openAssistant());
+    this.q("#feedback-delivery-token").addEventListener("input", (event) => {
+      this.feedbackCredentialDraft = event.target.value;
+      this.applyFeedbackDeliveryControls();
+    });
+    this.q("#feedback-delivery-save").addEventListener("click", () => this.feedbackDeliveryAction("save"));
+    this.q("#feedback-delivery-clear").addEventListener("click", () => this.feedbackDeliveryAction("clear"));
+    this.q("#feedback-delivery-enabled").addEventListener("change", (event) => {
+      this.feedbackDeliveryAction("enable", { enabled: event.target.checked });
+    });
     this.selectProvider();
   }
 
@@ -238,9 +267,10 @@ class HababAIPanel extends HTMLElement {
   }
 
   async refresh() {
-    const [connections, pipelines] = await Promise.allSettled([
+    const [connections, pipelines, feedbackDelivery] = await Promise.allSettled([
       this._hass.callWS({ type: "habab_home/providers/list" }),
       this._hass.callWS({ type: "assist_pipeline/pipeline/list" }),
+      this._hass.callWS({ type: "habab_home/feedback_delivery/status" }),
     ]);
     if (connections.status === "fulfilled") {
       this.connections = connections.value.connections;
@@ -264,6 +294,12 @@ class HababAIPanel extends HTMLElement {
         : this.t("pipelinesMissing");
     } else {
       this.q("#pipeline-status").textContent = this.t(pipelines.reason?.code || "unknown");
+    }
+    if (feedbackDelivery.status === "fulfilled") {
+      this.feedbackDeliveryState = feedbackDelivery.value;
+      this.q("#feedback-delivery-state").textContent = this.feedbackDeliveryStatusText();
+    } else {
+      this.q("#feedback-delivery-state").textContent = this.t("feedbackDeliveryStatusUnavailable");
     }
     this.updateControls();
     const failure = connections.status === "rejected" ? connections.reason
@@ -317,6 +353,65 @@ class HababAIPanel extends HTMLElement {
     openAssistant.disabled = !!this.busy || window.hababAssistant?.available !== true;
     this.q("#assistant-status").textContent = window.hababAssistant?.available === true
       ? "" : this.t("assistantUnavailable");
+    this.applyFeedbackDeliveryControls();
+  }
+
+  feedbackDeliveryStatusText() {
+    const state = this.feedbackDeliveryState;
+    if (!state?.credential_configured) return this.t("feedbackDeliveryNotConfigured");
+    if (!state.enabled) return this.t("feedbackDeliveryDisabled");
+    return state.ready ? this.t("feedbackDeliveryReady") : this.t("feedbackDeliveryUnavailable");
+  }
+
+  applyFeedbackDeliveryControls() {
+    const token = this.q("#feedback-delivery-token");
+    if (!token) return;
+    const state = this.feedbackDeliveryState || {};
+    const busy = !!this.busy || this.feedbackDeliveryBusy;
+    token.disabled = busy;
+    this.q("#feedback-delivery-save").disabled = busy || !this.feedbackCredentialDraft.trim();
+    this.q("#feedback-delivery-clear").disabled = busy || !state.credential_configured;
+    const enabled = this.q("#feedback-delivery-enabled");
+    enabled.checked = state.enabled === true;
+    enabled.disabled = busy || !state.credential_configured;
+  }
+
+  async feedbackDeliveryAction(action, payload = {}) {
+    if (this.feedbackDeliveryBusy || this.busy) return;
+    const type = {
+      save: "habab_home/feedback_delivery/save",
+      clear: "habab_home/feedback_delivery/clear",
+      enable: "habab_home/feedback_delivery/enable",
+    }[action];
+    if (!type) return;
+    this.feedbackDeliveryBusy = true;
+    this.applyFeedbackDeliveryControls();
+    const status = this.q("#feedback-delivery-state");
+    status.textContent = this.t("feedbackDeliverySaving");
+    status.dataset.error = "false";
+    try {
+      const message = { type, ...payload };
+      if (action === "save") message.token = this.feedbackCredentialDraft.trim();
+      this.feedbackDeliveryState = await this._hass.callWS(message);
+      if (action === "save" || action === "clear") {
+        this.feedbackCredentialDraft = "";
+        this.q("#feedback-delivery-token").value = "";
+      }
+      status.textContent = this.feedbackDeliveryStatusText();
+    } catch (error) {
+      const code = error?.code || "unknown";
+      status.textContent = this.t({
+        credential_invalid: "feedbackDeliveryCredentialInvalid",
+        credential_required: "feedbackDeliveryCredentialRequired",
+        feedback_unavailable: "feedbackDeliverySaveFailed",
+        invalid_enable_state: "feedbackDeliverySaveFailed",
+      }[code] || "feedbackDeliverySaveFailed");
+      status.dataset.error = "true";
+      if (action === "enable") this.q("#feedback-delivery-enabled").checked = this.feedbackDeliveryState.enabled === true;
+    } finally {
+      this.feedbackDeliveryBusy = false;
+      this.applyFeedbackDeliveryControls();
+    }
   }
 
   feedback(text, error = false, selector = "#feedback") {

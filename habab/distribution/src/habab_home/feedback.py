@@ -1,4 +1,4 @@
-"""Owner-scoped local feedback receipts; no external delivery is performed."""
+"""Owner-scoped durable feedback receipts and explicit optional delivery."""
 
 from __future__ import annotations
 
@@ -8,11 +8,13 @@ import hashlib
 import json
 import re
 import uuid
+from functools import partial
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
+from .feedback_transport import TOKEN_PATTERN, send_feedback
 from .diagnostics import (
     MAX_MESSAGES,
     ProjectionBudget,
@@ -29,6 +31,7 @@ RETENTION = timedelta(days=30)
 STORE_KEY = "habab_home.feedback_receipts"
 IDEMPOTENCY_KEY = re.compile(r"[0-9a-fA-F-]{36}\Z")
 FEEDBACK_VERSION = 1
+DELIVERY_STORE_KEY = "feedback_delivery"
 
 
 class FeedbackError(Exception):
@@ -70,12 +73,14 @@ def _digest(session_id: str, feedback: str) -> str:
 
 
 class FeedbackManager:
-    """Persist bounded, redacted local feedback packages in HA private storage."""
+    """Persist bounded local feedback and purpose-specific delivery settings."""
 
     def __init__(self, hass):
         self.hass = hass
         self.store = Store(hass, 1, STORE_KEY, private=True)
         self.records: dict[str, dict] = {}
+        self.delivery_enabled = False
+        self._delivery_token: str | None = None
         self._loaded = False
         self._lock = asyncio.Lock()
 
@@ -83,6 +88,27 @@ class FeedbackManager:
         if self._loaded:
             return
         stored = await self.store.async_load()
+        delivery_changed = False
+        delivery = stored.get(DELIVERY_STORE_KEY) if isinstance(stored, dict) else None
+        if isinstance(stored, dict) and DELIVERY_STORE_KEY in stored and not isinstance(delivery, dict):
+            delivery_changed = True
+        if isinstance(delivery, dict):
+            enabled = delivery.get("enabled")
+            token = delivery.get("token")
+            if type(enabled) is bool:
+                self.delivery_enabled = enabled
+            elif "enabled" in delivery:
+                delivery_changed = True
+            if isinstance(token, str) and TOKEN_PATTERN.fullmatch(token):
+                self._delivery_token = token
+            elif token is not None:
+                delivery_changed = True
+            if set(delivery) != {"enabled", "token"}:
+                delivery_changed = True
+        if not self._delivery_token:
+            delivery_changed = delivery_changed or self.delivery_enabled
+            self.delivery_enabled = False
+        self._register_delivery_token_for_redaction()
         if isinstance(stored, dict) and isinstance(stored.get("records"), dict):
             valid = {
                 receipt_id: record
@@ -101,10 +127,163 @@ class FeedbackManager:
             self.records = dict(sorted(valid.items(),
                                        key=lambda item: item[1]["created_at"])[-MAX_RECEIPTS:])
         changed = self._prune()
-        if changed or (isinstance(stored, dict) and isinstance(stored.get("records"), dict)
-                       and len(self.records) != len(stored["records"])):
-            await self.store.async_save({"records": self.records})
+        if delivery_changed or changed or (isinstance(stored, dict) and isinstance(stored.get("records"), dict)
+                                           and len(self.records) != len(stored["records"])):
+            await self._save_store()
         self._loaded = True
+
+    async def _ensure_loaded(self) -> None:
+        try:
+            await self._load()
+        except FeedbackError:
+            raise
+        except Exception as error:
+            raise FeedbackError("feedback_unavailable") from error
+
+    def _store_value(self, records: dict | None = None) -> dict:
+        return {
+            "records": self.records if records is None else records,
+            DELIVERY_STORE_KEY: {
+                "enabled": self.delivery_enabled,
+                "token": self._delivery_token,
+            },
+        }
+
+    async def _save_store(self, records: dict | None = None) -> None:
+        await self.store.async_save(self._store_value(records))
+
+    def _delivery_status(self) -> dict:
+        configured = bool(self._delivery_token)
+        return {
+            "enabled": self.delivery_enabled,
+            "credential_configured": configured,
+            "ready": self.delivery_enabled and configured,
+        }
+
+    def _register_delivery_token_for_redaction(self) -> None:
+        if not self._delivery_token:
+            return
+        setup_agent = self.hass.data.get(DOMAIN, {}).get("setup_agent")
+        register = getattr(setup_agent, "_register_runtime_secret", None)
+        if callable(register):
+            register(self._delivery_token)
+
+    async def async_preload(self) -> bool:
+        try:
+            async with self._lock:
+                await self._ensure_loaded()
+        except FeedbackError:
+            return False
+        return True
+
+    async def async_feedback_delivery_status(self) -> dict:
+        async with self._lock:
+            await self._ensure_loaded()
+            return self._delivery_status()
+
+    async def async_set_feedback_delivery_credential(self, token: str) -> dict:
+        if not isinstance(token, str) or not TOKEN_PATTERN.fullmatch(token):
+            raise FeedbackError("credential_invalid")
+        async with self._lock:
+            await self._ensure_loaded()
+            old = self._delivery_token
+            self._delivery_token = token
+            try:
+                await self._save_store()
+            except Exception as error:
+                self._delivery_token = old
+                raise FeedbackError("feedback_unavailable") from error
+            self._register_delivery_token_for_redaction()
+            return self._delivery_status()
+
+    async def async_set_feedback_delivery_enabled(self, enabled: bool) -> dict:
+        if type(enabled) is not bool:
+            raise FeedbackError("invalid_enable_state")
+        async with self._lock:
+            await self._ensure_loaded()
+            if enabled and not self._delivery_token:
+                raise FeedbackError("credential_required")
+            old = self.delivery_enabled
+            self.delivery_enabled = enabled
+            try:
+                await self._save_store()
+            except Exception as error:
+                self.delivery_enabled = old
+                raise FeedbackError("feedback_unavailable") from error
+            return self._delivery_status()
+
+    async def async_clear_feedback_delivery_credential(self) -> dict:
+        async with self._lock:
+            await self._ensure_loaded()
+            old_token, old_enabled = self._delivery_token, self.delivery_enabled
+            self._delivery_token = None
+            self.delivery_enabled = False
+            try:
+                await self._save_store()
+            except Exception as error:
+                self._delivery_token, self.delivery_enabled = old_token, old_enabled
+                raise FeedbackError("feedback_unavailable") from error
+            return self._delivery_status()
+
+    async def _async_deliver_record(self, record: dict, *, retry_ambiguous: bool = False) -> dict:
+        """Explicitly send one already-persisted local projection, without exposing its token."""
+        async with self._lock:
+            await self._ensure_loaded()
+            receipt_id = record.get("receipt_id")
+            current = self.records.get(receipt_id) if isinstance(receipt_id, str) else None
+            if current is None:
+                return {"delivery_status": "pending", "delivery_error": "local_receipt_unavailable"}
+            if current.get("delivery_status") == "saved_on_server":
+                return self._public_delivery(current)
+            token = self._delivery_token if self.delivery_enabled else None
+            if not token:
+                return {"delivery_status": "not_configured"}
+            package = {
+                "feedback": current["feedback"],
+                "context": current["context"],
+                "idempotency_key": current["idempotency_key"],
+            }
+            try:
+                result = await self.hass.async_add_executor_job(
+                    partial(send_feedback, package, token, retry_ambiguous=retry_ambiguous)
+                )
+            except Exception:
+                result = None
+            if result is None or result.status == "pending":
+                delivery = {
+                    "delivery_status": "pending",
+                    "delivery_error": (result.error_code if result else "receiver_unavailable"),
+                }
+            elif result.status == "saved_on_server":
+                delivery = {
+                    "delivery_status": "saved_on_server",
+                    "server_receipt_id": result.receipt_id,
+                    "server_issue_state": result.issue_state,
+                    "server_duplicate": result.duplicate,
+                }
+            elif result.status == "rejected":
+                delivery = {
+                    "delivery_status": "rejected",
+                    "delivery_error": result.error_code or "package_invalid",
+                }
+            else:
+                delivery = {"delivery_status": "not_configured"}
+            updated_record = {**current, **delivery}
+            updated = {**self.records, receipt_id: updated_record}
+            try:
+                await self._save_store(updated)
+            except Exception:
+                return {"delivery_status": "pending", "delivery_error": "local_status_unavailable"}
+            self.records = updated
+            return self._public_delivery(updated_record)
+
+    @staticmethod
+    def _public_delivery(record: dict) -> dict:
+        fields = (
+            "delivery_status", "delivery_error", "server_receipt_id",
+            "server_issue_state", "server_duplicate",
+        )
+        return {key: record[key] for key in fields if key in record and record[key] is not None}
 
     def _prune(self) -> bool:
         cutoff = _now() - RETENTION
@@ -124,7 +303,7 @@ class FeedbackManager:
         previous = self.records
         if self._prune():
             try:
-                await self.store.async_save({"records": self.records})
+                await self._save_store()
             except Exception:
                 self.records = previous
                 raise
@@ -170,7 +349,7 @@ class FeedbackManager:
                 "context": context,
             }
             updated = {**self.records, receipt_id: record}
-            await self.store.async_save({"records": updated})
+            await self._save_store(updated)
             self.records = updated
             return record, True
 
@@ -308,5 +487,8 @@ def async_register_views(hass):
     """Register authenticated local receipt routes and their private store."""
     manager = FeedbackManager(hass)
     hass.data[DOMAIN]["feedback"] = manager
+    create_task = getattr(hass, "async_create_task", None)
+    if callable(create_task):
+        create_task(manager.async_preload())
     hass.http.register_view(FeedbackSubmitView())
     hass.http.register_view(FeedbackReceiptView())

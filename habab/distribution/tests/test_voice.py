@@ -15,7 +15,9 @@ from homeassistant.components.habab_home.assist_adapter import parse_calls
 from homeassistant.components.habab_home.providers import (
     PROVIDERS, ProviderClient, ProviderError, provider_api_base, validate_settings,
 )
-from homeassistant.components.habab_home.websocket import get_connection_key, save_connection
+from homeassistant.components.habab_home.websocket import (
+    feedback_delivery_save, feedback_delivery_status, get_connection_key, save_connection,
+)
 from homeassistant.components.habab_home import websocket
 
 
@@ -163,6 +165,46 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                 })
                 connection.send_error.assert_called_once_with(8, "not_found", "not_found")
                 connection.send_result.assert_not_called()
+
+    async def test_feedback_delivery_commands_are_admin_only_and_never_read_back_key(self):
+        from homeassistant.exceptions import Unauthorized
+
+        manager = SimpleNamespace(
+            async_feedback_delivery_status=AsyncMock(return_value={
+                "enabled": False, "credential_configured": True, "ready": False,
+            }),
+            async_set_feedback_delivery_credential=AsyncMock(return_value={
+                "enabled": False, "credential_configured": True, "ready": False,
+            }),
+        )
+        hass = SimpleNamespace(data={"habab_home": {"feedback": manager}})
+        non_admin = Mock(user=SimpleNamespace(is_admin=False))
+        for command, message in (
+            (feedback_delivery_status, {"id": 41}),
+            (feedback_delivery_save, {"id": 44, "token": "fixture-feedback-receiver-token"}),
+        ):
+            with self.subTest(command=command.__name__), self.assertRaises(Unauthorized):
+                command(hass, non_admin, message)
+        manager.async_feedback_delivery_status.assert_not_awaited()
+        manager.async_set_feedback_delivery_credential.assert_not_awaited()
+        non_admin.send_result.assert_not_called()
+
+        admin = Mock(user=SimpleNamespace(is_admin=True))
+        await inspect.unwrap(feedback_delivery_status)(hass, admin, {"id": 42})
+        admin.send_result.assert_called_once_with(42, {
+            "enabled": False, "credential_configured": True, "ready": False,
+        })
+
+        saved = Mock()
+        await inspect.unwrap(feedback_delivery_save)(hass, saved, {
+            "id": 43, "token": "fixture-feedback-receiver-token",
+        })
+        manager.async_set_feedback_delivery_credential.assert_awaited_once_with(
+            "fixture-feedback-receiver-token")
+        saved.send_result.assert_called_once_with(43, {
+            "enabled": False, "credential_configured": True, "ready": False,
+        })
+        self.assertNotIn("token", saved.send_result.call_args.args[1])
 
     async def test_provider_list_returns_only_sanitized_matching_check_metadata(self):
         from homeassistant.components.habab_home.const import DOMAIN

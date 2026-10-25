@@ -14,6 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
+from .feedback import FeedbackError
 from .providers import ProviderClient, ProviderError, resolve_provider_contract
 from .setup_agent import AgentError
 
@@ -79,6 +80,64 @@ def async_register_commands(hass):
     websocket_api.async_register_command(hass, agent_run)
     websocket_api.async_register_command(hass, agent_abort)
     websocket_api.async_register_command(hass, agent_diagnostics)
+    websocket_api.async_register_command(hass, feedback_delivery_status)
+    websocket_api.async_register_command(hass, feedback_delivery_save)
+    websocket_api.async_register_command(hass, feedback_delivery_enable)
+    websocket_api.async_register_command(hass, feedback_delivery_clear)
+
+
+def _feedback_manager(hass):
+    return hass.data[DOMAIN]["feedback"]
+
+
+@websocket_api.websocket_command({probatio.Required("type"): "habab_home/feedback_delivery/status"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def feedback_delivery_status(hass, connection, msg):
+    try:
+        result = await _feedback_manager(hass).async_feedback_delivery_status()
+        connection.send_result(msg["id"], result)
+    except FeedbackError as error:
+        connection.send_error(msg["id"], error.code, error.code)
+
+
+@websocket_api.websocket_command({
+    probatio.Required("type"): "habab_home/feedback_delivery/save",
+    probatio.Required("token"): probatio.All(str, probatio.Length(min=1, max=512)),
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def feedback_delivery_save(hass, connection, msg):
+    try:
+        result = await _feedback_manager(hass).async_set_feedback_delivery_credential(msg["token"])
+        connection.send_result(msg["id"], result)
+    except FeedbackError as error:
+        connection.send_error(msg["id"], error.code, error.code)
+
+
+@websocket_api.websocket_command({
+    probatio.Required("type"): "habab_home/feedback_delivery/enable",
+    probatio.Required("enabled"): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def feedback_delivery_enable(hass, connection, msg):
+    try:
+        result = await _feedback_manager(hass).async_set_feedback_delivery_enabled(msg["enabled"])
+        connection.send_result(msg["id"], result)
+    except FeedbackError as error:
+        connection.send_error(msg["id"], error.code, error.code)
+
+
+@websocket_api.websocket_command({probatio.Required("type"): "habab_home/feedback_delivery/clear"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def feedback_delivery_clear(hass, connection, msg):
+    try:
+        result = await _feedback_manager(hass).async_clear_feedback_delivery_credential()
+        connection.send_result(msg["id"], result)
+    except FeedbackError as error:
+        connection.send_error(msg["id"], error.code, error.code)
 
 
 @websocket_api.websocket_command({

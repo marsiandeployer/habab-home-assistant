@@ -490,7 +490,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_realtime_feedback_uses_shared_local_save_and_current_owner_mapping(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
-        utterance = 'Отправь обратную связь: голосовой ответ был слишком длинным.'
+        utterance = 'Сохрани отзыв локально: голосовой ответ был слишком длинным.'
         feedback_text = 'Голосовой ответ был слишком длинным.'
         session = {
             'channel': 'web', 'provider_models': [], 'created_at': None, 'updated_at': None,
@@ -559,12 +559,11 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(store.data['records']), 1)
         self.assertEqual(next(iter(store.data['records'].values()))['owner_id'], 'alice')
         self.assertIn('ОТЗЫВ.', config['instructions'])
-        self.assertIn('Явный запрос владельца сохранить или отправить сформулированный отзыв',
+        self.assertIn('Только явная просьба отправить отзыв Habab/разработчикам',
                       config['instructions'])
-        self.assertIn('Обычная жалоба или неясное намерение не являются просьбой о сохранении',
+        self.assertIn('не означают удалённое согласие', config['instructions'])
+        self.assertIn('pending_issue означает только приёмку в ожидание обработки',
                       config['instructions'])
-        self.assertIn('второй раз согласие не спрашивай', config['instructions'])
-        self.assertIn('Не включай фоновую выгрузку', config['instructions'])
         self.assertIn('ask_home_assistant', {tool['name'] for tool in config['tools']})
         self.assertEqual({tool['name'] for tool in config['tools']},
                          {'ask_home_assistant', 'end_voice_session'})

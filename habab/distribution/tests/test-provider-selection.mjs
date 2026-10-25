@@ -59,6 +59,42 @@ test("initial selected provider does not capture a key or model draft typed duri
   assert.equal(panel.initialProviderSelectionApplied, true);
 });
 
+test("feedback receiver password draft survives a panel rerender", () => {
+  const panel = Object.create(HababAIPanel.prototype);
+  const nodes = new Map();
+  const node = () => {
+    const item = {
+      listeners: new Map(), value: "", dataset: {},
+      addEventListener(name, listener) { this.listeners.set(name, listener); },
+      setAttribute() {}, querySelector() { return node(); },
+    };
+    return item;
+  };
+  panel.shadowRoot = {
+    set innerHTML(_value) { nodes.clear(); },
+    querySelector(selector) {
+      if (!nodes.has(selector)) nodes.set(selector, node());
+      return nodes.get(selector);
+    },
+  };
+  Object.assign(panel, {
+    _hass: {}, language: "en", provider: "openai", busy: false,
+    feedbackCredentialDraft: "", feedbackDeliveryState: {
+      enabled: false, credential_configured: false, ready: false,
+    },
+    selectProvider: () => undefined,
+    t: (key) => key,
+    q(selector) { return this.shadowRoot.querySelector(selector); },
+  });
+
+  panel.render();
+  const firstInput = panel.q("#feedback-delivery-token");
+  firstInput.listeners.get("input")({ target: { value: "unsaved-fixture-token" } });
+  panel.render();
+
+  assert.equal(panel.q("#feedback-delivery-token").value, "unsaved-fixture-token");
+});
+
 test("initial selected provider does not override a tab chosen during load", async () => {
   const providerList = deferred();
   const panel = panelWithPendingProviderList(providerList);

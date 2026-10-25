@@ -271,6 +271,18 @@ def _redact_text(runtime, value: str, limit: int = 12000,
     return budget.clean_string(text) if budget is not None else text
 
 
+async def _feedback_redaction_ready(hass) -> bool:
+    """Load the purpose-specific receiver token before exporting runtime text."""
+    manager = hass.data.get(DOMAIN, {}).get("feedback")
+    preload = getattr(manager, "async_preload", None)
+    if not callable(preload):
+        return manager is None
+    try:
+        return await preload() is not False
+    except Exception:
+        return False
+
+
 def _safe_directory(path: Path, boundary: Path) -> bool:
     """Reject symlinked or non-directory components under a fixed config root."""
     try:
@@ -1001,6 +1013,8 @@ class DiagnosticsSessionsView(HomeAssistantView):
         if owner is None:
             return self.json_message("not_allowed", status_code=403)
         hass = request.app["hass"]
+        if not await _feedback_redaction_ready(hass):
+            return self.json_message("diagnostics_unavailable", status_code=503)
         assistant = hass.data.get(DOMAIN, {}).get("assistant")
         if assistant is None:
             return self.json({"sessions": [], "next_cursor": None,
@@ -1077,6 +1091,8 @@ class DiagnosticsSessionView(HomeAssistantView):
         except ValueError:
             return self.json_message("invalid_filter", status_code=400)
         hass = request.app["hass"]
+        if not await _feedback_redaction_ready(hass):
+            return self.json_message("diagnostics_unavailable", status_code=503)
         assistant = hass.data.get(DOMAIN, {}).get("assistant")
         if assistant is None:
             return self.json_message("not_found", status_code=404)
@@ -1144,6 +1160,8 @@ class DiagnosticsExportView(HomeAssistantView):
         except (ValueError, TypeError):
             return self.json_message("invalid_export", status_code=400)
         hass = request.app["hass"]
+        if not await _feedback_redaction_ready(hass):
+            return self.json_message("diagnostics_unavailable", status_code=503)
         assistant = hass.data.get(DOMAIN, {}).get("assistant")
         if assistant is None:
             return self.json_message("assistant_unavailable", status_code=503)
@@ -1314,6 +1332,8 @@ class DiagnosticsRuntimeLogsExportView(HomeAssistantView):
             return self.json_message("invalid_export", status_code=400)
 
         hass = request.app["hass"]
+        if not await _feedback_redaction_ready(hass):
+            return self.json_message("diagnostics_unavailable", status_code=503)
         assistant = hass.data.get(DOMAIN, {}).get("assistant")
         runtime = getattr(assistant, "runtime", None)
         if runtime is None or not isinstance(getattr(runtime, "root", None), (str, Path)):

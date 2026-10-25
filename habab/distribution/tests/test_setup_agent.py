@@ -441,12 +441,31 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
             "owner, session_id и channel не передавай", instruction
         )
         self.assertIn(
-            "state=saved_locally и issue_state=not_configured", instruction
+            "state=saved_locally подтверждает только локальную запись", instruction
         )
         self.assertIn(
-            "не утверждай, что отзыв отправлен разработчикам или что issue создан",
-            instruction,
+            "send_to_habab по умолчанию false", instruction
         )
+        self.assertIn("явно просит отправить этот отзыв Habab/разработчикам", instruction)
+        self.assertIn("при явном повторе отправки того же отзыва в той же сессии используй прежний UUID",
+                      instruction)
+        self.assertIn("server_issue_state=pending_issue подтверждает принятие сервером", instruction)
+
+    def test_runtime_clean_redacts_feedback_receiver_token(self):
+        token = "F" * 40
+        agent = SetupAgent.__new__(SetupAgent)
+        agent.hass = SimpleNamespace(
+            config_entries=SimpleNamespace(async_entries=Mock(return_value=[])),
+            data={"habab_home": {}},
+        )
+        agent.password = "password-placeholder"
+        agent.control_token = "control-placeholder"
+        agent._runtime_secrets = set()
+        agent._register_runtime_secret(token)
+
+        cleaned = agent.clean(f"server echoed {token}")
+
+        self.assertEqual(cleaned, "server echoed [redacted]")
 
     def test_android_prompt_uses_proot_sandbox_facts_and_shared_tools(self):
         prompt = runtime_prompt(ANDROID_PROOT_RUNTIME_KIND, PROMPT)
