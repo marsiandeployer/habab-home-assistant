@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -163,6 +164,81 @@ def write_provenance(stage, frontend_revision):
         json.dumps(provenance, indent=2) + '\n', encoding='utf-8')
 
 
+def set_static_permissions(root):
+    """Make a copied static tree readable by the public web server."""
+    root = Path(root)
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError('Static release root is missing or is a symlink')
+    directories = []
+    files = []
+    invalid = []
+    for current, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        directories.append(current_path)
+        for name in dirnames:
+            path = current_path / name
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+                invalid.append(path)
+        for name in filenames:
+            path = current_path / name
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+                invalid.append(path)
+            else:
+                files.append(path)
+    if invalid:
+        raise ValueError('Unexpected symlink or special file in static release')
+    for path in files:
+        os.chmod(path, 0o644, follow_symlinks=False)
+    for path in reversed(directories):
+        os.chmod(path, 0o755, follow_symlinks=False)
+
+
+def ensure_public_directory(path):
+    """Create one public ancestor if needed and make it traversable."""
+    path = Path(path)
+    if path.is_symlink():
+        raise ValueError('Public directory is a symlink')
+    if not path.exists():
+        path.mkdir()
+    mode = path.lstat().st_mode
+    if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+        raise ValueError('Public directory is not a directory')
+    os.chmod(path, 0o755, follow_symlinks=False)
+
+
+def copy_public_release(stage, release_root, public_root):
+    """Copy immutable assets, then set final destination modes before index swap."""
+    public_root = Path(public_root)
+    release_root = Path(release_root)
+    releases_root = public_root / 'releases'
+    if release_root.parent != releases_root:
+        raise ValueError('Release directory must be a direct child of public/releases')
+    ensure_public_directory(public_root)
+    ensure_public_directory(releases_root)
+    if release_root.exists() or release_root.is_symlink():
+        raise ValueError('Immutable release directory already exists')
+    release_root.mkdir()
+    for source in stage.rglob('*'):
+        if not source.is_file() or source.name == 'index.html':
+            continue
+        relative = source.relative_to(stage)
+        destination = release_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    set_static_permissions(release_root)
+
+
+def replace_public_index(stage_index, target):
+    next_index = target / '.index.html.next'
+    if next_index.is_symlink():
+        raise ValueError('Temporary public index is a symlink')
+    shutil.copy2(stage_index, next_index)
+    os.chmod(next_index, 0o644, follow_symlinks=False)
+    os.replace(next_index, target / 'index.html')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--from-published', action='store_true',
@@ -256,20 +332,12 @@ def main():
     # Keep the currently served release intact while publishing. New bundles
     # have content-hashed names; retaining previous bundles also lets already
     # open clients finish lazy imports after index.html changes.
-    TARGET.mkdir(parents=True, exist_ok=True)
-    for source in STAGE.rglob('*'):
-        if not source.is_file() or source.name == 'index.html':
-            continue
-        relative = source.relative_to(STAGE)
-        destination = TARGET / 'releases' / RELEASE / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+    release_root = TARGET / 'releases' / RELEASE
+    copy_public_release(STAGE, release_root, TARGET)
 
     # Switch the entrypoint only after every referenced asset is in place.
     publish_retirement_worker(TARGET, RETIREMENT_WORKER)
-    next_index = TARGET / '.index.html.next'
-    shutil.copy2(STAGE / 'index.html', next_index)
-    os.replace(next_index, TARGET / 'index.html')
+    replace_public_index(STAGE / 'index.html', TARGET)
 
     # Publication has completed. Retain the new release and the last one;
     # failed builds never reach this hook.

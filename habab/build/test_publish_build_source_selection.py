@@ -1,5 +1,8 @@
+import hashlib
 import json
+import os
 import shutil
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +13,8 @@ from publish_build import (
     PUBLISHED_ASSET_FILES,
     UPSTREAM_BASELINE,
     attribution_text,
+    copy_public_release,
+    replace_public_index,
     stage_published_frontend,
     validate_source_options,
     write_provenance,
@@ -17,6 +22,50 @@ from publish_build import (
 
 
 class PublishedFrontendSelectionTests(unittest.TestCase):
+    def test_public_permissions_survive_restrictive_umask_without_changing_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            compiled = root / 'compiled'
+            assets = compiled / 'assets'
+            assets.mkdir(parents=True)
+            index = compiled / 'index.html'
+            manifest = compiled / 'manifest.json'
+            bundle = assets / 'main.js'
+            index.write_bytes(b'<title>compiled</title>')
+            manifest.write_bytes(b'{"name":"Habab Home"}')
+            bundle.write_bytes(b'compiled bundle')
+            os.chmod(compiled, 0o700)
+            os.chmod(assets, 0o700)
+            for path in (index, manifest, bundle):
+                os.chmod(path, 0o600)
+            source_hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                             for path in (index, manifest, bundle)}
+            target = root / 'public'
+            release = target / 'releases' / 'title1'
+
+            old_umask = os.umask(0o077)
+            try:
+                copy_public_release(compiled, release, target)
+                replace_public_index(index, target)
+            finally:
+                os.umask(old_umask)
+
+            self.assertEqual(stat.S_IMODE(compiled.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(assets.stat().st_mode), 0o700)
+            self.assertTrue(all(stat.S_IMODE(path.stat().st_mode) == 0o600
+                                for path in (index, manifest, bundle)))
+            self.assertEqual(stat.S_IMODE((target / 'index.html').stat().st_mode), 0o644)
+            directories = [path for path in release.rglob('*') if path.is_dir()]
+            files = [path for path in release.rglob('*') if path.is_file()]
+            public_directories = [target, target / 'releases', release, *directories]
+            self.assertTrue(all(stat.S_IMODE(path.stat().st_mode) == 0o755
+                                for path in public_directories))
+            self.assertTrue(all(stat.S_IMODE(path.stat().st_mode) == 0o644 for path in files))
+            for source, digest in source_hashes.items():
+                copied = target / 'index.html' if source == index else release / source.relative_to(compiled)
+                self.assertEqual(hashlib.sha256(copied.read_bytes()).hexdigest(), digest)
+                self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
+
     def test_external_compiled_source_stages_allowlist_and_trusted_license(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / 'compiled'
