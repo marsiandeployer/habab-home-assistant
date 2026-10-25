@@ -10,7 +10,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Set;
+import java.util.Collections;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.Rule;
 import org.junit.Test;
@@ -65,7 +66,7 @@ public final class GuestHostsFileTest {
 
         assertThrows(IOException.class, () -> GuestHostsFile.seedIfEmpty(etc));
         assertTrue(Files.isSymbolicLink(hostsLink));
-        assertEquals("preserved", Files.readString(outside, StandardCharsets.UTF_8));
+        assertEquals("preserved", new String(Files.readAllBytes(outside), StandardCharsets.UTF_8));
 
         Path etcLink = root.resolve("etc-link");
         try {
@@ -84,9 +85,9 @@ public final class GuestHostsFileTest {
 
         assertThrows(IOException.class, () -> GuestHostsFile.writeAtomically(targetDirectory, EXPECTED));
 
-        assertEquals("preserved", Files.readString(sentinel, StandardCharsets.UTF_8));
+        assertEquals("preserved", new String(Files.readAllBytes(sentinel), StandardCharsets.UTF_8));
         try (Stream<Path> files = Files.list(root)) {
-            assertEquals(Set.of(targetDirectory), Set.copyOf(files.toList()));
+            assertEquals(Collections.singleton(targetDirectory), files.collect(Collectors.toSet()));
         }
     }
 

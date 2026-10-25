@@ -5,7 +5,6 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import java.io.IOException;
 import java.util.ArrayDeque;
-import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.vosk.*;
@@ -15,20 +14,20 @@ final class WakeDetector implements AutoCloseable {
     private final Model model;
     private final Recognizer recognizer;
     private final String phrase;
+    private final WakeMatchGate matchGate;
     private final VoiceActivityGate gate = new VoiceActivityGate();
     private final ArrayDeque<short[]> preRoll = new ArrayDeque<>();
     private boolean wasSpeech;
-    private long matchedAt;
     private long utteranceStarted;
 
     static String normalize(String value) {
-        return java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFKC)
-                .toLowerCase(new Locale("ru")).replaceAll("[^\\p{L}\\s]", " ").trim().replaceAll("\\s+", " ");
+        return WakeMatchGate.normalize(value);
     }
 
     WakeDetector(String directory, String requested) throws Exception {
         phrase = normalize(requested);
         if (phrase.isEmpty() || phrase.length() > 64 || phrase.split(" ").length > 5) throw new IOException("invalid_wake_phrase");
+        matchGate = new WakeMatchGate(phrase);
         LibVosk.vosk_set_log_level(-1);
         model = new Model(directory);
         try {
@@ -46,24 +45,37 @@ final class WakeDetector implements AutoCloseable {
         if (speech) {
             if (!wasSpeech) {
                 utteranceStarted = now;
-                for (short[] frame : preRoll) recognizer.acceptWaveForm(frame, frame.length);
+                for (short[] frame : preRoll) {
+                    if (acceptFrame(frame, frame.length, now)) { detected = true; break; }
+                }
             }
-            boolean ended = recognizer.acceptWaveForm(samples, count);
-            JSONObject result = new JSONObject(ended ? recognizer.getResult() : recognizer.getPartialResult());
-            String text = normalize(result.optString(ended ? "text" : "partial"));
-            if (text.equals(phrase)) {
-                if (matchedAt == 0) matchedAt = now;
-                detected = ended || now - matchedAt >= 200;
-            } else matchedAt = 0;
-            if (ended || now - utteranceStarted > 15000) { recognizer.reset(); utteranceStarted = now; }
-        } else if (wasSpeech) reset();
+            if (!detected) detected = acceptFrame(samples, count, now);
+            if (now - utteranceStarted > 15000) { resetRecognizer(); utteranceStarted = now; }
+        } else if (wasSpeech) {
+            // The VAD closes an utterance after its hangover. Flush Vosk's remaining
+            // frames before resetting, otherwise a final wake phrase can be discarded.
+            JSONObject result = new JSONObject(recognizer.getFinalResult());
+            detected = matchGate.accept(result.optString("text"), WakeMatchGate.ResultKind.VAD_END);
+            reset();
+        }
+        if (detected) { reset(); return true; }
         preRoll.add(java.util.Arrays.copyOf(samples, count));
         while (preRoll.size() > 15) preRoll.removeFirst();
         wasSpeech = speech;
-        if (detected) reset();
+        return false;
+    }
+
+    private boolean acceptFrame(short[] samples, int count, long now) throws Exception {
+        if (!recognizer.acceptWaveForm(samples, count)) return false;
+        JSONObject result = new JSONObject(recognizer.getResult());
+        boolean detected = matchGate.accept(result.optString("text"), WakeMatchGate.ResultKind.ENDPOINT);
+        resetRecognizer();
+        utteranceStarted = now;
         return detected;
     }
 
-    void reset() { recognizer.reset(); preRoll.clear(); wasSpeech = false; matchedAt = 0; }
+    private void resetRecognizer() { recognizer.reset(); matchGate.reset(); }
+
+    void reset() { resetRecognizer(); preRoll.clear(); wasSpeech = false; }
     @Override public void close() { recognizer.close(); model.close(); }
 }

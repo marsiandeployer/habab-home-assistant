@@ -1,0 +1,32 @@
+{
+  "kind": "issue19_parent_source_validation",
+  "checkedAt": "2026-10-25T08:07:35.142514+00:00",
+  "issue": 19,
+  "command": "ANDROID_HOME=/opt/android-sdk /opt/gradle/bin/gradle --offline --no-daemon --max-workers=1 -p habab/android :app:testDebugUnitTest :app:lintDebug",
+  "result": "PASS",
+  "suites": 17,
+  "tests": 84,
+  "passed": 83,
+  "skipped": 1,
+  "skipReason": "full runtime archive not provided; unchanged archive extraction case",
+  "wakeTestsPassed": 5,
+  "lint": "PASS",
+  "javaCompilation": "PASS",
+  "existingTestAssertionsRemoved": false,
+  "deviceRemainsNative16": true,
+  "sourceWakeChangeInstalled": false,
+  "acousticAcceptance": "NOT RUN",
+  "parentReview": "no confirmed finding in scoped WakeDetector/helper/test diff",
+  "limitations": [
+    "Final false recognitions remain possible.",
+    "Waiting for endpoint/VAD finalization may increase wake latency.",
+    "Pure matching tests and source wiring review do not replace Vosk/acoustic device tests."
+  ],
+  "sourceSha256": {
+    "app/src/main/java/ru/habab/home/WakeDetector.java": "494b2a5340eda65d388952054fd1ecde17672654ef94a7fe12bfa613933b6778",
+    "app/src/main/java/ru/habab/home/WakeMatchGate.java": "5678c737bbeb475eb850d5187c61584409809e6ce118e8af497799907d54a18f",
+    "app/src/test/java/ru/habab/home/WakeMatchGateTest.java": "3dc86adaba5967ef9062cdbbfb97a876920f89e8878a3d6e832401c68f94ff23",
+    "app/src/test/java/ru/habab/home/GuestHostsFileTest.java": "4bbd58310c7eef70ea7be102f4f403ed8ac8cc0e927d7b0c70568a3a67662004",
+    "app/src/test/java/ru/habab/home/VoiceStatusFileTest.java": "2677520fe34c2ef3f84718335c5f9ba1a6c1a7ddf42db7f3e62268f0f02b0b21"
+  }
+}
