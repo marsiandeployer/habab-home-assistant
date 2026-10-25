@@ -5,6 +5,8 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from assistant_bundle import publish_assistant, render_entrypoint
@@ -16,10 +18,42 @@ TARGET = ROOT / 'public'
 RETIREMENT_WORKER = ROOT / 'build/retire-demo-service-worker.js'
 UPSTREAM = ROOT.parent
 STAGE = ROOT / 'tmp/ha-frontend-build/publish-stage'
+PUBLISHED_ASSET_DIRS = ('assets', 'frontend_es5', 'frontend_latest', 'static', 'stub_config')
+PUBLISHED_ASSET_FILES = ('_headers', 'manifest.json', 'LICENSE.md')
+PUBLISHED_ENTRYPOINT = ROOT / 'build/flat-entrypoint.html'
 RELEASE = os.environ.get('HABAB_DEMO_RELEASE', '20261021-ui5')
 if not re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,79}', RELEASE):
     raise ValueError('Invalid HABAB_DEMO_RELEASE')
 PREFIX = f'/demos/home-assistant/releases/{RELEASE}/'
+
+
+def stage_published_frontend(source_root, stage, entrypoint):
+    """Copy only the retained flat frontend inputs, excluding adjacent public artifacts."""
+    for name in PUBLISHED_ASSET_DIRS:
+        source = source_root / name
+        if source.is_symlink() or not source.is_dir():
+            raise ValueError(f'Missing compiled frontend directory: {name}')
+        if any(path.is_symlink() for path in source.rglob('*')):
+            raise ValueError(f'Symlink in compiled frontend directory: {name}')
+    for name in PUBLISHED_ASSET_FILES:
+        source = source_root / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f'Missing compiled frontend file: {name}')
+    if entrypoint.is_symlink() or not entrypoint.is_file():
+        raise ValueError('Flat frontend entrypoint is missing')
+
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
+    try:
+        for name in PUBLISHED_ASSET_DIRS:
+            shutil.copytree(source_root / name, stage / name)
+        for name in PUBLISHED_ASSET_FILES:
+            shutil.copy2(source_root / name, stage / name)
+        shutil.copy2(entrypoint, stage / 'index.html')
+    except Exception:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
 
 
 def scope_javascript(content, *, legacy=False):
@@ -96,12 +130,19 @@ def main():
     source_root = TARGET if args.from_published else SOURCE
     if not (source_root / 'index.html').is_file():
         raise SystemExit(f'Upstream build is missing: {source_root}')
-    source_html = (args.entrypoint or source_root / 'index.html').read_text(encoding='utf-8')
+    entrypoint = args.entrypoint or (PUBLISHED_ENTRYPOINT if args.from_published else source_root / 'index.html')
+    source_html = entrypoint.read_text(encoding='utf-8')
     if args.from_published and '/releases/' in source_html:
         raise SystemExit('Already repackaged; rebuild from the pinned upstream source')
-    if STAGE.exists():
-        shutil.rmtree(STAGE)
-    shutil.copytree(source_root, STAGE, ignore=shutil.ignore_patterns('releases'))
+    if args.from_published:
+        try:
+            stage_published_frontend(source_root, STAGE, entrypoint)
+        except ValueError as err:
+            raise SystemExit(str(err)) from err
+    else:
+        if STAGE.exists():
+            shutil.rmtree(STAGE)
+        shutil.copytree(source_root, STAGE, ignore=shutil.ignore_patterns('releases'))
     (TARGET / 'integrations').mkdir(exist_ok=True)
     assistant = publish_assistant(TARGET, ROOT / 'distribution/src/habab_home/frontend/setup-chat.js')
     if not args.from_published:
@@ -176,9 +217,19 @@ def main():
     shutil.copy2(STAGE / 'index.html', next_index)
     os.replace(next_index, TARGET / 'index.html')
 
+    # Publication has completed. Retain the new release and the last one;
+    # failed builds never reach this hook.
+    retention = Path(os.environ.get('RELEASE_RETENTION_TOOL', '/root/tools/release-retention/retention.py'))
+    state = Path(os.environ.get('HABAB_DEMO_RETENTION_STATE', '/root/tools/release-retention/states/habab-demo.json'))
+    if retention.is_file() and state.is_file():
+        subprocess.run([sys.executable, str(retention), '--state', str(state),
+                        '--release', RELEASE, '--artifact', RELEASE, '--apply'], check=True)
+    else:
+        print('release retention SKIP: initialize current/previous manifest on this host')
+
     print(f'published {TARGET}')
     print(f'files={sum(p.is_file() for p in TARGET.rglob("*"))}')
-    print('old hashed assets retained; index.html replaced atomically last')
+    print('index.html replaced atomically; release retention processed')
 
 
 if __name__ == '__main__':
