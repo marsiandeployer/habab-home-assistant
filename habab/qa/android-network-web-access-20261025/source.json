@@ -1,0 +1,50 @@
+{
+  "scope": "source-only",
+  "schema": 1,
+  "change": "Optional web_access metadata is included in the existing atomic android-network.json snapshot.",
+  "web_access": {
+    "phone_url": "http://127.0.0.1:8123",
+    "lan_url": "http://<selected-ipv4>:8123 or null",
+    "lan_urls": [
+      "http://<connected-wifi-or-ethernet-ipv4>:8123"
+    ],
+    "external_reachability": "not_verified",
+    "source": "android_connectivity_manager"
+  },
+  "selection": "Use a valid IPv4 from the active Wi-Fi/Ethernet network. If there is no active LAN address, select only when exactly one connected Wi-Fi/Ethernet IPv4 candidate exists; otherwise lan_url is null and candidates remain in lan_urls.",
+  "excluded": [
+    "mobile transport",
+    "VPN transport",
+    "loopback IPv4",
+    "unspecified IPv4",
+    "link-local IPv4",
+    "multicast and reserved IPv4",
+    "non-IPv4 addresses"
+  ],
+  "android_min_api": 26,
+  "verification": {
+    "unit_test_task": "ANDROID_HOME=/opt/android-sdk /opt/gradle/bin/gradle --offline --no-daemon --max-workers=1 -p habab/android :app:testDebugUnitTest :app:lintDebug",
+    "result": "PASS",
+    "cases": 8,
+    "diff_check": "PASS",
+    "device_or_reachability_test": "NOT RUN",
+    "full_suite": {
+      "tests": 92,
+      "passed": 91,
+      "skipped": 1,
+      "failures": 0,
+      "errors": 0,
+      "skip_reason": "Full signed runtime archive is not supplied to this source-level run."
+    },
+    "lint": "PASS",
+    "android_python_tests": {
+      "tests": 14,
+      "passed": 14
+    }
+  },
+  "limitations": [
+    "LAN URLs identify interface addresses only; they do not prove that another client can reach the service.",
+    "When multiple candidates exist without an active Wi-Fi/Ethernet address, no single LAN URL is asserted."
+  ],
+  "device_installed": "NOT RUN"
+}

@@ -16,6 +16,7 @@ import org.json.JSONObject;
 import org.json.JSONArray;
 
 public final class ServerService extends Service {
+    static final String NATIVE_BASE_URL = "http://127.0.0.1:8123";
     static volatile boolean active;
     static volatile boolean stopping;
     static volatile String status = "stopped", tunnelStatus = "disabled";
@@ -70,8 +71,24 @@ public final class ServerService extends Service {
     private void updateDns(RuntimeStore store) throws Exception {
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         JSONArray interfaces = new JSONArray(); Set<String> seen = new HashSet<>();
+        List<WebAccessMetadata.NetworkSnapshot> webNetworks = new ArrayList<>();
+        Network activeNetwork = cm.getActiveNetwork();
+        // getAllNetworks() returns networks currently connected to the system.
         for (Network network : cm.getAllNetworks()) {
             LinkProperties links = cm.getLinkProperties(network);
+            NetworkCapabilities capabilities = cm.getNetworkCapabilities(network);
+            if (links != null && capabilities != null) {
+                List<String> ipv4 = new ArrayList<>();
+                for (LinkAddress address : links.getLinkAddresses()) {
+                    if (address.getAddress() instanceof Inet4Address) {
+                        ipv4.add(address.getAddress().getHostAddress());
+                    }
+                }
+                webNetworks.add(new WebAccessMetadata.NetworkSnapshot(network.toString(), true,
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN), ipv4));
+            }
             if (links == null || links.getInterfaceName() == null || !seen.add(links.getInterfaceName())) continue;
             String name = links.getInterfaceName(); int index = android.system.Os.if_nametoindex(name);
             if (index < 1) continue;
@@ -84,7 +101,18 @@ public final class ServerService extends Service {
         if (loopback > 0) interfaces.put(new JSONObject().put("name", "lo").put("index", loopback).put("addresses", new JSONArray()
                 .put(new JSONObject().put("address", "127.0.0.1").put("prefix", 8))
                 .put(new JSONObject().put("address", "::1").put("prefix", 128))));
-        JSONObject snapshot = new JSONObject().put("schema", 1).put("updatedAt", System.currentTimeMillis() / 1000).put("interfaces", interfaces);
+        WebAccessMetadata.Result webAccess = WebAccessMetadata.resolve(NATIVE_BASE_URL,
+                activeNetwork == null ? null : activeNetwork.toString(), webNetworks);
+        JSONArray lanUrls = new JSONArray();
+        for (String url : webAccess.lanUrls) lanUrls.put(url);
+        JSONObject webAccessJson = new JSONObject()
+                .put("phone_url", webAccess.phoneUrl)
+                .put("lan_url", webAccess.lanUrl == null ? JSONObject.NULL : webAccess.lanUrl)
+                .put("lan_urls", lanUrls)
+                .put("external_reachability", "not_verified")
+                .put("source", WebAccessMetadata.SOURCE);
+        JSONObject snapshot = new JSONObject().put("schema", 1).put("updatedAt", System.currentTimeMillis() / 1000)
+                .put("interfaces", interfaces).put("web_access", webAccessJson);
         Path temporary = new File(getFilesDir(), "android-network.next").toPath();
         Files.write(temporary, snapshot.toString().getBytes(StandardCharsets.UTF_8));
         Files.move(temporary, new File(getFilesDir(), "android-network.json").toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -99,7 +127,7 @@ public final class ServerService extends Service {
     }
 
     static boolean healthy() {
-        return healthyAt("http://127.0.0.1:8123/api/habab_home/status");
+        return healthyAt(NATIVE_BASE_URL + "/api/habab_home/status");
     }
 
     static boolean healthyAt(String endpoint) {
