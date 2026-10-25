@@ -64,16 +64,26 @@ test("feedback receiver password draft survives a panel rerender", () => {
   const nodes = new Map();
   const node = () => {
     const item = {
-      listeners: new Map(), value: "", dataset: {},
+      listeners: new Map(), value: "", dataset: {}, selectionStart: 0,
+      selectionEnd: 0, selectionDirection: "none",
       addEventListener(name, listener) { this.listeners.set(name, listener); },
+      focus() { panel.shadowRoot.activeElement = this; },
+      setSelectionRange(start, end, direction) {
+        this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction;
+      },
       setAttribute() {}, querySelector() { return node(); },
     };
     return item;
   };
   panel.shadowRoot = {
-    set innerHTML(_value) { nodes.clear(); },
+    activeElement: null,
+    set innerHTML(_value) { nodes.clear(); this.activeElement = null; },
     querySelector(selector) {
-      if (!nodes.has(selector)) nodes.set(selector, node());
+      if (!nodes.has(selector)) {
+        const item = node();
+        item.id = selector.startsWith("#") ? selector.slice(1) : "";
+        nodes.set(selector, item);
+      }
       return nodes.get(selector);
     },
   };
@@ -90,9 +100,18 @@ test("feedback receiver password draft survives a panel rerender", () => {
   panel.render();
   const firstInput = panel.q("#feedback-delivery-token");
   firstInput.listeners.get("input")({ target: { value: "unsaved-fixture-token" } });
+  firstInput.selectionStart = 8;
+  firstInput.selectionEnd = 14;
+  firstInput.selectionDirection = "backward";
+  panel.shadowRoot.activeElement = firstInput;
   panel.render();
 
-  assert.equal(panel.q("#feedback-delivery-token").value, "unsaved-fixture-token");
+  const restoredInput = panel.q("#feedback-delivery-token");
+  assert.equal(restoredInput.value, "unsaved-fixture-token");
+  assert.equal(panel.shadowRoot.activeElement, restoredInput);
+  assert.equal(restoredInput.selectionStart, 8);
+  assert.equal(restoredInput.selectionEnd, 14);
+  assert.equal(restoredInput.selectionDirection, "backward");
 });
 
 test("initial selected provider does not override a tab chosen during load", async () => {

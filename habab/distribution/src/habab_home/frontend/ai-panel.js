@@ -132,6 +132,11 @@ class HababAIPanel extends HTMLElement {
     }).format(date);
   }
   render() {
+    const activeElement = this.shadowRoot.activeElement;
+    const restoreFeedbackTokenFocus = activeElement?.id === "feedback-delivery-token";
+    const feedbackTokenSelection = restoreFeedbackTokenFocus
+      ? [activeElement.selectionStart, activeElement.selectionEnd, activeElement.selectionDirection]
+      : null;
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;height:100%;overflow:auto;container-type:inline-size;color:var(--primary-text-color);background:var(--primary-background-color);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
       *{box-sizing:border-box}::selection{background:var(--primary-color);color:var(--text-primary-color,#fff)}
@@ -180,6 +185,13 @@ class HababAIPanel extends HTMLElement {
       <habab-telemetry-panel></habab-telemetry-panel></main>`;
     this.q("#feedback-delivery-token").value = this.feedbackCredentialDraft;
     this.q("#feedback-delivery-endpoint").textContent = this.t("feedbackDeliveryEndpoint");
+    if (restoreFeedbackTokenFocus) {
+      const input = this.q("#feedback-delivery-token");
+      input.focus();
+      if (Number.isInteger(feedbackTokenSelection[0]) && Number.isInteger(feedbackTokenSelection[1])) {
+        input.setSelectionRange(feedbackTokenSelection[0], feedbackTokenSelection[1], feedbackTokenSelection[2]);
+      }
+    }
     this.q("ha-menu-button").hass = this._hass;
     this.q("habab-telemetry-panel").hass = this._hass;
     this.q("nav").addEventListener("click", (event) => {
