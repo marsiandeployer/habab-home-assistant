@@ -40,6 +40,10 @@ function fail(code, error) {
   return failure;
 }
 
+function classifyWaitFailure(error, failureCode) {
+  return fail(failureCode, error);
+}
+
 function safeErrorName(error) {
   return error instanceof Error && /^[A-Za-z0-9_]{1,40}$/.test(error.name) ? error.name : 'Error';
 }
@@ -196,13 +200,20 @@ function hasOwnedStart(events, entityId, ownerId, turn, callbackEvents = []) {
 }
 
 function latestTurnMessageEvidence(messages, expectedText) {
-  if (!Array.isArray(messages)) return {latest_user_match: false, assistant_present: false, assistant_reply: ''};
+  if (!Array.isArray(messages)) return {latest_user_match: false, assistant_present: false, assistant_length: 0};
   const latestUserIndex = messages.findLastIndex((message) => message?.role === 'user');
   const latestUser = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
   const assistants = latestUserIndex >= 0 ? messages.slice(latestUserIndex + 1).filter((message) =>
     message?.role === 'assistant' && typeof message.text === 'string' && message.text.trim()) : [];
+  const latestAssistantText = assistants.at(-1)?.text || '';
   return {latest_user_match: latestUser?.text === expectedText,
-    assistant_present: assistants.length > 0, assistant_reply: assistants.at(-1)?.text || ''};
+    assistant_present: assistants.length > 0, assistant_length: latestAssistantText.length};
+}
+
+function firstMatchingSignal(events, predicate) {
+  if (!Array.isArray(events) || typeof predicate !== 'function') return null;
+  const index = events.findIndex(predicate);
+  return index >= 0 ? events[index] : null;
 }
 
 function hasVerifiedSendCompletion(events, caseId, baseline, messages, expectedText) {
@@ -212,6 +223,46 @@ function hasVerifiedSendCompletion(events, caseId, baseline, messages, expectedT
     chat_instance_id: baseline?.chatInstanceId}) && completed.length === 1 &&
     completed[0].accepted === true && completed[0].latest_user_match === true &&
     completed[0].assistant_present === true && currentTurn.latest_user_match && currentTurn.assistant_present;
+}
+
+function classifyTurnEvidence(events, caseId, monitorServiceCount = null) {
+  const signals = (Array.isArray(events) ? events : []).filter((event) => event?.case_id === caseId);
+  const count = (kind) => signals.filter((event) => event.kind === kind).length;
+  const probeReady = count('agent_run_probe_ready');
+  const starts = count('agent_run_started');
+  const acknowledgements = count('agent_run_ack');
+  const failures = count('agent_run_failed');
+  const promptMatches = signals.filter((event) => event.kind === 'agent_run_started' &&
+    event.prompt_match === true).length;
+  const matchingAcknowledgements = signals.filter((event) => event.kind === 'agent_run_ack' &&
+    event.prompt_match === true).length;
+  const matchingFailures = signals.filter((event) => event.kind === 'agent_run_failed' &&
+    event.prompt_match === true).length;
+  const failedRun = signals.find((event) => event.kind === 'agent_run_failed');
+  const runErrorCode = failures === 1 && typeof failedRun?.error_code === 'string' &&
+    /^[A-Za-z0-9_]{1,80}$/.test(failedRun.error_code) ? failedRun.error_code : null;
+  let submission = 'unknown';
+  if (probeReady === 1 && starts === 1 && promptMatches === 1 &&
+      (matchingAcknowledgements === 1 || matchingFailures === 1 ||
+        (Number.isInteger(monitorServiceCount) && monitorServiceCount > 0))) {
+    submission = 'submitted';
+  }
+  let acknowledged = null;
+  let terminal = 'unknown';
+  if (acknowledgements === 1 && matchingAcknowledgements === 1 && failures === 0 &&
+      starts === 1 && promptMatches === 1) {
+    acknowledged = true;
+    terminal = 'completed';
+  } else if (failures === 1 && matchingFailures === 1 && acknowledgements === 0 &&
+      starts === 1 && promptMatches === 1) {
+    acknowledged = false;
+    terminal = 'error';
+  }
+  return {submission, probe_ready_count: probeReady, agent_run_start_count: starts,
+    agent_run_ack_count: acknowledgements, agent_run_error_count: failures,
+    agent_run_error_code: runErrorCode,
+    acknowledged, terminal, monitor_service_count: Number.isInteger(monitorServiceCount)
+      ? monitorServiceCount : null};
 }
 
 function canAttemptEmergencyStop({ownedStart, bindingMatches, mappedSession, ownerAdmin, state}) {
@@ -365,8 +416,8 @@ async function waitUi(page, predicate, timeout, args, failureCode, polling = 250
   try {
     result = await page.waitForFunction(predicate, {timeout, polling}, args);
     return await result.jsonValue();
-  } catch {
-    throw fail(failureCode);
+  } catch (error) {
+    throw classifyWaitFailure(error, failureCode);
   } finally {
     await result?.dispose();
   }
@@ -435,9 +486,39 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
           chat_instance_id: this.__hababVacuumQaId, session_id: this.sessionId,
           owner_id: this.hass?.user?.id, submitted_length: submitted.length});
         let operation;
+        const originalCallWS = this.hass?.callWS;
+        let callWSProbe = null;
         try {
+          if (typeof originalCallWS !== 'function') throw new Error('agent_run_probe_unavailable');
+          callWSProbe = async function (message, ...wsArgs) {
+            if (message?.type !== 'habab_home/agent/run') {
+              return originalCallWS.apply(this, [message, ...wsArgs]);
+            }
+            const promptMatch = typeof message.text === 'string' && message.text.trim() === active.expected_text;
+            emit({kind: 'agent_run_started', case_id: active.case_id, prompt_match: promptMatch});
+            try {
+              const result = await originalCallWS.apply(this, [message, ...wsArgs]);
+              const messages = Array.isArray(result?.messages) ? result.messages : [];
+              emit({kind: 'agent_run_ack', case_id: active.case_id, prompt_match: promptMatch,
+                assistant_present: messages.some((item) => item?.role === 'assistant' &&
+                  typeof item.text === 'string' && item.text.trim())});
+              return result;
+            } catch (error) {
+              emit({kind: 'agent_run_failed', case_id: active.case_id,
+                prompt_match: promptMatch,
+                error_class: error instanceof Error && /^[A-Za-z0-9_]{1,40}$/.test(error.name)
+                  ? error.name : 'UnknownError',
+                error_code: typeof error?.code === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(error.code)
+                  ? error.code : null});
+              throw error;
+            }
+          };
+          this.hass.callWS = callWSProbe;
+          if (this.hass.callWS !== callWSProbe) throw new Error('agent_run_probe_unavailable');
+          emit({kind: 'agent_run_probe_ready', case_id: active.case_id});
           operation = this.__hababVacuumOriginalSend.apply(this, args);
         } catch (error) {
+          if (callWSProbe && this.hass?.callWS === callWSProbe) this.hass.callWS = originalCallWS;
           emit({kind: 'send_failed', case_id: active.case_id, error_class: error instanceof Error ? error.name : 'UnknownError'});
           throw error;
         }
@@ -454,6 +535,7 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
           errorClass = error instanceof Error ? error.name : 'UnknownError';
           throw error;
         } finally {
+          if (callWSProbe && this.hass?.callWS === callWSProbe) this.hass.callWS = originalCallWS;
           const messages = Array.isArray(this.messages) ? this.messages : [];
           const latestUserIndex = messages.findLastIndex((message) => message?.role === 'user');
           const latestUser = latestUserIndex >= 0 ? messages[latestUserIndex] : null;
@@ -468,7 +550,6 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
             final_busy: Boolean(this.busy), status_error: statusError,
             latest_user_match: latestUser?.text === active.expected_text,
             assistant_present: assistantsAfterLatestUser.length > 0,
-            assistant_reply: String(latestAssistant?.text || ''),
             assistant_length: String(latestAssistant?.text || '').length,
             elapsed_ms: Date.now() - startedAt, error_class: errorClass};
           active.completed = true;
@@ -493,7 +574,7 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (callbackEvents.some((event) => event.case_id === caseId && event.kind === 'send_failed')) throw fail('chat_send_failed');
-      const event = callbackEvents.find((item) => item.case_id === caseId && item.kind === kind);
+      const event = firstMatchingSignal(callbackEvents, (item) => item.case_id === caseId && item.kind === kind);
       if (event) return event;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
@@ -533,14 +614,13 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
   }
   turn.latest_user_match = messageEvidence.latest_user_match;
   turn.assistant_present = messageEvidence.assistant_present;
-  turn.assistant_reply = messageEvidence.assistant_reply;
+  turn.assistant_length = messageEvidence.assistant_length;
   delete turn.messages;
   if (!turn.same_chat || !turn.same_document || !turn.same_service_worker || !turn.same_session ||
       !turn.same_owner || !turn.idle || !turn.no_ui_error || turn.path !== '/home/overview') {
     throw fail('chat_turn_identity_or_completion_mismatch');
   }
-  turn.assistant_reply = messageEvidence.assistant_reply;
-  turn.assistant_reply_length = completed.assistant_length;
+  turn.assistant_length = completed.assistant_length;
   trace.turn = turn;
   trace.completed = true;
   return turn;
@@ -587,7 +667,9 @@ async function runChatAction({page, runtime, observer, identity, ownerId, sessio
   if (!start.observer.connected || !start.observer.owner_matches || start.observer.disconnected_count !== 0 ||
       !start.state || !spec.fromStates.includes(start.state.state)) throw fail(`vacuum_${spec.name}_precondition_mismatch`);
   const turnTrace = {name: spec.name, expected_service: spec.service, accepted: false, completed: false,
-    prompt: spec.prompt, service_event: null, state_before: start.state.state, state_after: null};
+    prompt_sha256: crypto.createHash('sha256').update(spec.prompt, 'utf8').digest('hex'),
+    prompt_length: spec.prompt.length, service_event: null,
+    state_before: start.state.state, state_after: null};
   turnTrace.case_id = crypto.randomUUID();
   turnTrace.event_offset = start.event_offset;
   turnTrace.session_id = sessionId;
@@ -596,11 +678,12 @@ async function runChatAction({page, runtime, observer, identity, ownerId, sessio
   turnTrace.chat_instance_id = trace.chat_instance;
   trace.turns.push(turnTrace);
   trace.current_turn = turnTrace;
-  trace.last_prompt = spec.prompt;
+  trace.last_prompt_sha256 = turnTrace.prompt_sha256;
+  trace.last_prompt_length = turnTrace.prompt_length;
   persistTrace(trace);
   const turn = await sendVisiblePrompt(page, spec.prompt, sessionId, ownerId, turnTrace, callbackEvents, turnTrace.case_id);
   await observeOneService(observer, start.event_offset, identity.entity_id, spec.service, ownerId);
-  turnTrace.assistant_reply_length = turn.assistant_reply.length;
+  turnTrace.assistant_length = turn.assistant_length;
   persistTrace(trace);
   const state = await waitForState(runtime, identity.entity_id, spec.states, spec.stateTimeout, trace, spec.name);
   await waitForQuietEvents(observer);
@@ -610,6 +693,9 @@ async function runChatAction({page, runtime, observer, identity, ownerId, sessio
   }
   turnTrace.service_event = serviceEvents[0];
   turnTrace.state_after = state.state;
+  report.chat_turn_evidence ||= {};
+  report.chat_turn_evidence[spec.name] = classifyTurnEvidence(callbackEvents, turnTrace.case_id,
+    serviceEvents.filter((event) => eventMatches(event, identity.entity_id, spec.service, ownerId)).length);
   report.actions[spec.name] = {chat_prompt_accepted: true, chat_reply_present: true,
     exact_target_service_event: true, authenticated_user_context: true, expected_state_reached: true,
     state: state.state};
@@ -874,13 +960,16 @@ async function main() {
       await page.exposeFunction('__hababVacuumQaSendSignal', (signal) => {
         const permitted = ['kind', 'case_id', 'document_marker', 'chat_instance_id', 'session_id', 'owner_id',
           'accepted', 'completed', 'final_busy', 'status_error', 'latest_user_match', 'assistant_present',
-          'assistant_reply', 'assistant_length', 'elapsed_ms', 'error_class', 'submitted_length'];
-        if (!signal || !['send_started', 'send_accepted', 'send_completed', 'send_failed'].includes(signal.kind)) return;
+          'assistant_length', 'elapsed_ms', 'error_class', 'error_code', 'submitted_length', 'prompt_match'];
+        if (!signal || !['send_started', 'send_accepted', 'send_completed', 'send_failed',
+          'agent_run_probe_ready', 'agent_run_started', 'agent_run_ack', 'agent_run_failed'].includes(signal.kind)) return;
         const event = {at: new Date().toISOString()};
         for (const key of permitted) {
           const value = signal[key];
           if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) {
-            event[key] = value;
+            if (key === 'error_class') event[key] = /^[A-Za-z0-9_]{1,40}$/.test(value) ? value : 'UnknownError';
+            else if (key === 'error_code') event[key] = typeof value === 'string' && /^[A-Za-z0-9_]{1,80}$/.test(value) ? value : null;
+            else event[key] = value;
           }
         }
         callbackEvents.push(event);
@@ -1036,6 +1125,13 @@ async function main() {
         const code = SAFE_CODE.test(error?.code || '') ? error.code :
           SAFE_CODE.test(error?.message || '') ? error.message : 'qa_failed';
         report.failure = {stage, code, source_error_name: safeErrorName(error)};
+        report.chat_turn_evidence = Object.fromEntries((trace.turns || []).map((turn) => {
+          const monitorCount = observer && target && ownerId
+            ? observer.events.slice(turn.event_offset).filter((event) =>
+              eventMatches(event, target.entity_id, turn.expected_service, ownerId)).length
+            : null;
+          return [turn.name, classifyTurnEvidence(trace.send_callbacks || [], turn.case_id, monitorCount)];
+        }));
         trace.failure = report.failure;
         trace.stage = stage;
         if (observer) trace.service_events = observer.events;
@@ -1091,7 +1187,8 @@ async function main() {
       report.finished_at = new Date().toISOString();
       updateJson(reportPath, report);
       process.stdout.write(`${JSON.stringify({verdict: report.verdict, stage,
-        actions: report.actions, final_state: report.final_state || null,
+        actions: report.actions, chat_turn_evidence: report.chat_turn_evidence || {},
+        final_state: report.final_state || null,
         emergency_recovery: report.emergency_recovery, report: reportPath})}\n`);
       if (report.verdict === 'FAIL' || report.verdict === 'BLOCKED') process.exitCode = 1;
     }
@@ -1100,7 +1197,9 @@ async function main() {
 
 module.exports = {eventMatches, canStartVacuumFrom, sameDeviceBinding, hasOwnedStart,
   latestTurnMessageEvidence, hasVerifiedSendCompletion,
-  canAttemptEmergencyStop, canAttemptEmergencyDock, emergencyRecoveryComplete, deriveDeviceIdentity};
+  firstMatchingSignal, classifyTurnEvidence, classifyWaitFailure,
+  canAttemptEmergencyStop, canAttemptEmergencyDock,
+  emergencyRecoveryComplete, deriveDeviceIdentity};
 
 if (require.main === module) {
   main().catch((error) => {

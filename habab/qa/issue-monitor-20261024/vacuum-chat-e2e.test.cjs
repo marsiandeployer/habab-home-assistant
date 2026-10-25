@@ -7,7 +7,10 @@ const {
   eventMatches,
   hasOwnedStart,
   latestTurnMessageEvidence,
+  firstMatchingSignal,
   hasVerifiedSendCompletion,
+  classifyTurnEvidence,
+  classifyWaitFailure,
   canAttemptEmergencyStop,
   canAttemptEmergencyDock,
   emergencyRecoveryComplete,
@@ -112,16 +115,17 @@ test('unverified dock call remains incomplete even if the readback later says do
     dockCall: {ws_result: true, event_verified: true}, dockedState}), true);
 });
 
-test('current turn correlation accepts multiple assistant bubbles in capped or replaced history', () => {
+test('current turn correlation returns only assistant presence and length', () => {
   const prompt = 'Run this vacuum action through chat';
   const capped = Array.from({length: 57}, (_, index) => ({role: index % 2 ? 'assistant' : 'user', text: `old ${index}`}));
   capped.push({role: 'user', text: prompt},
     {role: 'assistant', text: 'I am checking the request.'},
     {role: 'assistant', text: 'The requested action is complete.'});
   assert.equal(capped.length, 60);
-  assert.deepEqual(latestTurnMessageEvidence(capped, prompt), {
-    latest_user_match: true, assistant_present: true, assistant_reply: 'The requested action is complete.',
-  });
+  const cappedEvidence = latestTurnMessageEvidence(capped, prompt);
+  assert.deepEqual(cappedEvidence, {latest_user_match: true, assistant_present: true,
+    assistant_length: 'The requested action is complete.'.length});
+  assert.equal(Object.hasOwn(cappedEvidence, 'assistant_reply'), false);
 
   const replaced = [
     {role: 'assistant', text: 'Historical assistant response.'},
@@ -130,7 +134,7 @@ test('current turn correlation accepts multiple assistant bubbles in capped or r
     {role: 'assistant', text: 'Current final answer.'},
   ];
   assert.deepEqual(latestTurnMessageEvidence(replaced, prompt), {
-    latest_user_match: true, assistant_present: true, assistant_reply: 'Current final answer.',
+    latest_user_match: true, assistant_present: true, assistant_length: 'Current final answer.'.length,
   }, 'use the latest prompt and assistant messages after it after the history array is replaced');
   assert.equal(latestTurnMessageEvidence([
     {role: 'user', text: prompt}, {role: 'assistant', text: 'Old answer.'},
@@ -147,7 +151,7 @@ test('current turn correlation accepts multiple assistant bubbles in capped or r
     {kind: 'send_completed', case_id: 'case-1', completed: true, accepted: true, final_busy: false,
       status_error: false, latest_user_match: true, assistant_present: true,
       document_marker: 'doc-1', chat_instance_id: 'chat-1', session_id: 'session-1', owner_id: ownerId,
-      assistant_reply: 'Готово'},
+      assistant_length: 'Готово'.length},
   ];
   assert.equal(hasVerifiedSendCompletion(events, 'case-1', baseline, replaced, prompt), true);
   assert.equal(hasVerifiedSendCompletion(events, 'case-1', baseline, [
@@ -171,4 +175,60 @@ test('missing, failed, or replaced-document send callback cannot prove completio
   assert.equal(hasVerifiedSendCompletion(complete.map((event) => event.kind === 'send_completed'
     ? {...event, document_marker: 'replacement-doc'} : event), 'case-1', baseline, messages,
   'Run this vacuum action through chat'), false);
+});
+
+test('turn evidence keeps lost telemetry unknown and wait failures retain only safe classifications', () => {
+  const completed = classifyTurnEvidence([
+    {kind: 'agent_run_probe_ready', case_id: 'case-1'},
+    {kind: 'agent_run_started', case_id: 'case-1', prompt_match: true},
+    {kind: 'agent_run_ack', case_id: 'case-1', prompt_match: true},
+  ], 'case-1', 1);
+  assert.deepEqual(completed, {submission: 'submitted', probe_ready_count: 1,
+    agent_run_start_count: 1, agent_run_ack_count: 1, agent_run_error_count: 0,
+    agent_run_error_code: null,
+    acknowledged: true, terminal: 'completed', monitor_service_count: 1});
+
+  const lostTelemetry = classifyTurnEvidence([
+    {kind: 'agent_run_probe_ready', case_id: 'case-2'},
+  ], 'case-2', 0);
+  assert.equal(lostTelemetry.submission, 'unknown');
+  assert.equal(lostTelemetry.acknowledged, null);
+  assert.equal(lostTelemetry.terminal, 'unknown');
+
+  const unknown = classifyTurnEvidence([
+    {kind: 'agent_run_probe_ready', case_id: 'case-3'},
+    {kind: 'agent_run_started', case_id: 'case-3', prompt_match: true},
+  ], 'case-3', null);
+  assert.equal(unknown.submission, 'unknown');
+  assert.equal(unknown.acknowledged, null);
+  assert.equal(unknown.terminal, 'unknown');
+  assert.equal(unknown.monitor_service_count, null);
+
+  const monitorOnly = classifyTurnEvidence([
+    {kind: 'agent_run_probe_ready', case_id: 'case-4'},
+  ], 'case-4', 1);
+  assert.equal(monitorOnly.submission, 'unknown', 'an uncorrelated service event cannot prove this chat run');
+
+  const failed = classifyTurnEvidence([
+    {kind: 'agent_run_probe_ready', case_id: 'case-5'},
+    {kind: 'agent_run_started', case_id: 'case-5', prompt_match: true},
+    {kind: 'agent_run_failed', case_id: 'case-5', prompt_match: true, error_code: 'model_error'},
+  ], 'case-5', 0);
+  assert.equal(failed.submission, 'submitted');
+  assert.equal(failed.acknowledged, false);
+  assert.equal(failed.terminal, 'error');
+  assert.equal(failed.agent_run_error_code, 'model_error');
+
+  const timeout = Object.assign(new Error('private browser detail'), {name: 'TimeoutError'});
+  const failure = classifyWaitFailure(timeout, 'chat_reply_timeout');
+  assert.equal(failure.code, 'chat_reply_timeout');
+  assert.equal(failure.name, 'TimeoutError');
+  assert.equal(failure.message, 'chat_reply_timeout');
+});
+
+test('first matching callback at index zero is returned as a truthy signal object', () => {
+  const first = {kind: 'send_started', case_id: 'case-1'};
+  assert.equal(firstMatchingSignal([first, {kind: 'send_accepted', case_id: 'case-1'}],
+    (event) => event.kind === 'send_started'), first);
+  assert.equal(firstMatchingSignal([], () => true), null);
 });
