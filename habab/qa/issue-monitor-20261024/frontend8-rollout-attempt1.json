@@ -1,0 +1,14 @@
+{
+  "checked_at": "2026-10-25T08:40:00.410014+00:00",
+  "attempt": 1,
+  "result": "FAIL_ORIGINAL_RESTORED",
+  "failure": "docker_api_unavailable",
+  "verified_operator_defect": "Docker Unix HTTP timeout5s shorter than graceful stop30s",
+  "original_container_same_id": true,
+  "original_image": "sha256:22ae7a87f5286c37a02257dd61575e55f56ff4424a35d188e956a757c139634d",
+  "original_running": true,
+  "independent_authenticated_health_and_provider_readback": "PASS after rollback",
+  "mapped_session_active": false,
+  "root_fix": "bounded Docker HTTP timeout120s; native authenticated readiness polling fixed before execution",
+  "model_or_device_calls": 0
+}

@@ -1,0 +1,38 @@
+{
+  "checked_at": "2026-10-25T08:51:42.206Z",
+  "target": "https://habab-demo.wpmix.net/owner-test",
+  "expected_build": {
+    "image_digest": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source_commit": "f803277c68511622e3ad780d10a8a046cb9ef478"
+  },
+  "observed_build": {
+    "image_matches": true,
+    "base_candidate_receipt_matches": true,
+    "forward_hotfix_hashes_match": true,
+    "init_py_sha256": "b594844a055cab6b677788e69720f66450227474743b3db0b786ab7e97d980d1"
+  },
+  "status": "FAIL",
+  "test": "real service-worker activation while chat draft is dirty, then deferred reload after clean",
+  "results": {
+    "chat_bootstrap_ready": true,
+    "hashed_chat_entry_200": true,
+    "relative_strings_and_voice_modules_200": true,
+    "habab_home_module_404_count": 0,
+    "provider_api_ready": true,
+    "draft_dirty_through_real_controllerchange": false,
+    "controllerchange_count": 0,
+    "controllerchange_trusted_count": 0,
+    "top_document_reload_while_dirty": false,
+    "draft_retained_after_activation": false,
+    "global_dirty_cleared_by_real_input": false,
+    "deferred_reload_after_clean": false,
+    "same_owner_session_after_reload": false,
+    "model_run_frames": null,
+    "config_write_frames": null,
+    "call_service_events": 0,
+    "page_errors": 0,
+    "failed_responses": 2,
+    "native_editor_coexistence_browser_coverage": false
+  },
+  "limitation": "This browser run exercises the chat provider only; native editor coexistence is covered by source unit tests, not this browser scenario."
+}

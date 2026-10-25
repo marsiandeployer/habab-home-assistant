@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-10-25T08:43:26.069Z",
+  "target": "https://habab-demo.wpmix.net/owner-test",
+  "expected_build": {
+    "image_digest": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source_commit": "f803277c68511622e3ad780d10a8a046cb9ef478"
+  },
+  "observed_build": {
+    "image_matches": true,
+    "source_receipt_matches": true
+  },
+  "status": "FAIL",
+  "test": "real service-worker activation while chat draft is dirty, then deferred reload after clean",
+  "results": {
+    "provider_api_ready": false,
+    "draft_dirty_through_real_controllerchange": false,
+    "controllerchange_count": 0,
+    "controllerchange_trusted_count": 0,
+    "top_document_reload_while_dirty": false,
+    "draft_retained_after_activation": false,
+    "global_dirty_cleared_by_real_input": false,
+    "deferred_reload_after_clean": false,
+    "same_owner_session_after_reload": false,
+    "model_run_frames": null,
+    "config_write_frames": null,
+    "call_service_events": 0,
+    "page_errors": 0,
+    "failed_responses": 8,
+    "native_editor_coexistence_browser_coverage": false
+  },
+  "limitation": "This browser run exercises the chat provider only; native editor coexistence is covered by source unit tests, not this browser scenario."
+}

@@ -1,0 +1,16 @@
+{
+  "checked_at": "2026-10-25T08:51:07.569581+00:00",
+  "mode": "live_forward_hotfix",
+  "base_image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+  "base_source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+  "patched_init_sha256": "b594844a055cab6b677788e69720f66450227474743b3db0b786ab7e97d980d1",
+  "hashed_entry_and_imports_http": {
+    "/habab-home/2870095b9086708a.js": 200,
+    "/habab-home/voice.js": 200,
+    "/habab-home/strings.js": 200
+  },
+  "pinned_core_url_contract_test": "PASS with init source overlay",
+  "actual_browser_acceptance": "RUNNING separately",
+  "no_more_rollback_user_instruction": true,
+  "model_or_device_commands": 0
+}
