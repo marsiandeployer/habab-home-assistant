@@ -1,6 +1,6 @@
 # Issue #20: current-source review
 
-**Result:** one narrow late-event race was confirmed and fixed in `RealtimeVoice`; the model's semantic end policy and END-cue path already exist in Native17. No keyword classifier or prompt change was made. The remaining end-to-cue delay still includes the transcript journal drain, which cannot be separated safely within the owned Java file alone. No physical goodbye trace was available or collected.
+**Result:** one narrow late-event race was confirmed and fixed in `RealtimeVoice`; the model's semantic end policy and END-cue path already exist in Native17. No keyword classifier or prompt change was made. A passive monotonic timing hook now marks the semantic-end and local finish path without changing end behavior. No physical goodbye trace was available or collected, so the reported ~20-second delay remains unlocalized.
 
 ## Confirmed and fixed
 
@@ -14,14 +14,20 @@ On a normal end, `RealtimeVoice.finish()` stops playback/provider transport befo
 
 Moving the END callback ahead of the journal drain would currently let `VoiceService.endSession()` call `RealtimeVoice.close()`, which closes the history queue and can discard accepted writes. That requires coordinated lifecycle ownership of `VoiceService` and `VoiceHistoryQueue`, outside this issue assignment's edit scope. No such change was made; the queue's existing 1,500 ms failure bound is retained.
 
+## Bounded timing hook
+
+`RealtimeVoice.timing()` records fixed-name millisecond values in the existing `timingsMs` status map and `HababVoiceTiming` log. The end markers are `end_tool_event_received_elapsed_ms` and `end_tool_accepted_elapsed_ms` (absolute `SystemClock.elapsedRealtime()` values), `end_tool_dispatch_ms` (event-to-acceptance duration), then `end_finish_enter_ms`, `end_playback_stopped_ms` or `end_playback_stop_failed_ms`, `end_socket_cancel_requested_ms`, and `end_history_drained_ms` or `end_history_failed_ms`, followed by `end_listener_callback_ms`. The latter durations are measured from acceptance.
+
+`VoiceService` adds `lastCueElapsedRealtimeAt` and `lastCueCompletedElapsedRealtimeAt` beside the existing `lastCue` status. They use the same monotonic clock; `-1` means the cue has not completed yet. Together these fields let a later status readback measure end-event-to-END-cue request and completion without retaining audio or transcript text.
+
 ## Evidence and verification
 
 - Native17 handoff says the end policy/cues are present in the installed APK/runtime, but fresh acoustic acceptance is absent: `habab/android/qa/handoff-20261025-android-to-web.md`.
 - Existing text-only Gemini receipt checks explicit-goodbye tool selection, but it does not test P30 microphone timing, playback, or END: `habab/android/qa/voice/native15-policy-smalltalk-end-guards.json`.
-- Added a regression test for the send gate: late unscoped sends are rejected while ending; current-epoch sends remain allowed for an active session.
-- Focused verification passed: `timeout 120s gradle --no-daemon -p habab/android :app:testDebugUnitTest --tests ru.habab.home.RealtimeVoiceSendGateTest`.
-- `git diff --check` passed. No APK assembly, phone, audio, model, or server process was exercised.
+- The send-gate regression test rejects late unscoped sends while ending and preserves current-epoch sends during an active session; its earlier focused run passed.
+- Scoped Java compilation passed: `timeout 120s gradle --no-daemon -p habab/android :app:compileDebugJavaWithJavac`.
+- No APK assembly, phone, audio, model, or server process was exercised.
 
 ## Next physical measurement
 
-On the installed Native17 P30, capture a privacy-safe monotonic timing trace for one explicit «пока» and one standalone final «спасибо»: speech-stop/VAD, `end_voice_session` receipt, `finish()` entry, audio upload stop, socket cancel, transcript-drain completion or failure, END cue request/play completion, and return to wake. Do not retain audio or full transcript. Repeat with an active HA tool held open when the operator can safely provide that scenario; confirm its late result is not sent after `ending` and that no post-END audio is uploaded. This is required to distinguish semantic selection delay from local journal/cue delay and to complete the issue's P30 acceptance.
+After normal P30 unlock, use one explicit «Пока» turn and read only the `timingsMs` end markers plus `lastCueElapsedRealtimeAt` and `lastCueCompletedElapsedRealtimeAt` from `voice-status.json`. Check the cue is `end`, `lastCueCompleted` is true, and the END-to-cue intervals are plausible. Do not retain audio or transcript text. The current `native15-policy-smalltalk-end-guards.json` remains useful for the text-only semantic case; it does not replace this physical measurement. A held-open HA tool and post-END upload check remain separate follow-up coverage.
