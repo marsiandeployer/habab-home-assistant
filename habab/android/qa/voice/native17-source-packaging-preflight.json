@@ -1,0 +1,18 @@
+{
+  "kind": "native17_clean_committed_source_packaging_check",
+  "source_commit": "1b7034a89c40ed574417d69018d8211222fdbc22",
+  "source_files": 62,
+  "required_files_sha256": {
+    "src/habab_home/setup_agent.py": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+    "src/habab_telegram/transport.py": "344742a87bf4025069b5180d6d6c8cda0e9039a20741497b09ddf2a5612d12df",
+    "telegram-agent/relay-fetch.mjs": "cd86cb8932343f984bd82e12b3a0adf55bb5fd112c7a65424459a12a0ba5b53f",
+    "telegram-agent/worker.mjs": "e17513d5b02dc9e3b5d629ba779d57f5e98819856a78e97a4041d448ce6d105d"
+  },
+  "new_telegram_transport_files_included": true,
+  "tests_and_node_modules_excluded": true,
+  "clean_git_archive_used": true,
+  "guest_runtime_not_started": true,
+  "runtime_archive_built": false,
+  "phone_changed": false,
+  "temporary_snapshot_removed_on_exit": true
+}

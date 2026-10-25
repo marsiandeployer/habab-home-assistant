@@ -1,0 +1,13 @@
+{
+  "kind": "native17_frontend_input_preparation",
+  "frontend_version": "20260930.4+habab.8",
+  "manifest_commit": "1b7034a89",
+  "sha256": "8aff0182e0665185edd42ff1659bc68247f39acc998f75f8232c6be750ef9f9a",
+  "bytes": 111324155,
+  "downloaded_and_hash_verified": true,
+  "cache_location": "/dev/shm/habab-native17-runtime-cache-20261025/native-frontend/8aff0182e0665185edd42ff1659bc68247f39acc998f75f8232c6be750ef9f9a",
+  "runtime_packaged": false,
+  "apk_built": false,
+  "phone_updated": false,
+  "pending": "Final committed shared Core freeze and cloud tool acceptance."
+}

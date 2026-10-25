@@ -1,0 +1,224 @@
+{
+  "kind": "native16_after_gateway_update_background_sample",
+  "adb_exact_device": true,
+  "version_name": "0.1.8-voice-preview",
+  "duration_seconds": 65.67,
+  "samples": 25,
+  "fresh_status_samples": 25,
+  "active_samples": 25,
+  "wake_phase_samples": 1,
+  "screen_off_samples": 25,
+  "core_pids_before": [
+    "22546"
+  ],
+  "core_pids_after": [
+    "22546"
+  ],
+  "core_pid_unchanged": true,
+  "public_gateway_ready": true,
+  "metadata_samples": [
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "wake",
+      "screen_off": true,
+      "wake_count": 3,
+      "capture_frames": 25793
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "connecting",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 25893
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "connecting",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 25995
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26095
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26296
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26396
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26497
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26698
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26799
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26899
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 26999
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 27200
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "thinking",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 27301
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 27401
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 27602
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 27702
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 27802
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "listening",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 27902
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 28102
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 28202
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 28302
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 4,
+      "capture_frames": 28402
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "connecting",
+      "screen_off": true,
+      "wake_count": 5,
+      "capture_frames": 28603
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "connecting",
+      "screen_off": true,
+      "wake_count": 5,
+      "capture_frames": 28703
+    },
+    {
+      "fresh": true,
+      "active": true,
+      "phase": "speech",
+      "screen_off": true,
+      "wake_count": 5,
+      "capture_frames": 28803
+    }
+  ],
+  "microphone_audio_or_transcripts_recorded": false,
+  "services_restarted": false,
+  "acceptance_limit": "Short current-device observation; not 48-hour, reboot, wake-phrase or new Native17 acceptance."
+}

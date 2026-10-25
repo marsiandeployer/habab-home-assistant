@@ -1,0 +1,31 @@
+{
+  "kind": "native17_clean_apk_build_acceptance",
+  "host_source": "af48e2f9a5139b48a7773463fcbf6f9445299f94",
+  "runtime_source": "3b59bd8df31bb0d648242885765ea4007eceac88",
+  "runtime_id": "2f94e2e4d62bf401",
+  "frontend": "20260930.4+habab.8",
+  "apk_sha256": "996f30dafaddae355f33b03ceb6fc5d6ee21afef7737658f1ae0e2ad9696b8ff",
+  "apk_bytes": 52487538,
+  "version_code": 17,
+  "version_name": "0.1.9-voice-preview",
+  "package": "ru.habab.home",
+  "minimum_sdk": 26,
+  "target_sdk": 28,
+  "signer_sha256": "d5847538e56e57c1b17ea394a8130cd593277033af7421e251babad6c25cf704",
+  "signer_matches_installed_native16_artifact": true,
+  "apk_zip_crc_valid": true,
+  "pinned_runtime_url": "https://habab-demo.wpmix.net/downloads/android/release-2f94e2e4d62bf401.json",
+  "gradle": {
+    "assemble": "PASS",
+    "lint": "PASS",
+    "unit": {
+      "tests": 92,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "actual_full_archive_installer_test": "PASS"
+  },
+  "phone_installed": false,
+  "runtime_published": false
+}

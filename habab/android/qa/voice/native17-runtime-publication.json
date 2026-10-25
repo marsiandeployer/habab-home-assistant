@@ -1,0 +1,21 @@
+{
+  "kind": "native17_runtime_publication_acceptance",
+  "runtime_id": "2f94e2e4d62bf401",
+  "runtime_sha256": "7a8ac16aab2cb04b6cdcd0da4dbb05f638918ecd7ed28b288d4cda51df0e595c",
+  "runtime_bytes": 874181326,
+  "signature_and_streamed_payload_verifier": "PASS",
+  "payload_regular_files": 156098,
+  "payload_symlinks": 1634,
+  "payload_regular_bytes": 2525903473,
+  "habab_source_files": 63,
+  "frontend": "20260930.4+habab.8",
+  "public_manifest_and_signature_exact_bytes": true,
+  "public_archive_full_download_sha256": "PASS",
+  "public_stream_elapsed_seconds": 74.29,
+  "retention_current": "2f94e2e4d62bf401",
+  "retention_previous": "2c6567223ad3ef6b",
+  "older_runtime_711_removed": true,
+  "apk_promoted_publicly": false,
+  "phone_updated": false,
+  "download_written_to_disk": false
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "native17_pinned_host_inputs",
+  "source": "frozen clean Native15/16 inputs, unchanged pinned model and JNI",
+  "destination": "/dev/shm/habab-native17-build-20261025",
+  "file_sha256": {
+    "assets/voice/model.zip": "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4",
+    "assets/voice/model.json": "0116a1c998bb16ae4b5082868a7a6375e8bcfeb02826c2e9c4d9a97f490832a4",
+    "jniLibs/arm64-v8a/libtalloc.so": "dda9a37e52b493906e488b5fd49195c43125378ae813943ca83d1e337143c6b8",
+    "jniLibs/arm64-v8a/libproot-loader.so": "1da54355333cca3fb6ee10e3b82a24df24fb230c99241ce83809bf9e240609b5",
+    "jniLibs/arm64-v8a/libproot.so": "5524ccd52dffccfbfecc8133d476140b2bb4dd2fc525289bf10f77976e04f7f7",
+    "jniLibs/arm64-v8a/libandroid-shmem.so": "428f148ee25677823bc01d0e49c49934fa9189dd34034d1b96ad73b6da08b5a5"
+  },
+  "snapshot_sources_not_yet_created": true,
+  "device_mutated": false
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "native17_artifact_source_provenance",
+  "runtime_commit": "3b59bd8df31bb0d648242885765ea4007eceac88",
+  "host_commit": "af48e2f9a5139b48a7773463fcbf6f9445299f94",
+  "manifest_source_files_equal_committed_bytes": 63,
+  "host_tracked_files_equal_committed_bytes": 167,
+  "launcher_equal_committed_bytes": true,
+  "native_frontend": "20260930.4+habab.8",
+  "dirty_source_overlay_used": false,
+  "phone_installed": false
+}

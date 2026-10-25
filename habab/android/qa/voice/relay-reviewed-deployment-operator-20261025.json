@@ -1,0 +1,67 @@
+{
+  "kind": "reviewed_voice_relay_deployment",
+  "mode": "EXECUTE_AFTER_EXPLICIT_PARENT_HANDOFF",
+  "outcome": "INCOMPLETE_FIX_FORWARD_REQUIRED",
+  "release_commit": "9c174aacc",
+  "release_source_sha256": "9741f2f84d1be886ec4eb7069d83d516751048da8955e43cb695f2c5e483ee29",
+  "browser_origin_added": "https://habab-demo.wpmix.net",
+  "execution_gates": {
+    "parent_go": true,
+    "cloud_handoff": true
+  },
+  "preflight": {
+    "selected_habab_service_key_hash_matches": true,
+    "google_key_source_unique_and_valid": true,
+    "google_catalog_validated_models": true,
+    "old_pm2_exact_identity_and_pid": true,
+    "old_pm2_sensitive_environment_present": true,
+    "old_relay_upstream_ready_local_and_public": true,
+    "exact_phone_and_core": true,
+    "fresh_voice_wake_idle": true
+  },
+  "deployment": {
+    "release_file_frozen": true,
+    "config_updated": true,
+    "voice_stopped": true,
+    "voice_off_readback": true,
+    "old_relay_stopped": true,
+    "new_relay_started": true,
+    "upstream_reenrolled_in_ram": true,
+    "local_health": true,
+    "public_health": true,
+    "local_capabilities": true,
+    "public_capabilities": true,
+    "pm2_saved": false,
+    "voice_stop_requested": true,
+    "voice_stop_command_nonzero": true,
+    "pm2_stop_command_nonzero": false,
+    "pm2_delete_command_nonzero": false,
+    "pm2_start_command_nonzero": false,
+    "new_process_identity_verified": true,
+    "new_relay_unenrolled_health": true
+  },
+  "voice_restore": {
+    "was_active_before": true,
+    "attempted": true,
+    "verified_wake": true
+  },
+  "secrets": {
+    "google_key_printed_or_persisted": false,
+    "service_key_printed_or_persisted": false,
+    "keys_in_argv_or_environment": false,
+    "raw_config_or_process_environment_persisted": false
+  },
+  "scope": {
+    "core_restarted": false,
+    "other_pm2_apps_restarted": false,
+    "tunnels_touched": false,
+    "browser_touched": false,
+    "telegram_bot_api_or_updates_called": false,
+    "model_generation_called": false,
+    "automatic_old_release_or_config_restore": false
+  },
+  "failure": {
+    "stage": "verify_core_pid_and_pm2_persistence",
+    "code": "other_pm2_dump_entries_changed"
+  }
+}

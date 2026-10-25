@@ -1,0 +1,13 @@
+{
+  "http_status": 200,
+  "manifest_id": "2f94e2e4d62bf401",
+  "archive_bytes": 874181326,
+  "archive_sha256": "7a8ac16aab2cb04b6cdcd0da4dbb05f638918ecd7ed28b288d4cda51df0e595c",
+  "elapsed_seconds": 0.44,
+  "kind": "native17_phone_guest_https_manifest_preflight",
+  "actual_native_updater_download": "NOT RUN",
+  "archive_downloaded": false,
+  "model_or_telegram_called": false,
+  "core_restarted": false,
+  "credentials_used": false
+}

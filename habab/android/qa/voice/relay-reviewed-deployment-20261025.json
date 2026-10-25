@@ -1,0 +1,24 @@
+{
+  "outcome": "PASS_REVIEWED_RELAY_DEPLOYED",
+  "original_operator_receipt_preserved": true,
+  "operator_false_failure": "PM2 save excludes pmx_module by installed Startup.js:509",
+  "excluded_modules": [
+    "pm2-logrotate"
+  ],
+  "regular_apps_dump_equal": true,
+  "pid": 286678,
+  "source_sha256": "9741f2f84d1be886ec4eb7069d83d516751048da8955e43cb695f2c5e483ee29",
+  "source_outside_mutable_checkout": true,
+  "local_public_health_and_capabilities": true,
+  "telegram_protocol": "telegram-bot-api-relay-v1",
+  "browser_origin": "https://habab-demo.wpmix.net",
+  "voice_active_wake_fresh": true,
+  "core_state": "RUNNING",
+  "core_version": "2026.10.2",
+  "core_pid": [
+    "22546"
+  ],
+  "model_generation_or_telegram_called": false,
+  "restart_or_reenrollment_repeated": false,
+  "credentials_printed_or_persisted": false
+}

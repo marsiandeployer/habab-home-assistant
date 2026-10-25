@@ -1,0 +1,14 @@
+{
+  "kind": "native17_runtime_working_input_cache_ram_copy",
+  "source": "/root/homeassistent/habab/android/build/runtime",
+  "destination": "/dev/shm/habab-native17-runtime-cache-20261025",
+  "bytes": 2827399935,
+  "entries": 172423,
+  "inventorySha256": "febfaebef58ffc461654fadcb2c3cdecffd6ee742d345ef0f78828e3f34c487f",
+  "sourceAndDestinationEqual": true,
+  "sourceDeleted": false,
+  "elapsedSeconds": 140.22,
+  "packagerLockAcquired": true,
+  "ownerAuthDataAbsent": true,
+  "purpose": "active Native17 packaging input; not a release archive"
+}
