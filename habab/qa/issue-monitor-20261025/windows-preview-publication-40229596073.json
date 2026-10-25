@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "run_id": 40229596073,
+  "run_url": "https://github.com/marsiandeployer/habab-home-assistant/actions/runs/40229596073",
+  "workflow_ref": "main",
+  "workflow_head_sha": "48c2c65586cf152ebb2f28a4287291e58e89a3b4",
+  "source_revision": "48c2c65586cf152ebb2f28a4287291e58e89a3b4",
+  "source_dirty": false,
+  "candidate_targets": [
+    "windows"
+  ],
+  "jobs": {
+    "resolve-source": "success",
+    "windows-source": "success",
+    "assemble-candidate": "success",
+    "linux-image": "skipped",
+    "android": "skipped"
+  },
+  "artifacts": [
+    {
+      "filename": "habab-home-windows-59d23122eb97.zip",
+      "url": "https://habab-demo.wpmix.net/downloads/habab-home-windows-59d23122eb97.zip",
+      "bytes": 281251,
+      "sha256": "59d23122eb972ba865f5e891a81bfc68b45fdd6979f76fdd80774cf9bd5459b8",
+      "public_get_status": 200,
+      "zip_crc_and_members": "pass",
+      "embedded_source_revision": "48c2c65586cf152ebb2f28a4287291e58e89a3b4"
+    },
+    {
+      "filename": "start-home-assistant-preview-0.3.6-59d23122eb97.bat",
+      "url": "https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-59d23122eb97.bat",
+      "bytes": 894,
+      "sha256": "982d8e10b9ae81a0c2f517cacdd46a78d9d987ba7807d29e89014411ae1c14ee",
+      "public_get_status": 200,
+      "pins_zip_filename_and_sha256": true
+    },
+    {
+      "filename": "windows-preview-0.3.6-59d23122eb97.json",
+      "url": "https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-59d23122eb97.json",
+      "bytes": 625,
+      "sha256": "a9c077968f23d370904a84fc57f0f4ad04522fda7733c4c5e691244a6f9f76d9",
+      "public_get_status": 200,
+      "source_revision": "48c2c65586cf152ebb2f28a4287291e58e89a3b4"
+    }
+  ],
+  "payload_bytes_total": 282770,
+  "frontend9": {
+    "version": "20260930.4+habab.9",
+    "url": "https://habab-demo.wpmix.net/downloads/native-frontend/9faecade64144e2a6af3c3a4edc951e183292eaab0147cc49f85f8ec555d2952/home_assistant_frontend-20260930.4+habab.9-py3-none-any.whl",
+    "head_status": 200,
+    "downloaded_bytes": 0
+  },
+  "retention": {
+    "state": "/root/tools/release-retention/states/habab-windows-preview.json",
+    "root": "/root/homeassistent/habab/public/downloads",
+    "current": "preview-0.3.6-59d23122eb97",
+    "current_artifacts": [
+      "habab-home-windows-59d23122eb97.zip",
+      "start-home-assistant-preview-0.3.6-59d23122eb97.bat",
+      "windows-preview-0.3.6-59d23122eb97.json"
+    ],
+    "previous": "preview-0.3.6-45203ea388bf",
+    "previous_artifacts": [
+      "habab-home-windows-45203ea388bf.zip",
+      "start-home-assistant-preview-0.3.6-45203ea388bf.bat"
+    ],
+    "excluded_metadata_alias": "windows-preview-0.3.6.json",
+    "preview_status": "PREVIEW",
+    "apply_status": "APPLY",
+    "candidates": [],
+    "deleted": [],
+    "net_free_bytes": 0
+  },
+  "boundaries": {
+    "stable_windows_package_manifest_changed": false,
+    "generic_launchers_changed": false,
+    "generic_preview_metadata_changed": false,
+    "site_cta_changed": false,
+    "physical_windows_run": "NOT_RUN",
+    "linux_android_builds": "NOT_RUN",
+    "stable_promotion": "NOT_DONE"
+  },
+  "stage_directory_removed": true,
+  "artifact_retention_expires_at_utc": {
+    "candidate_windows": "2026-10-26T20:11:46Z",
+    "candidate_manifest": "2026-10-26T20:11:54Z"
+  }
+}

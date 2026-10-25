@@ -8,3 +8,11 @@
 - The package includes Node `24.18.1-r0`, Chromium `155.0.8059.84-r0`, and Kurigram `2.2.26`.
 
 Publication, phone installation, Chromium execution, APK hook execution, and physical acceptance are **NOT RUN**. This verification does not accept browser automation or Android behavior.
+
+## Subsequent publication update
+
+Runtime `release-3149ea67a5e9691e` has since been published. Its manifest and
+signature passed exact public GET readback; the archive was checked by HEAD and
+a 64 KiB range, while its full SHA-256 was verified only against the local
+canonical archive. Runtime retention is current `3149ea67a5e9691e`, previous
+`2f94e2e4d62bf401`. See the [bounded delivery readback](public-delivery-readback-20261025.md).
