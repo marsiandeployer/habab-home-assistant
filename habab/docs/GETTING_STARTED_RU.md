@@ -1,15 +1,15 @@
 # Установка и первый запуск Habab Home
 
-Habab Home — локальный Docker-дистрибутив Home Assistant. На [странице загрузки Habab Home](https://habab.ru/home-assistant) опубликован Windows ZIP 0.3.1. В текущем checkout интеграция `habab_home` объявляет версию 0.3.6 в `const.py` и `manifest.json`, а `release.json` и Compose tag содержат 0.3.4. Это разные версии компонентов и пакета; Windows ZIP остаётся отдельным стабильным выпуском. Остальные разделы описывают текущий исходный код; расположение отдельных элементов в ZIP 0.3.1 может отличаться.
+Habab Home — локальный Docker-дистрибутив Home Assistant. На [странице загрузки Habab Home](https://habab.ru/home-assistant) кнопка Windows скачивает BAT-загрузчик `start-home-assistant.bat`. Он загружает и проверяет SHA-256 стабильного ZIP 0.3.1, распаковывает пакет в `%LOCALAPPDATA%\HababHome` и запускает его. В Git checkout используется другой BAT — `habab/distribution/start-windows.bat`; он собирает исходники checkout. Текущий исходный кандидат и интеграция имеют версию 0.3.6; пакетный `release.json` и Compose tag пока содержат 0.3.4. Это отдельные метаданные, а не версия стабильного ZIP. Остальные разделы описывают текущий исходный код; расположение отдельных элементов в ZIP 0.3.1 может отличаться.
 
 ## Windows
 
 1. Установите и запустите Docker Desktop для Windows. Дождитесь статуса **Engine running**.
-2. Скачайте Windows ZIP, распакуйте его в постоянную папку и запустите `start-windows.bat`. Если Windows или Docker Desktop запросит перезагрузку, сделайте это и снова запустите BAT из той же папки.
+2. Для готового стабильного пакета нажмите **Скачать для Windows** на странице загрузки и запустите скачанный `start-home-assistant.bat`. Загрузчик сам получает проверенный ZIP, распаковывает его в `%LOCALAPPDATA%\HababHome` и запускает установку. Если вы уже скачали и распаковали ZIP вручную, запустите внутри него `start-windows.bat`. Если Windows или Docker Desktop запросит перезагрузку, сделайте это и снова запустите тот же BAT.
 3. Откройте [http://127.0.0.1:8123](http://127.0.0.1:8123) и создайте владельца Home Assistant. Готовой пары логин/пароль в пакете нет.
 4. В разделе **AI** добавьте собственного провайдера и проверьте подключение. После входа администратора откроется чат Habab Home.
 
-BAT из Git checkout находится в `habab/distribution/start-windows.bat`. Для запуска исходников клонируйте репозиторий и запустите отслеживаемый файл из корня:
+Для исходников Git checkout запустите именно `habab/distribution/start-windows.bat` из корня репозитория. Не используйте для checkout скачанный `start-home-assistant.bat`: он устанавливает стабильный ZIP в `%LOCALAPPDATA%\HababHome`.
 
 ```powershell
 git clone https://github.com/marsiandeployer/habab-home-assistant.git
