@@ -1,0 +1,16 @@
+{
+  "source_revision": "9e22386e9a0d64527fadaba5290b5b6758792e11",
+  "source_snapshot": "git archive committed distribution",
+  "canonical_package_builder": true,
+  "metadata_and_sha256_readback": true,
+  "zip_crc_and_each_member_source_comparison": true,
+  "bootstrap_sha_pins": true,
+  "package": {
+    "filename": "habab-home-windows-fa2a889a7bed.zip",
+    "sha256": "fa2a889a7bed74dbc9ec07d7cc802b61419eec3e83c4d863a89c03b35e245418",
+    "bytes": 277918
+  },
+  "published": false,
+  "physical_windows_run": false,
+  "temporary_snapshot_removed_on_exit": true
+}

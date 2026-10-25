@@ -1,0 +1,376 @@
+name: Habab release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Full commit SHA or existing tag (branches are rejected)
+        required: true
+        type: string
+      include_android:
+        description: Attempt Android only with a same-source signed runtime and configured signing secrets
+        required: false
+        default: false
+        type: boolean
+      android_runtime_manifest_url:
+        description: HTTPS URL of an already signed runtime manifest carrying sourceRevision
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-source:
+    runs-on: ubuntu-latest
+    outputs:
+      source_revision: ${{ steps.resolve.outputs.source_revision }}
+    steps:
+      - id: resolve
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config extensions.partialClone origin
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          if [[ "$SOURCE_REF" =~ ^[0-9a-f]{40,64}$ ]]; then
+            git fetch --filter=blob:none --no-tags origin "$SOURCE_REF"
+            resolved=$(git rev-parse --verify "$SOURCE_REF^{commit}")
+            [[ "$resolved" == "$SOURCE_REF" ]] || { echo '::error::Commit SHA did not resolve exactly'; exit 1; }
+          else
+            [[ "$SOURCE_REF" != refs/* && "$SOURCE_REF" != -* ]] && git check-ref-format "refs/tags/$SOURCE_REF" || { echo '::error::Pass a valid tag name or full SHA, not a branch/ref path'; exit 1; }
+            git fetch --filter=blob:none --no-tags origin "refs/tags/$SOURCE_REF:refs/tags/$SOURCE_REF"
+            resolved=$(git rev-parse --verify "refs/tags/$SOURCE_REF^{commit}") || { echo '::error::The requested tag does not exist'; exit 1; }
+          fi
+          git fetch --filter=blob:none --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$resolved" refs/remotes/origin/main; then
+            echo '::error::Selected source is not an ancestor of current origin/main'; exit 1
+          fi
+          echo "source_revision=$resolved" >> "$GITHUB_OUTPUT"
+
+  windows-source:
+    needs: resolve-source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch only Windows package source blobs
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config extensions.partialClone origin
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git fetch --filter=blob:none --no-tags --depth=1 origin "$SOURCE_REVISION"
+          git sparse-checkout init --cone
+          git sparse-checkout set habab/distribution
+          git checkout --detach FETCH_HEAD
+      - name: Create exact-source Windows distribution snapshot
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Windows checkout does not match the selected source'; exit 1; }
+          git diff --quiet && git diff --cached --quiet || { echo '::error::Windows checkout is dirty'; exit 1; }
+          snapshot=$(mktemp -d "$RUNNER_TEMP/habab-source.XXXXXX")
+          trap 'rm -rf "$snapshot"' EXIT
+          git archive "$SOURCE_REVISION" habab/distribution | tar -x -C "$snapshot"
+          HABAB_SOURCE_REVISION="$SOURCE_REVISION" HABAB_SOURCE_DIRTY=false \
+            python3 "$snapshot/habab/distribution/package-windows.py"
+          mkdir -p candidate/windows
+          python3 - "$snapshot/habab/public/downloads" candidate/windows "$SOURCE_REVISION" <<'PY'
+          import json
+          from pathlib import Path
+          import shutil
+          import sys
+          source = Path(sys.argv[1])
+          destination = Path(sys.argv[2])
+          revision = sys.argv[3]
+          metadata = json.loads((source / 'windows-package.json').read_text())
+          for name in (metadata['filename'], 'windows-package.json', 'start-home-assistant.bat',
+                       'start-xiaomi-home.bat', 'support_tunnel.bat'):
+              path = source / name
+              if not path.is_file():
+                  raise SystemExit(f'Canonical Windows builder output is missing: {name}')
+              shutil.copy2(path, destination / name)
+          (destination / 'status.json').write_text(json.dumps({
+              'state': 'built', 'source_revision': revision,
+              'source_dirty': False, 'kind': 'installer-package',
+              'filename': metadata['filename']}, sort_keys=True) + '\n')
+          PY
+          windows_zip=$(python3 -c 'import json; print(json.load(open("candidate/windows/windows-package.json"))["filename"])')
+          unzip -t "candidate/windows/$windows_zip"
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: candidate-windows
+          path: candidate
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-image:
+    needs: resolve-source
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            artifact: linux-amd64
+          - platform: linux/arm64
+            artifact: linux-arm64
+    steps:
+      - name: Fetch only Linux image source blobs
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config extensions.partialClone origin
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git fetch --filter=blob:none --no-tags --depth=1 origin "$SOURCE_REVISION"
+          git sparse-checkout init --cone
+          git sparse-checkout set habab/distribution
+          git checkout --detach FETCH_HEAD
+      - uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
+      - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3.6.1
+      - name: Build Linux OCI candidate
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+          PLATFORM: ${{ matrix.platform }}
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Linux checkout does not match the selected source'; exit 1; }
+          git diff --quiet && git diff --cached --quiet || { echo '::error::Linux checkout is dirty'; exit 1; }
+          mkdir -p "candidate/$ARTIFACT"
+          docker buildx build --platform "$PLATFORM" --pull=false \
+            --build-arg "HABAB_SOURCE_REVISION=$SOURCE_REVISION" \
+            --build-arg HABAB_SOURCE_DIRTY=false \
+            --output "type=oci,dest=candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar" \
+            habab/distribution
+          printf '{"state":"built","source_revision":"%s","source_dirty":false,"platform":"%s"}\n' "$SOURCE_REVISION" "$PLATFORM" > "candidate/$ARTIFACT/status.json"
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: candidate-${{ matrix.artifact }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    needs: resolve-source
+    if: ${{ inputs.include_android }}
+    runs-on: ubuntu-latest
+    env:
+      RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
+      SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+    steps:
+      - name: Fetch only Android and distribution source blobs
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config extensions.partialClone origin
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git fetch --filter=blob:none --no-tags --depth=1 origin "$SOURCE_REVISION"
+          git sparse-checkout init --cone
+          git sparse-checkout set habab/android habab/distribution
+          git checkout --detach FETCH_HEAD
+      - name: Require real runtime and release signing inputs
+        run: |
+          set -euo pipefail
+          [[ -n "$RUNTIME_MANIFEST_URL" ]] || { echo '::error::RUNTIME_MANIFEST_URL is required when Android is requested'; exit 1; }
+          python3 - <<'PY'
+          from urllib.parse import urlsplit
+          from pathlib import Path
+          url = urlsplit(__import__('os').environ['RUNTIME_MANIFEST_URL'])
+          if (url.scheme != 'https' or url.hostname != 'habab-demo.wpmix.net'
+                  or url.username or url.password or url.query or url.fragment
+                  or not url.path.startswith('/downloads/android/')):
+              raise SystemExit('::error::Android runtime manifest must use the canonical HTTPS downloads path')
+          PY
+      - name: Verify same-source signed runtime input
+        env:
+          RUNTIME_PUBLIC_KEY: habab/android/app/src/main/assets/release/trusted-key.der
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Android checkout does not match the selected source'; exit 1; }
+          git diff --quiet && git diff --cached --quiet || { echo '::error::Android checkout is dirty'; exit 1; }
+          mkdir -p candidate/android runtime-input
+          curl --fail --location --silent --show-error "$RUNTIME_MANIFEST_URL" -o runtime-input/release.json
+          curl --fail --location --silent --show-error "$RUNTIME_MANIFEST_URL.sig" -o runtime-input/release.json.sig
+          openssl pkey -pubin -inform DER -in habab/android/app/src/main/assets/release/trusted-key.der \
+            -out runtime-input/runtime-public.pem
+          base64 --decode runtime-input/release.json.sig > runtime-input/signature
+          openssl dgst -sha256 -verify runtime-input/runtime-public.pem \
+            -signature runtime-input/signature runtime-input/release.json
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          distribution = Path('habab/distribution')
+          expected = {}
+          allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css'}
+          source_dirs = [distribution / 'src/habab_home', distribution / 'src/habab_telegram',
+                         distribution / 'telegram-agent']
+          for source_dir in source_dirs:
+              for path in sorted(source_dir.rglob('*')):
+                  relative = path.relative_to(distribution)
+                  if path.is_file() and path.suffix in allowed and not {
+                      '__pycache__', 'node_modules', 'tests', 'test', '.git'
+                  }.intersection(relative.parts):
+                      expected[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+          for name in ('habab-ha.py', 'install-xiaomi-home.py', 'xiaomi-home-release.json'):
+              path = distribution / name
+              expected[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+          release = json.loads(Path('runtime-input/release.json').read_text())
+          if release.get('sourceRevision') != os.environ['SOURCE_REVISION']:
+              raise SystemExit('::error::Signed runtime manifest must attest this exact sourceRevision')
+          if release.get('sourceFiles') != expected:
+              raise SystemExit('::error::Runtime sourceFiles do not match this exact checkout')
+          launcher = Path('habab/android/runtime/launch.py')
+          if release.get('androidLauncherSha256') != hashlib.sha256(launcher.read_bytes()).hexdigest():
+              raise SystemExit('::error::Android runtime launcher does not match this exact checkout')
+          # Match package_runtime.py's canonical seed append; no runtime filesystem is built here.
+          config = Path('habab/distribution/config/configuration.yaml').read_text()
+          config += '\nautomation: !include automations.yaml\nscript: !include scripts.yaml\nscene: !include scenes.yaml\nrecorder:\nhistory:\n'
+          if release.get('configurationSha256') != hashlib.sha256(config.encode()).hexdigest():
+              raise SystemExit('::error::Android runtime seed configuration does not match this exact checkout')
+          if network_tools := release.get('networkTools'):
+              lock = Path('habab/android/tools/network_tools/network-tools.lock.json')
+              if network_tools.get('lockSha256') != hashlib.sha256(lock.read_bytes()).hexdigest():
+                  raise SystemExit('::error::Android network-tools lock does not match this exact checkout')
+              for key, template in (
+                  ('browserLauncherSha256', 'habab/android/tools/network_tools/habab-browser'),
+                  ('pythonLauncherSha256', 'habab/android/tools/network_tools/habab-python-network'),
+              ):
+                  if network_tools.get(key) != hashlib.sha256(Path(template).read_bytes()).hexdigest():
+                      raise SystemExit('::error::Android network-tools launcher does not match this exact checkout')
+          url = release.get('url', '')
+          archive_url = urlsplit(url)
+          if (archive_url.scheme != 'https' or archive_url.hostname != 'habab-demo.wpmix.net'
+                  or archive_url.username or archive_url.password or archive_url.query
+                  or archive_url.fragment or not archive_url.path.startswith('/downloads/android/')):
+              raise SystemExit('::error::Runtime archive must use the canonical HTTPS downloads path')
+          archive_name = Path(archive_url.path).name
+          if not archive_name or archive_name in {'.', '..'}:
+              raise SystemExit('::error::Runtime archive URL has no safe filename')
+          Path('runtime-input/archive-url.txt').write_text(url)
+          PY
+          archive_url=$(cat runtime-input/archive-url.txt)
+          archive_name=${archive_url##*/}
+          curl --fail --location --silent --show-error "$archive_url" -o "runtime-input/$archive_name"
+          mkdir -p habab/android/dist
+          cp "runtime-input/$archive_name" habab/android/dist/
+          cp runtime-input/release.json habab/android/dist/
+          cp runtime-input/release.json.sig habab/android/dist/release.json.sig
+          python3 habab/android/tools/verify_runtime.py habab/android/dist/release.json --public-key "$RUNTIME_PUBLIC_KEY"
+          mkdir -p candidate/android
+          cp "habab/android/dist/$archive_name" candidate/android/
+          cp habab/android/dist/release.json* candidate/android/
+          printf '%s\n' "$RUNTIME_MANIFEST_URL" > habab/android/app/src/main/assets/release/default-url.txt
+      - uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
+        with:
+          gradle-version: '8.5'
+          cache-disabled: true
+          dependency-graph: disabled
+      - name: Build and test Android APK inputs
+        run: |
+          set -euo pipefail
+          gradle --no-daemon -p habab/android :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+      - name: Sign APK with release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.HABAB_ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HABAB_ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.HABAB_ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.HABAB_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keystore="$RUNNER_TEMP/habab-release.jks"
+          trap 'rm -f "$keystore"' EXIT
+          [[ -n "${ANDROID_KEYSTORE_BASE64:-}" ]] || { echo '::error::HABAB_ANDROID_KEYSTORE_BASE64 is required to sign Android APK'; exit 1; }
+          [[ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ]] || { echo '::error::HABAB_ANDROID_KEYSTORE_PASSWORD is required to sign Android APK'; exit 1; }
+          [[ -n "${ANDROID_KEY_ALIAS:-}" ]] || { echo '::error::HABAB_ANDROID_KEY_ALIAS is required to sign Android APK'; exit 1; }
+          [[ -n "${ANDROID_KEY_PASSWORD:-}" ]] || { echo '::error::HABAB_ANDROID_KEY_PASSWORD is required to sign Android APK'; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          unsigned=$(find habab/android/app/build/outputs/apk/release -name '*.apk' -print -quit)
+          test -n "$unsigned"
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$build_tools/zipalign" -p -f 4 "$unsigned" candidate/android/habab-home-unsigned-aligned.apk
+          "$build_tools/apksigner" sign --ks "$keystore" --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD \
+            --out candidate/android/habab-home-arm64.apk candidate/android/habab-home-unsigned-aligned.apk
+          "$build_tools/apksigner" verify --verbose candidate/android/habab-home-arm64.apk
+          rm candidate/android/habab-home-unsigned-aligned.apk
+          printf '{"state":"built","source_revision":"%s","source_dirty":false,"runtime_manifest":"%s"}\n' "$SOURCE_REVISION" "$RUNTIME_MANIFEST_URL" > candidate/android/status.json
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: candidate-android
+          path: candidate
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble-candidate:
+    needs: [resolve-source, windows-source, linux-image, android]
+    if: ${{ always() && needs.resolve-source.result == 'success' && needs.windows-source.result == 'success' && needs.linux-image.result == 'success' && (needs.android.result == 'success' || needs.android.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch only candidate manifest source blobs
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config extensions.partialClone origin
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git fetch --filter=blob:none --no-tags --depth=1 origin "$SOURCE_REVISION"
+          git sparse-checkout init --cone
+          git sparse-checkout set habab/distribution habab/scripts
+          git checkout --detach FETCH_HEAD
+      - name: Verify aggregation checkout
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Aggregation checkout does not match the candidate source'; exit 1; }
+          git diff --quiet && git diff --cached --quiet || { echo '::error::Aggregation checkout is dirty'; exit 1; }
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: candidate-*
+          path: candidate
+          merge-multiple: true
+      - name: Record checksums and explicit platform status
+        env:
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate/android
+          if [[ "$ANDROID_RESULT" == skipped ]]; then
+            printf '{"state":"blocked","source_revision":"%s","source_dirty":false,"reason":"Android was not requested; a signed same-source runtime input and release signing secrets are required"}\n' "$SOURCE_REVISION" > candidate/android/status.json
+            android_state=blocked
+          else
+            android_state=built
+          fi
+          python3 habab/scripts/release-candidate.py --root candidate --source-tree . --source-revision "$SOURCE_REVISION" --android-state "$android_state" --output candidate/release-candidate.json
+          python3 -m json.tool candidate/release-candidate.json >/dev/null
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: habab-release-candidate-${{ needs.resolve-source.outputs.source_revision }}
+          path: candidate/release-candidate.json
+          if-no-files-found: error
+          retention-days: 14

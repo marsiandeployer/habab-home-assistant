@@ -34,8 +34,10 @@ if [ ! -f "$HOME/.local/share/habab-android/release-signing.pem" ]; then
     -out "$HOME/.local/share/habab-android/release-signing.pem"
 fi
 
+# Используйте полный SHA чистого коммита, который войдёт в выпуск.
 python3 habab/android/tools/package_runtime.py \
   --signing-key "$HOME/.local/share/habab-android/release-signing.pem" \
+  --source-revision "$(git rev-parse HEAD)" \
   --public-base https://habab-demo.wpmix.net/downloads/android
 
 ANDROID_HOME=/opt/android-sdk gradle --no-daemon -p habab/android \
