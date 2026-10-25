@@ -4,9 +4,6 @@ from datetime import timedelta
 from ipaddress import ip_address
 import logging
 import os
-import json
-from pathlib import Path
-import time
 
 from zeroconf import AddressResolver
 from zeroconf.asyncio import AsyncServiceInfo
@@ -17,6 +14,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.start import async_at_started
 
 from .const import DOMAIN
+from .android_network import load_network_snapshot
 
 _LOGGER = logging.getLogger(__name__)
 HOST = "homeassistant.local."
@@ -36,12 +34,7 @@ def lan_addresses(addresses):
 
 def android_wifi_addresses():
     """Use the app's ConnectivityManager snapshot, excluding the SIM interface."""
-    raw = Path("/run/habab-network.json").read_text()
-    if len(raw) > 65536:
-        raise ValueError("network_snapshot_too_large")
-    data = json.loads(raw)
-    if data.get("schema") != 1 or abs(time.time() - data.get("updatedAt", 0)) > 120:
-        raise ValueError("network_snapshot_stale")
+    data = load_network_snapshot()
     return lan_addresses([item["address"] for interface in data["interfaces"]
                           if interface["name"].startswith(("wlan", "swlan", "ap", "eth"))
                           for item in interface["addresses"]])

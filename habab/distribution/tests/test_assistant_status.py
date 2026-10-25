@@ -2,8 +2,10 @@
 import json
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from homeassistant.components.habab_home.assistant_status import get_assistant_status
+from homeassistant.components.habab_home import assistant_status
 from homeassistant.components.habab_home.const import DOMAIN
 from homeassistant.components.habab_home.gemini_live import DEFAULT_MODEL
 from homeassistant.components.habab_home.setup_agent import AgentError, PROMPT
@@ -84,6 +86,18 @@ class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(deepseek["voice"]["selected_provider_supports_realtime"])
         self.assertIsNone(deepseek["voice"]["selected_provider_protocol"])
         self.assertIsNone(deepseek["voice"]["default_voice_model"])
+
+    async def test_android_web_access_is_in_text_runtime_status(self):
+        web_access = {
+            "status": "available", "phone_url": "http://127.0.0.1:8123",
+            "lan_url": "http://192.168.1.42:8123",
+            "lan_urls": ["http://192.168.1.42:8123"],
+            "external_reachability": "not_verified",
+            "source": "android_connectivity_manager",
+        }
+        with patch.object(assistant_status, "web_access_context", return_value=web_access):
+            result = await self.status({"provider": "habab", "api_key": "fixture-key"})
+        self.assertEqual(result["web_access"], web_access)
 
     async def test_absent_or_unknown_provider_reports_no_selected_transport(self):
         hass = SimpleNamespace(data={DOMAIN: {

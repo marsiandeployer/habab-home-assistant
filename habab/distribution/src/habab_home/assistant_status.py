@@ -2,6 +2,7 @@
 import os
 
 from .const import DOMAIN, VERSION
+from .android_network import web_access_context
 from .runtime_context import DOCKER_RUNTIME_KIND, RUNTIME_KIND_ENV
 
 
@@ -36,6 +37,7 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
     return {
         "assistant": "Habab", "version": VERSION,
         "ha_runtime": os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND),
+        "web_access": web_access_context(),
         "selected_provider": settings.get("provider"),
         "selected_text_model": settings.get("model"),
         "voice": {

@@ -1,0 +1,33 @@
+{
+  "status": "SOURCE_TESTS_PASS_PHYSICAL_NOT_RUN",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/android_network.py": "bbafbb4451a3ec555500841ee26677c81fe72835049eed0a44ee9831adc78741",
+    "habab/distribution/src/habab_home/assistant_status.py": "18770b50ba6b41c00527278cf63c73360b1c5137ffc0da7a9653eeb3b06fd22a",
+    "habab/distribution/src/habab_home/mdns.py": "27d44b0422310e558cbafe68a1ef9ed3605cc1d06c04f1e95745f9aac3092351",
+    "habab/distribution/src/habab_home/voice_context.py": "d33622a056be91daf78fcedf72173a2fdbdb76913e08e7d3c2db4addf4a7e05f",
+    "habab/distribution/tests/test_android_network.py": "b829d3c7fa70ea56ceeb88109a6dc74463039bf61c048d7b9fe68f5636e8c395",
+    "habab/distribution/tests/test_assistant_status.py": "f694930053f016e466d88e2a5308188879c3de4aef2114e650fde5a550b53f68",
+    "habab/distribution/tests/test_voice_context.py": "fb1568a11b37fe1976aa897a969ba8d7bc59b9cf638a47f903fda7b047e6c933"
+  },
+  "root_independent_tests": {
+    "count": 22,
+    "modules": [
+      "test_android_network",
+      "test_android_mdns",
+      "test_voice_context",
+      "test_assistant_status"
+    ],
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "isolation": "network none, source/tests read-only"
+  },
+  "contract": {
+    "snapshot_schema": 1,
+    "max_read_bytes": 65537,
+    "freshness_seconds": 120,
+    "phone_url_scope": "same Android phone",
+    "lan_url_scope": "same-LAN candidate, externally unverified",
+    "invalid_or_non_android": "unknown"
+  },
+  "runtime_installation": "NOT_RUN",
+  "physical_LAN_browser": "NOT_RUN"
+}

@@ -70,6 +70,18 @@ class VoiceContextTests(unittest.TestCase):
         self.assertEqual(result["max_age_seconds"], 30)
         self.assertEqual(result["snapshot_kind"], "observed_home_state")
 
+    def test_validated_android_web_access_is_carried_in_voice_context(self):
+        web_access = {
+            "status": "available", "phone_url": "http://127.0.0.1:8123",
+            "lan_url": "http://192.168.1.42:8123",
+            "lan_urls": ["http://192.168.1.42:8123"],
+            "external_reachability": "not_verified",
+            "source": "android_connectivity_manager",
+        }
+        with unittest.mock.patch.object(voice_context, "web_access_context", return_value=web_access):
+            result = voice_context.build_voice_context(self.hass)
+        self.assertEqual(result["web_access"], web_access)
+
     def test_only_assist_exposed_visible_allowlisted_weather_and_device_states_are_included(self):
         states = [
             make_state("climate.kitchen", "heat", name="Кухня", attributes={

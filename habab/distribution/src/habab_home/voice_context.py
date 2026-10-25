@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from homeassistant.components.habab_home.android_network import web_access_context
+
 try:
     from homeassistant.components.homeassistant import exposed_entities
     from homeassistant.helpers import area_registry, device_registry, entity_registry
@@ -84,11 +86,12 @@ def _clock(hass, now):
     }
 
 
-def _unknown_context(clock):
+def _unknown_context(clock, web_access):
     return {
         **clock,
         "snapshot_kind": "observed_home_state",
         "max_age_seconds": _MAX_AGE_SECONDS,
+        "web_access": web_access,
         "assist_exposure": "unknown",
         "weather": {"status": "unknown", "entities": []},
         "states": [],
@@ -149,7 +152,8 @@ def build_voice_context(hass, *, now=None) -> dict:
     snapshot with no entity data.
     """
     clock = _clock(hass, now)
-    context = _unknown_context(clock)
+    web_access = web_access_context()
+    context = _unknown_context(clock, web_access)
 
     should_expose = getattr(exposed_entities, "async_should_expose", None)
     if not callable(should_expose) or any(
@@ -199,6 +203,7 @@ def build_voice_context(hass, *, now=None) -> dict:
         return context
 
     context.update({
+        "web_access": web_access,
         "assist_exposure": "verified",
         "weather": {
             "status": "available" if weather else "unavailable",
@@ -216,6 +221,6 @@ def build_voice_context(hass, *, now=None) -> dict:
             context["weather"]["status"] = "available" if weather else "unavailable"
         else:
             # Fixed fields alone are tiny; this is a final defensive fallback.
-            return _unknown_context(clock)
+            return _unknown_context(clock, web_access)
         context["truncated"] = True
     return context
