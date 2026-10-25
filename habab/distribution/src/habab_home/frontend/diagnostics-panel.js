@@ -47,6 +47,7 @@ const copy = {
     conversation: "Conversation",
     events: "Recorded events",
     date: "Time",
+    timeUnavailable: "Time not recorded",
     event: "Event",
     details: "Details",
     userMessage: "User message",
@@ -148,6 +149,7 @@ const copy = {
     conversation: "Разговор",
     events: "Записанные события",
     date: "Время",
+    timeUnavailable: "Время не записано",
     event: "Событие",
     details: "Подробности",
     userMessage: "Сообщение пользователя",
@@ -884,7 +886,8 @@ class HababDiagnosticsPanel extends HTMLElement {
   renderEvent(event) {
     const item = el("li", "event");
     item.append(el("h3", "", diagnosticEventLabel(event, this.words)));
-    const time = el("time", "", formatDiagnosticTimestamp(event?.at, this.language));
+    const formattedTime = formatDiagnosticTimestamp(event?.at, this.language);
+    const time = el("time", "", formattedTime === "—" ? this.t("timeUnavailable") : formattedTime);
     if (typeof event?.at === "string") time.dateTime = event.at;
     item.append(time);
     if (event?.available === false || event?.kind === "stage_unavailable") {

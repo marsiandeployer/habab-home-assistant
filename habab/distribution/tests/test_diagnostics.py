@@ -59,6 +59,7 @@ def tool_messages():
              r'escaped_unicode={\"pass\\u0077ord\":\"short-escaped-unicode-secret\"}'},
             {"type": "tool", "tool": "habab-ha", "callID": "call-safe-1", "state": {
                 "status": "completed",
+                "time": {"start": 1792933200250, "end": 1792933200750},
                 "input": {"action": "states", "api_key": "nested-private",
                           "refreshToken": "camel-private", "OPENAI_API_KEY": "short-env-json",
                           "ssh_private_key": "short-json-private",
@@ -192,6 +193,10 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         result = next(event for event in events if event["stage"] == "tool_result")
         self.assertEqual(call["confirmation"], "runtime_call_recorded")
         self.assertEqual(call["correlation_id"], result["correlation_id"])
+        self.assertEqual(call["at"], "2026-10-25T13:00:00.250Z")
+        self.assertEqual(result["at"], "2026-10-25T13:00:00.750Z")
+        self.assertIsNone(call["duration_ms"])
+        self.assertEqual(result["duration_ms"], 500)
         self.assertEqual(call["input"]["api_key"], "[redacted]")
         self.assertEqual(call["input"]["ssh_private_key"], "[redacted]")
         self.assertEqual(call["input"]["signing_key"], "[redacted]")
@@ -200,6 +205,27 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(event["stage"] == "backend_accept" and event["available"] for event in events))
         self.assertTrue(any(event["stage"] == "backend_accept" and not event["available"] for event in events))
         self.assertFalse(payload["sources"]["native_assist_history"]["available"])
+
+    async def test_tool_events_do_not_substitute_parent_message_time_when_runtime_time_is_missing(self):
+        messages = [{
+            "info": {"role": "assistant", "time": {"created": 1792933200000,
+                                                        "completed": 1792933201000}},
+            "parts": [{"type": "tool", "tool": "habab-ha", "state": {
+                "status": "completed", "input": {"action": "states"}, "output": "ok",
+            }}],
+        }]
+
+        events = diagnostics.project_messages(None, messages, "web")
+
+        call, result = events
+        self.assertIsNone(call["at"])
+        self.assertIsNone(result["at"])
+        self.assertIsNone(call["duration_ms"])
+        self.assertIsNone(result["duration_ms"])
+        self.assertNotIn("_sort_at", json.dumps(events))
+        self.assertTrue(diagnostics._matches_window(
+            [call], diagnostics._parse_time("2026-10-25T00:00:00Z"),
+            diagnostics._parse_time("2026-10-26T00:00:00Z"), messages))
 
     async def test_projection_event_budget_stops_before_later_parts(self):
         messages = [{"info": {"role": "assistant", "time": {"created": 1792933200000,

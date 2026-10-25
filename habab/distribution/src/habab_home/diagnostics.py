@@ -584,6 +584,17 @@ def _duration_ms(message: dict) -> int | None:
     return min(int((ended - created).total_seconds() * 1000), 86_400_000)
 
 
+def _tool_timing(state: dict) -> tuple[datetime | None, datetime | None, int | None]:
+    """Read per-tool timestamps when the OpenCode record contains them."""
+    timing = state.get("time") if isinstance(state.get("time"), dict) else {}
+    started = _timestamp(timing.get("start"))
+    ended = _timestamp(timing.get("end"))
+    if started is None or ended is None or ended < started:
+        return started, ended, None
+    duration = min(int((ended - started).total_seconds() * 1000), 86_400_000)
+    return started, ended, duration
+
+
 def _event_order_key(event: dict) -> tuple[int, int, int]:
     """Order projected events by their stable source message and part IDs."""
     parts = str(event.get("id", "")).split(".")
@@ -661,15 +672,17 @@ def _tool_events(runtime, message: dict, channel: str, created: datetime | None,
         if status not in {"running", "completed", "error"}:
             status = "unknown"
         info = message.get("info") if isinstance(message.get("info"), dict) else {}
-        base = {"at": _iso(created), "channel": channel, **_provider_model(info, budget), "tool": tool_name,
-                "status": status, "duration_ms": _duration_ms(message), "exit_code": None}
+        tool_started, tool_ended, tool_duration = _tool_timing(state)
+        base = {"at": None, "_sort_at": _iso(created), "channel": channel,
+                **_provider_model(info, budget), "tool": tool_name,
+                "status": status, "duration_ms": None, "exit_code": None}
         call_id = part.get("callID")
         if isinstance(call_id, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", call_id):
             base["correlation_id"] = budget.clean_string(call_id)
         if "input" in state:
             if not budget.claim_event():
                 break
-            events.append({**base, "id": f"{message_index}.{part_index}.call",
+            events.append({**base, "at": _iso(tool_started), "id": f"{message_index}.{part_index}.call",
                            "stage": "tool_call", "kind": "tool_invocation",
                            "input": _clean_value(runtime, state.get("input"), budget=budget),
                            "output": None, "text": None,
@@ -682,8 +695,9 @@ def _tool_events(runtime, message: dict, channel: str, created: datetime | None,
             exit_code = metadata.get("exit")
             if type(exit_code) is not int or not -255 <= exit_code <= 255:
                 exit_code = None
-            events.append({**base, "id": f"{message_index}.{part_index}.result",
+            events.append({**base, "at": _iso(tool_ended), "id": f"{message_index}.{part_index}.result",
                            "stage": "tool_result", "kind": "tool_output",
+                           "duration_ms": tool_duration,
                            "input": None,
                            "output": _clean_value(runtime, state.get("output"), budget=budget) if "output" in state else None,
                            "text": None, "exit_code": exit_code,
@@ -788,7 +802,10 @@ def project_messages(runtime, raw_messages, channel: str,
         events.extend(_tool_events(runtime, message, channel, created, message_index, budget))
         if budget.truncation_count > truncations_before_message:
             break
-    events.sort(key=lambda event: (event.get("at") or "", _event_order_key(event)))
+    events.sort(key=lambda event: (event.get("at") or event.get("_sort_at") or "",
+                                   _event_order_key(event)))
+    for event in events:
+        event.pop("_sort_at", None)
     return events
 
 
@@ -829,11 +846,22 @@ def _session_status(runtime, owner: str, session_id: str, messages: list) -> tup
     return "unknown", None
 
 
-def _matches_window(events: list[dict], start: datetime | None, end: datetime | None) -> bool:
+def _matches_window(events: list[dict], start: datetime | None, end: datetime | None,
+                    raw_messages: list | None = None) -> bool:
     if start is None and end is None:
         return True
     for event in events:
         at = _parse_time(event.get("at")) if event.get("at") else None
+        if at is None and isinstance(raw_messages, list):
+            try:
+                message_index = int(str(event.get("id", "")).split(".", 1)[0])
+            except ValueError:
+                message_index = -1
+            if 0 <= message_index < len(raw_messages):
+                message = raw_messages[message_index]
+                info = message.get("info") if isinstance(message, dict) else None
+                timing = info.get("time") if isinstance(info, dict) else None
+                at = _timestamp(timing.get("created")) if isinstance(timing, dict) else None
         if at is not None and (start is None or at >= start) and (end is None or at < end):
             return True
     return False
@@ -1005,9 +1033,10 @@ class DiagnosticsSessionsView(HomeAssistantView):
         history_available = True
         for record in records:
             try:
-                session, events, _raw = await _session_data(hass, owner.id, record)
+                session, events, raw_messages = await _session_data(hass, owner.id, record)
             except AgentError:
                 history_available = False
+                raw_messages = []
                 session = {"session_id": record["session_id"], "channel": record["channel"],
                            "modes": record["modes"], "status": "unknown", "created_at": None,
                            "updated_at": None, "provider_models": [], "processing_duration_ms": None,
@@ -1018,7 +1047,7 @@ class DiagnosticsSessionsView(HomeAssistantView):
                 continue
             if requested_status != "all" and session["status"] != requested_status:
                 continue
-            if not _matches_window(events, start, end):
+            if not _matches_window(events, start, end, raw_messages):
                 continue
             sessions.append(session)
         next_offset = cursor + len(records)
@@ -1060,7 +1089,7 @@ class DiagnosticsSessionView(HomeAssistantView):
         if len(matches) != 1:
             return self.json_message("not_found", status_code=404)
         try:
-            session, events, _raw = await _session_data(hass, owner.id, matches[0])
+            session, events, raw_messages = await _session_data(hass, owner.id, matches[0])
         except AgentError as error:
             if error.code == "not_found":
                 return self.json_message("not_found", status_code=404)
@@ -1078,7 +1107,8 @@ class DiagnosticsSessionView(HomeAssistantView):
         if channel_query == "voice" and "voice" not in session["modes"]:
             return self.json_message("not_found", status_code=404)
         if start is not None and end is not None:
-            events = [event for event in events if _matches_window([event], start, end)]
+            events = [event for event in events
+                      if _matches_window([event], start, end, raw_messages)]
         response = self.json({"session": session, "events": _stage_rows(events, session["channel"]),
                               "sources": _sources(True, session_limit_reached=session_limit_reached)})
         response.headers["Cache-Control"] = "no-store"
@@ -1184,7 +1214,7 @@ class DiagnosticsExportView(HomeAssistantView):
                 events = []
             if channel == "voice" and "voice" not in session["modes"]:
                 continue
-            if not _matches_window(events, start, end):
+            if not _matches_window(events, start, end, item["messages"]):
                 continue
             if not events and session["status"] == "unknown":
                 events.append(_unavailable_stage("conversation_history", session["channel"],
