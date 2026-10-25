@@ -2546,10 +2546,8 @@ diff --git a/src/mixins/dirty-state-provider-mixin.ts b/src/mixins/dirty-state-p
 diff --git a/src/util/register-service-worker.ts b/src/util/register-service-worker.ts
 --- a/src/util/register-service-worker.ts
 +++ b/src/util/register-service-worker.ts
-@@ -1,4 +1,9 @@
-+import {
-+  registerGlobalDirtyStateProvider,
-+} from "../mixins/dirty-state-provider-mixin";
+@@ -1,4 +1,7 @@
++import { registerGlobalDirtyStateProvider } from "../mixins/dirty-state-provider-mixin";
  import { showToast } from "./toast";
 +
 +window.haRegisterDirtyStateProvider = registerGlobalDirtyStateProvider;

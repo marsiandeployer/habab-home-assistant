@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-25T07:30:37.822600+00:00",
+  "checked_at": "2026-10-25T07:42:41.789115+00:00",
   "scope": "browser Habab/Gemini voice source candidate; not a deployed acceptance result",
   "source_sha256": {
     "habab/distribution/src/habab_home/realtime.py": "87ef206bd73aa311179daa9a12ede6d0fa9ad75db822063a94f09ad7aa4e3307",
@@ -55,8 +55,8 @@
     "live browser synthetic PCM transport",
     "physical microphone or audible cues",
     "browser real voice-command actuation",
-    "native frontend wheel build and pinned lint/types/Vitest",
-    "deployed service-worker reload deferral during actual chat"
+    "deployed service-worker reload deferral during actual chat",
+    "native frontend wheel build and complete builder checks under pinned Node24"
   ],
   "deployment": "NOT_RUN",
   "active_owner_image_unchanged": "22ae/sourceaaeab",
@@ -72,7 +72,7 @@
     "live_acceptance": false
   },
   "reload_guard_source": {
-    "patch_sha256": "eb9dc06a2503b9625f3ce5c8fbb8344203593123399ae373c24341b14b9c5931",
+    "patch_sha256": "c47ee0a56a56f4b8c260ea3b4db3d6111da22e9a6f7d29b1d428882f50ec4010",
     "pinned_commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
     "independent_apply": "PASS",
     "unique_source_paths": 24,
@@ -81,7 +81,7 @@
     "wheel_metadata_version_smoke": "PASS; exact embedded Python executed with synthetic pyproject",
     "chat_uses_shared_dirty_aggregate": true,
     "native_build": "NOT_RUN",
-    "native_lint_types_vitest": "NOT_RUN",
+    "native_lint_types_vitest": "PASS isolated cached dependencies: ESLint/Prettier/Vitest67 underNode22.21.1; generated-input preparation/types underNode24.21.0; fullbuilder NOT_RUN",
     "release_manifest_changed": false
   }
 }

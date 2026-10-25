@@ -1,0 +1,58 @@
+{
+  "checked_at_utc": "2026-10-25T07:39:21Z",
+  "scope": "Pinned Home Assistant frontend source patch for deferred service-worker reload while private chat has busy, voice, transcript, or draft state.",
+  "source_commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
+  "bridge_patch_sha256": "c47ee0a56a56f4b8c260ea3b4db3d6111da22e9a6f7d29b1d428882f50ec4010",
+  "build_wheel_patch_sha_matches": true,
+  "isolation": {
+    "dependencies": "Copied cached node_modules from pinned worktree; no install or network access.",
+    "generated_outputs": "Gulp outputs confined to disposable /dev/shm tree; tree removed after receipt.",
+    "native_bundle_or_wheel_built": false
+  },
+  "tool_versions": {
+    "node_for_eslint_prettier_vitest": "22.21.1",
+    "node_for_gulp_and_typescript": "24.21.0",
+    "pnpm_cached_version": "11.28.0",
+    "eslint": "10.11.0",
+    "prettier": "3.9.9",
+    "vitest": "5.0.2",
+    "typescript_package": "6.0.3",
+    "native_tsc_package": "7.0.2"
+  },
+  "checks": [
+    {
+      "command": "./node_modules/.bin/eslint [builder target list] --max-warnings=0",
+      "result": "PASS; exit 0"
+    },
+    {
+      "command": "./node_modules/.bin/prettier --check [builder target list]",
+      "result": "PASS; exit 0"
+    },
+    {
+      "command": "./node_modules/.bin/vitest run --config test/vitest.config.ts [7 focused builder test paths]",
+      "result": "PASS; 7 files, 67 tests"
+    },
+    {
+      "command": "source /root/.nvm/nvm.sh && nvm use 24.21.0 && ./node_modules/.bin/gulp gather-gallery-pages",
+      "result": "PASS; generated gallery/build/import-pages.ts in isolated tree"
+    },
+    {
+      "command": "source /root/.nvm/nvm.sh && nvm use 24.21.0 && ./node_modules/.bin/gulp gen-icons-json",
+      "result": "PASS; generated build/mdi/iconMetadata.json and iconList.json in isolated tree"
+    },
+    {
+      "command": "node ./node_modules/@typescript/native/bin/tsc (Node 24.21.0)",
+      "result": "PASS; exit 0 after the actual Gulp preparation tasks"
+    }
+  ],
+  "preserved_initial_typecheck_failure": {
+    "command": "node ./node_modules/@typescript/native/bin/tsc against source archive before generation",
+    "result": "Expected failure due missing generated gallery/build/import-pages and build/mdi/iconList.json/iconMetadata.json; rerun passed after actual Gulp tasks. No dummy files or declarations were added."
+  },
+  "translation_metadata": {
+    "source": "Existing build/translations/translationMetadata.json from the same pinned commit 26690e06b0bf64a1487929245c32842ef92c62b5",
+    "sha256": "d36409ab0ea8e6fe2fe17824bd794a63add2b2d664dcede943d0a8a4becdbff8"
+  },
+  "pnpm_note": "pnpm exec was not used because it prompted to purge the copied node_modules directory; cached package binaries were run directly. No shared dependency files were changed.",
+  "temporary_tree_removed": true
+}

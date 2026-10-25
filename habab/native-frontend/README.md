@@ -13,15 +13,16 @@ Released `.7` patch SHA-256: `06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da1
 ## Pending source candidate
 
 The current `bridge.patch` is a pending `.8` source candidate with SHA-256
-`eb9dc06a2503b9625f3ce5c8fbb8344203593123399ae373c24341b14b9c5931`.
+`c47ee0a56a56f4b8c260ea3b4db3d6111da22e9a6f7d29b1d428882f50ec4010`.
 `build-wheel.sh` targets `20260930.4+habab.8`. The change adds
 `window.haRegisterDirtyStateProvider`, backed by `DirtyStateProviderMixin`, so an
 external frontend component can register unsaved state with Home Assistant's
 service-worker reload guard and defer reload until it is safe.
 
-No `.8` wheel has been built, so there is no `.8` wheel digest or size. Native
-lint, `pnpm lint:types`, and focused Vitest have not run for this candidate. At
-this review on 2026-10-25, the filesystem had about 1.4 GiB free. The release
+No `.8` wheel has been built, so there is no `.8` wheel digest or size. Isolated cached-dependency checks passed: ESLint, Prettier, and 67 focused Vitest
+tests under Node 22.21.1; real Gulp input generation and the TypeScript check
+under Node 24.21.0. The complete builder under pinned Node 24 and the wheel build
+remain pending. At this review on 2026-10-25, the filesystem had about 1.5 GiB free. The release
 manifest still describes the published `.7` wheel below; `.8` is not a released
 artifact.
 
@@ -120,8 +121,9 @@ pnpm exec vitest run --config test/vitest.config.ts test/dialogs/voice-command-d
 ```
 
 The `.7` wheel build completed successfully. This does not establish public
-release or physical-device acceptance. The `.8` source candidate has not passed
-its build, lint, typecheck, or Vitest gates.
+release or physical-device acceptance. The `.8` source candidate has passed
+the isolated checks described above; its wheel build and full builder gates
+remain pending.
 
 The browser integration and wheel installation checks are performed by the
 parent release workflow.
