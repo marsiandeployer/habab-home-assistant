@@ -1,0 +1,34 @@
+{
+  "checked_at": "2026-10-25T17:27:39.228379+00:00",
+  "target": "P30 VOG-L29 ru.habab.home",
+  "mode": "read_only",
+  "adb_state": "device",
+  "apk_version_code": 17,
+  "apk_version_name": "0.1.9-voice-preview",
+  "runtimes": {
+    "current": {
+      "available": true,
+      "runtime_id": "2f94e2e4d62bf401",
+      "core_version": "2026.10.2",
+      "habab_version": "0.3.6",
+      "frontend_version": "20260930.4+habab.8",
+      "source_revision": null
+    },
+    "previous": {
+      "available": true,
+      "runtime_id": "2c6567223ad3ef6b",
+      "core_version": "2026.10.2",
+      "habab_version": "0.3.6",
+      "frontend_version": "20260930.4+habab.7",
+      "source_revision": null
+    }
+  },
+  "presence": {
+    "chromium": false,
+    "network_tools_marker": false
+  },
+  "device_mutations": 0,
+  "provider_calls": 0,
+  "audio_or_transcripts_collected": false,
+  "presence_probe_method": "adb shell run-as test -e; shell protocol propagates remote exit status"
+}

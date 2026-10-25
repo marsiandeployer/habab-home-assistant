@@ -1,0 +1,25 @@
+{
+  "checked_at_utc": "2026-10-25T18:15:31.778726+00:00",
+  "method": "GET",
+  "endpoint": "https://direct.i-dgtl.ru/api/v1/balance",
+  "account_identity": {
+    "provider": "I-Digital Direct E2E",
+    "key_id": "18420"
+  },
+  "http_status": 200,
+  "auth_valid": true,
+  "currency_types": [
+    "BNS"
+  ],
+  "bonus_balance_positive": true,
+  "test_mode": "UNKNOWN",
+  "test_mode_fields_present": [],
+  "allowed_number_match": "UNKNOWN",
+  "allowed_number_fields_present": [],
+  "authorized_number_linked_to_e2e_source_record": false,
+  "current_sender_ready": "UNKNOWN",
+  "provider_send": "NOT_RUN",
+  "amounts_and_response_body_saved": false,
+  "free_allowance_verified": "UNKNOWN",
+  "source_sender_reference_present": true
+}

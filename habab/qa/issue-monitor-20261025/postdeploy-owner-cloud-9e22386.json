@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "checked_at": "2026-10-25T18:15:16.947Z",
+  "scope": "owner-cloud post-deploy read-only acceptance; no phone, model, provider, SMS, export, or settings actions",
+  "status": "blocked",
+  "releaseIdentity": {
+    "expected": {
+      "source_commit": "9e22386e9a0d64527fadaba5290b5b6758792e11",
+      "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+      "product_version": "0.3.6"
+    },
+    "observed": {
+      "container_image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+      "product_version": "0.3.6",
+      "home_assistant_version": "2026.10.2",
+      "source_file_sha256_matches": {
+        "habab_home/diagnostics.py": true,
+        "habab_home/frontend/diagnostics-panel.js": true,
+        "idigital_sms/api.py": true,
+        "idigital_sms/notify.py": true,
+        "idigital_sms/strings.json": true,
+        "idigital_sms/translations/en.json": true,
+        "idigital_sms/translations/ru.json": true
+      },
+      "served_panel_sha256": "5fc297d8244ccfe5e1a429a2a99e5403d0748c5209efbcc2176dd589ecbe3b95"
+    },
+    "status": "passed",
+    "evidence": "Deployment receipt, live owner container metadata and installed overlay hashes; authenticated status API and served panel asset."
+  },
+  "summary": {
+    "totalSteps": 9,
+    "passed": 8,
+    "failed": 0,
+    "blocked": 1,
+    "notVerifiable": 0,
+    "criticals": 0,
+    "majors": 0,
+    "minors": 0
+  },
+  "agentVerification": [
+    {
+      "step": "Read authenticated owner runtime status",
+      "tool": "HTTP GET /api/habab_home/status",
+      "required": true,
+      "status": "passed",
+      "details": "HTTP 200; read-only."
+    },
+    {
+      "step": "Verify deployed image, exact overlay file hashes, runtime version and served diagnostics panel SHA-256",
+      "tool": "docker inspect/sha256sum + authenticated HTTP GET",
+      "required": true,
+      "status": "passed",
+      "details": "container_image_match=true; overlay_files=7/7; panel_http=200; panel_sha_matches=true."
+    },
+    {
+      "step": "Read owner diagnostics sessions with the API limit",
+      "tool": "HTTP GET diagnostics/sessions?limit=20&channel=all",
+      "required": true,
+      "status": "passed",
+      "details": "HTTP 200; sessions_returned=2; limit=20; session identifiers and message text omitted."
+    },
+    {
+      "step": "Read owner conversation detail and inspect only stage/time metadata",
+      "tool": "HTTP GET diagnostics/sessions/{mapped-session}",
+      "required": true,
+      "status": "passed",
+      "details": "HTTP 200; detail_read=true; events inspected in memory; transcript text and session identifiers omitted."
+    },
+    {
+      "step": "Verify authenticated owner admin identity through native WebSocket",
+      "tool": "HA WebSocket auth/current_user",
+      "required": true,
+      "status": "passed",
+      "details": "authenticated=true; active_admin=true; user identifier omitted."
+    },
+    {
+      "step": "Request Russian frontend/get_translations for idigital_sms exceptions/entity/services; record key presence only",
+      "tool": "HA WebSocket frontend/get_translations",
+      "required": true,
+      "status": "passed",
+      "details": "{\"exceptions\":true,\"russianStringsReturned\":true,\"entity\":true,\"services\":true}"
+    }
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "tool-call-timing",
+      "criterion": "Recorded tool invocation and result expose runtime timestamps and result duration without substituting parent-message time.",
+      "source": "deployment acceptance",
+      "required": true,
+      "status": "blocked",
+      "evidence": "tool_calls=0; tool_results=0; timestamped_calls=0; timestamped_results=0; results_with_duration=0; transcript content was neither output nor saved.",
+      "manualVerificationPlan": "At the next already-authorized owner conversation that invokes a tool, reopen History and diagnostics and verify call/result runtime times and result duration; this QA did not initiate a model or device action."
+    },
+    {
+      "id": "sms-translations",
+      "criterion": "Russian exceptions, entity, and service translations resolve for idigital_sms through Home Assistant frontend translations.",
+      "source": "deployment acceptance",
+      "required": true,
+      "status": "passed",
+      "evidence": {
+        "exceptions": true,
+        "russianStringsReturned": true,
+        "entity": true,
+        "services": true
+      }
+    }
+  ],
+  "findings": [
+    {
+      "severity": "minor",
+      "title": "A required data-dependent check could not be verified",
+      "expected": "A mapped owner conversation contains runtime-recorded call and result timestamps.",
+      "actual": "No qualifying current event was found; no model call was initiated.",
+      "reproduction": "See tool-call-timing acceptance criterion and its manual verification plan."
+    }
+  ],
+  "sideEffects": {
+    "httpWriteRequests": 0,
+    "websocketWriteCommands": 0,
+    "modelCalls": 0,
+    "providerCalls": 0,
+    "smsCalls": 0,
+    "archiveExports": 0,
+    "phoneActions": 0,
+    "authRefreshPersisted": false,
+    "authRefreshedInMemory": true
+  }
+}

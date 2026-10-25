@@ -1,0 +1,59 @@
+{
+  "checked_at": "2026-10-25T17:47:18.140411+00:00",
+  "scope": "owner-test forward overlay for diagnostics timing and SMS guards/translations",
+  "source_commit": "9e22386e9a0d64527fadaba5290b5b6758792e11",
+  "base_image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+  "container_unchanged": true,
+  "files": [
+    {
+      "path": "habab_home/diagnostics.py",
+      "source_sha256": "6509bfe676f6a5d4b5c8ea3f8758814276d43dc7a080cca859e523e4354a90da",
+      "installed_sha256": "6509bfe676f6a5d4b5c8ea3f8758814276d43dc7a080cca859e523e4354a90da",
+      "changed": true
+    },
+    {
+      "path": "habab_home/frontend/diagnostics-panel.js",
+      "source_sha256": "5fc297d8244ccfe5e1a429a2a99e5403d0748c5209efbcc2176dd589ecbe3b95",
+      "installed_sha256": "5fc297d8244ccfe5e1a429a2a99e5403d0748c5209efbcc2176dd589ecbe3b95",
+      "changed": true
+    },
+    {
+      "path": "idigital_sms/api.py",
+      "source_sha256": "3532ac2e98ff09fcd5b475611e8d58709635288847dbb20cf0259ac9d651602b",
+      "installed_sha256": "3532ac2e98ff09fcd5b475611e8d58709635288847dbb20cf0259ac9d651602b",
+      "changed": true
+    },
+    {
+      "path": "idigital_sms/notify.py",
+      "source_sha256": "f3d0dd22ec83139c48828aca1001960295c3ac8945d5dbfa165f06486c4c2620",
+      "installed_sha256": "f3d0dd22ec83139c48828aca1001960295c3ac8945d5dbfa165f06486c4c2620",
+      "changed": true
+    },
+    {
+      "path": "idigital_sms/strings.json",
+      "source_sha256": "a92766f56a6292483bbc36f4bf5b0336c752d9bab81630760aebb319927d09bc",
+      "installed_sha256": "a92766f56a6292483bbc36f4bf5b0336c752d9bab81630760aebb319927d09bc",
+      "changed": true
+    },
+    {
+      "path": "idigital_sms/translations/en.json",
+      "source_sha256": "a92766f56a6292483bbc36f4bf5b0336c752d9bab81630760aebb319927d09bc",
+      "installed_sha256": "a92766f56a6292483bbc36f4bf5b0336c752d9bab81630760aebb319927d09bc",
+      "changed": true
+    },
+    {
+      "path": "idigital_sms/translations/ru.json",
+      "source_sha256": "5f35b0f1e8c731311e4d5fe18e82787c61b02edd6fd9c13426d6e4ebf8f2b470",
+      "installed_sha256": "5f35b0f1e8c731311e4d5fe18e82787c61b02edd6fd9c13426d6e4ebf8f2b470",
+      "changed": true
+    }
+  ],
+  "changed_files": 7,
+  "core_restart_count_for_this_deploy": 1,
+  "http_root": 200,
+  "voice_gateway_pid_unchanged": true,
+  "household_config_modified": false,
+  "provider_or_sms_calls": 0,
+  "phone_modified": false,
+  "model_or_physical_e2e": "NOT RUN"
+}

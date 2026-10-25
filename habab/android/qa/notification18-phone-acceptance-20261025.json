@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "kind": "p30_notification18_update_acceptance",
+  "device": {
+    "serial": "DUM0220122000902",
+    "product": "HWVOG",
+    "model": "VOG-L29",
+    "androidApi": 29
+  },
+  "sourceCommit": "ee98ca116778765465091f7ca4182061a58a3a9d",
+  "apk": {
+    "versionCode": 18,
+    "versionName": "0.1.10-notification",
+    "sha256": "9bfc87724d1db1aac51d11efaaf7bfe10f74e19dd0876c02822d265855e3b454",
+    "signerSha256": "d5847538e56e57c1b17ea394a8130cd593277033af7421e251babad6c25cf704",
+    "installMethod": "adb install -r",
+    "installResult": "success",
+    "uninstallOrDataClear": false
+  },
+  "runtime": {
+    "currentIdBeforeAndAfter": "2f94e2e4d62bf401",
+    "previousIdBeforeAndAfter": "2c6567223ad3ef6b",
+    "currentCoreVersion": "2026.10.2",
+    "currentHababVersion": "0.3.6",
+    "changed": false
+  },
+  "postUpdate": {
+    "existingServiceStartedOnce": true,
+    "appProotProcessCount": 1,
+    "bridgeRootHttp": 200,
+    "bridgeProtectedStatusHttp": 401,
+    "foregroundNotification": {
+      "present": true,
+      "id": 1,
+      "channel": "server",
+      "importance": 2,
+      "ongoing": true,
+      "contentIntentPresent": true,
+      "recordUpdatedInPlaceAfterForegroundStartMs": 49146,
+      "expectedTextResourceFromHealthyStatus": "server_running",
+      "textValueReadback": "redacted_by_android_dumpsys"
+    }
+  },
+  "notificationTapToHaWebView": {
+    "result": "NOT_RUN",
+    "reason": "system_keyguard_required_unlock_after_normal_wake_and_swipe",
+    "credentialEntryOrKeyguardBypass": false
+  },
+  "apkRetention": {
+    "current": "native18",
+    "previous": "native17",
+    "olderRegisteredReleaseRemoved": "native16"
+  },
+  "screenshot": "not_created",
+  "modelVoiceBotOrRuntimeChanges": false
+}
