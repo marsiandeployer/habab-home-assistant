@@ -26,20 +26,24 @@ DirectClient = _api.DirectClient
 IDigitalError = _api.IDigitalError
 validate_api_key = _api.validate_api_key
 validate_recipient = _api.validate_recipient
+SendGuard = _api.SendGuard
 
 
 class FakeContent:
-    def __init__(self, body):
+    def __init__(self, body, fragment_size=None):
         self._body = json.dumps(body).encode()
+        self._fragment_size = fragment_size
 
-    async def read(self, _limit):
-        return self._body
+    async def iter_chunked(self, requested_size):
+        size = min(self._fragment_size or requested_size, requested_size)
+        for offset in range(0, len(self._body), size):
+            yield self._body[offset:offset + size]
 
 
 class FakeResponse:
-    def __init__(self, status, body):
+    def __init__(self, status, body, *, fragment_size=None):
         self.status = status
-        self.content = FakeContent(body)
+        self.content = FakeContent(body, fragment_size)
 
     async def __aenter__(self):
         return self
@@ -73,12 +77,12 @@ def make_client(session):
 
 
 class IDigitalSmsProtocolTests(unittest.IsolatedAsyncioTestCase):
-    async def test_send_posts_one_item_to_only_the_configured_recipient(self):
+    async def test_fragmented_valid_response_is_read_through_eof(self):
         message_uuid = "063474ec-a34f-4558-90c5-984395000004"
         session = FakeSession(FakeResponse(200, {
             "errors": False,
             "items": [{"messageUuid": message_uuid}],
-        }))
+        }, fragment_size=7))
         client = make_client(session)
 
         result = await client.send_message("Test body")
@@ -158,6 +162,45 @@ class IDigitalSmsProtocolTests(unittest.IsolatedAsyncioTestCase):
             "provider_status": "delivered",
         })
         self.assertEqual(len(session.calls), 1)
+
+    async def test_only_documented_direct_statuses_are_classified(self):
+        self.assertEqual(_api._message_status("sent"), "accepted")
+        self.assertEqual(_api._message_status("delivered"), "delivered")
+        self.assertEqual(_api._message_status("undelivered"), "error")
+        for status in ("queued", "sending", "expired", "unsent", "stopped", "future"):
+            self.assertEqual(_api._message_status(status), "unknown")
+
+        session = FakeSession(FakeResponse(200, {"status": "queued"}))
+        result = await make_client(session).get_status(
+            "063474ec-a34f-4558-90c5-984395000004"
+        )
+        self.assertEqual(result, {"status": "unknown", "provider_status": "unknown"})
+
+    async def test_send_guard_suppresses_duplicate_and_enforces_minute_limit(self):
+        now = [1000.0]
+        guard = SendGuard(clock=lambda: now[0])
+        guard.reserve("same message")
+        with self.assertRaises(IDigitalError) as duplicate:
+            guard.reserve("same message")
+        self.assertEqual(duplicate.exception.code, "duplicate_suppressed")
+        now[0] += 59.999
+        with self.assertRaises(IDigitalError) as limited:
+            guard.reserve("different message")
+        self.assertEqual(limited.exception.code, "rate_limited")
+        now[0] += 0.002
+        guard.reserve("different message")
+
+    async def test_send_guard_enforces_ten_attempts_per_rolling_hour(self):
+        now = [1000.0]
+        guard = SendGuard(clock=lambda: now[0])
+        for index in range(10):
+            guard.reserve(f"message {index}")
+            now[0] += 60
+        with self.assertRaises(IDigitalError) as limited:
+            guard.reserve("message eleven")
+        self.assertEqual(limited.exception.code, "rate_limited")
+        now[0] += 3600
+        guard.reserve("message after window")
 
     async def test_outer_timeout_is_bounded_and_not_retried(self):
         class HangingSession:

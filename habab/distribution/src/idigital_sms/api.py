@@ -2,7 +2,9 @@
 
 import asyncio
 import base64
+import hashlib
 import json
+import time
 from urllib.parse import quote
 from uuid import UUID
 
@@ -87,17 +89,46 @@ def validate_message(value: object) -> str:
 
 
 def _message_status(provider_status: object) -> str:
-    """Map only provider states whose meaning is known; preserve no raw response."""
+    """Map only provider states documented by Direct; preserve no raw response."""
     if not isinstance(provider_status, str):
         return "unknown"
     status = provider_status.lower()
     if status == "delivered":
         return "delivered"
-    if status in {"undelivered", "expired", "unsent", "stopped"}:
+    if status == "undelivered":
         return "error"
-    if status in {"queued", "sending", "sent"}:
+    if status == "sent":
         return "accepted"
     return "unknown"
+
+
+class SendGuard:
+    """Small in-memory per-entry rate limit and duplicate-attempt guard."""
+
+    def __init__(self, *, clock=time.monotonic) -> None:
+        self._clock = clock
+        self._attempts: list[float] = []
+        self._recent_digests: dict[str, float] = {}
+
+    def reserve(self, message: str) -> None:
+        """Reserve before POST so ambiguous attempts cannot be retried immediately."""
+        now = self._clock()
+        hour_ago = now - 3600
+        self._attempts = [stamp for stamp in self._attempts if stamp > hour_ago]
+        duplicate_cutoff = now - 300
+        self._recent_digests = {
+            digest: stamp for digest, stamp in self._recent_digests.items()
+            if stamp > duplicate_cutoff
+        }
+        digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
+        if digest in self._recent_digests:
+            raise IDigitalError("duplicate_suppressed")
+        if self._attempts and now - self._attempts[-1] < 60:
+            raise IDigitalError("rate_limited")
+        if len(self._attempts) >= 10:
+            raise IDigitalError("rate_limited")
+        self._attempts.append(now)
+        self._recent_digests[digest] = now
 
 
 class DirectClient:
@@ -128,9 +159,11 @@ class DirectClient:
                 json=payload,
                 allow_redirects=False,
             ) as response:
-                raw = await response.content.read(MAX_RESPONSE_BYTES + 1)
-                if len(raw) > MAX_RESPONSE_BYTES:
-                    raise IDigitalError("invalid_response")
+                raw = bytearray()
+                async for chunk in response.content.iter_chunked(MAX_RESPONSE_BYTES + 1):
+                    raw.extend(chunk)
+                    if len(raw) > MAX_RESPONSE_BYTES:
+                        raise IDigitalError("invalid_response")
                 try:
                     body = json.loads(raw)
                 except (ValueError, UnicodeError):
@@ -196,9 +229,13 @@ class DirectClient:
         if http_status >= 500 or http_status != 200 or not isinstance(body, dict):
             raise IDigitalError("status_unavailable")
         provider_status = body.get("status")
+        normalized_provider_status = (
+            provider_status.lower()
+            if isinstance(provider_status, str)
+            and provider_status.lower() in {"sent", "delivered", "undelivered"}
+            else "unknown"
+        )
         return {
             "status": _message_status(provider_status),
-            "provider_status": (
-                provider_status.lower() if isinstance(provider_status, str) else "unknown"
-            ),
+            "provider_status": normalized_provider_status,
         }

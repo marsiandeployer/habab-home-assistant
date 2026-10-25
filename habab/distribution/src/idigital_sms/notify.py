@@ -5,7 +5,7 @@ import logging
 from homeassistant.components.notify import NotifyEntity
 from homeassistant.exceptions import HomeAssistantError
 
-from .api import IDigitalError
+from .api import IDigitalError, SendGuard, validate_message
 from .const import ATTR_MESSAGE_UUID, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ class IDigitalSmsNotifyEntity(NotifyEntity):
         self._client = client
         self._attr_unique_id = f"{entry_id}_notify"
         self._message_uuid: str | None = None
+        self._send_guard = SendGuard()
 
     @property
     def extra_state_attributes(self) -> dict[str, str] | None:
@@ -37,10 +38,22 @@ class IDigitalSmsNotifyEntity(NotifyEntity):
 
     async def async_send_message(self, message: str, title: str | None = None) -> None:
         """Send once; a timeout is ambiguous and is never retried."""
+        try:
+            validate_message(message)
+            self._send_guard.reserve(message)
+        except IDigitalError as err:
+            _LOGGER.warning("I-Digital SMS send failed: %s", err.code)
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key=err.code,
+            ) from None
         self._message_uuid = None
         self.async_write_ha_state()
         try:
             self._message_uuid = await self._client.send_message(message)
         except IDigitalError as err:
             _LOGGER.warning("I-Digital SMS send failed: %s", err.code)
-            raise HomeAssistantError(err.code) from None
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key=err.code,
+            ) from None
