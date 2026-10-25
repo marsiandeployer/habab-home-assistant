@@ -1,0 +1,9 @@
+{
+  "relay_host": "<cloud-ssh-host>.<example-domain>",
+  "relay_port": 22,
+  "relay_user": "<provisioned-per-home-user>",
+  "remote_port": 32001,
+  "local_port": 8123,
+  "identity_file": "%LOCALAPPDATA%\\HababHome\\ProductTunnel\\identity",
+  "host_key": "ssh-ed25519 <out-of-band-verified-public-host-key>"
+}
