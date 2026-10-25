@@ -38,6 +38,25 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         agent.hass.config_entries.async_entries = lambda _: [openai, deepseek]
         self.assertIs(agent.settings(), deepseek.data)
 
+    def test_explicit_selection_precedes_legacy_fallback_and_uses_first_flag(self):
+        agent = object.__new__(SetupAgent)
+        openai = SimpleNamespace(
+            data={"provider": "openai", "model": "gpt-4.1-mini", "api_key": "openai-key"},
+            options={"assistant_selected": True},
+        )
+        deepseek = SimpleNamespace(
+            data={"provider": "deepseek", "model": "deepseek-flash", "api_key": "deepseek-key"},
+            options={},
+        )
+        agent.hass = SimpleNamespace(
+            config_entries=SimpleNamespace(async_entries=lambda _: [deepseek, openai]))
+
+        self.assertIs(agent.settings(), openai.data)
+
+        deepseek.options = {"assistant_selected": True}
+        agent.hass.config_entries.async_entries = lambda _: [openai, deepseek]
+        self.assertIs(agent.settings(), openai.data)
+
     def agent(self):
         agent = object.__new__(SetupAgent)
         agent.lock = asyncio.Lock()
@@ -189,7 +208,7 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(PROMPT.startswith(ASSISTANT_IDENTITY))
         self.assertEqual(
             hashlib.sha256(PROMPT.removeprefix(ASSISTANT_IDENTITY).encode()).hexdigest(),
-            "2d1bc151f1e28e3053b4ed3ff50fcbc68720a108dcc1736a29a5123081bfa681",
+            "01e3d7ff9d74deb367fb5dea05e1eb8fbcedac58ae4f3443ff37b963ade0a92d",
         )
         self.assertIs(runtime_prompt("docker", PROMPT), PROMPT)
 
@@ -256,17 +275,24 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
             model = "gemini-3.1-flash-lite" if provider == "habab" else "gpt-4.1-mini"
             agent.settings = Mock(return_value={"provider": provider, "model": model, "api_key": "fixture-selected-key"})
             agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
-            with patch.dict("os.environ", {"HABAB_OPENAI_BASE_URL": "https://voice.example.test/v1"}):
+            with patch.dict("os.environ", {
+                "HABAB_OPENAI_BASE_URL": "https://voice.example.test/v1",
+                "OPENCODE_ENABLE_EXA": "0", "EXA_API_KEY": "fixture-host-exa-key",
+            }):
                 with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
                     await agent.ensure()
             env = spawn.await_args.kwargs["env"]
             config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+            self.assertEqual(config["permission"], {"*": "allow"})
             self.assertEqual(config["enabled_providers"], ["habab-" + provider])
             self.assertEqual(config["model"], "habab-" + provider + "/" + model)
             self.assertEqual(config["provider"]["habab-" + provider]["options"]["baseURL"], expected_base)
             self.assertEqual(config["provider"]["habab-" + provider]["npm"],
                              "@ai-sdk/google" if provider == "habab" else "@ai-sdk/openai-compatible")
             self.assertEqual(env["HABAB_" + provider.upper() + "_KEY"], "fixture-selected-key")
+            self.assertEqual(env["OPENCODE_ENABLE_EXA"], "1")
+            self.assertNotIn("EXA_API_KEY", env)
+            self.assertNotIn("fixture-host-exa-key", str(env))
             self.assertNotIn("HABAB_DEEPSEEK_KEY", env)
             self.assertNotIn("fixture-selected-key", env["OPENCODE_CONFIG_CONTENT"])
 

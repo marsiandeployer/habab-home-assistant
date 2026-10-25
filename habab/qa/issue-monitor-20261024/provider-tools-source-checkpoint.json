@@ -1,0 +1,38 @@
+{
+  "status": "SOURCE_TESTS_PASS_LIVE_ACCEPTANCE_INCOMPLETE",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/setup_actions.py": "4769b330f11477ce49ab8ce262cd138ac4f4e459d82348cc6db961d72aad59f9",
+    "habab/distribution/src/habab_home/setup_agent.py": "3684a3f235dd06be7c038c18dc695182695b734c80365a4f9cd0fbde49d82d37",
+    "habab/distribution/src/habab_home/effective_provider.py": "119cb08d4b73bcaf5bc28b8d084b6ad85b1e129330baf6f166dd81249f45e85a",
+    "habab/distribution/src/habab_home/websocket.py": "6a22e0eab694b1765bf135844d160c54ddfe367215859c48e6c44688f22d5adc",
+    "habab/distribution/tests/test_setup_actions.py": "622e6890a19109051b0805f3397176b70c8cbb23afba53ad671291af3d64fe55",
+    "habab/distribution/tests/test_setup_agent.py": "caacb6dee7afbd47a14c677602cce735d5b7182095c10233780fab31c25aac1c",
+    "habab/distribution/tests/test_voice.py": "1cef5c2c3027d508e88674319a372e147aad83da73ba8dac5203f57105645533"
+  },
+  "changes": [
+    "Shared effective provider entry used by runtime and admin list, preserving legacy order",
+    "App-scoped OpenCode tool permission allow, child-only EXA flag, inherited secrets remain filtered",
+    "Exact Core service enum description and human inventory table prompt"
+  ],
+  "independent_tests": {
+    "setup_actions": 18,
+    "setup_agent": 17,
+    "voice_provider_contracts": 19,
+    "isolation": "pinned Core network-none read-only mount"
+  },
+  "deployment": {
+    "inventory_only": "installed setup_actions4769b330/setup_agenta565fe8c",
+    "full_tools_and_shared_resolver": "NOT_INSTALLED"
+  },
+  "live_acceptance": {
+    "inventory": "FAIL: first answer still called Met.no a weather station; same-turn authenticated raw trace proves zero tools",
+    "full_tool_permission": "NOT_RUN",
+    "webfetch_websearch": "NOT_RUN",
+    "provider_panel": "NOT_RUN"
+  },
+  "limits": [
+    "Source tests do not prove model tool use or live internet",
+    "No Android runtime modified",
+    "No host Codex or aisell configuration changed"
+  ]
+}

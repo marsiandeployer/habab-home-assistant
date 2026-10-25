@@ -9,6 +9,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import DISCOVERY_SOURCES
 from homeassistant.core import Context
 from homeassistant.helpers import device_registry, entity_registry
+from homeassistant.helpers.device_registry import DeviceEntryType
 from .const import DOMAIN
 from .assistant_status import get_assistant_status
 
@@ -237,6 +238,10 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
                 "manufacturer": device.manufacturer,
                 "area_id": device.area_id,
                 "entry_type": entry_type,
+                "entry_type_description": (
+                    "служебная запись"
+                    if device.entry_type is DeviceEntryType.SERVICE else None
+                ),
                 "integration_domain": config_entry_domains.get(device.config_entry_id),
                 "entities": [entity.entity_id for entity in
                              entity_registry.async_entries_for_device(entities, device.id)],

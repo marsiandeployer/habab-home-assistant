@@ -191,6 +191,55 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("fixture-saved-key", str(result))
         self.assertNotIn("fingerprint", result)
 
+    async def test_provider_list_marks_effective_provider_for_legacy_and_explicit_entries(self):
+        from homeassistant.components.habab_home.const import DOMAIN
+
+        cases = [
+            (
+                ["openai", "deepseek"],
+                [False, False],
+                "deepseek",
+            ),
+            (
+                ["deepseek", "openai"],
+                [False, True],
+                "openai",
+            ),
+            (
+                ["openai", "deepseek"],
+                [True, True],
+                "openai",
+            ),
+        ]
+        for providers, flags, expected in cases:
+            with self.subTest(providers=providers, flags=flags):
+                entries = [
+                    SimpleNamespace(
+                        entry_id=f"{provider}-entry",
+                        domain=DOMAIN,
+                        data={
+                            "provider": provider,
+                            "model": PROVIDERS[provider]["model"],
+                            "api_key": f"fixture-{provider}-key",
+                        },
+                        state=SimpleNamespace(value="loaded"),
+                        options={"assistant_selected": flag} if flag else {},
+                    )
+                    for provider, flag in zip(providers, flags, strict=True)
+                ]
+                hass = SimpleNamespace(
+                    config_entries=SimpleNamespace(async_entries=Mock(return_value=entries)))
+                connection = Mock()
+                with patch.object(websocket.er, "async_get", return_value=Mock()), \
+                     patch.object(websocket.er, "async_entries_for_config_entry", return_value=[]):
+                    await inspect.unwrap(websocket.list_connections)(hass, connection, {"id": 9})
+
+                listed = connection.send_result.call_args.args[1]["connections"]
+                self.assertEqual(
+                    [row["provider"] for row in listed if row["assistant_selected"]],
+                    [expected],
+                )
+
     async def test_successful_save_selects_provider_without_returning_flow_credentials(self):
         from homeassistant.components.habab_home.const import DOMAIN
 

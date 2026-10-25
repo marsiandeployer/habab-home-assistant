@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
+from .effective_provider import effective_provider_entry
 from .providers import ProviderClient, ProviderError
 from .setup_agent import AgentError
 
@@ -140,8 +141,10 @@ async def agent_diagnostics(hass, connection, msg):
 @websocket_api.async_response
 async def list_connections(hass, connection, msg):
     registry = er.async_get(hass)
+    config_entries = hass.config_entries.async_entries(DOMAIN)
+    selected_entry = effective_provider_entry(config_entries)
     entries = []
-    for entry in hass.config_entries.async_entries(DOMAIN):
+    for entry in config_entries:
         entities = {
             item.domain: item.entity_id
             for item in er.async_entries_for_config_entry(registry, entry.entry_id)
@@ -150,7 +153,7 @@ async def list_connections(hass, connection, msg):
         entries.append({
             "entry_id": entry.entry_id, "provider": entry.data["provider"],
             "model": entry.data["model"], "state": entry.state.value,
-            "assistant_selected": bool(entry.options.get("assistant_selected")),
+            "assistant_selected": entry is selected_entry,
             "entities": entities, **_api_check_readback(entry),
         })
     connection.send_result(msg["id"], {"connections": entries})

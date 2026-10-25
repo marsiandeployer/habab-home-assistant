@@ -22,6 +22,7 @@ from .agent_diagnostics import AgentDiagnostics
 from .assistant_identity import ASSISTANT_IDENTITY
 from .assistant_status import get_assistant_status
 from .const import DOMAIN
+from .effective_provider import effective_provider_entry
 from .providers import PROVIDERS, provider_api_base
 from .runtime_context import (
     DOCKER_RUNTIME_KIND,
@@ -86,7 +87,7 @@ Bluetooth override с BlueZ применим только к Linux-хосту. �
 {"action":"integrations"} — установленные интеграции без секретов;
 {"action":"xiaomi_setup"} — подготовить или проверить подключение Xiaomi Home;
 {"action":"discover_devices","duration":8} — ограниченное наблюдение за нативными HA discovery-потоками и Bluetooth; duration от 1 до 15 секунд;
-{"action":"devices"} — реестр устройств Home Assistant: возвращает до 200 записей с именем, ID, моделью, производителем, area, entry_type, integration_domain и связанными entity_id, а также count (число возвращённых записей), total_count (полный размер реестра), limit и truncated. Для ответа о количестве записей используй total_count, а при перечислении называй каждую строку записью реестра. entry_type=service прямо помечает служебную запись; entry_type=null или другой тип сам по себе не доказывает наличие физического прибора. integration_domain показывает интеграцию-владельца записи, а не тип или наличие аппаратуры. Не называй запись физическим прибором, погодной станцией, системой или купленным устройством только по словам о погоде, облаке, ПО, провайдере, сервисе, domain, имени или entity_id. Физический тип указывай только когда поля модели и производителя вместе с сущностями явно описывают конкретную физическую модель; иначе дай точный счёт реестра и скажи, что тип записи по этим данным не подтверждён. Если truncated=true, в списке показана только часть записей, но total_count остаётся полным счётом реестра;
+{"action":"devices"} — реестр устройств Home Assistant: возвращает до 200 записей с именем, ID, моделью, производителем, area, entry_type, entry_type_description, integration_domain и связанными entity_id, а также count (число возвращённых записей), total_count (полный размер реестра), limit и truncated. entry_type_description равен «служебная запись» только для точного enum-флага DeviceEntryType.SERVICE; null означает, что описание типа неизвестно. Для ответа о количестве записей используй total_count, а при перечислении называй каждую строку записью реестра. entry_type=null или другой тип сам по себе не доказывает наличие физического прибора. integration_domain показывает интеграцию-владельца записи, а не тип или наличие аппаратуры. Не называй запись физическим прибором, погодной станцией, системой или купленным устройством только по словам о погоде, облаке, ПО, провайдере, сервисе, domain, имени или entity_id. Физический тип указывай только когда поля модели и производителя вместе с сущностями явно описывают конкретную физическую модель; иначе дай точный счёт реестра и скажи, что тип записи по этим данным не подтверждён. Если truncated=true, в списке показана только часть записей, но total_count остаётся полным счётом реестра;
 {"action":"states","entity_id":"..."} — состояние;
 {"action":"assist_exposure","operation":"get","entity_id":"..."} — текущая экспозиция одной сущности для Home Assistant Conversation;
 {"action":"assist_exposure","operation":"set","entity_id":"...","should_expose":true} — явно включить или выключить экспозицию одной сущности для Home Assistant Conversation (should_expose строго true или false);
@@ -99,7 +100,7 @@ Bluetooth override с BlueZ применим только к Linux-хосту. �
 {"action":"start_integration","domain":"..."} — начать нативное подключение;
 {"action":"continue_integration","flow_id":"...","input":{...}} — заполнить следующий шаг;
 {"action":"options_start","entry_id":"..."} и {"action":"options_continue","flow_id":"...","input":{...}} — настройки интеграции.
-На вопрос о текущих подключённых устройствах, интеграциях, их количестве или наличии сначала прочитай соответствующий реестр действием devices или integrations в этом же ходе разговора. При необходимости текущих состояний дополнительно прочитай states. Не подменяй свежее чтение сведениями из прежних сообщений или старых результатов инструментов. Если чтение не удалось, сообщи, что актуальный состав не проверен, а не выдавай прежние данные за текущие.
+На вопрос о текущих подключённых устройствах, интеграциях, их количестве или наличии сначала прочитай соответствующий реестр действием devices или integrations в этом же ходе разговора. При перечислении devices выведи таблицу с понятными заголовками «Название», «Тип записи», «Модель». Тип записи передавай по фактическим entry_type и entry_type_description: service — «служебная запись», null — «тип не подтверждён», иной тип — точное значение без догадок. Сохраняй тип каждой строки и не превращай реестровые записи в подсчёт физических приборов. Строку с entry_type=service называй служебной записью, не аппаратурой и не купленным устройством. При необходимости текущих состояний дополнительно прочитай states. Не подменяй свежее чтение сведениями из прежних сообщений или старых результатов инструментов. Если чтение не удалось, сообщи, что актуальный состав не проверен, а не выдавай прежние данные за текущие.
 В assistant_status значение android_local_voice_settings_control_from_chat=false относится только к локальным настройкам голоса Android, например фразе пробуждения и звуку; оно не запрещает управлять экспозицией сущностей HA Conversation. Отдельная возможность home_assistant_conversation_entity_exposure.registered относится только к настройке одной точной сущности, а runtime_status=not_checked означает, что настройка ещё не проверялась. Не делай вывод об успешной работе из регистрации возможности и не объявляй её недоступной из-за ограничения Android: проверяй только результат assist_exposure get/set, включая явную ошибку helper.
 Для запросов найти устройства или подключения по LAN, Wi-Fi или Bluetooth сначала вызови discover_devices, затем изучи devices и ожидающие discovered_flows. Это наблюдение ограничено тем, что видит сам Home Assistant: результат может быть неполным; оно не сканирует список Wi-Fi сетей (SSID), не предполагает наличие Windows-адаптера и не меняет сеть или настройки хоста. Не обещай найти SSID через это действие. При явном запросе владельца выбери только flow, чей домен и описание соответствуют нужному устройству, и явно прими его через adopt_discovered_flow. Продолжай только flow ID из результата принятия. Не принимай flow наугад и не используй занятые или пользовательские подключения. Продолжай только показанные варианты меню или пустое подтверждение. Непустую форму владелец заполняет в защищённой карточке; значения полей не придумывай.
 Выбирай только реальные ID из результатов. Явно указанная владельцем цель — обязательное условие действия: не заменяй названное устройство, комнату, список или другой объект похожим либо найденным ранее. Перед изменением состояния существующей сущности перечитай актуальные states и сверь entity_id и friendly_name с указанной целью; сведения из прежних сообщений не заменяют эту проверку. Если точная цель не найдена или выбор неоднозначен, ничего не меняй и уточни цель у владельца. После завершения проверь integrations, devices и доступные states.
@@ -147,17 +148,10 @@ class SetupAgent:
 
     def settings(self):
         entries = self.hass.config_entries.async_entries(DOMAIN)
-        supported = set(PROVIDERS)
-        for entry in entries:
-            if (entry.data.get("provider") in supported
-                    and getattr(entry, "options", {}).get("assistant_selected")):
-                return entry.data
-        # Preserve the established provider when both are configured.
-        for provider in ("deepseek", "openai", "habab", "gemini"):
-            for entry in entries:
-                if entry.data.get("provider") == provider:
-                    return entry.data
-        raise AgentError("provider_required")
+        entry = effective_provider_entry(entries)
+        if entry is None:
+            raise AgentError("provider_required")
+        return entry.data
 
     def select_provider(self, provider):
         """Persist an explicit UI selection without removing voice connections."""
@@ -215,9 +209,7 @@ class SetupAgent:
             "share": "disabled", "snapshot": False, "plugin": [], "mcp": {},
             "lsp": False, "formatter": False, "enabled_providers": [provider_id],
             "model": f"{provider_id}/{settings['model']}",
-            "permission": {"*": "deny", "bash": "allow", "read": "allow",
-                           "edit": "allow", "glob": "allow", "grep": "allow",
-                           "external_directory": "allow"},
+            "permission": {"*": "allow"},
             "provider": {provider_id: {
                 "npm": "@ai-sdk/google" if is_gemini else "@ai-sdk/openai-compatible",
                 "name": PROVIDERS[provider]["name"],
@@ -237,6 +229,7 @@ class SetupAgent:
             "XDG_CACHE_HOME": str(self.root / "cache"),
             "OPENCODE_CONFIG_CONTENT": json.dumps(config),
             "OPENCODE_DISABLE_PROJECT_CONFIG": "true", "OPENCODE_DISABLE_AUTOUPDATE": "true",
+            "OPENCODE_ENABLE_EXA": "1",
             "OPENCODE_SERVER_PASSWORD": self.password,
             key_name: settings["api_key"],
             "HABAB_HA_CONTROL_TOKEN": self.control_token,

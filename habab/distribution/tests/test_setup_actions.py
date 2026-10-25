@@ -113,10 +113,31 @@ class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {
             "devices": [{"id": "device-id", "name": "Kitchen", "model": "Model X",
                 "manufacturer": "Maker", "area_id": "kitchen", "entry_type": "service",
+                "entry_type_description": "служебная запись",
                 "integration_domain": "test_domain", "entities": ["sensor.kitchen_temperature"]}],
             "count": 1, "total_count": 1, "limit": 200, "truncated": False,
         })
         json.dumps(result)
+
+    async def test_devices_leave_missing_entry_type_unknown(self):
+        device = DeviceEntry(config_entry_id="entry-id", id="device-id",
+                             identifiers={("test", "device")}, entry_type=None)
+        items = ActiveDeviceRegistryItems()
+        items[device.id] = device
+        registry = object.__new__(DeviceRegistry)
+        registry._devices = items
+        registry.devices = _DeprecatedDeviceRegistryItemsView(items)
+        with patch("homeassistant.components.habab_home.setup_actions.device_registry.async_get",
+                   return_value=registry), \
+             patch("homeassistant.components.habab_home.setup_actions.entity_registry.async_get",
+                   return_value=object()), \
+             patch("homeassistant.components.habab_home.setup_actions.entity_registry.async_entries_for_device",
+                   return_value=[]):
+            hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda: [
+                SimpleNamespace(entry_id="entry-id", domain="fixture")]))
+            result = await execute(hass, None, "alice", {"action": "devices"})
+        self.assertIsNone(result["devices"][0]["entry_type"])
+        self.assertIsNone(result["devices"][0]["entry_type_description"])
 
     async def test_devices_count_and_truncation_describe_full_registry(self):
         item_count = 201
