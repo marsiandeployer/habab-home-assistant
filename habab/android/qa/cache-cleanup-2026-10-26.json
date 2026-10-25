@@ -1,0 +1,59 @@
+{
+  "schema": "bounded-cache-cleanup-receipt/v1",
+  "cleanup_date": "2026-10-26",
+  "cleanup_time_utc": null,
+  "cleanup_time_note": "Exact execution time was not retained in the terminal receipt.",
+  "scope": [
+    {
+      "label": "native18-extracted-build-cache",
+      "allocated_bytes": 3394605056,
+      "removed": true
+    },
+    {
+      "label": "obsolete-cfb-source-checkout",
+      "allocated_bytes": 6160384,
+      "removed": true
+    },
+    {
+      "label": "apk19-app-build-intermediates",
+      "allocated_bytes": 195760128,
+      "removed": true
+    }
+  ],
+  "allocated_bytes_total": 3596525568,
+  "filesystem_availability": {
+    "unit": "bytes",
+    "available_before": 19176595456,
+    "available_after": 22772736000,
+    "observed_delta": 3596140544,
+    "difference_vs_allocated_bytes": 385024,
+    "note": "Concurrent filesystem activity can affect df delta."
+  },
+  "method": {
+    "allocation_measurement": "du -sx -B1 per approved target",
+    "availability_measurement": "df -B1 available bytes for /",
+    "deletion": "Scoped removal after fresh identity and dependency preflight.",
+    "fresh_preflight": {
+      "lsof_open_file_rows": 0,
+      "process_path_matches_on_cwd_exe_open_fds": 0,
+      "proc_scan_races_or_denied": 149,
+      "host_mountpoint_references": 0,
+      "docker_mount_references": 0,
+      "external_symlink_references": 0
+    }
+  },
+  "preserved": {
+    "current_signed_runtime_3149_source_and_public_copies": true,
+    "previous_signed_runtime_2f94_canonical_and_public_copies_byte_identical": true,
+    "previous_frontend_8_wheel_matches_qa_sha": true,
+    "locked_node_apks_present_and_hash_verified": 21,
+    "opencode_archive_hash_verified_in_wip": true,
+    "voice_jni_source_inputs_present_in_frozen_source": 19,
+    "protected_wip_rootfs_present": true
+  },
+  "limits": [
+    "No phone, tunnel, runtime build, APK build, or publication action was performed.",
+    "The proc scan had 149 raced or denied entries; lsof returned zero open-file rows for each target.",
+    "Only the three approved cache/generated-build targets were removed."
+  ]
+}
