@@ -1,0 +1,15 @@
+{
+  "verdict": "PASS",
+  "stage": "terminal_controller_readback",
+  "prompt_sent": false,
+  "form_values_read": false,
+  "form_submitted": false,
+  "broker_connected": false,
+  "controller_abort_confirmed": true,
+  "mqtt_entry_count_unchanged": true,
+  "backend_idle_at_end": true,
+  "cleanup_complete": true,
+  "owner_observer_continuous": true,
+  "scope": "Operator cancellation of the MQTT QA fixture; not visible-chat E2E acceptance",
+  "ended_at": "2026-10-25T11:48:50.692Z"
+}

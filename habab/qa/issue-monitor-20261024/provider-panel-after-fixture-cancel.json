@@ -1,0 +1,29 @@
+{
+  "scope": "Read-only provider panel before and after operator fixture cancellation; observational comparison, not proof of causation",
+  "runtime": {
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "ai_panel_sha256": "64a613d9b3a82df4f3da2ae0156facb832efb4d3643b0888e8bf2b5c4300fded"
+  },
+  "served_panel": {
+    "status": 200,
+    "sha256": "64a613d9b3a82df4f3da2ae0156facb832efb4d3643b0888e8bf2b5c4300fded"
+  },
+  "admin": true,
+  "finished_at": "2026-10-25T11:50:15.871Z",
+  "before": {
+    "page_error_count": 2,
+    "duplicate_element_names": [
+      "ha-selector",
+      "wa-icon"
+    ]
+  },
+  "after": {
+    "page_error_count": 0,
+    "failed_resource_count": 0,
+    "service_call_count": 0,
+    "settings_mutations": 0,
+    "model_runs": 0,
+    "key_value_observed": false
+  }
+}
