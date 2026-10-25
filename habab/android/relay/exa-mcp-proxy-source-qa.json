@@ -1,0 +1,100 @@
+{
+  "kind": "exa_mcp_proxy_source_qa",
+  "date": "2026-10-25",
+  "status": "source_tests_passed_not_deployed",
+  "scope": [
+    "habab/android/relay/exa_mcp_proxy.py",
+    "habab/android/relay/test_exa_mcp_proxy.py",
+    "habab/android/relay/exa-mcp-proxy-source-qa.json"
+  ],
+  "contract": {
+    "client_endpoint": "POST /mcp/exa",
+    "capabilities": {
+      "endpoint": "GET /mcp/exa/capabilities",
+      "protocol": "habab-exa-mcp-relay-v1",
+      "mcp_url": "/mcp/exa",
+      "tools": ["web_search_exa", "get_code_context_exa"]
+    },
+    "upstream": "https://mcp.exa.ai/mcp?tools=web_search_exa,get_code_context_exa",
+    "authentication": "Exactly one Authorization: Bearer Habab service key; hash loaded from private auth config key_sha256. Client authorization is never forwarded upstream.",
+    "allowed_methods": [
+      "initialize",
+      "notifications/initialized",
+      "notifications/cancelled",
+      "ping",
+      "tools/list",
+      "tools/call:web_search_exa",
+      "tools/call:get_code_context_exa"
+    ],
+    "tool_schemas": {
+      "web_search_exa": {
+        "required": ["query", "objective"],
+        "query_max_characters": 4000,
+        "objective_min_characters": 1,
+        "objective_max_characters": 4096,
+        "numResults": "optional integer from 1 to 25"
+      },
+      "get_code_context_exa": {
+        "required": ["query"],
+        "query_max_characters": 4000,
+        "numResults": "optional integer from 1 to 25"
+      },
+      "catalog_policy": "tools/list is checked against the expected vendor tool names, required fields, exact property sets and base types. The relay publishes its stricter enforced bounds in the returned schema and rejects vendor schema drift with sanitized 502."
+    },
+    "transport": "Streamable HTTP POST; JSON and SSE responses forwarded. tools/list JSON/SSE catalogs are validated and bounded before returning. Session and protocol headers are filtered; GET and DELETE return 405.",
+    "limits": {
+      "request_body_bytes": 1048576,
+      "request_body_total_read_timeout_seconds": 10,
+      "response_body_bytes": 8388608,
+      "inflight_requests": 4,
+      "connect_timeout_seconds": 10,
+      "upstream_total_timeout_seconds": 60,
+      "tool_query_characters": 4000,
+      "objective_characters": 4096,
+      "num_results_integer_max": 25,
+      "cancellation_reason_characters": 256
+    },
+    "upstream_cookie_policy": "aiohttp DummyCookieJar; upstream cookies are not retained or replayed"
+  },
+  "tests": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 /root/.venvs/habab-voice-relay/bin/python -m unittest test_exa_mcp_proxy -v",
+    "working_directory": "habab/android/relay",
+    "result": "PASS",
+    "passed": 18,
+    "failed": 0,
+    "outbound_guard": "ClientSession requests to non-loopback hosts raise before socket creation; the fixed Exa URL is patched to a local TestServer.",
+    "covered": [
+      "service-key authorization, duplicate authorization, query rejection and no upstream credential forwarding",
+      "capabilities advertise both tools",
+      "vendor tools/list schema validation, enforced bounded schema publication, JSON and SSE catalogs, drift rejection",
+      "both tool calls, required web objective, bounded query/objective and integer numResults policy",
+      "malformed and oversized bodies, total request body read deadline, unsupported methods and tool names",
+      "initialize, initialized and narrowly validated cancelled notifications",
+      "exact JSON payload and safe protocol/session header forwarding",
+      "byte-for-byte ordinary SSE forwarding and bounded tools/list SSE rewrite",
+      "DummyCookieJar prevents response cookies from being sent on a later upstream request",
+      "JSON/SSE response caps, sanitized HTTP 429 and Retry-After, redirect rejection, upstream timeout and downstream cancellation cleanup",
+      "health without upstream probe and private config file permissions"
+    ]
+  },
+  "upstream_schema_evidence": "Parent reported a live upstream tools/list readback with web_search_exa properties query:string minLength 1, objective:string minLength 1 maxLength 4096, numResults:number; required query and objective; additionalProperties false. get_code_context_exa properties query:string minLength 1, numResults:number; required query; additionalProperties false. No search/tool call was made for that schema readback.",
+  "official_protocol_checks": [
+    "https://github.com/exa-labs/exa-mcp-server/blob/main/api/mcp.ts",
+    "https://exa.ai/mcp",
+    "https://modelcontextprotocol.io/specification/2025-03-26/basic/transports",
+    "https://github.com/anomalyco/opencode/blob/v1.14.21/packages/opencode/src/mcp/index.ts"
+  ],
+  "initial_test_harness_note": "An earlier baseline test run failed because the network-guard self-test left its expected blocked-host marker set for teardown. That test clears the marker after asserting the request was blocked before socket creation. The expanded 18-test suite passes.",
+  "not_run": [
+    "live Exa tool call, search or code-context request",
+    "PM2, nginx, deployment, device or ADB",
+    "real Habab service key or Exa key",
+    "Core/Node client integration"
+  ],
+  "known_limits": [
+    "No standalone GET SSE listener or DELETE session termination; both return 405.",
+    "tools/list SSE is buffered within the 8 MiB and 60 second upstream bounds so its schema can be checked and constrained; ordinary SSE responses remain streamed.",
+    "The integer 1–25 numResults limit intentionally narrows the vendor number schema and is reflected in the client-visible schema.",
+    "Contract remains source-only pending Core/Node integration and parent review."
+  ]
+}

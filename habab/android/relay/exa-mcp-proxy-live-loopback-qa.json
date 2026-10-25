@@ -1,0 +1,74 @@
+{
+  "kind": "exa_relay_real_upstream_loopback_smoke",
+  "observedAtUnix": 1792930145,
+  "sourceSha256": "3f672290a9d624d9748e30e770e38aba59be22a5396ab8eb26c07b4aac7e57e2",
+  "ephemeral_service_key_ram_only": true,
+  "deployed": false,
+  "model_calls": false,
+  "phone_touched": false,
+  "calls": [
+    {
+      "method": "initialize",
+      "httpStatus": 200,
+      "durationMs": 204,
+      "jsonrpcResult": true,
+      "jsonrpcError": false,
+      "isError": false,
+      "responseBytes": 1077
+    },
+    {
+      "method": "tools/list",
+      "httpStatus": 200,
+      "durationMs": 194,
+      "jsonrpcResult": true,
+      "jsonrpcError": false,
+      "isError": false,
+      "responseBytes": 2821,
+      "tools": [
+        {
+          "name": "web_search_exa",
+          "required": [
+            "query",
+            "objective"
+          ],
+          "numResultsType": "integer"
+        },
+        {
+          "name": "get_code_context_exa",
+          "required": [
+            "query"
+          ],
+          "numResultsType": "integer"
+        }
+      ]
+    },
+    {
+      "method": "tools/call",
+      "httpStatus": 200,
+      "durationMs": 1144,
+      "jsonrpcResult": true,
+      "jsonrpcError": false,
+      "isError": false,
+      "responseBytes": 3325,
+      "tool": "web_search_exa",
+      "contentBytes": 3131,
+      "officialHaDomainPresent": true,
+      "contentSha256": "815fbcf0c5f25711c38ecced27678d72140c24ca94aae77a97b3b46f808549fd"
+    },
+    {
+      "method": "tools/call",
+      "httpStatus": 200,
+      "durationMs": 587,
+      "jsonrpcResult": true,
+      "jsonrpcError": false,
+      "isError": false,
+      "responseBytes": 3468,
+      "tool": "get_code_context_exa",
+      "contentBytes": 3188,
+      "officialHaDomainPresent": false,
+      "contentSha256": "52a0f7b22426519155ee8f0fa87e0ba0c3e173fa58c02982e514b8c56355c0e2"
+    }
+  ],
+  "outcome": "PASS_REAL_UPSTREAM_BOTH_TOOLS",
+  "owned_loopback_server_closed": true
+}

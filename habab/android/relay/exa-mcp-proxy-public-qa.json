@@ -1,0 +1,80 @@
+{
+  "kind": "exa_mcp_public_acceptance",
+  "releaseId": "bd54ab2ae835ce40",
+  "observedAtUnix": 1792930281,
+  "credential_source": "existing_phone_provider_ram_only",
+  "model_calls": false,
+  "phone_settings_changed": false,
+  "checks": [
+    {
+      "check": "unauthorized",
+      "httpStatus": 401
+    },
+    {
+      "check": "capabilities",
+      "httpStatus": 200,
+      "body": {
+        "protocol": "habab-exa-mcp-relay-v1",
+        "mcp_url": "/mcp/exa",
+        "tools": [
+          "web_search_exa",
+          "get_code_context_exa"
+        ]
+      }
+    },
+    {
+      "check": "get_mcp",
+      "httpStatus": 405
+    },
+    {
+      "check": "initialize",
+      "tool": null,
+      "httpStatus": 200,
+      "jsonrpcSuccess": true,
+      "durationMs": 275,
+      "responseBytes": 1077
+    },
+    {
+      "check": "tools/list",
+      "tool": null,
+      "httpStatus": 200,
+      "jsonrpcSuccess": true,
+      "durationMs": 246,
+      "responseBytes": 2821,
+      "tools": [
+        "web_search_exa",
+        "get_code_context_exa"
+      ]
+    },
+    {
+      "check": "tools/call",
+      "tool": "web_search_exa",
+      "httpStatus": 200,
+      "jsonrpcSuccess": true,
+      "durationMs": 1281,
+      "responseBytes": 3335
+    },
+    {
+      "check": "tools/call",
+      "tool": "get_code_context_exa",
+      "httpStatus": 200,
+      "jsonrpcSuccess": true,
+      "durationMs": 584,
+      "responseBytes": 3471
+    }
+  ],
+  "processes": [
+    {
+      "name": "habab-voice-relay",
+      "pid": 286678,
+      "status": "online"
+    },
+    {
+      "name": "habab-exa-mcp-relay",
+      "pid": 373955,
+      "status": "online"
+    }
+  ],
+  "voice_process_not_restarted": true,
+  "outcome": "PASS_PUBLIC_AUTH_AND_BOTH_MCP_TOOLS"
+}
