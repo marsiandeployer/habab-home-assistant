@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "source_sha256": "18d2af5500c959796e2c8c9ead8521473cefd42bc2654ccdc9817123e2f380e4",
+  "environment": {
+    "browser": "owned headless Chromium",
+    "fixture_origin": "loopback only",
+    "real_home_assistant": false,
+    "real_backend": false,
+    "real_history": false,
+    "model_calls": false,
+    "user_credentials": false,
+    "authentication": "synthetic admin with mocked fetchWithAuth",
+    "real_microphone": false
+  },
+  "checks": {
+    "desktop_two_column_layout": true,
+    "cancelled_status_filter": true,
+    "user_assistant_tool_result_timeline": true,
+    "evidence_caveat_visible": true,
+    "synthetic_secrets_masked": true,
+    "dynamic_html_rendered_as_text": true,
+    "native_assist_unavailable_disclosed": true,
+    "runtime_error_detail": true,
+    "cancellation_stage_detail": true,
+    "selected_zip_download_initiated": true,
+    "period_zip_initiated": true,
+    "period_export_scope_is_time_and_channel_only": true,
+    "admin_account_change_clears_previous_owner": true,
+    "non_admin_clears_and_denies": true,
+    "mobile_single_column_layout_and_no_horizontal_overflow": true,
+    "realtime_voice_label_correct": true
+  },
+  "fixture_api_requests": {
+    "GET /api/habab_home/diagnostics/{resource}": 12,
+    "POST /api/habab_home/diagnostics/{resource}": 2
+  },
+  "browser_errors": {
+    "console_error_count": 0,
+    "page_error_count": 0,
+    "failed_request_count": 0,
+    "external_request_count": 0,
+    "external_request_origins": []
+  },
+  "known_source_mismatch": null,
+  "status": "passed",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844
+    }
+  }
+}

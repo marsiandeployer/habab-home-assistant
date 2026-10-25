@@ -22,7 +22,7 @@ const copy = {
     allChannels: "All channels",
     web: "Web chat",
     telegram: "Telegram",
-    voice: "Browser voice",
+    voice: "Realtime voice",
     nativeAssist: "Native Assist history is not recorded by Habab.",
     status: "Result",
     allStatuses: "All results",
@@ -123,7 +123,7 @@ const copy = {
     allChannels: "Все каналы",
     web: "Веб-чат",
     telegram: "Telegram",
-    voice: "Голос в браузере",
+    voice: "Голосовой диалог",
     nativeAssist: "История нативного Assist не записывается Habab.",
     status: "Результат",
     allStatuses: "Все результаты",
@@ -314,6 +314,12 @@ export function diagnosticEventLabel(event, words) {
     stage_error: words.stageError,
   };
   return labels[event.kind] || words.unknown;
+}
+
+export function diagnosticChannelLabel(channel, modes, words) {
+  if (channel === "telegram") return words.telegram;
+  if (channel === "voice" || modes?.includes("voice")) return words.voice;
+  return words.web;
 }
 
 function el(name, className, text) {
@@ -591,7 +597,7 @@ class HababDiagnosticsPanel extends HTMLElement {
       button.append(el("span", "session-title", sanitizeDiagnosticText(session.title || session.session_id)));
       const metadata = el("span", "session-meta");
       metadata.append(
-        el("span", "", this.t(session.channel === "telegram" ? "telegram" : session.modes?.includes("voice") ? "voice" : "web")),
+        el("span", "", diagnosticChannelLabel(session.channel, session.modes, this.words)),
         el("span", "", this.t(session.status || "unknown")),
         el("span", "", `${formatDiagnosticTimestamp(session.updated_at || session.created_at, this.language)} · ${Number.isFinite(session.message_count) ? session.message_count : 0} ${this.t("messages")}`),
       );
@@ -660,7 +666,7 @@ class HababDiagnosticsPanel extends HTMLElement {
     const summary = el("dl", "summary");
     const summaryItems = [
       ["idLabel", session.session_id],
-      ["channelLabel", this.t(session.modes?.includes("voice") && this.filters.channel === "voice" ? "voice" : session.channel === "telegram" ? "telegram" : "web")],
+      ["channelLabel", diagnosticChannelLabel(session.channel, session.modes, this.words)],
       ["statusLabel", this.t(session.status || "unknown")],
       ["countLabel", Number.isFinite(session.message_count) ? session.message_count : this.detail.events.length],
       ["created", formatDiagnosticTimestamp(session.created_at, this.language)],

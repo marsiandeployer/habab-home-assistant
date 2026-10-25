@@ -32,6 +32,7 @@ test("diagnostic labels separate assistant language from recorded tool events", 
     unavailableStage: "Unavailable", userMessage: "User", assistantText: "Assistant text",
     voiceTranscript: "Voice transcript", toolInvocation: "Tool call recorded",
     toolOutput: "Tool result recorded", stageError: "Runtime error recorded", unknown: "Unknown",
+    telegram: "Telegram", voice: "Realtime voice", web: "Web chat",
   };
   assert.equal(diagnostics.diagnosticEventLabel({ kind: "assistant_text" }, words), "Assistant text");
   assert.equal(diagnostics.diagnosticEventLabel({ kind: "tool_invocation", confirmation: "runtime_call_recorded" }, words), "Tool call recorded");
@@ -39,6 +40,9 @@ test("diagnostic labels separate assistant language from recorded tool events", 
   assert.equal(diagnostics.diagnosticEventLabel({ kind: "stage_unavailable", available: false }, words), "Unavailable");
   assert.equal(diagnostics.diagnosticEventLabel({ kind: "stage_error", stage: "model_request", status: "error" }, words), "Runtime error recorded");
   assert.equal(diagnostics.diagnosticEventLabel({ kind: "assistant_text", confirmation: "not_applicable" }, words), "Assistant text");
+  assert.equal(diagnostics.diagnosticChannelLabel("web", ["web", "voice"], words), "Realtime voice");
+  assert.equal(diagnostics.diagnosticChannelLabel("voice", ["voice"], words), "Realtime voice");
+  assert.equal(diagnostics.diagnosticChannelLabel("telegram", ["telegram"], words), "Telegram");
 });
 
 test("diagnostic rendering helpers mask credentials and sensitive structured fields", () => {
