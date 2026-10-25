@@ -1,4 +1,6 @@
 // Independent downstream extension: no dependency on compiled HA internals.
+import { AssistVoice, BrowserGeminiVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js";
+import { strings } from "./strings.js";
 export function visibleTextMessages(messages) {
   if (!Array.isArray(messages)) return [];
   return messages.filter((message) =>
@@ -22,6 +24,12 @@ export function appendQuickReplyToDraft(draft, prompt) {
   return typeof draft === "string" && draft.trim()
     ? `${draft.replace(/\s+$/, "")}\n${prompt}`
     : prompt;
+}
+
+export function shouldBlockFrontendReload({busy, voiceBusy, activeVoice, pendingVoiceText, draft}) {
+  return busy === true || voiceBusy === true || activeVoice === true ||
+    (typeof pendingVoiceText === "string" && pendingVoiceText.trim().length > 0) ||
+    (typeof draft === "string" && draft.trim().length > 0);
 }
 
 export function mountStableElement(parent, element) {
@@ -59,6 +67,22 @@ export function chooseAssistPipeline(requestedId, pipelines, preferredId, lastUs
   let selected = pipelines.find((pipeline) => pipeline?.id === id);
   if (!selected && preferredId) selected = pipelines.find((pipeline) => pipeline?.id === preferredId);
   return selected;
+}
+
+export function selectBrowserVoiceRoute(capability) {
+  if (capability?.available === true && capability.client === "browser_v1" &&
+      capability.provider === "habab" && capability.realtime_provider === "gemini" &&
+      capability.transport === "habab" && capability.websocket_url === "wss://habab-voice.wpmix.net/gemini/ws" &&
+      capability.auth?.mode === "first_text_frame" && capability.auth?.type === "habab.voice.auth.v1") {
+    return "habab_browser_v1";
+  }
+  if (capability?.available === false &&
+      capability.reason === "selected_provider_requires_ha_assist_stt" &&
+      capability.browser?.transport === "ha_assist_pipeline" &&
+      capability.browser?.requires_ha_stt === true) {
+    return "ha_assist_pipeline";
+  }
+  return undefined;
 }
 
 export function assistantDiagnosticMessage(diagnostic, copy) {
@@ -390,6 +414,11 @@ function installChat() {
     }
 
     connectedCallback() {
+      if (!this.demo && !this.reloadStateProvider && typeof window !== "undefined" &&
+          typeof window.haRegisterDirtyStateProvider === "function") {
+        this.reloadStateProvider = window.haRegisterDirtyStateProvider(this);
+      }
+      this.syncReloadState();
       this.subscribeVoiceHistory();
       if (this.shadowRoot.firstChild) {
         this.installLayoutLifecycle();
@@ -430,7 +459,7 @@ function installChat() {
         this.onClose();
       });
       this.q(".collapse").onclick = () => this.collapseMobileChat();
-      this.q(".mic").onclick = () => this.voiceBusy ? this.voice?.finishRecording() : this.startVoice("last_used");
+      this.q(".mic").onclick = () => this.voiceBusy ? this.finishVoice() : this.startVoice("last_used");
       this.q(".fresh").onclick = () => this.connect(true);
       this.q(".retry").onclick = () => this.connect();
       this.q(".setup-jump").onclick = () => this.revealSetupForm();
@@ -453,6 +482,7 @@ function installChat() {
             !event.composedPath().some(isEditableFocusTarget)) this.followSetupForms = false;
       });
       this.q("form").onsubmit = (event) => {event.preventDefault(); this.send();};
+      this.q("textarea").oninput = () => this.syncReloadState();
       this.q("textarea").onkeydown = (event) => {
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {event.preventDefault(); this.send();}
       };
@@ -495,6 +525,8 @@ function installChat() {
       this.markdownUpgradePending = false;
       this.drawGeneration += 1;
       this.cleanupVoice();
+      this.reloadStateProvider?.unregister();
+      this.reloadStateProvider = undefined;
       if (this.integrationCard) this.integrationCard.active = false;
       this.historyConnection = undefined;
       this.historyAttempt = undefined;
@@ -572,6 +604,7 @@ function installChat() {
       const draft = textarea.value;
       if (draft.trim()) {
         textarea.value = appendQuickReplyToDraft(draft, prompt);
+        this.syncReloadState();
         textarea.focus();
         return;
       }
@@ -618,6 +651,7 @@ function installChat() {
         submit_prompt: params.submit === true && typeof params.prompt === "string" && params.prompt.length <= 4000,
       };
       if (this.openParams.initial_prompt !== undefined) this.q("textarea").value = this.openParams.initial_prompt;
+      this.syncReloadState();
       this.returnFocus = opener || this.q(".launcher");
       this.setAssistantOpen(true);
       const dialog = this.q("dialog");
@@ -658,6 +692,23 @@ function installChat() {
       this.q(".fresh").disabled = this.busy || !this.sessionId;
       this.q(".retry").disabled = this.busy;
       for (const button of this.shadowRoot.querySelectorAll(".quick-reply")) button.disabled = this.busy || !this.sessionId;
+      this.syncReloadState();
+    }
+
+    syncReloadState() {
+      if (this.demo) return;
+      if (!this.reloadStateProvider && typeof window !== "undefined" &&
+          typeof window.haRegisterDirtyStateProvider === "function") {
+        this.reloadStateProvider = window.haRegisterDirtyStateProvider(this);
+      }
+      const textarea = this.shadowRoot?.querySelector?.("textarea");
+      this.reloadStateProvider?.setDirty(shouldBlockFrontendReload({
+        busy: this.busy,
+        voiceBusy: this.voiceBusy,
+        activeVoice: this.voice !== undefined,
+        pendingVoiceText: this.pendingVoiceText,
+        draft: textarea?.value,
+      }));
     }
 
     async connect(fresh = false) {
@@ -735,6 +786,14 @@ function installChat() {
       this.pendingVoiceText = undefined;
       this.controls();
       try {
+        const capability = await this.realtimeRequest("session", "GET");
+        if (generation !== this.voiceGeneration || !this.q("dialog").open || !this.isCurrentOwnerContext()) return;
+        const route = selectBrowserVoiceRoute(capability);
+        if (route === "habab_browser_v1") {
+          await this.startBrowserVoice(capability, generation);
+          return;
+        }
+        if (route !== "ha_assist_pipeline") throw {code: "browserVoiceUnavailable"};
         if (invalidId) throw {code: "noAssistPipeline"};
         const pipelines = await this.pipelines();
         if (generation !== this.voiceGeneration || !this.q("dialog").open) return;
@@ -744,6 +803,8 @@ function installChat() {
         if (!pipeline) throw {code: "noAssistPipeline"};
         if (!pipeline.stt_engine) throw {code: "speechRequired"};
         this.voiceReplyPipeline = pipeline.tts_engine ? pipeline : undefined;
+        await playVoiceCue("start");
+        if (generation !== this.voiceGeneration || !this.q("dialog").open || !this.isCurrentOwnerContext()) return;
         this.status(this.t.listening);
         this.voice = new AssistVoice(this.hass, pipeline, (event) => {
           if (generation !== this.voiceGeneration || !this.isCurrentOwnerContext()) return;
@@ -756,10 +817,88 @@ function installChat() {
         this.voice = undefined;
         this.voiceBusy = false;
         this.busy = false;
-        const code = typeof error?.code === "string" && this.t[error.code] ? error.code : "failed";
-        this.status(this.t[code], true);
+        const voiceStrings = strings[this.language || "en"];
+        const code = typeof error?.code === "string" ? error.code : "failed";
+        this.status(voiceStrings[code] || this.t[code] || this.t.failed, true);
         this.controls();
       }
+    }
+
+    async realtimeRequest(action, method, body, signal) {
+      const options = {method, cache: "no-store", signal};
+      if (body !== undefined) {
+        options.headers = {"Content-Type": "application/json"};
+        options.body = JSON.stringify(body);
+      }
+      const response = await this.hass.fetchWithAuth(`/api/habab_home/realtime/${action}`, options);
+      let result;
+      try { result = await response.json(); } catch (_) { result = undefined; }
+      if (!response.ok) {
+        const code = typeof result?.message === "string" ? result.message : "browserVoiceFailed";
+        throw {code};
+      }
+      return result;
+    }
+
+    async startBrowserVoice(capability, generation) {
+      this.status(strings[this.language || "en"].browserVoiceStarting);
+      const isCurrent = () => generation === this.voiceGeneration && this.q("dialog").open && this.isCurrentOwnerContext();
+      const session = await bootstrapAfterStartCue({
+        playCue: playVoiceCue,
+        createSession: () => this.realtimeRequest("session", "POST", {client: "browser_v1"}),
+        isCurrent,
+        stopSession: (sessionId) => this.realtimeRequest("stop", "POST", {session_id: sessionId}),
+      });
+      if (!session) return;
+      if (session?.client !== "browser_v1" ||
+          session.websocket_url !== capability.websocket_url || typeof session.session_id !== "string" ||
+          typeof session.value !== "string" || !session.value || !session.setup ||
+          !Number.isFinite(session.lease_ttl_seconds) || typeof session.expires_at !== "number" ||
+          !Number.isSafeInteger(session.expires_at)) {
+        if (typeof session?.session_id === "string") {
+          void this.realtimeRequest("stop", "POST", {session_id: session.session_id}).catch(() => {});
+        }
+        throw {code: "browserVoiceFailed"};
+      }
+      const voice = new BrowserGeminiVoice({...session, auth: capability.auth}, {
+        onEvent: (event) => {
+          if (generation !== this.voiceGeneration || !this.isCurrentOwnerContext()) return;
+          this.onBrowserVoiceEvent(voice, event);
+        },
+        onTurn: (text, signal) => this.realtimeRequest("turn", "POST", {session_id: session.session_id, text}, signal),
+        onTranscript: (event) => this.realtimeRequest("transcript", "POST", {
+          session_id: session.session_id, kind: "event", event_id: event.event_id,
+          role: event.role, text: event.text,
+        }),
+        onStop: (sessionId) => this.realtimeRequest("stop", "POST", {session_id: sessionId}),
+        playCue: playVoiceCue,
+      });
+      this.voice = voice;
+      await voice.start();
+    }
+
+    onBrowserVoiceEvent(voice, event) {
+      if (event.type === "ready") this.status(this.t.listening);
+      if (event.type === "speech-start") this.status(this.t.speechStart);
+      if (event.type === "speech-end") this.status(this.t.speechEnd);
+      if (event.type === "error") {
+        const code = typeof event.code === "string" && strings[this.language || "en"][event.code]
+          ? event.code : "browserVoiceFailed";
+        this.status(strings[this.language || "en"][code], true);
+      }
+      if (event.type === "expired") this.status(this.t.timeout, true);
+      if (event.type === "ended" && this.voice === voice) {
+        this.voice = undefined;
+        this.voiceBusy = false;
+        this.busy = false;
+        if (event.stopError) this.status(strings[this.language || "en"].browserVoiceStopFailed, true);
+        this.controls();
+      }
+    }
+
+    finishVoice() {
+      if (this.voice instanceof BrowserGeminiVoice) void this.voice.finish();
+      else this.voice?.finishRecording();
     }
 
     onVoiceEvent(event) {
@@ -776,16 +915,23 @@ function installChat() {
       }
       if (event.type === "run-end" || event.type === "error") {
         const transcript = this.pendingVoiceText;
-        this.pendingVoiceText = undefined;
         this.voice?.close(false);
         this.voice = undefined;
         this.voiceBusy = false;
+        if (event.type === "run-end" && transcript) {
+          // Keep the reload guard held until send() synchronously claims the turn.
+          this.busy = false;
+          this.pendingVoiceText = transcript;
+          const send = this.send(transcript, {voiceReply: true});
+          this.pendingVoiceText = undefined;
+          this.controls();
+          void send;
+          return;
+        }
+        this.pendingVoiceText = undefined;
         this.busy = false;
         this.controls();
-        if (event.type === "run-end") {
-          if (transcript) void this.send(transcript, {voiceReply: true});
-          else this.status(this.t.transcriptEmpty, true);
-        }
+        if (event.type === "run-end") this.status(this.t.transcriptEmpty, true);
       }
     }
 

@@ -81,13 +81,184 @@ VOICE_PROVIDER_NAMES = {
     "openai": "OpenAI",
 }
 
+BROWSER_CLIENT = "browser_v1"
+BROWSER_AUTH_TYPE = "habab.voice.auth.v1"
+BROWSER_AUTH_MODE = "first_text_frame"
+VOICE_SESSION_LIFETIME = 180
+RELAY_CAPABILITY_TIMEOUT = 8
+BROWSER_CANCEL_WAIT_SECONDS = 17
+
+
+def browser_assist_fallback(reason):
+    return {"available": False, "reason": reason,
+            "browser": {"transport": "ha_assist_pipeline", "requires_ha_stt": True}}
+
+
+def habab_relay_root():
+    origin = urlsplit(PROVIDERS["habab"]["url"])
+    if (origin.scheme != "https" or origin.hostname != "habab-voice.wpmix.net"
+            or not origin.netloc or origin.username is not None or origin.password is not None):
+        raise ValueError("invalid_realtime_endpoint")
+    return origin.scheme + "://" + origin.netloc
+
+
+async def fetch_habab_browser_capability(client, api_key):
+    """Return safe, validated relay capabilities; never expose the server key."""
+    try:
+        async with client.get(
+            habab_relay_root() + "/v1/capabilities",
+            headers={"Authorization": "Bearer " + api_key},
+            timeout=ClientTimeout(total=RELAY_CAPABILITY_TIMEOUT), allow_redirects=False,
+        ) as response:
+            if response.status != 200:
+                return None
+            payload = await response.json()
+    except (ClientError, TimeoutError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("provider") != "habab":
+        return None
+    realtime = payload.get("realtime")
+    if (not isinstance(realtime, dict) or realtime.get("provider") != "gemini"
+            or realtime.get("transport") != "habab"):
+        return None
+    auth = realtime.get("browser_auth")
+    if (not isinstance(auth, dict) or auth.get("enabled") is not True
+            or auth.get("mode") != BROWSER_AUTH_MODE or auth.get("type") != BROWSER_AUTH_TYPE):
+        return None
+    models = realtime.get("models")
+    default_model = realtime.get("default_model")
+    websocket = realtime.get("websocket")
+    if (not isinstance(models, list) or not models
+            or any(not isinstance(model, str) or model not in gemini_live.MODELS for model in models)
+            or default_model not in models or websocket != "/gemini/ws"):
+        return None
+    return {"provider": "habab", "realtime_provider": "gemini", "transport": "habab",
+            "models": list(models), "default_model": default_model,
+            "websocket_url": habab_relay_root().replace("https://", "wss://", 1) + websocket,
+            "auth": {"mode": BROWSER_AUTH_MODE, "type": BROWSER_AUTH_TYPE}}
+
+
+def track_browser_task(hass, session_id):
+    task = asyncio.current_task()
+    if task is None:
+        raise AgentError("invalid_session")
+    tasks = hass.data[DOMAIN].setdefault("voice_session_tasks", {}).setdefault(session_id, set())
+    tasks.add(task)
+    return task
+
+
+def untrack_browser_task(hass, session_id, task):
+    by_session = hass.data[DOMAIN].get("voice_session_tasks", {})
+    tasks = by_session.get(session_id)
+    if tasks is not None:
+        tasks.discard(task)
+        if not tasks:
+            by_session.pop(session_id, None)
+    if not by_session:
+        hass.data[DOMAIN].pop("voice_session_tasks", None)
+
+
+async def cancel_browser_tasks(hass, session_id, *, wait=False):
+    by_session = hass.data[DOMAIN].get("voice_session_tasks", {})
+    tasks = by_session.pop(session_id, set())
+    if not by_session:
+        hass.data[DOMAIN].pop("voice_session_tasks", None)
+    current = asyncio.current_task()
+    jobs = [task for task in tasks if task is not current]
+    pending = [task for task in jobs if not task.done()]
+    for task in pending:
+        task.cancel()
+    if not wait or not jobs:
+        return False
+    done, still_pending = await asyncio.wait(jobs, timeout=BROWSER_CANCEL_WAIT_SECONDS)
+    failed = False
+    for task in done:
+        if task.cancelled():
+            continue
+        try:
+            exception = task.exception()
+            if exception is not None:
+                failed = True
+        except asyncio.CancelledError:
+            pass
+    return bool(still_pending) or failed
+
+
+async def revoke_browser_lease(hass, session_id, *, expected=None, wait=False):
+    leases = hass.data[DOMAIN].get("voice_sessions", {})
+    lease = leases.get(session_id)
+    if (not lease or lease.get("client") != BROWSER_CLIENT
+            or expected is not None and lease is not expected):
+        return None
+    leases.pop(session_id, None)
+    expiry_tasks = hass.data[DOMAIN].get("voice_session_expiry_tasks", {})
+    expiry = expiry_tasks.pop(session_id, None)
+    if not expiry_tasks:
+        hass.data[DOMAIN].pop("voice_session_expiry_tasks", None)
+    current = asyncio.current_task()
+    if expiry is not None and expiry is not current and not expiry.done():
+        expiry.cancel()
+    incomplete = await cancel_browser_tasks(hass, session_id, wait=wait)
+    return not incomplete
+
+
+async def prune_expired_voice_leases(hass, now):
+    leases = hass.data[DOMAIN].get("voice_sessions", {})
+    expired = [(key, value) for key, value in leases.items() if value["expires"] <= now]
+    for key, value in expired:
+        if value.get("client", "native_v2") == BROWSER_CLIENT:
+            await revoke_browser_lease(hass, key, expected=value)
+        else:
+            leases.pop(key, None)
+
+
+async def expire_browser_lease(hass, session_id, expires):
+    try:
+        await asyncio.sleep(max(0, expires - time.monotonic()))
+        lease = hass.data[DOMAIN].get("voice_sessions", {}).get(session_id)
+        if (lease and lease.get("client") == BROWSER_CLIENT
+                and lease.get("expires") == expires and expires <= time.monotonic()):
+            await revoke_browser_lease(hass, session_id, expected=lease, wait=True)
+    finally:
+        tasks = hass.data[DOMAIN].get("voice_session_expiry_tasks", {})
+        if tasks.get(session_id) is asyncio.current_task():
+            tasks.pop(session_id, None)
+        if not tasks:
+            hass.data[DOMAIN].pop("voice_session_expiry_tasks", None)
+
+
+def schedule_browser_lease_expiry(hass, session_id, lease):
+    expiry_task = asyncio.create_task(expire_browser_lease(hass, session_id, lease["expires"]))
+    hass.data[DOMAIN].setdefault("voice_session_expiry_tasks", {})[session_id] = expiry_task
+    return expiry_task
+
+
+def browser_lease(hass, owner, session_id):
+    lease = voice_lease(hass, owner, session_id)
+    if lease.get("client", "native_v2") != BROWSER_CLIENT or lease.get("provider") != "gemini":
+        raise AgentError("invalid_session")
+    return lease
+
+
+async def validate_browser_lease_history(hass, assistant, owner, session_id):
+    lease = browser_lease(hass, owner, session_id)
+    history = await assistant.voice_history_context(owner)
+    lease = browser_lease(hass, owner, session_id)
+    if history["epoch"] != lease["history_epoch"]:
+        raise AgentError("invalid_session")
+    if lease.get("history_session") is None and history["session_id"] is not None:
+        lease["history_session"] = history["session_id"]
+    elif history["session_id"] != lease.get("history_session"):
+        raise AgentError("invalid_session")
+    return lease
+
 
 def session_config(model, *, client=None, context=None, selected_provider=None):
     if not isinstance(model, str) or model not in MODELS:
         raise ValueError("unsupported_realtime_model")
-    if client is not None and client != "native_v2":
+    if client is not None and client not in ("native_v2", BROWSER_CLIENT):
         raise ValueError("unsupported_voice_client")
-    conversational = client == "native_v2"
+    conversational = client in ("native_v2", BROWSER_CLIENT)
     if conversational and selected_provider is not None and (
         not isinstance(selected_provider, str) or selected_provider not in VOICE_PROVIDER_NAMES
     ):
@@ -147,7 +318,8 @@ def active_admin(request):
 
 def voice_lease(hass, owner, session_id):
     lease = hass.data[DOMAIN].get("voice_sessions", {}).get(session_id)
-    if not lease or lease["owner"] != owner or lease["expires"] <= time.monotonic():
+    if (not lease or lease["owner"] != owner or lease["expires"] <= time.monotonic()
+            or lease.get("client", "native_v2") not in ("native_v2", BROWSER_CLIENT)):
         raise AgentError("invalid_session")
     return lease
 
@@ -168,6 +340,30 @@ class RealtimeSessionView(HomeAssistantView):
         self.last_started = {}
         self.lock = asyncio.Lock()
 
+    async def get(self, request):
+        owner = active_admin(request)
+        if owner is None:
+            return self.json_message("not_allowed", status_code=403)
+        try:
+            settings = request.app["hass"].data[DOMAIN]["setup_agent"].settings()
+        except AgentError as error:
+            return self.json_message(error.code, status_code=400)
+        if settings.get("provider") != "habab":
+            result = self.json(browser_assist_fallback("selected_provider_requires_ha_assist_stt"))
+            result.headers["Cache-Control"] = "no-store"
+            return result
+        try:
+            client = async_get_clientsession(request.app["hass"])
+            capability = await fetch_habab_browser_capability(client, settings["api_key"])
+        except (AgentError, KeyError, TypeError):
+            capability = None
+        if capability is None:
+            result = self.json({"available": False, "reason": "browser_voice_unavailable"})
+        else:
+            result = self.json({"available": True, "client": BROWSER_CLIENT, **capability})
+        result.headers["Cache-Control"] = "no-store"
+        return result
+
     async def post(self, request):
         owner = active_admin(request)
         if owner is None:
@@ -182,7 +378,10 @@ class RealtimeSessionView(HomeAssistantView):
             settings = hass.data[DOMAIN]["setup_agent"].settings()
             selected_provider = settings.get("provider")
             gemini = selected_provider in {"gemini", "habab"}
-            if gemini and client_kind != "native_v2":
+            browser = client_kind == BROWSER_CLIENT
+            if browser and selected_provider != "habab":
+                return self.json_message("unsupported_voice_protocol", status_code=400)
+            if gemini and client_kind != "native_v2" and not browser:
                 return self.json_message("unsupported_voice_protocol", status_code=400)
             if gemini and not callable(getattr(hass.data[DOMAIN]["assistant"], "record_voice_event", None)):
                 return self.json_message("voice_history_protocol_required", status_code=400)
@@ -192,7 +391,8 @@ class RealtimeSessionView(HomeAssistantView):
         except ValueError:
             return self.json_message("realtime_provider_required", status_code=400)
         try:
-            snapshot = voice_context(hass) if client_kind == "native_v2" else None
+            conversational = client_kind in ("native_v2", BROWSER_CLIENT)
+            snapshot = voice_context(hass) if conversational else None
             model = data.get("model", gemini_live.DEFAULT_MODEL if gemini else "gpt-realtime-mini")
             allowed_models = gemini_live.MODELS if gemini else OPENAI_MODELS
             if not isinstance(model, str) or model not in allowed_models:
@@ -213,13 +413,18 @@ class RealtimeSessionView(HomeAssistantView):
         try:
             # Small talk must not start OpenCode or fetch its history just to connect audio.
             history = (await hass.data[DOMAIN]["assistant"].voice_history_context(owner.id)
-                       if client_kind == "native_v2" else None)
-            chat = ({"session_id": "voice2_" + secrets.token_urlsafe(24)} if client_kind == "native_v2"
+                       if conversational else None)
+            chat = ({"session_id": "voice2_" + secrets.token_urlsafe(24)} if conversational
                     else await hass.data[DOMAIN]["assistant"].web_session(owner.id))
             client = async_get_clientsession(hass)
             if selected_provider == "habab":
-                origin = urlsplit(PROVIDERS["habab"]["url"])
-                relay_root = origin.scheme + "://" + origin.netloc
+                relay_root = habab_relay_root()
+                if browser:
+                    capability = await fetch_habab_browser_capability(client, settings["api_key"])
+                    if capability is None:
+                        return self.json_message("realtime_unavailable", status_code=502)
+                    if model not in capability["models"]:
+                        return self.json_message("invalid_voice_settings", status_code=400)
                 setup = gemini_live.live_setup(model, config)
                 async with client.post(
                     relay_root + "/v1/realtime/bootstrap",
@@ -232,10 +437,13 @@ class RealtimeSessionView(HomeAssistantView):
                     relay = await response.json()
                 if (not isinstance(relay, dict) or relay.get("provider") != "gemini" or relay.get("transport") != "habab"
                         or relay.get("model") != model or relay.get("setup") != setup
-                        or relay.get("websocket_url") != "wss://habab-voice.wpmix.net/gemini/ws"
+                        or relay.get("websocket_url") != relay_root.replace("https://", "wss://", 1) + "/gemini/ws"
                         or not isinstance(relay.get("value"), str) or not 1 <= len(relay["value"]) <= 2048):
                     return self.json_message("invalid_realtime_response", status_code=502)
-                connection = relay
+                connection = {key: relay[key] for key in (
+                    "provider", "transport", "model", "value", "expires_at",
+                    "websocket_url", "setup",
+                ) if key in relay}
             elif gemini:
                 try:
                     connection = await gemini_live.create_connection(client, settings["api_key"], model, config)
@@ -267,18 +475,53 @@ class RealtimeSessionView(HomeAssistantView):
             return self.json_message(error.code, status_code=400)
         except (ClientError, TimeoutError, ValueError):
             return self.json_message("realtime_unavailable", status_code=502)
-        if client_kind == "native_v2":
+        if conversational:
             now = time.monotonic()
             leases = hass.data[DOMAIN].setdefault("voice_sessions", {})
-            for key in [key for key, value in leases.items() if value["expires"] <= now]:
-                del leases[key]
-            leases[chat["session_id"]] = {"owner": owner.id, "expires": now + 180,
-                                        "provider": connection["provider"],
-                                        "history_session": history["session_id"], "history_epoch": history["epoch"]}
-        result = self.json({**connection,
-                            "session_id": chat["session_id"],
-                            "client": client_kind,
-                            "voice_context": snapshot})
+            await prune_expired_voice_leases(hass, now)
+            lease = {"owner": owner.id, "client": client_kind,
+                     "expires": now + VOICE_SESSION_LIFETIME,
+                     "provider": connection["provider"],
+                     "history_session": history["session_id"], "history_epoch": history["epoch"]}
+            leases[chat["session_id"]] = lease
+            if browser:
+                schedule_browser_lease_expiry(hass, chat["session_id"], lease)
+        result_data = {**connection, "session_id": chat["session_id"],
+                       "client": client_kind, "voice_context": snapshot}
+        if browser:
+            result_data["lease_ttl_seconds"] = VOICE_SESSION_LIFETIME
+        result = self.json(result_data)
+        result.headers["Cache-Control"] = "no-store"
+        return result
+
+
+class RealtimeStopView(HomeAssistantView):
+    url = "/api/habab_home/realtime/stop"
+    name = "api:habab_home:realtime:stop"
+    requires_auth = True
+
+    async def post(self, request):
+        owner = active_admin(request)
+        if owner is None:
+            return self.json_message("not_allowed", status_code=403)
+        try:
+            session_id = (await request.json()).get("session_id")
+            if not isinstance(session_id, str) or not session_id.startswith("voice2_") or len(session_id) > 128:
+                return self.json_message("invalid_session", status_code=400)
+            hass = request.app["hass"]
+            lease = browser_lease(hass, owner.id, session_id)
+        except (ValueError, AttributeError):
+            return self.json_message("invalid_session", status_code=400)
+        except AgentError as error:
+            return self.json_message(error.code, status_code=403)
+
+        complete = await revoke_browser_lease(hass, session_id, expected=lease, wait=True)
+        if complete is None:
+            return self.json_message("invalid_session", status_code=403)
+        if not complete:
+            # The lease is revoked even if cancellation cleanup is incomplete.
+            return self.json_message("stop_incomplete", status_code=504)
+        result = self.json({"stopped": True, "client": BROWSER_CLIENT})
         result.headers["Cache-Control"] = "no-store"
         return result
 
@@ -292,28 +535,52 @@ class RealtimeTurnView(HomeAssistantView):
         owner = active_admin(request)
         if owner is None:
             return self.json_message("not_allowed", status_code=403)
+        tracked_session = None
+        tracked_task = None
         try:
             data = await request.json()
             session_id, text = data.get("session_id"), data.get("text")
             if not isinstance(session_id, str) or not 1 <= len(session_id) <= 128 or not isinstance(text, str) or not 1 <= len(text.strip()) <= 4000:
                 return self.json_message("invalid_voice_turn", status_code=400)
-            assistant = request.app["hass"].data[DOMAIN]["assistant"]
+            hass = request.app["hass"]
+            assistant = hass.data[DOMAIN]["assistant"]
             canonical_id = session_id
             if session_id.startswith("voice2_"):
-                lease = voice_lease(request.app["hass"], owner.id, session_id)
-                current_history = await assistant.voice_history_context(owner.id)
-                if current_history["epoch"] != lease["history_epoch"]:
-                    raise AgentError("invalid_session")
-                canonical_id = (await assistant.web_session(owner.id))["session_id"]
-                result = await assistant.run(owner.id, "web", canonical_id, text,
-                                             expected_history_epoch=lease["history_epoch"])
+                lease = voice_lease(hass, owner.id, session_id)
+                browser = lease.get("client", "native_v2") == BROWSER_CLIENT
+                if browser:
+                    tracked_session = session_id
+                    tracked_task = track_browser_task(hass, session_id)
+                try:
+                    if browser:
+                        lease = await validate_browser_lease_history(hass, assistant, owner.id, session_id)
+                    else:
+                        current_history = await assistant.voice_history_context(owner.id)
+                        if current_history["epoch"] != lease["history_epoch"]:
+                            raise AgentError("invalid_session")
+                    canonical_id = (await assistant.web_session(owner.id))["session_id"]
+                    if browser:
+                        lease = await validate_browser_lease_history(hass, assistant, owner.id, session_id)
+                        if lease.get("history_session") != canonical_id:
+                            raise AgentError("invalid_session")
+                    result = await assistant.run(owner.id, "web", canonical_id, text,
+                                                 expected_history_epoch=lease["history_epoch"])
+                    if browser:
+                        await validate_browser_lease_history(hass, assistant, owner.id, session_id)
+                finally:
+                    if tracked_task is not None:
+                        untrack_browser_task(hass, tracked_session, tracked_task)
+                        tracked_session = tracked_task = None
             else:
                 result = await assistant.run(owner.id, "web", canonical_id, text)
-            async_dispatcher_send(request.app["hass"], "habab_voice_history_" + owner.id, result)
+            async_dispatcher_send(hass, "habab_voice_history_" + owner.id, result)
         except (ValueError, AttributeError):
             return self.json_message("invalid_voice_turn", status_code=400)
         except AgentError as error:
             return self.json_message(error.code, status_code=400)
+        finally:
+            if tracked_task is not None:
+                untrack_browser_task(request.app["hass"], tracked_session, tracked_task)
         replies = [item["text"] for item in result.get("messages", []) if item.get("role") == "assistant" and item.get("text")]
         if not replies:
             return self.json_message("empty_assistant_reply", status_code=502)
@@ -329,22 +596,35 @@ class RealtimeContextView(HomeAssistantView):
         owner = active_admin(request)
         if owner is None:
             return self.json_message("not_allowed", status_code=403)
+        hass = request.app["hass"]
+        tracked_session = None
+        tracked_task = None
         try:
             session_id = (await request.json()).get("session_id")
             if not isinstance(session_id, str) or len(session_id) > 128:
                 raise ValueError("invalid_session")
-            lease = voice_lease(request.app["hass"], owner.id, session_id)
-            history = await request.app["hass"].data[DOMAIN]["assistant"].voice_history_context(owner.id)
-            if (history["epoch"] != lease["history_epoch"] or
-                    lease.get("history_session") is not None and history["session_id"] != lease["history_session"]):
-                raise AgentError("invalid_session")
-            result = self.json({"voice_context": voice_context(request.app["hass"])})
+            assistant = hass.data[DOMAIN]["assistant"]
+            lease = voice_lease(hass, owner.id, session_id)
+            browser = lease.get("client", "native_v2") == BROWSER_CLIENT
+            if browser:
+                tracked_session = session_id
+                tracked_task = track_browser_task(hass, session_id)
+                await validate_browser_lease_history(hass, assistant, owner.id, session_id)
+            else:
+                history = await assistant.voice_history_context(owner.id)
+                if (history["epoch"] != lease["history_epoch"] or
+                        lease.get("history_session") is not None and history["session_id"] != lease["history_session"]):
+                    raise AgentError("invalid_session")
+            result = self.json({"voice_context": voice_context(hass)})
             result.headers["Cache-Control"] = "no-store"
             return result
         except (ValueError, AttributeError):
             return self.json_message("invalid_voice_turn", status_code=400)
         except AgentError as error:
             return self.json_message(error.code, status_code=403)
+        finally:
+            if tracked_task is not None:
+                untrack_browser_task(hass, tracked_session, tracked_task)
 
 
 class RealtimeTranscriptView(HomeAssistantView):
@@ -356,6 +636,9 @@ class RealtimeTranscriptView(HomeAssistantView):
         owner = active_admin(request)
         if owner is None:
             return self.json_message("not_allowed", status_code=403)
+        hass = request.app["hass"]
+        tracked_session = None
+        tracked_task = None
         try:
             data = await request.json()
             session_id, event_id = data.get("session_id"), data.get("event_id")
@@ -363,9 +646,13 @@ class RealtimeTranscriptView(HomeAssistantView):
                     or not isinstance(event_id, str) or not 1 <= len(event_id) <= 128
                     or data.get("kind") not in (None, "event")):
                 return self.json_message("invalid_voice_turn", status_code=400)
-            hass = request.app["hass"]
             lease = voice_lease(hass, owner.id, session_id)
             assistant = hass.data[DOMAIN]["assistant"]
+            browser = lease.get("client", "native_v2") == BROWSER_CLIENT
+            if browser:
+                tracked_session = session_id
+                tracked_task = track_browser_task(hass, session_id)
+                lease = await validate_browser_lease_history(hass, assistant, owner.id, session_id)
             if data.get("kind") == "event":
                 role, text = data.get("role"), data.get("text")
                 if (lease.get("provider") != "gemini" or role not in ("user", "assistant")
@@ -386,6 +673,8 @@ class RealtimeTranscriptView(HomeAssistantView):
                 result = await assistant.record_voice_turn(
                     owner.id, lease["history_session"], event_id, user_text, assistant_text,
                     history_epoch=lease["history_epoch"])
+            if browser:
+                await validate_browser_lease_history(hass, assistant, owner.id, session_id)
             async_dispatcher_send(hass, "habab_voice_history_" + owner.id, result)
             response = self.json({"recorded": result["recorded"], "duplicate": result["duplicate"]})
             response.headers["Cache-Control"] = "no-store"
@@ -394,10 +683,14 @@ class RealtimeTranscriptView(HomeAssistantView):
             return self.json_message("invalid_voice_turn", status_code=400)
         except AgentError as error:
             return self.json_message(error.code, status_code=403)
+        finally:
+            if tracked_task is not None:
+                untrack_browser_task(hass, tracked_session, tracked_task)
 
 
 def async_register_views(hass):
     hass.http.register_view(RealtimeSessionView())
+    hass.http.register_view(RealtimeStopView())
     hass.http.register_view(RealtimeTurnView())
     hass.http.register_view(RealtimeContextView())
     hass.http.register_view(RealtimeTranscriptView())

@@ -1,4 +1,5 @@
 """Voice must use the authenticated owner's canonical chat, never another session."""
+import asyncio
 import json
 import os
 import time
@@ -16,6 +17,28 @@ class Request(dict):
         self.app = {'hass': SimpleNamespace(data={'habab_home': {'assistant': assistant}})}
         super().__init__(hass_user=owner)
         self.json = AsyncMock(return_value=data or {})
+
+
+class AsyncContext:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, *args):
+        return None
+
+
+def relay_browser_capability(*, enabled=True, provider="habab", realtime_provider="gemini",
+                             transport="habab", mode="first_text_frame",
+                             auth_type="habab.voice.auth.v1"):
+    return {"provider": provider, "realtime": {
+        "provider": realtime_provider, "transport": transport,
+        "models": ["gemini-3.8-live"], "default_model": "gemini-3.8-live",
+        "websocket": "/gemini/ws",
+        "browser_auth": {"enabled": enabled, "mode": mode, "type": auth_type},
+    }}
 
 
 class RealtimeTests(unittest.IsolatedAsyncioTestCase):
@@ -62,6 +85,82 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 400)
         self.assertEqual(json.loads(response.body)['message'], 'voice_history_protocol_required')
         client.assert_not_called()
+
+    async def test_browser_capability_is_server_probed_without_bootstrap_or_history(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(), voice_history_context=AsyncMock())
+        request = Request(owner, assistant=assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'habab', 'api_key': 'synthetic-selected-habab', 'model': 'gemini-3.1-flash-lite'})
+        remote = relay_browser_capability()
+        response = SimpleNamespace(status=200, json=AsyncMock(return_value=remote))
+        client = SimpleNamespace(get=Mock(return_value=AsyncContext(response)))
+        with patch.object(realtime, 'async_get_clientsession', return_value=client):
+            result = await realtime.RealtimeSessionView().get(request)
+        payload = json.loads(result.body)
+        self.assertEqual(result.status, 200)
+        self.assertEqual(payload, {
+            'available': True, 'client': 'browser_v1', 'provider': 'habab',
+            'realtime_provider': 'gemini', 'transport': 'habab',
+            'models': ['gemini-3.8-live'], 'default_model': 'gemini-3.8-live',
+            'websocket_url': 'wss://habab-voice.wpmix.net/gemini/ws',
+            'auth': {'mode': 'first_text_frame', 'type': 'habab.voice.auth.v1'},
+        })
+        self.assertEqual(result.headers['Cache-Control'], 'no-store')
+        client.get.assert_called_once_with(
+            'https://habab-voice.wpmix.net/v1/capabilities',
+            headers={'Authorization': 'Bearer synthetic-selected-habab'},
+            timeout=realtime.ClientTimeout(total=8), allow_redirects=False)
+        self.assertNotIn('synthetic-selected-habab', result.body.decode())
+        assistant.web_session.assert_not_awaited()
+        assistant.voice_history_context.assert_not_awaited()
+
+    async def test_browser_capability_rejects_bad_relay_metadata_without_fallback(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        cases = [
+            relay_browser_capability(enabled=False),
+            relay_browser_capability(provider='other'),
+            relay_browser_capability(realtime_provider='openai'),
+            relay_browser_capability(transport='direct'),
+            relay_browser_capability(mode='url_query'),
+            relay_browser_capability(auth_type='other.auth'),
+        ]
+        for metadata in cases:
+            with self.subTest(metadata=metadata):
+                request = Request(owner)
+                request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+                    'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
+                response = SimpleNamespace(status=200, json=AsyncMock(return_value=metadata))
+                client = SimpleNamespace(get=Mock(return_value=AsyncContext(response)))
+                with patch.object(realtime, 'async_get_clientsession', return_value=client):
+                    result = await realtime.RealtimeSessionView().get(request)
+                self.assertEqual(json.loads(result.body), {
+                    'available': False, 'reason': 'browser_voice_unavailable'})
+                self.assertNotIn('ha_assist_pipeline', result.body.decode())
+                self.assertNotIn('synthetic-selected-habab', result.body.decode())
+
+    async def test_non_habab_browser_capability_explicitly_requires_ha_assist_stt(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        request = Request(owner)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'gemini', 'api_key': 'synthetic-selected-gemini'})
+        with patch.object(realtime, 'async_get_clientsession') as client:
+            result = await realtime.RealtimeSessionView().get(request)
+        self.assertEqual(json.loads(result.body), {
+            'available': False, 'reason': 'selected_provider_requires_ha_assist_stt',
+            'browser': {'transport': 'ha_assist_pipeline', 'requires_ha_stt': True}})
+        client.assert_not_called()
+
+    async def test_browser_capability_requires_active_ha_admin(self):
+        for owner in [None, SimpleNamespace(id='alice', is_active=False, is_admin=True),
+                      SimpleNamespace(id='alice', is_active=True, is_admin=False)]:
+            request = Request(owner)
+            request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=Mock())
+            with patch.object(realtime, 'async_get_clientsession') as client:
+                response = await realtime.RealtimeSessionView().get(request)
+            self.assertEqual(response.status, 403)
+            client.assert_not_called()
+            request.app['hass'].data['habab_home']['setup_agent'].settings.assert_not_called()
 
     async def test_independent_gemini_event_uses_server_lease_metadata_without_fake_pair(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
@@ -258,6 +357,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload['client'], 'native_v2')
         self.assertTrue(payload['session_id'].startswith('voice2_'))
         self.assertEqual(payload['voice_context'], snapshot)
+        self.assertNotIn('lease_ttl_seconds', payload)
         call = client.post.call_args
         self.assertEqual(call.args[0], 'https://habab-voice.wpmix.net/v1/realtime/bootstrap')
         self.assertEqual(call.kwargs['headers']['Authorization'], 'Bearer synthetic-selected-habab')
@@ -276,6 +376,101 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lease['owner'], 'alice')
         self.assertEqual(lease['history_epoch'], 2)
         self.assertEqual(lease['provider'], 'gemini')
+
+    async def test_browser_habab_bootstrap_uses_relay_and_creates_bound_voice2_lease(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        history = {'session_id': None, 'epoch': 4}
+        assistant = SimpleNamespace(web_session=AsyncMock(),
+            voice_history_context=AsyncMock(return_value=history), record_voice_event=AsyncMock())
+        request = Request(owner, {'client': 'browser_v1'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'habab', 'api_key': 'synthetic-selected-habab', 'model': 'gemini-3.1-flash-lite'})
+        snapshot = {'time_zone': 'UTC', 'states': []}
+        config = realtime.session_config('gemini-3.8-live', client='browser_v1', context=snapshot,
+                                         selected_provider='habab')
+        setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
+        capability = relay_browser_capability()
+        relay = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
+                 'value': 'synthetic-opaque-relay-credential', 'expires_at': 12345,
+                 'websocket_url': 'wss://habab-voice.wpmix.net/gemini/ws', 'setup': setup,
+                 'debug_secret': 'synthetic-unexpected-secret'}
+        capability_response = SimpleNamespace(status=200, json=AsyncMock(return_value=capability))
+        bootstrap_response = SimpleNamespace(status=200, json=AsyncMock(return_value=relay))
+        client = SimpleNamespace(get=Mock(return_value=AsyncContext(capability_response)),
+                                 post=Mock(return_value=AsyncContext(bootstrap_response)))
+        with patch.object(realtime, 'voice_context', return_value=snapshot), \
+                patch.object(realtime, 'async_get_clientsession', return_value=client):
+            result = await realtime.RealtimeSessionView().post(request)
+        payload = json.loads(result.body)
+        self.assertEqual(result.status, 200)
+        self.assertEqual(payload['client'], 'browser_v1')
+        self.assertTrue(payload['session_id'].startswith('voice2_'))
+        self.assertEqual(payload['lease_ttl_seconds'], 180)
+        self.assertEqual(payload['voice_context'], snapshot)
+        self.assertEqual(payload['value'], 'synthetic-opaque-relay-credential')
+        self.assertEqual(payload['websocket_url'], relay['websocket_url'])
+        self.assertEqual(payload['setup'], setup)
+        self.assertNotIn('debug_secret', payload)
+        self.assertNotIn('synthetic-unexpected-secret', result.body.decode())
+        self.assertEqual(result.headers['Cache-Control'], 'no-store')
+        self.assertNotIn('synthetic-selected-habab', result.body.decode())
+        self.assertEqual(client.get.call_args.args[0], 'https://habab-voice.wpmix.net/v1/capabilities')
+        bootstrap = client.post.call_args
+        self.assertEqual(bootstrap.args[0], 'https://habab-voice.wpmix.net/v1/realtime/bootstrap')
+        self.assertEqual(bootstrap.kwargs['headers']['Authorization'], 'Bearer synthetic-selected-habab')
+        self.assertEqual(bootstrap.kwargs['json'], {'model': 'gemini-3.8-live', 'setup': setup})
+        client.post.assert_called_once()
+        assistant.web_session.assert_not_awaited()
+        assistant.voice_history_context.assert_awaited()
+        lease = realtime.voice_lease(request.app['hass'], 'alice', payload['session_id'])
+        self.assertEqual(lease, {'owner': 'alice', 'client': 'browser_v1',
+            'expires': lease['expires'], 'provider': 'gemini',
+            'history_session': None, 'history_epoch': 4})
+
+    async def test_browser_bootstrap_requires_live_capability_and_epoch_stability(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock(),
+            voice_history_context=AsyncMock(side_effect=[{'session_id': None, 'epoch': 2},
+                                                        {'session_id': None, 'epoch': 3}]))
+        request = Request(owner, {'client': 'browser_v1'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
+        snapshot = {'time_zone': 'UTC'}
+        config = realtime.session_config('gemini-3.8-live', client='browser_v1', context=snapshot,
+                                         selected_provider='habab')
+        setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
+        capability_response = SimpleNamespace(status=200, json=AsyncMock(return_value=relay_browser_capability()))
+        bootstrap_response = SimpleNamespace(status=200, json=AsyncMock(return_value={
+            'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
+            'value': 'synthetic-opaque-relay', 'expires_at': 12345,
+            'websocket_url': 'wss://habab-voice.wpmix.net/gemini/ws', 'setup': setup}))
+        client = SimpleNamespace(get=Mock(return_value=AsyncContext(capability_response)),
+                                 post=Mock(return_value=AsyncContext(bootstrap_response)))
+        with patch.object(realtime, 'voice_context', return_value=snapshot), \
+                patch.object(realtime, 'async_get_clientsession', return_value=client):
+            response = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(response.status, 403)
+        self.assertEqual(json.loads(response.body)['message'], 'invalid_session')
+        self.assertNotIn('voice_sessions', request.app['hass'].data['habab_home'])
+        assistant.web_session.assert_not_awaited()
+
+    async def test_browser_bootstrap_does_not_fallback_when_relay_capability_is_unavailable(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(web_session=AsyncMock(), voice_history_context=AsyncMock(
+            return_value={'session_id': None, 'epoch': 0}), record_voice_event=AsyncMock())
+        request = Request(owner, {'client': 'browser_v1'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
+        response = SimpleNamespace(status=403, json=AsyncMock(return_value={}))
+        client = SimpleNamespace(get=Mock(return_value=AsyncContext(response)), post=Mock())
+        with patch.object(realtime, 'voice_context', return_value={'time_zone': 'UTC'}), \
+                patch.object(realtime, 'async_get_clientsession', return_value=client):
+            result = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(result.status, 502)
+        self.assertEqual(json.loads(result.body)['message'], 'realtime_unavailable')
+        client.post.assert_not_called()
+        assistant.web_session.assert_not_awaited()
+        self.assertNotIn('voice_sessions', request.app['hass'].data['habab_home'])
 
     async def test_voice_tool_resolves_canonical_chat_only_when_called(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
@@ -320,6 +515,39 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.call_count, 1)
         assistant.web_session.assert_not_awaited()
         assistant.run.assert_not_awaited()
+
+    async def test_browser_lease_reuses_existing_context_and_gemini_dialogue_journal(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        history = {'session_id': 'web-alice', 'epoch': 9}
+        assistant = SimpleNamespace(
+            voice_history_context=AsyncMock(return_value=history), web_session=AsyncMock(), run=AsyncMock(),
+            record_voice_event=AsyncMock(return_value={'recorded': True, 'duplicate': False, 'messages': []}),
+            record_voice_turn=AsyncMock())
+        lease = {'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() + 60,
+                 'provider': 'gemini', 'history_session': 'web-alice', 'history_epoch': 9}
+        hass = SimpleNamespace(data={'habab_home': {'assistant': assistant,
+            'voice_sessions': {'voice2_browser': lease}}})
+        context_request = Request(owner, {'session_id': 'voice2_browser'}, assistant)
+        context_request.app['hass'] = hass
+        with patch.object(realtime, 'voice_context', return_value={'states': []}) as snapshot:
+            context_response = await realtime.RealtimeContextView().post(context_request)
+        self.assertEqual(context_response.status, 200)
+        self.assertEqual(json.loads(context_response.body), {'voice_context': {'states': []}})
+        snapshot.assert_called_once_with(hass)
+
+        transcript_request = Request(owner, {'session_id': 'voice2_browser', 'event_id': 'browser_event_1',
+            'kind': 'event', 'role': 'user', 'text': 'Привет'}, assistant)
+        transcript_request.app['hass'] = hass
+        with patch.object(realtime, 'async_dispatcher_send') as dispatch:
+            transcript_response = await realtime.RealtimeTranscriptView().post(transcript_request)
+        self.assertEqual(transcript_response.status, 200)
+        assistant.record_voice_event.assert_awaited_once_with(
+            'alice', 'web-alice', 'browser_event_1', 'user', 'Привет',
+            history_epoch=9, provider='gemini', correlation=None)
+        assistant.web_session.assert_not_awaited()
+        assistant.run.assert_not_awaited()
+        assistant.record_voice_turn.assert_not_awaited()
+        self.assertEqual(dispatch.call_args.args[1], 'habab_voice_history_alice')
 
     async def test_transcript_is_journaled_with_server_lease_epoch_without_opencode(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
@@ -454,6 +682,12 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
                       config['instructions'])
         self.assertNotIn('api_key', config['instructions'])
 
+        browser = realtime.session_config('gpt-realtime-mini', client='browser_v1', context=snapshot,
+                                          selected_provider='habab')
+        self.assertEqual(browser['instructions'], config['instructions'])
+        self.assertEqual(browser['tools'], config['tools'])
+        self.assertEqual(browser['tool_choice'], config['tool_choice'])
+
     def test_native_v2_provider_model_metadata_uses_validated_selection_without_secrets(self):
         for provider, name in [('gemini', 'Google Gemini'), ('openai', 'OpenAI')]:
             with self.subTest(provider=provider):
@@ -520,3 +754,253 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             response = await realtime.RealtimeTurnView().post(Request(owner, {'session_id': 'ses_bob', 'text': 'Check lights'}, assistant))
         self.assertEqual(response.status, 400)
         dispatch.assert_not_called()
+
+    async def test_browser_direct_gemini_and_openai_never_fall_back_to_habab_relay(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for provider in ('gemini', 'openai'):
+            with self.subTest(provider=provider):
+                assistant = SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock())
+                request = Request(owner, {'client': 'browser_v1'}, assistant)
+                request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+                    'provider': provider, 'api_key': 'synthetic-selected-' + provider})
+                with patch.object(realtime, 'async_get_clientsession') as client:
+                    response = await realtime.RealtimeSessionView().post(request)
+                self.assertEqual(response.status, 400)
+                self.assertEqual(json.loads(response.body)['message'], 'unsupported_voice_protocol')
+                client.assert_not_called()
+                assistant.web_session.assert_not_awaited()
+
+    async def test_browser_stop_cancels_only_its_pending_turn_and_revokes_lease(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        turn_started, turn_cancelled = asyncio.Event(), asyncio.Event()
+        never = asyncio.Event()
+
+        async def pending_run(*args, **kwargs):
+            turn_started.set()
+            try:
+                await never.wait()
+            except asyncio.CancelledError:
+                turn_cancelled.set()
+                raise
+
+        assistant = SimpleNamespace(
+            voice_history_context=AsyncMock(side_effect=[
+                {'session_id': None, 'epoch': 7}, {'session_id': 'web-alice', 'epoch': 7}]),
+            web_session=AsyncMock(return_value={'session_id': 'web-alice'}),
+            run=AsyncMock(side_effect=pending_run),
+            record_voice_event=AsyncMock(), record_voice_turn=AsyncMock())
+        hass = SimpleNamespace(data={'habab_home': {'assistant': assistant,
+            'voice_sessions': {'voice2_browser': {
+                'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() + 60,
+                'provider': 'gemini', 'history_session': None, 'history_epoch': 7}},
+            'voice_session_tasks': {}}})
+        lease = hass.data['habab_home']['voice_sessions']['voice2_browser']
+        expiry_task = realtime.schedule_browser_lease_expiry(hass, 'voice2_browser', lease)
+        turn_request = Request(owner, {'session_id': 'voice2_browser', 'text': 'Проверь дом'}, assistant)
+        turn_request.app['hass'] = hass
+        turn_task = asyncio.create_task(realtime.RealtimeTurnView().post(turn_request))
+        await asyncio.wait_for(turn_started.wait(), 1)
+
+        other = asyncio.create_task(never.wait())
+        hass.data['habab_home']['voice_session_tasks']['voice2_native'] = {other}
+        stop_request = Request(owner, {'session_id': 'voice2_browser'}, assistant)
+        stop_request.app['hass'] = hass
+        response = await realtime.RealtimeStopView().post(stop_request)
+        self.assertEqual(response.status, 200)
+        self.assertTrue(json.loads(response.body)['stopped'])
+        self.assertTrue(turn_task.cancelled())
+        self.assertTrue(turn_cancelled.is_set())
+        self.assertTrue(expiry_task.cancelled())
+        self.assertFalse(other.cancelled())
+        self.assertNotIn('voice2_browser', hass.data['habab_home']['voice_sessions'])
+        self.assertIn('voice2_native', hass.data['habab_home']['voice_session_tasks'])
+        other.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await other
+
+    async def test_browser_lease_expiry_revokes_and_cancels_only_its_pending_turn(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        turn_started, turn_cancelled = asyncio.Event(), asyncio.Event()
+        never = asyncio.Event()
+
+        async def pending_run(*args, **kwargs):
+            turn_started.set()
+            try:
+                await never.wait()
+            except asyncio.CancelledError:
+                turn_cancelled.set()
+                raise
+
+        assistant = SimpleNamespace(
+            voice_history_context=AsyncMock(side_effect=[
+                {'session_id': None, 'epoch': 8}, {'session_id': 'web-alice', 'epoch': 8}]),
+            web_session=AsyncMock(return_value={'session_id': 'web-alice'}),
+            run=AsyncMock(side_effect=pending_run))
+        lease = {'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() + 60,
+                 'provider': 'gemini', 'history_session': None, 'history_epoch': 8}
+        hass = SimpleNamespace(data={'habab_home': {'assistant': assistant,
+            'voice_sessions': {'voice2_expiring': lease}, 'voice_session_tasks': {}}})
+        request = Request(owner, {'session_id': 'voice2_expiring', 'text': 'Проверь дом'}, assistant)
+        request.app['hass'] = hass
+        turn_task = asyncio.create_task(realtime.RealtimeTurnView().post(request))
+        await asyncio.wait_for(turn_started.wait(), 1)
+
+        other = asyncio.create_task(never.wait())
+        hass.data['habab_home']['voice_session_tasks']['voice2_native'] = {other}
+        lease['expires'] = time.monotonic() + 0.02
+        expiry_task = realtime.schedule_browser_lease_expiry(hass, 'voice2_expiring', lease)
+        await asyncio.wait_for(turn_cancelled.wait(), 1)
+        await asyncio.wait_for(expiry_task, 1)
+        self.assertTrue(turn_task.cancelled())
+        self.assertNotIn('voice2_expiring', hass.data['habab_home']['voice_sessions'])
+        self.assertFalse(other.cancelled())
+        other.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await other
+
+    async def test_expiry_pruning_cancels_browser_jobs_but_leaves_native_jobs_alone(self):
+        browser_cancelled = asyncio.Event()
+        never = asyncio.Event()
+
+        async def browser_job():
+            try:
+                await never.wait()
+            except asyncio.CancelledError:
+                browser_cancelled.set()
+                raise
+
+        browser_task = asyncio.create_task(browser_job())
+        native_task = asyncio.create_task(never.wait())
+        await asyncio.sleep(0)
+        leases = {
+            'voice2_browser': {'owner': 'alice', 'client': 'browser_v1', 'provider': 'gemini',
+                               'expires': time.monotonic() - 1},
+            'voice2_native': {'owner': 'alice', 'client': 'native_v2', 'provider': 'gemini',
+                              'expires': time.monotonic() - 1},
+        }
+        hass = SimpleNamespace(data={'habab_home': {
+            'voice_sessions': leases,
+            'voice_session_tasks': {'voice2_browser': {browser_task}, 'voice2_native': {native_task}},
+        }})
+        await realtime.prune_expired_voice_leases(hass, time.monotonic())
+        await asyncio.wait_for(browser_cancelled.wait(), 1)
+        with self.assertRaises(asyncio.CancelledError):
+            await browser_task
+        self.assertNotIn('voice2_browser', leases)
+        self.assertNotIn('voice2_native', leases)
+        self.assertFalse(native_task.cancelled())
+        native_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await native_task
+
+    async def test_stop_reports_incomplete_when_cancellation_cleanup_raises(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        release = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def failing_cleanup():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise RuntimeError('synthetic cleanup failure')
+
+        task = asyncio.create_task(failing_cleanup())
+        await asyncio.sleep(0)
+        hass = SimpleNamespace(data={'habab_home': {
+            'voice_sessions': {'voice2_failure': {
+                'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() + 60,
+                'provider': 'gemini', 'history_session': None, 'history_epoch': 0}},
+            'voice_session_tasks': {'voice2_failure': {task}}}})
+        request = Request(owner, {'session_id': 'voice2_failure'})
+        request.app['hass'] = hass
+        with patch.object(realtime, 'BROWSER_CANCEL_WAIT_SECONDS', 0.1):
+            response = await realtime.RealtimeStopView().post(request)
+        self.assertEqual(response.status, 504)
+        self.assertEqual(json.loads(response.body)['message'], 'stop_incomplete')
+        self.assertTrue(cancelled.is_set())
+        self.assertNotIn('voice2_failure', hass.data['habab_home']['voice_sessions'])
+
+    async def test_stop_wait_is_bounded_when_a_job_delays_cancellation_cleanup(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        release = asyncio.Event()
+        cancellation_seen = asyncio.Event()
+
+        async def delayed_cleanup():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancellation_seen.set()
+                await release.wait()
+
+        task = asyncio.create_task(delayed_cleanup())
+        await asyncio.sleep(0)
+        lease = {'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() + 60,
+                 'provider': 'gemini', 'history_session': None, 'history_epoch': 0}
+        hass = SimpleNamespace(data={'habab_home': {
+            'voice_sessions': {'voice2_slow': lease},
+            'voice_session_tasks': {'voice2_slow': {task}},
+        }})
+        request = Request(owner, {'session_id': 'voice2_slow'})
+        request.app['hass'] = hass
+        with patch.object(realtime, 'BROWSER_CANCEL_WAIT_SECONDS', 0.02):
+            response = await realtime.RealtimeStopView().post(request)
+        self.assertEqual(response.status, 504)
+        self.assertEqual(json.loads(response.body)['message'], 'stop_incomplete')
+        self.assertTrue(cancellation_seen.is_set())
+        self.assertFalse(task.done())
+        self.assertNotIn('voice2_slow', hass.data['habab_home']['voice_sessions'])
+        release.set()
+        await asyncio.wait_for(task, 1)
+
+    async def test_stop_rejects_native_foreign_and_expired_leases_without_cancelling(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for session_id, lease in [
+            ('voice2_native', {'owner': 'alice', 'client': 'native_v2', 'expires': time.monotonic() + 60}),
+            ('voice2_foreign', {'owner': 'bob', 'client': 'browser_v1', 'expires': time.monotonic() + 60}),
+            ('voice2_expired', {'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() - 1}),
+        ]:
+            with self.subTest(session_id=session_id):
+                hass = SimpleNamespace(data={'habab_home': {
+                    'voice_sessions': {session_id: lease}, 'voice_session_tasks': {}}})
+                task = asyncio.create_task(asyncio.Event().wait())
+                hass.data['habab_home']['voice_session_tasks'][session_id] = {task}
+                request = Request(owner, {'session_id': session_id})
+                request.app['hass'] = hass
+                response = await realtime.RealtimeStopView().post(request)
+                self.assertEqual(response.status, 403)
+                self.assertFalse(task.cancelled())
+                self.assertIn(session_id, hass.data['habab_home']['voice_sessions'])
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+    async def test_stopped_browser_lease_rejects_late_context_turn_and_transcript(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(voice_history_context=AsyncMock(), web_session=AsyncMock(),
+            run=AsyncMock(), record_voice_event=AsyncMock(), record_voice_turn=AsyncMock())
+        hass = SimpleNamespace(data={'habab_home': {'assistant': assistant, 'voice_sessions': {}}})
+        requests = [
+            (realtime.RealtimeContextView(), {'session_id': 'voice2_stopped'}, 403),
+            (realtime.RealtimeTurnView(), {'session_id': 'voice2_stopped', 'text': 'Проверь'}, 400),
+            (realtime.RealtimeTranscriptView(), {'session_id': 'voice2_stopped', 'event_id': 'evt_stale',
+                'kind': 'event', 'role': 'user', 'text': 'Поздний фрагмент'}, 403),
+        ]
+        for view, data, status in requests:
+            request = Request(owner, data, assistant)
+            request.app['hass'] = hass
+            response = await view.post(request)
+            self.assertEqual(response.status, status)
+        assistant.voice_history_context.assert_not_awaited()
+        assistant.web_session.assert_not_awaited()
+        assistant.run.assert_not_awaited()
+        assistant.record_voice_event.assert_not_awaited()
+        assistant.record_voice_turn.assert_not_awaited()
+
+    def test_browser_stop_view_is_registered(self):
+        http = SimpleNamespace(register_view=Mock())
+        hass = SimpleNamespace(http=http)
+        with patch.object(realtime.websocket_api, 'async_register_command'):
+            realtime.async_register_views(hass)
+        paths = {call.args[0].url for call in http.register_view.call_args_list}
+        self.assertIn('/api/habab_home/realtime/stop', paths)

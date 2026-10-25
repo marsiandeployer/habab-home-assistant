@@ -6,9 +6,10 @@ worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-fron
 translations="${HABAB_NATIVE_FRONTEND_TRANSLATIONS:-/root/.local/share/habab-native-frontend-translations-official/translations}"
 source_commit="26690e06b0bf64a1487929245c32842ef92c62b5"
 patch_file="$repo_root/habab/native-frontend/bridge.patch"
-patch_sha="06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da19afcf36c4267bb"
+patch_sha="eb9dc06a2503b9625f3ce5c8fbb8344203593123399ae373c24341b14b9c5931"
 catalog_sha="154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce"
-wheel_name="home_assistant_frontend-20260930.4+habab.7-py3-none-any.whl"
+wheel_version="20260930.4+habab.8"
+wheel_name="home_assistant_frontend-${wheel_version}-py3-none-any.whl"
 staging="$(mktemp -d /root/.local/share/habab-native-frontend-wheel.XXXXXX)"
 pyproject_backup="$staging/pyproject.toml"
 
@@ -69,6 +70,10 @@ pnpm exec eslint \
   test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
   build-scripts/gulp/gather-static.js \
   src/habab/native-ui-bridge.ts \
+  src/data/context/dirty-state.ts \
+  src/mixins/dirty-state-provider-mixin.ts \
+  src/dialogs/config-flow/dialog-data-entry-flow.ts \
+  src/util/register-service-worker.ts \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
   src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts \
@@ -77,6 +82,8 @@ pnpm exec eslint \
   src/data/preloads.ts \
   src/data/recorder.ts \
   src/layouts/home-assistant.ts \
+  test/mixins/dirty-state-provider-mixin.test.ts \
+  test/util/register-service-worker.test.ts \
   test/data/recorder-info.test.ts \
   --max-warnings=0
 pnpm exec prettier --check \
@@ -87,6 +94,10 @@ pnpm exec prettier --check \
   test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
   build-scripts/gulp/gather-static.js \
   src/habab/native-ui-bridge.ts \
+  src/data/context/dirty-state.ts \
+  src/mixins/dirty-state-provider-mixin.ts \
+  src/dialogs/config-flow/dialog-data-entry-flow.ts \
+  src/util/register-service-worker.ts \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
   src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts \
@@ -95,6 +106,8 @@ pnpm exec prettier --check \
   src/data/preloads.ts \
   src/data/recorder.ts \
   src/layouts/home-assistant.ts \
+  test/mixins/dirty-state-provider-mixin.test.ts \
+  test/util/register-service-worker.test.ts \
   test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts \
   test/habab/native-ui-bridge.test.ts \
   test/data/recorder-info.test.ts
@@ -103,6 +116,8 @@ pnpm exec vitest run --config test/vitest.config.ts \
   test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
   test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts \
   test/habab/native-ui-bridge.test.ts \
+  test/mixins/dirty-state-provider-mixin.test.ts \
+  test/util/register-service-worker.test.ts \
   test/data/recorder-info.test.ts
 pnpm exec gulp gather-gallery-pages
 pnpm exec gulp clean
@@ -175,13 +190,14 @@ pnpm exec gulp gather-gallery-pages
 pnpm lint:types
 
 cp pyproject.toml "$pyproject_backup"
-python3 - <<'PY'
+python3 - "$wheel_version" <<'PY'
 from pathlib import Path
+import sys
 
 path = Path("pyproject.toml")
 text = path.read_text()
 old = 'version      = "20260930.4"'
-new = 'version      = "20260930.4+habab.7"'
+new = f'version      = "{sys.argv[1]}"'
 if text.count(old) != 1:
     raise SystemExit("Could not locate the pinned package version exactly once")
 path.write_text(text.replace(old, new, 1))

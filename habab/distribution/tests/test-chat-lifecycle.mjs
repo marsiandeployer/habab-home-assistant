@@ -428,6 +428,27 @@ test("native pipeline selectors retain explicit, last-used, and preferred pipeli
   assert.equal(setupChatModule.chooseAssistPipeline("last_used", [], undefined, undefined), undefined);
 });
 
+test("browser voice capability selects only explicit Habab realtime or HA Assist fallback", () => {
+  const capability = {
+    available: true, client: "browser_v1", provider: "habab", realtime_provider: "gemini",
+    transport: "habab", websocket_url: "wss://habab-voice.wpmix.net/gemini/ws",
+    auth: {mode: "first_text_frame", type: "habab.voice.auth.v1"},
+  };
+  assert.equal(setupChatModule.selectBrowserVoiceRoute(capability), "habab_browser_v1");
+  assert.equal(setupChatModule.selectBrowserVoiceRoute({
+    available: false, reason: "selected_provider_requires_ha_assist_stt",
+    browser: {transport: "ha_assist_pipeline", requires_ha_stt: true},
+  }), "ha_assist_pipeline");
+  for (const unsupported of [
+    {available: false, reason: "browser_voice_unavailable"},
+    {...capability, provider: "openai"},
+    {...capability, auth: {mode: "query", type: "habab.voice.auth.v1"}},
+    {...capability, websocket_url: "wss://attacker.invalid/gemini/ws"},
+    {available: false, reason: "selected_provider_requires_ha_assist_stt",
+      browser: {transport: "ha_assist_pipeline", requires_ha_stt: false}},
+  ]) assert.equal(setupChatModule.selectBrowserVoiceRoute(unsupported), undefined);
+});
+
 test("assistant diagnostics use only bounded safe fields and never provider response text", async () => {
   const copy = {diagnosticAuth: "Check your key.", diagnosticQuota: "Check your limits.", diagnosticGeneric: "Check settings."};
   assert.equal(setupChatModule.assistantDiagnosticMessage({name: "AuthenticationError", http_status: 401, response: "secret key"}, copy), "Check your key.");
@@ -439,6 +460,76 @@ test("assistant diagnostics use only bounded safe fields and never provider resp
 test("quick replies append to a draft instead of replacing user text", () => {
   assert.equal(setupChatModule.appendQuickReplyToDraft("I have two lights  \n", "Can I add them?"), "I have two lights\nCan I add them?");
   assert.equal(setupChatModule.appendQuickReplyToDraft("  ", "I want Zigbee"), "I want Zigbee");
+});
+
+test("reload protection covers active turns, voice, pending transcript, and unsent draft", () => {
+  const shouldBlock = setupChatModule.shouldBlockFrontendReload;
+  assert.equal(shouldBlock({busy: false, voiceBusy: false, activeVoice: false}), false);
+  assert.equal(shouldBlock({busy: true}), true);
+  assert.equal(shouldBlock({voiceBusy: true}), true);
+  assert.equal(shouldBlock({activeVoice: true}), true);
+  assert.equal(shouldBlock({pendingVoiceText: "turn on the light"}), true);
+  assert.equal(shouldBlock({draft: "unsent question"}), true);
+  assert.equal(shouldBlock({draft: "  \n"}), false);
+
+  const states = [];
+  const instance = Object.create(setupChatElementClass.prototype);
+  const textarea = {value: "unsent question"};
+  instance.demo = false;
+  instance.busy = false;
+  instance.voiceBusy = false;
+  instance.voice = undefined;
+  instance.pendingVoiceText = undefined;
+  instance.shadowRoot = {querySelector: () => textarea};
+  instance.reloadStateProvider = {setDirty: (value) => states.push(value)};
+  instance.syncReloadState();
+  textarea.value = "";
+  instance.busy = true;
+  instance.syncReloadState();
+  instance.busy = false;
+  instance.voiceBusy = true;
+  instance.syncReloadState();
+  instance.voiceBusy = false;
+  instance.pendingVoiceText = "recognized request";
+  instance.syncReloadState();
+  instance.pendingVoiceText = undefined;
+  instance.syncReloadState();
+  assert.deepEqual(states, [true, true, true, true, false]);
+});
+
+test("private chat registers its own reload provider and releases it on disconnect", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  let registeredOwner;
+  let unregistered = 0;
+  const win = {
+    haRegisterDirtyStateProvider(owner) {
+      registeredOwner = owner;
+      return {setDirty() {}, unregister() { unregistered++; }};
+    },
+    removeEventListener() {},
+  };
+  Object.defineProperty(globalThis, "window", {configurable: true, value: win});
+  try {
+    const instance = Object.create(setupChatElementClass.prototype);
+    instance.demo = false;
+    instance.shadowRoot = {firstChild: {} };
+    instance.messages = [];
+    instance.q = () => ({open: false});
+    instance.subscribeVoiceHistory = () => {};
+    instance.installLayoutLifecycle = () => {};
+    instance.syncReloadState = () => {};
+    instance.cleanupVoice = () => {};
+    instance.setAssistantOpen = () => {};
+    instance.connectedCallback();
+    assert.equal(registeredOwner, instance);
+
+    instance.disconnectedCallback();
+    assert.equal(unregistered, 1);
+    assert.equal(instance.reloadStateProvider, undefined);
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
 });
 
 
