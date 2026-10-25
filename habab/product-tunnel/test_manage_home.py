@@ -4,6 +4,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import manage_home
 
 
 SCRIPT = Path(__file__).with_name("manage_home.py")
@@ -85,6 +88,55 @@ class ManageHomeTest(unittest.TestCase):
             self.assertFalse((root / "var/lib/habab-product-tunnel/homes/alpha.json").exists())
             self.assertEqual(beta_before, beta_key.read_bytes())
             self.assertTrue((root / "var/lib/habab-product-tunnel/homes/beta.json").exists())
+
+    def test_apply_failure_rolls_back_and_preserves_concurrent_change(self) -> None:
+        home_id = "rollback"
+        key = fake_key(3, "operator@rollback")
+        host = f"home-{home_id}.remote.habab.ru"
+        files = manage_home.render(home_id, host, 32043, key)
+        manifest_path = manage_home._manifest_path(home_id)
+        manifest = manage_home._manifest(home_id, host, 32043, key, "edge", files)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "rollback"
+            original_write = manage_home._atomic_write
+            writes = 0
+
+            def fail_second_write(path: Path, content: bytes, mode: int) -> None:
+                nonlocal writes
+                writes += 1
+                if writes == 2:
+                    raise OSError("fixture write failure")
+                original_write(path, content, mode)
+
+            with patch.object(manage_home, "_atomic_write", side_effect=fail_second_write):
+                with self.assertRaisesRegex(manage_home.ManageError, "rolled back 1 path"):
+                    manage_home._apply(root, files, manifest_path, manifest)
+
+            self.assertTrue(all(not (root / relative).exists() for relative in files))
+            self.assertFalse((root / manifest_path).exists())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "concurrent"
+            first_path = root / next(iter(files))
+            original_write = manage_home._atomic_write
+            writes = 0
+
+            def change_first_then_fail(path: Path, content: bytes, mode: int) -> None:
+                nonlocal writes
+                writes += 1
+                if writes == 2:
+                    first_path.write_bytes(b"concurrent change")
+                    raise OSError("fixture write failure")
+                original_write(path, content, mode)
+
+            with patch.object(manage_home, "_atomic_write", side_effect=change_first_then_fail):
+                with self.assertRaisesRegex(manage_home.ManageError, "rollback stopped.*changed concurrently"):
+                    manage_home._apply(root, files, manifest_path, manifest)
+
+            self.assertEqual(first_path.read_bytes(), b"concurrent change")
+            self.assertFalse((root / manifest_path).exists())
+            self.assertTrue(all(not (root / relative).exists() for relative in list(files)[1:]))
 
 
 if __name__ == "__main__":

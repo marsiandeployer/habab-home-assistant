@@ -260,16 +260,74 @@ def _atomic_write(path: Path, content: bytes, mode: int) -> None:
         raise
 
 
+def _snapshot(root: Path, relative: Path) -> tuple[bytes, int, int, int] | None:
+    content = _read(root, relative)
+    if content is None:
+        return None
+    metadata = (root / relative).lstat()
+    return content, stat.S_IMODE(metadata.st_mode), metadata.st_dev, metadata.st_ino
+
+
 def _apply(root: Path, files: dict[Path, bytes], manifest_path: Path, manifest: bytes | None) -> None:
-    for relative, content in files.items():
+    changes = [
+        (relative, content, 0o600 if relative.parent == KEY_DIR else 0o644)
+        for relative, content in files.items()
+    ]
+    changes.append((manifest_path, manifest or b"", 0o600))
+    before: dict[Path, tuple[bytes, int, int, int] | None] = {}
+    for relative, _, _ in changes:
         _check_no_symlinks(root, relative)
-        target = root / relative
-        if target.exists() and _read(root, relative) is None:
-            raise ManageError(f"refusing to replace unmanaged path: {relative}")
-        mode = 0o600 if relative.parent == KEY_DIR or relative == manifest_path else 0o644
-        _atomic_write(target, content, mode)
-    _check_no_symlinks(root, manifest_path)
-    _atomic_write(root / manifest_path, manifest or b"", 0o600)
+        before[relative] = _snapshot(root, relative)
+
+    written: list[tuple[Path, tuple[bytes, int, int, int]]] = []
+    pending: Path | None = None
+    try:
+        for relative, content, mode in changes:
+            if _snapshot(root, relative) != before[relative]:
+                raise ManageError(f"managed path changed after preview; refusing to overwrite: {relative}")
+            pending = relative
+            _atomic_write(root / relative, content, mode)
+            applied = _snapshot(root, relative)
+            if applied is None or applied[0] != content or applied[1] != mode:
+                raise ManageError(f"managed path changed during apply; refusing rollback: {relative}")
+            written.append((relative, applied))
+            pending = None
+    except BaseException as apply_error:
+        if pending is not None and _snapshot(root, pending) != before[pending]:
+            raise ManageError(
+                f"apply partially failed after {len(written)} path(s); rollback stopped because "
+                f"path changed concurrently: {pending}"
+            ) from apply_error
+        for relative, applied in written:
+            if _snapshot(root, relative) != applied:
+                raise ManageError(
+                    f"apply partially failed after {len(written)} path(s); rollback stopped because "
+                    f"path changed concurrently: {relative}"
+                ) from apply_error
+
+        rolled_back = 0
+        for relative, applied in reversed(written):
+            if _snapshot(root, relative) != applied:
+                raise ManageError(
+                    f"apply partially failed after rolling back {rolled_back} path(s); rollback "
+                    f"stopped because path changed concurrently: {relative}"
+                ) from apply_error
+            _check_no_symlinks(root, relative)
+            previous = before[relative]
+            target = root / relative
+            if previous is None:
+                target.unlink()
+                if _snapshot(root, relative) is not None:
+                    raise ManageError(f"apply partially failed; rollback could not remove: {relative}") from apply_error
+            else:
+                _atomic_write(target, previous[0], previous[1])
+                restored = _snapshot(root, relative)
+                if restored is None or restored[:2] != previous[:2]:
+                    raise ManageError(f"apply partially failed; rollback could not restore: {relative}") from apply_error
+            rolled_back += 1
+        raise ManageError(
+            f"apply failed; rolled back {rolled_back} path(s): {type(apply_error).__name__}"
+        ) from apply_error
 
 
 def _manifest(home_id: str, host: str, port: int, public_key: str, tls_termination: str,
