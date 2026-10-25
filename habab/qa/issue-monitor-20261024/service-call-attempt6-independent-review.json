@@ -1,0 +1,12 @@
+{
+  "checked_at": "2026-10-25T07:17:48.132241+00:00",
+  "original_report": "service-call-e2e-20261025-attempt-6.json",
+  "original_verdict_preserved": "FAIL",
+  "helper_absent": true,
+  "entity_registry_absent": true,
+  "state_http404": true,
+  "operator_mutations": 0,
+  "runtime_source": "aaeab54b5eb8910406ec97e4e3ab987123608349",
+  "failure_cause": "service worker controllerchange triggered document reload; original chat Promise did not settle",
+  "root_cause_proof": "read-only startup probe3; no model prompts or service calls"
+}
