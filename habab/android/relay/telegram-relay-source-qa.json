@@ -1,0 +1,82 @@
+{
+  "kind": "telegram_relay_source_qa",
+  "date": "2026-10-25",
+  "status": "source_tests_passed_not_deployed",
+  "contract_status": "candidate_pending_core_node_owner_agreement",
+  "scope": [
+    "habab/android/relay/openai_gateway.py",
+    "habab/android/relay/test_gateway.py",
+    "habab/android/relay/README.md"
+  ],
+  "client_contract": {
+    "capabilities": {
+      "protocol": "telegram-bot-api-relay-v1",
+      "base": "/telegram",
+      "methods": [
+        "getMe",
+        "getUpdates",
+        "getChatMember",
+        "sendMessage",
+        "sendChatAction"
+      ]
+    },
+    "headers": [
+      "Authorization: Bearer HABAB_SERVICE_KEY",
+      "X-Habab-Telegram-Bot-Token: BOT_TOKEN"
+    ],
+    "verbs": {
+      "getMe": [
+        "GET without query/body",
+        "POST with JSON {}"
+      ],
+      "other_methods": "POST JSON only"
+    },
+    "limits": {
+      "inflight_http": 6,
+      "request_body_bytes": 1048576,
+      "response_body_bytes": 8388608,
+      "getUpdates_timeout_seconds": 25
+    }
+  },
+  "unit_tests": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 /root/.venvs/habab-voice-relay/bin/python -m unittest discover -s . -p test_gateway.py -v",
+    "working_directory": "habab/android/relay",
+    "result": "PASS",
+    "passed": 39,
+    "failed": 0,
+    "upstream": "local aiohttp TestServer mock only",
+    "outbound_guard": "ClientSession requests fail before socket unless hostname is loopback"
+  },
+  "initial_test_isolation_incident": {
+    "result": "NOT_A_QA_PASS",
+    "summary": "The first test run preceded local Telegram base URL patching and the outbound guard. It attempted requests with only the fixed synthetic invalid fixture token; Telegram returned 401. No real bot token or user data was used, and no successful API operation occurred.",
+    "run": {
+      "tests": 37,
+      "failures": 5,
+      "errors": 1
+    },
+    "mitigation": "Patched the fixed upstream base to the loopback mock, added a pre-socket loopback-only ClientSession guard, and reran the full suite successfully."
+  },
+  "not_run": [
+    "live Telegram Bot API verification",
+    "real bot token, Habab service key, or Google master key",
+    "relay restart, enrollment, deployment, Android device, or ADB"
+  ],
+  "release_state": "source_only_private_candidate_no_live_changes",
+  "parent_follow_up": {
+    "checkedAt": "2026-10-25T09:00:54.804359+00:00",
+    "scopedReview": "Gateway auth, fixed target, token forwarding, bounds, lifecycle and tests inspected; one token-validation mismatch corrected",
+    "tokenGrammar": "ASCII numeric bot id 1..20 digits; secret 20..256 allowed characters; total token length <=256 matching Core validation",
+    "independentSuiteResult": "PASS",
+    "testsPassed": 40,
+    "outboundMode": "fixture-wide loopback guard; fixed Telegram origin patched to local TestServer",
+    "coreNodeWireAgreement": "pending",
+    "liveGatewayRestarted": false,
+    "deviceOrRealBotTested": false
+  },
+  "parent_source_sha256": {
+    "openai_gateway.py": "9741f2f84d1be886ec4eb7069d83d516751048da8955e43cb695f2c5e483ee29",
+    "test_gateway.py": "61e3501cd25ef366d61cf55f7c9808ae2c4e596a6c40af1a5f56932128c82516",
+    "README.md": "8c886b94ace01649a264d333556cc574cbfbab079b49ffb9ac089e7b44a52f7e"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "kind": "habab_noxon_opencode_source_architecture_readback",
+  "checkedAt": "2026-10-25T09:00:54.806168+00:00",
+  "hababExecutor": {
+    "runtime": "OpenCode",
+    "mode": "serve --pure",
+    "wrapper": "habab/distribution/src/habab_home/setup_agent.py:SetupAgent.ensure",
+    "perInstallationWorkspace": true,
+    "usesEntireAisellBotplatform": false
+  },
+  "telegram": {
+    "worker": "habab/distribution/telegram-agent/worker.mjs",
+    "package": "local vendor/noxon-telegram",
+    "provenance": "habab/distribution/telegram-agent/PROVENANCE.md",
+    "sourceAisellCommit": "d4a84aea91f15a2c81b875803bcbe9ce0d8c7e0d",
+    "adaptedSubset": "selected provider-neutral message-splitting helper; Bot API transport implemented separately",
+    "fullNoxonTasksHistoryAccountsInfrastructureImported": false
+  },
+  "aisellReadback": {
+    "source": "/root/aisell/botplatform/src/bot.ts",
+    "openCodeBranch": "qwen: opencode run",
+    "otherCliProvidersAlsoPresent": true
+  },
+  "voice": {
+    "directConversation": "Gemini Live",
+    "executorTool": "ask_home_assistant"
+  },
+  "sourceOnlyInspection": true,
+  "noxonProductionProcessesOrDataChanged": false
+}

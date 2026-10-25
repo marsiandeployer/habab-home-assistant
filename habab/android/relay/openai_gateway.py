@@ -31,6 +31,14 @@ VOICE_FIRST_FRAME_TIMEOUT = 10
 VOICE_SETUP_MAX_BYTES = 64 * 1024
 BROWSER_VOICE_AUTH_TYPE = 'habab.voice.auth.v1'
 LEGACY_OPENAI_ROUTES = {'chat/completions', 'audio/speech', 'audio/transcriptions', 'realtime/client_secrets', 'models'}
+TELEGRAM_METHODS = ('getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction')
+TELEGRAM_BOT_TOKEN = re.compile(r'[0-9]{1,20}:[A-Za-z0-9_-]{20,256}\Z')
+TELEGRAM_API_BASE = 'https://api.telegram.org/bot'
+TELEGRAM_REQUEST_MAX = 1024 * 1024
+TELEGRAM_RESPONSE_MAX = 8 * 1024 * 1024
+TELEGRAM_LONG_POLL_MAX = 25
+TELEGRAM_REQUEST_TIMEOUT = 20
+TELEGRAM_LONG_POLL_REQUEST_TIMEOUT = 35
 
 
 def exact_web_origin(value):
@@ -173,7 +181,98 @@ class Gateway:
                          'bootstrap': '/v1/realtime/bootstrap', 'websocket': '/gemini/ws',
                          'browser_auth': {'enabled': bool(self.browser_origins),
                                           'mode': 'first_text_frame', 'type': BROWSER_VOICE_AUTH_TYPE}},
+            'telegram': {'protocol': 'telegram-bot-api-relay-v1', 'base': '/telegram',
+                         'methods': list(TELEGRAM_METHODS)},
         }, headers={'Cache-Control': 'no-store'})
+
+    async def telegram(self, request):
+        auth_values = request.headers.getall('Authorization', [])
+        if len(auth_values) != 1:
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        _, digest = self.authorization(request)
+        if not self.owner(digest):
+            return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
+        if request.query:
+            return web.json_response({'error': {'code': 'telegram_invalid_query'}}, status=400)
+
+        method = request.match_info.get('method', '')
+        if method not in TELEGRAM_METHODS:
+            return web.json_response({'error': {'code': 'telegram_method_not_allowed'}}, status=404)
+        allowed_methods = ('GET', 'POST') if method == 'getMe' else ('POST',)
+        if request.method not in allowed_methods:
+            return web.json_response({'error': {'code': 'telegram_http_method_not_allowed'}}, status=405)
+
+        token_values = request.headers.getall('X-Habab-Telegram-Bot-Token', [])
+        if (len(token_values) != 1 or len(token_values[0]) > 256
+                or TELEGRAM_BOT_TOKEN.fullmatch(token_values[0]) is None):
+            return web.json_response({'error': {'code': 'telegram_invalid_bot_token'}}, status=400)
+        bot_token = token_values[0]
+
+        body = b''
+        if method == 'getMe' and request.method == 'GET':
+            if request.content_length not in (None, 0) or request.headers.get('Transfer-Encoding'):
+                return web.json_response({'error': {'code': 'telegram_invalid_request'}}, status=400)
+        else:
+            if request.content_type != 'application/json':
+                return web.json_response({'error': {'code': 'telegram_invalid_request'}}, status=400)
+            payload = bytearray()
+            async for block in request.content.iter_chunked(65536):
+                payload.extend(block)
+                if len(payload) > TELEGRAM_REQUEST_MAX:
+                    return web.json_response({'error': {'code': 'telegram_request_too_large'}}, status=413)
+            body = bytes(payload)
+            try:
+                decoded = json.loads(body)
+                if not body or not isinstance(decoded, dict):
+                    raise ValueError
+                if method == 'getMe' and decoded:
+                    raise ValueError
+                if method == 'getUpdates':
+                    timeout = decoded.get('timeout', 0)
+                    if (isinstance(timeout, bool) or not isinstance(timeout, int)
+                            or not 0 <= timeout <= TELEGRAM_LONG_POLL_MAX):
+                        raise ValueError
+            except (ValueError, UnicodeError, TypeError):
+                return web.json_response({'error': {'code': 'telegram_invalid_request'}}, status=400)
+
+        if self.inflight >= 6:
+            return web.json_response({'error': {'code': 'relay_busy'}}, status=429)
+        self.inflight += 1
+        timeout_seconds = (TELEGRAM_LONG_POLL_REQUEST_TIMEOUT if method == 'getUpdates'
+                           else TELEGRAM_REQUEST_TIMEOUT)
+        upstream_url = f'{TELEGRAM_API_BASE}{bot_token}/{method}'
+        try:
+            timeout = ClientTimeout(total=timeout_seconds, connect=10, sock_connect=10,
+                                    sock_read=TELEGRAM_LONG_POLL_MAX + 5 if method == 'getUpdates' else 15)
+            async with self.client.request(request.method, upstream_url,
+                    headers={'Content-Type': 'application/json'} if body else {},
+                    data=body if body else None, allow_redirects=False, timeout=timeout) as response:
+                payload = bytearray()
+                async for block in response.content.iter_chunked(65536):
+                    payload.extend(block)
+                    if len(payload) > TELEGRAM_RESPONSE_MAX:
+                        return web.json_response({'error': {'code': 'telegram_response_too_large'}}, status=502)
+                safe = bytes(payload).replace(bot_token.encode(), b'[redacted]')
+                try:
+                    parsed = json.loads(safe)
+                    if not isinstance(parsed, dict):
+                        raise ValueError
+                except (ValueError, UnicodeError, TypeError):
+                    return web.json_response({'error': {'code': 'telegram_invalid_upstream_response'}}, status=502)
+                headers = {'Content-Type': response.headers.get('Content-Type', 'application/json'),
+                           'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+                retry_after = response.headers.get('Retry-After')
+                if retry_after is not None and re.fullmatch(r'\d{1,6}', retry_after):
+                    headers['Retry-After'] = retry_after
+                return web.Response(body=safe, status=response.status, headers=headers)
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            return web.json_response({'error': {'code': 'telegram_upstream_timeout'}}, status=504)
+        except Exception:
+            return web.json_response({'error': {'code': 'telegram_upstream_unavailable'}}, status=502)
+        finally:
+            self.inflight -= 1
 
     async def gemini_bootstrap(self, request):
         service_key, digest = self.authorization(request)
@@ -451,6 +550,7 @@ class Gateway:
         app.cleanup_ctx.append(self.lifecycle)
         app.router.add_get('/health', self.health)
         app.router.add_get('/v1/capabilities', self.capabilities)
+        app.router.add_route('*', '/telegram/{method}', self.telegram)
         app.router.add_post('/v1/realtime/bootstrap', self.gemini_bootstrap)
         app.router.add_get('/gemini/ws', self.gemini_voice)
         app.router.add_route('*', '/gemini/{tail:.*}', self.gemini_text)

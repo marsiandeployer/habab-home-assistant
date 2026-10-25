@@ -3,11 +3,14 @@ import hashlib
 import asyncio
 import json
 from pathlib import Path
+import re
 import stat
 import tempfile
 import unittest
+from urllib.parse import urlsplit
 from unittest.mock import patch
 
+from aiohttp.client import ClientSession
 from aiohttp import WSMsgType, web
 from aiohttp.client_exceptions import WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer
@@ -17,6 +20,14 @@ from openai_gateway import Gateway
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        original_request = ClientSession._request
+        async def guarded_request(session, method, url, **kwargs):
+            host = urlsplit(str(url)).hostname
+            if host not in {'127.0.0.1', 'localhost', '::1'}:
+                raise AssertionError('relay tests block non-loopback outbound requests')
+            return await original_request(session, method, url, **kwargs)
+        self.outbound_guard = patch.object(ClientSession, '_request', guarded_request)
+        self.outbound_guard.start()
         self.calls = []
         self.echo_secret = False
         self.large_response = False
@@ -24,9 +35,35 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.oversized_token_response = False
         self.fail_gemini_connect = False
         self.close_gemini_with = None
+        self.telegram_calls = []
+        self.telegram_status = 200
+        self.telegram_payload = {'ok': True, 'result': {'id': 12}}
+        self.telegram_retry_after = None
+        self.telegram_delay = 0
+        self.telegram_started = asyncio.Event()
+        self.telegram_finished = asyncio.Event()
+        self.telegram_large_response = False
         self.gemini_frames = []
         self.gemini_connections = 0
         async def upstream(request):
+            if request.path.startswith('/bot'):
+                body = await request.read()
+                bot_path, _, bot_method = request.path.rpartition('/')
+                fixed_bot_path = bool(re.fullmatch(r'/bot[0-9]{1,20}:[A-Za-z0-9_-]{20,256}', bot_path))
+                self.telegram_calls.append((request.method, fixed_bot_path, bot_method, body,
+                                            request.headers.get('Authorization'),
+                                            request.headers.get('x-goog-api-key'),
+                                            request.headers.get('X-Habab-Telegram-Bot-Token') is not None))
+                self.telegram_started.set()
+                try:
+                    if self.telegram_delay:
+                        await asyncio.sleep(self.telegram_delay)
+                    if self.telegram_large_response:
+                        return web.Response(body=b'x' * 128, content_type='application/json')
+                    headers = {'Retry-After': str(self.telegram_retry_after)} if self.telegram_retry_after else None
+                    return web.json_response(self.telegram_payload, status=self.telegram_status, headers=headers)
+                finally:
+                    self.telegram_finished.set()
             received_key = request.headers.get('x-goog-api-key')
             self.calls.append((request.path, received_key, request.query_string))
             if request.path.endswith('/auth_tokens'):
@@ -72,7 +109,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         app = web.Application()
         app.router.add_route('*', '/{path:.*}', upstream)
         app.router.add_get('/gemini', gemini_upstream)
-        self.upstream = TestServer(app)
+        self.upstream = TestServer(app, handler_cancellation=True)
         await self.upstream.start_server()
         self.browser_origin = 'https://habab-demo.wpmix.net'
         self.gateway = Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), upstream_key='synthetic-vendor',
@@ -83,7 +120,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.gemini_patch.start()
         self.token_patch = patch('openai_gateway.GEMINI_TOKEN_URL', str(self.upstream.make_url('/v1beta/auth_tokens')))
         self.token_patch.start()
-        self.client = TestClient(TestServer(self.gateway.app()))
+        self.telegram_patch = patch('openai_gateway.TELEGRAM_API_BASE', str(self.upstream.make_url('/bot')).rstrip('/'))
+        self.telegram_patch.start()
+        self.client = TestClient(TestServer(self.gateway.app(), handler_cancellation=True))
         await self.client.start_server()
 
     async def asyncTearDown(self):
@@ -92,6 +131,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.patch.stop()
         self.gemini_patch.stop()
         self.token_patch.stop()
+        self.telegram_patch.stop()
+        self.outbound_guard.stop()
 
     async def bootstrap(self, setup=None, headers=None, path='/v1/realtime/bootstrap'):
         setup = setup or {'model': 'models/gemini-3.8-live', 'tools': [{'functionDeclarations': []}]}
@@ -486,8 +527,158 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get('/v1/capabilities', headers={'x-goog-api-key': 'synthetic-bot'})
         self.assertEqual(response.status, 401)
         response = await self.client.post('/telegram/deleteWebhook', headers={'Authorization': 'Bearer synthetic-bot'})
-        self.assertEqual(response.status, 404)
+        self.assertEqual(response.status, 401)
         self.assertEqual(self.calls, [])
+
+    async def test_capabilities_advertise_narrow_telegram_contract(self):
+        response = await self.client.get('/v1/capabilities', headers={'Authorization': 'Bearer synthetic-owner'})
+        payload = await response.json()
+        self.assertEqual(payload['telegram'], {
+            'protocol': 'telegram-bot-api-relay-v1', 'base': '/telegram',
+            'methods': ['getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction'],
+        })
+
+    async def test_telegram_auth_token_query_and_method_boundaries_do_not_reach_upstream(self):
+        owner = {'Authorization': 'Bearer synthetic-owner'}
+        valid_token = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk'
+        cases = [
+            ('GET', '/telegram/getMe', {}, 401),
+            ('GET', '/telegram/getMe', {**owner, 'X-Habab-Telegram-Bot-Token': 'malformed'}, 400),
+            ('GET', '/telegram/getMe?chat_id=123', {**owner, 'X-Habab-Telegram-Bot-Token': valid_token}, 400),
+            ('GET', '/telegram/getUpdates', {**owner, 'X-Habab-Telegram-Bot-Token': valid_token}, 405),
+            ('POST', '/telegram/notAMethod', {**owner, 'X-Habab-Telegram-Bot-Token': valid_token}, 404),
+        ]
+        for method, path, headers, status in cases:
+            response = await self.client.request(method, path, headers=headers,
+                                                 json={} if method == 'POST' else None)
+            self.assertEqual(response.status, status)
+        self.assertEqual(self.telegram_calls, [])
+
+    async def test_test_fixture_rejects_non_loopback_outbound_before_socket(self):
+        with self.assertRaisesRegex(AssertionError, 'block non-loopback'):
+            await self.gateway.client.get('https://api.telegram.org/botinvalid/getMe')
+        self.assertEqual(self.telegram_calls, [])
+
+    async def test_telegram_token_validation_matches_core_ascii_and_length_bounds(self):
+        for token in ('1:' + 'A' * 20, '9' * 20 + ':' + 'A' * 235):
+            response = await self.client.get('/telegram/getMe', headers={
+                'Authorization': 'Bearer synthetic-owner',
+                'X-Habab-Telegram-Bot-Token': token,
+            })
+            self.assertEqual(response.status, 200)
+        accepted = len(self.telegram_calls)
+        for token in ('9' * 21 + ':' + 'A' * 20, '1:' + 'A' * 255,
+                      '\u0661\u0662\u0663\u0664\u0665:' + 'A' * 35, '12345:' + 'A' * 19):
+            response = await self.client.get('/telegram/getMe', headers={
+                'Authorization': 'Bearer synthetic-owner',
+                'X-Habab-Telegram-Bot-Token': token,
+            })
+            self.assertEqual(response.status, 400)
+        self.assertEqual(len(self.telegram_calls), accepted)
+
+    async def test_telegram_forwards_only_fixed_methods_and_preserves_botapi_status_body(self):
+        token = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk'
+        headers = {'Authorization': 'Bearer synthetic-owner', 'X-Habab-Telegram-Bot-Token': token}
+        response = await self.client.get('/telegram/getMe', headers=headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.json(), {'ok': True, 'result': {'id': 12}})
+        self.assertEqual(self.telegram_calls[-1], ('GET', True, 'getMe', b'', None, None, False))
+
+        response = await self.client.post('/telegram/getMe', headers=headers, json={})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.json(), {'ok': True, 'result': {'id': 12}})
+        self.assertEqual(self.telegram_calls[-1], ('POST', True, 'getMe', b'{}', None, None, False))
+
+        response = await self.client.post('/telegram/getChatMember', headers=headers,
+                                          json={'chat_id': 42, 'user_id': 7})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.telegram_calls[-1][1:3], (True, 'getChatMember'))
+
+        response = await self.client.post('/telegram/sendChatAction', headers=headers,
+                                          json={'chat_id': 42, 'action': 'typing'})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.telegram_calls[-1][1:3], (True, 'sendChatAction'))
+
+        body = {'chat_id': 42, 'text': 'synthetic message'}
+        self.telegram_payload = {'ok': False, 'error_code': 429,
+                                 'parameters': {'retry_after': 7}, 'description': 'Too Many Requests'}
+        self.telegram_status = 429
+        self.telegram_retry_after = 7
+        response = await self.client.post('/telegram/sendMessage', headers=headers, json=body)
+        self.assertEqual(response.status, 429)
+        self.assertEqual(response.headers.get('Retry-After'), '7')
+        self.assertEqual(await response.json(), self.telegram_payload)
+        self.assertEqual(self.telegram_calls[-1],
+                         ('POST', True, 'sendMessage', json.dumps(body).encode(), None, None, False))
+        self.assertEqual(len(self.telegram_calls), 5)
+        self.assertEqual(self.calls, [])
+
+    async def test_telegram_getupdates_is_one_manual_request_capped_at_25_seconds(self):
+        token = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk'
+        headers = {'Authorization': 'Bearer synthetic-owner', 'X-Habab-Telegram-Bot-Token': token}
+        self.gateway.upstream_key = None
+        payload = {'offset': 101, 'timeout': 25, 'allowed_updates': ['message']}
+        response = await self.client.post('/telegram/getUpdates', headers=headers, json=payload)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.json(), {'ok': True, 'result': {'id': 12}})
+        self.assertEqual(len(self.telegram_calls), 1)
+        self.assertEqual(self.telegram_calls[0][1:3], (True, 'getUpdates'))
+        self.assertEqual(json.loads(self.telegram_calls[0][3]), payload)
+
+        response = await self.client.post('/telegram/getUpdates', headers=headers,
+                                          json={'timeout': 26})
+        self.assertEqual(response.status, 400)
+        self.assertEqual(len(self.telegram_calls), 1)
+
+    async def test_telegram_body_and_upstream_response_limits_are_enforced(self):
+        token = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk'
+        headers = {'Authorization': 'Bearer synthetic-owner', 'X-Habab-Telegram-Bot-Token': token}
+        with patch('openai_gateway.TELEGRAM_REQUEST_MAX', 8):
+            response = await self.client.post('/telegram/sendMessage', headers=headers, json={'text': 'too long'})
+        self.assertEqual(response.status, 413)
+        self.assertEqual(self.telegram_calls, [])
+
+        self.telegram_large_response = True
+        with patch('openai_gateway.TELEGRAM_RESPONSE_MAX', 16):
+            response = await self.client.get('/telegram/getMe', headers=headers)
+        self.assertEqual(response.status, 502)
+        self.assertEqual((await response.json())['error']['code'], 'telegram_response_too_large')
+        self.assertEqual(len(self.telegram_calls), 1)
+
+    async def test_telegram_bot_token_is_redacted_from_upstream_json_echo(self):
+        token = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk'
+        headers = {'Authorization': 'Bearer synthetic-owner', 'X-Habab-Telegram-Bot-Token': token}
+        self.telegram_payload = {'ok': False, 'description': 'token ' + token}
+        self.telegram_status = 400
+        response = await self.client.get('/telegram/getMe', headers=headers)
+        payload = await response.read()
+        self.assertEqual(response.status, 400)
+        self.assertIn(b'[redacted]', payload)
+        self.assertNotIn(token.encode(), payload)
+
+    async def test_telegram_long_poll_timeout_is_sanitized(self):
+        token = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk'
+        headers = {'Authorization': 'Bearer synthetic-owner', 'X-Habab-Telegram-Bot-Token': token}
+        self.telegram_delay = 0.1
+        with patch('openai_gateway.TELEGRAM_LONG_POLL_REQUEST_TIMEOUT', 0.02):
+            response = await self.client.post('/telegram/getUpdates', headers=headers, json={'timeout': 25})
+        self.assertEqual(response.status, 504)
+        self.assertEqual((await response.json())['error']['code'], 'telegram_upstream_timeout')
+        self.assertNotIn(token, await response.text())
+        self.assertTrue(self.telegram_calls)
+
+    async def test_telegram_downstream_cancellation_propagates_and_releases_http_slot(self):
+        token = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk'
+        headers = {'Authorization': 'Bearer synthetic-owner', 'X-Habab-Telegram-Bot-Token': token}
+        self.telegram_delay = 10
+        request = asyncio.create_task(self.client.post('/telegram/getUpdates', headers=headers, json={'timeout': 25}))
+        await asyncio.wait_for(self.telegram_started.wait(), timeout=2)
+        request.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await request
+        await asyncio.wait_for(self.telegram_finished.wait(), timeout=2)
+        self.assertEqual(self.gateway.inflight, 0)
+        self.assertEqual(len(self.telegram_calls), 1)
 
     async def test_local_operator_enrolls_only_in_ram_and_socket_is_private(self):
         with tempfile.TemporaryDirectory() as directory:

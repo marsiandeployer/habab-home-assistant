@@ -97,9 +97,27 @@ constrained token хранится в RAM до подключения и пер�
 Лимиты: два голосовых соединения, 180 секунд и 16 MiB в каждую сторону;
 шесть параллельных HTTP-запросов, 2 MiB входящего и 8 MiB ответного тела.
 
-Telegram использует прямой Bot API и отдельный необязательный пользовательский
-HTTP-прокси в настройках бота. Сервер Habab не запускает Telegram poller
-и не предоставляет API-пересылку Telegram.
+Если выбран Habab, бот может обращаться через Bot API relay с авторизацией.
+`GET /v1/capabilities` объявляет `telegram.protocol=telegram-bot-api-relay-v1`,
+`base=/telegram` и точный список поддержанных методов. Каждый вызов требует
+`Authorization: Bearer <HABAB_SERVICE_KEY>` и
+`X-Habab-Telegram-Bot-Token: <BOT_TOKEN>`. Gateway проверяет service key до
+обращения к Telegram, затем проверяет формат Bot API token. Этот token передаётся
+Telegram Bot API только в фиксированном URL
+`https://api.telegram.org/bot<TOKEN>/<METHOD>`; произвольный URL и произвольные
+методы проксировать нельзя. Ошибки и access log не содержат token.
+
+Разрешены `GET /telegram/getMe` без query/body и `POST /telegram/getMe` с JSON
+`{}`. Остальные поддержанные методы используют `POST` с JSON:
+`getUpdates`, `getChatMember`, `sendMessage`, `sendChatAction`. Query параметры,
+другие методы и другие HTTP verbs отклоняются до upstream. `getUpdates` — один
+upstream-вызов на каждый запрос клиента, с `timeout` от 0 до 25 секунд; сервер
+не запускает фоновый poller. При отмене клиентского запроса отменяется и
+upstream-вызов. Gateway использует общий лимит шести HTTP-запросов, ограничивает
+входное тело 1 MiB, ответ 8 MiB и не следует redirect. Успешный Bot API JSON,
+HTTP status, включая 429 с `retry_after`, передаются клиенту. Timeout, неверный
+ответ, превышение лимита и upstream-сбой возвращают безопасный код ошибки.
+Google master key для Telegram не используется.
 
 Проверки без реальных ключей:
 
