@@ -1,0 +1,53 @@
+{
+  "checked_date": "2026-10-26",
+  "target": "authenticated owner-test loopback :8395",
+  "issue": 21,
+  "purpose": "single_turn_official_wyoming_search_and_page_fetch",
+  "prompt_sent": true,
+  "prompt_terminal": true,
+  "assistant_reply_present": true,
+  "owner_admin_verified": true,
+  "chat_session_ready": true,
+  "backend_idle_before": true,
+  "selected_provider_text_ready": true,
+  "runtime_status": "running",
+  "diagnostics_readback": "OK",
+  "tool_calls": [
+    {
+      "tool": "bash",
+      "call_status": "completed",
+      "result_status": "completed",
+      "result_available": true,
+      "result_nonempty": true,
+      "result_count": null
+    },
+    {
+      "tool": "exa_web_search_exa",
+      "call_status": "completed",
+      "result_status": "completed",
+      "result_available": true,
+      "result_nonempty": true,
+      "result_count": null
+    },
+    {
+      "tool": "webfetch",
+      "call_status": "completed",
+      "result_status": "completed",
+      "result_available": true,
+      "result_nonempty": true,
+      "result_count": null
+    }
+  ],
+  "search_result_count": 2,
+  "page_fetch_completed": true,
+  "fetched_official_url": "https://www.home-assistant.io/integrations/wyoming/",
+  "verdict": "PASS_CLOUD_TOOL_TRACE",
+  "failure_code": null,
+  "official_urls_observed_across_trace": [
+    "https://www.home-assistant.io/integrations/wyoming/",
+    "https://www.home-assistant.io/voice_control/",
+    "https://www.home-assistant.io/integrations/stt/",
+    "https://www.home-assistant.io/integrations/tts/",
+    "https://www.home-assistant.io/integrations/wake_word/"
+  ]
+}
