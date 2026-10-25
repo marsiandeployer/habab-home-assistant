@@ -92,6 +92,8 @@ The wheel build runs `rspack-prod-app-modern` followed by
 `rspack-prod-app-legacy` so the two compiler configurations do not overlap.
 `HABAB_TERSER_WORKERS=1` limits each pass to one worker. Other frontend builds
 keep the existing automatic Terser parallelism unless they set this option.
+The focused Vitest run uses one worker and disables file parallelism to fit the
+bounded build scope.
 `SKIP_FETCH_NIGHTLY_TRANSLATIONS=1` applies to all translation stages; the
 builder runs the normal license generation step and does not reuse a prior
 wheel's license output.

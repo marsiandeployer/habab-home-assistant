@@ -124,6 +124,8 @@ pnpm exec prettier --check \
 # from the pinned source catalog before tests, without fetching nightly files.
 pnpm exec gulp build-translations
 pnpm exec vitest run --config test/vitest.config.ts \
+  --maxWorkers=1 \
+  --no-file-parallelism \
   test/panels/home/ha-panel-home.test.ts \
   test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
   test/build-scripts/rspack-config.test.js \
