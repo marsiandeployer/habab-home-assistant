@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import re
 from pathlib import Path
 
 ENTRY_START = '<!-- habab-assistant-entry:start -->'
@@ -11,14 +12,56 @@ OLD_END = '<!-- habab-assistant-preview:end -->'
 LEGACY_TAG = '<script type="module" src="/demos/home-assistant/integrations/setup-chat.js?v=5"></script>'
 
 
+_STATIC_IMPORT = re.compile(
+    r"(?:\bimport\s*(?:[^'\"]*?\sfrom\s*)?|\bexport\s+[^'\"]*?\sfrom\s*)['\"]([^'\"]+)['\"]"
+)
+_DYNAMIC_IMPORT = re.compile(r"\bimport\s*\(\s*['\"]([^'\"]+)['\"]\s*\)")
+
+
+def _local_module_closure(source):
+    """Return source and every relative module it imports, preserving paths."""
+    source = Path(source).resolve()
+    root = source.parent
+    modules = {}
+    pending = [source]
+    while pending:
+        module = pending.pop()
+        relative = module.relative_to(root)
+        if relative in modules:
+            continue
+        content = module.read_bytes()
+        modules[relative] = content
+        text = content.decode('utf-8')
+        imports = _STATIC_IMPORT.findall(text) + _DYNAMIC_IMPORT.findall(text)
+        for specifier in imports:
+            if not specifier.startswith(('./', '../')):
+                continue
+            dependency = (module.parent / specifier.split('?', 1)[0].split('#', 1)[0]).resolve()
+            if not dependency.is_relative_to(root):
+                raise ValueError('assistant import escapes frontend source directory')
+            if not dependency.is_file():
+                raise ValueError(f'missing assistant import: {specifier}')
+            pending.append(dependency)
+    return modules
+
+
 def assistant_release(source):
-    return _release(Path(source).read_bytes())
+    return _release(_local_module_closure(source))
 
 
-def _release(data):
-    digest = hashlib.sha256(data).hexdigest()
+def _release(modules):
+    digest_builder = hashlib.sha256()
+    total_bytes = 0
+    for relative, data in sorted(modules.items(), key=lambda item: item[0].as_posix()):
+        path_bytes = relative.as_posix().encode('utf-8')
+        digest_builder.update(len(path_bytes).to_bytes(4, 'big'))
+        digest_builder.update(path_bytes)
+        digest_builder.update(len(data).to_bytes(8, 'big'))
+        digest_builder.update(data)
+        total_bytes += len(data)
+    digest = digest_builder.hexdigest()
     relative = f'assistant/releases/{digest[:16]}/setup-chat.js'
-    return {'sha256': digest, 'bytes': len(data), 'relative_path': relative,
+    return {'sha256': digest, 'bytes': total_bytes, 'relative_path': relative,
             'module_url': '/demos/home-assistant/' + relative}
 
 
@@ -42,14 +85,16 @@ def render_entrypoint(html, module_url):
 
 def publish_assistant(public_dir, source):
     public_dir = Path(public_dir)
-    data = Path(source).read_bytes()
-    release = _release(data)
-    target = public_dir / release['relative_path']
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and target.read_bytes() != data:
-        raise ValueError('immutable assistant module differs')
-    if not target.exists():
-        target.write_bytes(data)
+    modules = _local_module_closure(source)
+    release = _release(modules)
+    release_dir = (public_dir / release['relative_path']).parent
+    for relative, data in modules.items():
+        target = release_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and target.read_bytes() != data:
+            raise ValueError('immutable assistant module differs')
+        if not target.exists():
+            target.write_bytes(data)
     # Cached HTML can still import this address; it forwards to the same UI.
     shim = public_dir / 'integrations/setup-chat.js'
     shim.parent.mkdir(parents=True, exist_ok=True)

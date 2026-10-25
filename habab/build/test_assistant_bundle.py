@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from assistant_bundle import LEGACY_TAG, OLD_START, OLD_END, publish_assistant, render_entrypoint
+from assistant_bundle import LEGACY_TAG, OLD_START, OLD_END, assistant_release, publish_assistant, render_entrypoint
 
 
 class SharedAssistantTests(unittest.TestCase):
@@ -41,6 +41,40 @@ class SharedAssistantTests(unittest.TestCase):
             artifact.write_text('unexpected content')
             with self.assertRaises(ValueError):
                 publish_assistant(public, source)
+
+    def test_import_closure_is_published_and_changes_release_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source_dir = base / 'frontend'
+            nested = source_dir / 'nested'
+            nested.mkdir(parents=True)
+            source = source_dir / 'setup-chat.js'
+            strings = source_dir / 'strings.js'
+            voice = nested / 'voice.js'
+            shared = source_dir / 'shared.js'
+            source.write_text('import "./strings.js";\nimport("./nested/voice.js");\n')
+            strings.write_text('export const strings = { label: "first" };\n')
+            voice.write_text('import { shared } from "../shared.js";\n')
+            shared.write_text('export const shared = true;\n')
+
+            public = base / 'public'
+            first_release = publish_assistant(public, source)
+            first_dir = (public / first_release['relative_path']).parent
+            for relative in ('setup-chat.js', 'strings.js', 'nested/voice.js', 'shared.js'):
+                self.assertEqual((first_dir / relative).read_bytes(), (source_dir / relative).read_bytes())
+            self.assertEqual(assistant_release(source), first_release)
+
+            strings.write_text('export const strings = { label: "changed" };\n')
+            second_release = assistant_release(source)
+            self.assertNotEqual(first_release['sha256'], second_release['sha256'])
+            publish_assistant(public, source)
+            second_dir = (public / second_release['relative_path']).parent
+            for relative in ('setup-chat.js', 'strings.js', 'nested/voice.js', 'shared.js'):
+                self.assertTrue((second_dir / relative).is_file(), relative)
+
+            source.write_text('import "./missing.js";\n')
+            with self.assertRaisesRegex(ValueError, 'missing assistant import'):
+                assistant_release(source)
 
 
 if __name__ == '__main__':
