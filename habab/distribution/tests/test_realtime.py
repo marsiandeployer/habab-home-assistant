@@ -3,13 +3,15 @@ import asyncio
 import json
 import os
 import time
+import uuid
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from homeassistant.components.habab_home import realtime
+from homeassistant.components.habab_home import feedback, feedback_action, realtime
 from homeassistant.components.habab_home.setup_agent import AgentError
 from homeassistant.components.habab_home.assistant import AssistantService
+from homeassistant.components.habab_home.setup_actions import execute as execute_setup_action
 
 
 class Request(dict):
@@ -485,6 +487,95 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, 200)
         assistant.web_session.assert_awaited_once_with('alice')
         assistant.run.assert_awaited_once_with('alice', 'web', 'ses_alice', 'Проверь свет', expected_history_epoch=0)
+
+    async def test_realtime_feedback_uses_shared_local_save_and_current_owner_mapping(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        utterance = 'Отправь обратную связь: голосовой ответ был слишком длинным.'
+        feedback_text = 'Голосовой ответ был слишком длинным.'
+        session = {
+            'channel': 'web', 'provider_models': [], 'created_at': None, 'updated_at': None,
+            'status': 'completed', 'processing_duration_ms': None, 'message_count': 2,
+            'events_truncated': False,
+        }
+        store = SimpleNamespace(data=None)
+
+        async def load_store():
+            return store.data
+
+        async def save_store(data):
+            store.data = data
+
+        store.async_load = AsyncMock(side_effect=load_store)
+        store.async_save = AsyncMock(side_effect=save_store)
+        assistant = SimpleNamespace(
+            web_sessions={'alice': 'web-alice'}, telegram_sessions={},
+            runtime=SimpleNamespace(clean=lambda text: text),
+            voice_history_context=AsyncMock(return_value={'session_id': 'web-alice', 'epoch': 9}),
+            web_session=AsyncMock(return_value={'session_id': 'web-alice'}),
+        )
+        hass = SimpleNamespace(data={'habab_home': {'assistant': assistant}})
+        with patch.object(feedback, 'Store', return_value=store):
+            manager = feedback.FeedbackManager(hass)
+        hass.data['habab_home']['feedback'] = manager
+        setup_agent = SimpleNamespace(active=('alice', 'web-alice'))
+        action_results = []
+
+        async def shared_run(run_owner, channel, session_id, text, expected_history_epoch=None):
+            self.assertEqual((run_owner, channel, session_id, text, expected_history_epoch),
+                             ('alice', 'web', 'web-alice', utterance, 9))
+            result = await execute_setup_action(hass, setup_agent, run_owner, {
+                'action': 'save_feedback', 'feedback': feedback_text, 'consent': True,
+                'idempotency_key': str(uuid.uuid4()),
+            })
+            action_results.append(result)
+            if result.get('state') == 'saved_locally' and result.get('issue_state') == 'not_configured':
+                reply = 'Отзыв сохранён локально в Home Assistant; issue не создан.'
+            else:
+                reply = 'Не удалось сохранить отзыв.'
+            return {'messages': [{'role': 'assistant', 'text': reply}]}
+
+        assistant.run = AsyncMock(side_effect=shared_run)
+        hass.data['habab_home']['voice_sessions'] = {
+            'voice2_feedback': {
+                'owner': 'alice', 'expires': time.monotonic() + 60,
+                'client': 'native_v2', 'provider': 'gemini',
+                'history_session': 'web-alice', 'history_epoch': 9,
+            },
+        }
+        request = Request(owner, {'session_id': 'voice2_feedback', 'text': utterance}, assistant)
+        request.app['hass'] = hass
+        config = realtime.session_config('gemini-3.8-live', client='native_v2',
+                                         selected_provider='gemini')
+        with patch.object(feedback_action, '_session_data', AsyncMock(return_value=(session, [], []))), \
+                patch.object(realtime, 'async_dispatcher_send'):
+            response = await realtime.RealtimeTurnView().post(request)
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.body)['text'],
+                         'Отзыв сохранён локально в Home Assistant; issue не создан.')
+        self.assertEqual(len(action_results), 1)
+        self.assertEqual(action_results[0]['state'], 'saved_locally')
+        self.assertEqual(action_results[0]['issue_state'], 'not_configured')
+        self.assertEqual(len(store.data['records']), 1)
+        self.assertEqual(next(iter(store.data['records'].values()))['owner_id'], 'alice')
+        self.assertIn('ОТЗЫВ.', config['instructions'])
+        self.assertIn('Явный запрос владельца сохранить или отправить сформулированный отзыв',
+                      config['instructions'])
+        self.assertIn('Обычная жалоба или неясное намерение не являются просьбой о сохранении',
+                      config['instructions'])
+        self.assertIn('второй раз согласие не спрашивай', config['instructions'])
+        self.assertIn('Не включай фоновую выгрузку', config['instructions'])
+        self.assertIn('ask_home_assistant', {tool['name'] for tool in config['tools']})
+        self.assertEqual({tool['name'] for tool in config['tools']},
+                         {'ask_home_assistant', 'end_voice_session'})
+
+        foreign = Request(SimpleNamespace(id='bob', is_active=True, is_admin=True),
+                          {'session_id': 'voice2_feedback', 'text': utterance}, assistant)
+        foreign.app['hass'] = hass
+        denied = await realtime.RealtimeTurnView().post(foreign)
+        self.assertEqual(denied.status, 400)
+        self.assertEqual(assistant.run.await_count, 1)
+        self.assertEqual(store.async_save.await_count, 1)
 
     async def test_foreign_or_expired_voice_lease_never_starts_opencode(self):
         for lease in [{'owner': 'bob', 'expires': time.monotonic() + 60},
