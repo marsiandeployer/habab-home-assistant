@@ -688,6 +688,39 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(browser['tools'], config['tools'])
         self.assertEqual(browser['tool_choice'], config['tool_choice'])
 
+    def test_end_session_policy_and_tool_metadata_are_shared_across_voice_clients(self):
+        end_tools = []
+        for client in ('native_v2', 'browser_v1'):
+            for provider, model in (
+                ('openai', 'gpt-realtime-mini'),
+                ('gemini', 'gemini-3.8-live'),
+            ):
+                with self.subTest(client=client, provider=provider):
+                    conversation = realtime.session_config(
+                        model, client=client, context={'states': []}, selected_provider=provider)
+                    tools = {tool['name']: tool for tool in conversation['tools']}
+                    self.assertEqual(set(tools), {'ask_home_assistant', 'end_voice_session'})
+                    end_tool = tools['end_voice_session']
+                    self.assertEqual(end_tool['parameters'], {
+                        'type': 'object', 'properties': {}, 'additionalProperties': False,
+                    })
+                    self.assertEqual(conversation['tool_choice'], 'auto')
+                    if provider == 'gemini':
+                        setup = realtime.gemini_live.live_setup(model, conversation)
+                        self.assertEqual(
+                            setup['systemInstruction']['parts'][0]['text'],
+                            conversation['instructions'])
+                        declarations = {
+                            tool['name']: tool
+                            for tool in setup['tools'][0]['functionDeclarations']
+                        }
+                        self.assertEqual(declarations['end_voice_session']['description'],
+                                         end_tool['description'])
+                        self.assertEqual(declarations['end_voice_session']['parametersJsonSchema'],
+                                         end_tool['parameters'])
+                    end_tools.append(end_tool)
+        self.assertTrue(all(tool == end_tools[0] for tool in end_tools[1:]))
+
     def test_native_v2_provider_model_metadata_uses_validated_selection_without_secrets(self):
         for provider, name in [('gemini', 'Google Gemini'), ('openai', 'OpenAI')]:
             with self.subTest(provider=provider):

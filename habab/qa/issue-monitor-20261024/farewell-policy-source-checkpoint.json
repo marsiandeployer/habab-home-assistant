@@ -1,0 +1,22 @@
+{
+  "issue": 20,
+  "independent_backend_tests": 47,
+  "semantic_risk_cases": [
+    "explicit farewell",
+    "standalone final thanks after completed answer",
+    "thanks plus follow-up",
+    "quoted farewell",
+    "negation",
+    "pending action",
+    "barge-in"
+  ],
+  "client_keyword_routing_added": false,
+  "actual_model_quality": "NOT_RUN",
+  "physical_voice_acceptance": "NOT_RUN",
+  "checked_at": "2026-10-25T08:09:52.408507+00:00",
+  "scope": "source candidate only",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/realtime.py": "3615d1c70c9083c34fa6deda703cf03716364b7b60845681c628f06ee438fa2e",
+    "habab/distribution/tests/test_realtime.py": "0d47d93d6a8076c48fc4868ac44dfd11211248986a1f8972f0decab335743660"
+  }
+}
