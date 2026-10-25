@@ -233,4 +233,3 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
             "/api/habab_home/feedback/{receipt_id}",
         ])
         self.assertTrue(all(view.requires_auth for view in registrations))
-
