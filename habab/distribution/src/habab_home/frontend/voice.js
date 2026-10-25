@@ -93,10 +93,12 @@ export async function bootstrapAfterStartCue({ playCue, createSession, isCurrent
 
 // Native Assist WebSocket streaming for speech input and optional TTS-only output.
 export class AssistVoice {
-  constructor(hass, pipeline, onEvent) {
+  constructor(hass, pipeline, onEvent, { runConversation = false, conversationId } = {}) {
     this.hass = hass;
     this.pipeline = pipeline;
     this.onEvent = onEvent;
+    this.runConversation = runConversation;
+    this.conversationId = conversationId;
     this.pending = [];
   }
 
@@ -115,6 +117,12 @@ export class AssistVoice {
       });
       await this.capture.start();
       if (this.closed || this.recordingEnded) { this.stopMicrophone(); return; }
+      const options = {
+        type: "assist_pipeline/run", pipeline: this.pipeline.id,
+        start_stage: "stt", end_stage: this.runConversation ? "intent" : "stt",
+        input: { sample_rate: 16000 },
+      };
+      if (this.conversationId) options.conversation_id = this.conversationId;
       this.unsubscribe = await this.hass.connection.subscribeMessage((event) => {
         if (this.closed) return;
         if (event.type === "run-start") {
@@ -131,11 +139,7 @@ export class AssistVoice {
         }
         this.onEvent(event);
         if (event.type === "run-end" || event.type === "error") this.close(false);
-      }, {
-        type: "assist_pipeline/run", pipeline: this.pipeline.id,
-        start_stage: "stt", end_stage: "stt",
-        input: { sample_rate: 16000 },
-      });
+      }, options);
       // Covers a terminal event arriving before the subscription Promise resolves.
       if (this.closed) this.releaseSubscription();
       else {

@@ -166,7 +166,7 @@ test("closing during a pending spoken reply settles it and releases its subscrip
   assert.equal(subscription.options.end_stage, "tts");
 });
 
-function recordingHarness(t) {
+function recordingHarness(t, voiceOptions) {
   const keys = ["window", "navigator", "AudioContext", "AudioWorkletNode", "WebSocket"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const state = { sent: [], events: [], stopped: 0, unsubscribed: 0 };
@@ -185,12 +185,13 @@ function recordingHarness(t) {
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, value });
   const hass = { connection: {
     socket: { readyState: 1, send: (frame) => state.sent.push(frame) },
-    subscribeMessage: (callback) => {
+    subscribeMessage: (callback, options) => {
       state.callback = callback;
+      state.options = options;
       return new Promise((resolve) => { state.resolveSubscription = () => resolve(() => { state.unsubscribed++; }); });
     },
   } };
-  state.voice = new AssistVoice(hass, { id: "privacy-pipeline", stt_engine: "stt" }, (event) => state.events.push(event));
+  state.voice = new AssistVoice(hass, { id: "privacy-pipeline", stt_engine: "stt" }, (event) => state.events.push(event), voiceOptions);
   t.after(() => {
     state.voice.close();
     for (const [key, descriptor] of descriptors) {
@@ -200,6 +201,30 @@ function recordingHarness(t) {
   });
   return state;
 }
+
+test("native Assist mode requests the configured conversation stage with its scoped conversation id", async (t) => {
+  const h = recordingHarness(t, {runConversation: true, conversationId: "ha-conversation-1"});
+  const starting = h.voice.start();
+  await new Promise(setImmediate);
+  assert.deepEqual(h.options, {
+    type: "assist_pipeline/run", pipeline: "privacy-pipeline", start_stage: "stt", end_stage: "intent",
+    input: {sample_rate: 16000}, conversation_id: "ha-conversation-1",
+  });
+  h.callback({type: "run-start", data: {runner_data: {stt_binary_handler_id: 7}}});
+  h.callback({type: "stt-start", data: {}});
+  h.callback({type: "stt-end", data: {stt_output: {text: "turn on the light"}}});
+  h.callback({type: "intent-end", data: {intent_output: {
+    conversation_id: "ha-conversation-2", response: {speech: {plain: {speech: "Done"}}},
+  }}});
+  h.callback({type: "run-end", data: null});
+  h.resolveSubscription();
+  await starting;
+  assert.deepEqual(h.events.map((event) => event.type), ["run-start", "stt-start", "stt-end", "intent-end", "run-end"]);
+  assert.equal(h.voice.runConversation, true);
+  assert.equal(h.voice.conversationId, "ha-conversation-1");
+  assert.equal(h.stopped, 1);
+  assert.equal(h.unsubscribed, 1);
+});
 
 test("manual stop before a delayed runner drops buffered microphone audio and cancels the subscription", async (t) => {
   const h = recordingHarness(t);

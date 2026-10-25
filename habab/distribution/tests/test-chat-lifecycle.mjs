@@ -56,6 +56,7 @@ test("global chat launcher follows the authenticated main element across routes"
     assert.equal(launcher.hass, main.hass);
     assert.equal(launcher.autoOpenOnConnect, true, "the authorized admin assistant opens on its first mount");
     assert.equal(launcher.language, "ru");
+    assert.equal(launcher.voiceMode, "habab", "the established Habab voice route remains the default");
     launcher.isConnected = true;
     const opener = { isConnected: true };
     const originalParams = { pipeline_id: "pipeline-original", start_listening: true };
@@ -281,6 +282,34 @@ test("voice cleanup invalidates callbacks without clearing a pending text busy s
   assert.equal(pendingText.busy, true, "voice cleanup leaves a pending text request busy");
 });
 
+test("closing native Assist TTS releases its busy lease without letting a stale finalizer clear a reopened run", async () => {
+  let closeCalls = 0;
+  let speakCalls = 0;
+  const chat = Object.create(setupChatElementClass.prototype);
+  Object.assign(chat, {
+    voice: {close() { closeCalls++; }}, voiceBusy: false, busy: true, running: false,
+    voiceGeneration: 10, nativeAssistBusyGeneration: 10, isConnected: false,
+    nativeAssistEndCue: Promise.resolve(), nativeAssistPipeline: {id: "pipeline"},
+    speakReply: async () => { speakCalls++; }, isCurrentOwnerContext: () => true, controls() {},
+  });
+  chat.cleanupVoice();
+  assert.equal(closeCalls, 1);
+  assert.equal(chat.busy, false, "closing releases busy state owned by native TTS");
+  assert.equal(chat.nativeAssistBusyGeneration, undefined);
+  assert.equal(chat.voiceGeneration, 11);
+
+  chat.busy = true;
+  chat.nativeAssistBusyGeneration = 11;
+  await chat.finishNativeAssistReply(10);
+  assert.equal(chat.busy, true, "the old finalizer cannot clear the reopened run");
+  assert.equal(chat.nativeAssistBusyGeneration, 11);
+  assert.equal(speakCalls, 0, "the old completion cannot speak the reopened run's response");
+  await chat.finishNativeAssistReply(11);
+  assert.equal(chat.busy, false, "the current finalizer releases its own busy lease");
+  assert.equal(chat.nativeAssistBusyGeneration, undefined);
+  assert.equal(speakCalls, 1);
+});
+
 test("real open method preserves startup focus and desktop manual focus", () => {
   const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
   const mediaDescriptor = Object.getOwnPropertyDescriptor(globalThis, "matchMedia");
@@ -460,6 +489,18 @@ test("assistant diagnostics use only bounded safe fields and never provider resp
 test("quick replies append to a draft instead of replacing user text", () => {
   assert.equal(setupChatModule.appendQuickReplyToDraft("I have two lights  \n", "Can I add them?"), "I have two lights\nCan I add them?");
   assert.equal(setupChatModule.appendQuickReplyToDraft("  ", "I want Zigbee"), "I want Zigbee");
+});
+
+test("native Assist turn reuses the chat message shape without mutating loaded history", () => {
+  const existing = [{role: "assistant", text: "Earlier answer"}];
+  const updated = setupChatModule.appendNativeAssistTurn(existing, "Turn on the light", "Light is on");
+  assert.deepEqual(existing, [{role: "assistant", text: "Earlier answer"}], "the loaded history stays unchanged");
+  assert.deepEqual(updated, [
+    {role: "assistant", text: "Earlier answer"},
+    {role: "user", text: "Turn on the light"},
+    {role: "assistant", text: "Light is on"},
+  ]);
+  assert.equal(setupChatModule.appendNativeAssistTurn(updated, "Recognized request", "" ).at(-1).role, "user");
 });
 
 test("reload protection covers active turns, voice, pending transcript, and unsent draft", () => {
