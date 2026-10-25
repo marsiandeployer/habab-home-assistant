@@ -40,9 +40,13 @@ reproduces the wheel. The license asset was reused byte-for-byte from `.7` becau
 the `gen-licenses` cache index was unavailable; license generation was not rerun.
 
 The immutable `.8` candidate is available on the artifact server, with its full
-HTTPS body verified against the digest and size. It has not been included in a
-new image or deployed to an owner installation. Build and archive readback are
-not live acceptance. `distribution/native-frontend-release.json`
+HTTPS body verified against the digest and size. It has not been deployed to
+an owner installation. A local candidate image was built from clean commit
+`f803277c68511622e3ad780d10a8a046cb9ef478` on branch
+`qa/owner-frontend8-20261025`: all 44 component files matched and 80 baked backend
+tests passed without a source overlay. See
+[`frontend8-candidate-image-independent.json`](../qa/issue-monitor-20261024/frontend8-candidate-image-independent.json).
+Build and archive readback are not live acceptance. `distribution/native-frontend-release.json`
 continues to identify the published `.7` wheel below.
 
 ## Rebuild

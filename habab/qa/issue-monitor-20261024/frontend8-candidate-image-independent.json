@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-10-25T08:22:37.685390+00:00",
+  "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+  "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+  "branch": "qa/owner-frontend8-20261025",
+  "baked_component_files_matched": 44,
+  "baked_frontend": "20260930.4+habab.8",
+  "baked_tests_passed": 80,
+  "test_source_overlay": false,
+  "stable_main_frontend_manifest": ".7",
+  "owner_deployed": false,
+  "live_model_quality": "NOT_RUN"
+}
