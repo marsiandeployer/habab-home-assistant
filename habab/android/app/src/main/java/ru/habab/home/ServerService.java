@@ -17,6 +17,7 @@ import org.json.JSONArray;
 
 public final class ServerService extends Service {
     static final String NATIVE_BASE_URL = "http://127.0.0.1:8123";
+    private static final int NOTIFICATION_ID = 1;
     static volatile boolean active;
     static volatile boolean stopping;
     static volatile String status = "stopped", tunnelStatus = "disabled";
@@ -25,6 +26,7 @@ public final class ServerService extends Service {
     private Tunnel tunnel;
     private PowerManager.WakeLock wakeLock;
     private WifiManager.MulticastLock multicastLock;
+    private volatile boolean foregroundNotification;
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
@@ -32,10 +34,33 @@ public final class ServerService extends Service {
         super.onCreate();
         NotificationManager manager = getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel("server", getString(R.string.server_channel), NotificationManager.IMPORTANCE_LOW));
-        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
-        startForeground(1, new Notification.Builder(this, "server").setSmallIcon(android.R.drawable.ic_menu_manage)
-                .setContentTitle(getString(R.string.app_name)).setContentText(getString(R.string.server_starting))
-                .setContentIntent(open).setOngoing(true).build());
+        status = "starting";
+        startForeground(NOTIFICATION_ID, serverNotification(status));
+        foregroundNotification = true;
+    }
+
+    private Notification serverNotification(String value) {
+        int text = value.equals("running") ? R.string.server_running
+                : value.startsWith("error:") ? R.string.server_error
+                : value.startsWith("restarting") ? R.string.server_restarting
+                : value.equals("startup-taking-longer-than-5-minutes") ? R.string.server_starting_long
+                : R.string.server_starting;
+        PendingIntent open = PendingIntent.getActivity(this, 0,
+                new Intent(this, MainActivity.class).putExtra(MainActivity.EXTRA_OPEN_HOME_IF_READY, true)
+                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Builder(this, "server").setSmallIcon(android.R.drawable.ic_menu_manage)
+                .setContentTitle(getString(R.string.app_name)).setContentText(getString(text))
+                .setContentIntent(open).setOngoing(!value.startsWith("error:")).build();
+    }
+
+    private void setServerStatus(String value) {
+        boolean changed = !value.equals(status);
+        status = value;
+        if (changed && foregroundNotification) {
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) manager.notify(NOTIFICATION_ID, serverNotification(value));
+        }
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -46,7 +71,7 @@ public final class ServerService extends Service {
         if (!getSharedPreferences("server", 0).getBoolean("desired", false)) { stopSelf(); return START_NOT_STICKY; }
         if (stopping || MaintenanceService.active) { stopSelf(); return START_NOT_STICKY; }
         if (worker != null) return START_STICKY;
-        active = true; status = "starting";
+        active = true; setServerStatus("starting");
         wakeLock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "habab:server");
         wakeLock.acquire();
         WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
@@ -153,7 +178,7 @@ public final class ServerService extends Service {
             } catch (java.net.ConnectException | java.net.SocketTimeoutException available) { /* Free port. */ }
             store.seedConfig();
             while (active && failures < 5) {
-                status = "starting";
+                setServerStatus("starting");
                 updateDns(store);
                 if (log.length() > 8L * 1024 * 1024) Files.move(log.toPath(), new File(getFilesDir(), "core.previous.log").toPath(), StandardCopyOption.REPLACE_EXISTING);
                 ProcessBuilder builder = new ProcessBuilder(command(store));
@@ -178,24 +203,25 @@ public final class ServerService extends Service {
                 while (active && child.isAlive()) {
                     if (System.currentTimeMillis() - networkUpdated > 10000) { updateDns(store); networkUpdated = System.currentTimeMillis(); }
                     if (!ready && healthy()) {
-                        ready = true; status = "running";
+                        ready = true; setServerStatus("running");
                         if (tunnelThread == null) {
                             tunnel = new Tunnel(this); tunnelThread = new Thread(tunnel::run, "habab-tunnel"); tunnelThread.start();
                         }
                     }
-                    if (!ready && System.currentTimeMillis() - started > 300000) status = "startup-taking-longer-than-5-minutes";
+                    if (!ready && System.currentTimeMillis() - started > 300000)
+                        setServerStatus("startup-taking-longer-than-5-minutes");
                     Thread.sleep(2000);
                 }
                 if (!active) break;
                 if (System.currentTimeMillis() - started > 300000 && ready) failures = 0;
                 failures++;
-                status = "restarting (" + failures + "/5)";
+                setServerStatus("restarting (" + failures + "/5)");
                 Thread.sleep(Math.min(60000L, 5000L << (failures - 1)));
             }
             if (active) throw new IOException("Core exited repeatedly; inspect diagnostics");
         } catch (InterruptedException error) { Thread.currentThread().interrupt(); }
         catch (Exception error) {
-            status = "error: " + error.getMessage();
+            setServerStatus("error: " + error.getMessage());
             try (FileWriter out = new FileWriter(log, true)) { out.write("\nHabab launcher: " + error.getClass().getSimpleName() + ": " + error.getMessage() + "\n"); }
             catch (IOException ignored) { /* Status remains visible. */ }
             getSharedPreferences("server", 0).edit().putBoolean("desired", false).apply();
@@ -223,6 +249,8 @@ public final class ServerService extends Service {
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (multicastLock != null && multicastLock.isHeld()) multicastLock.release();
         if (!status.startsWith("error:")) status = stopping ? "stopping" : "stopped";
-        stopForeground(true); super.onDestroy();
+        boolean failed = status.startsWith("error:");
+        foregroundNotification = false;
+        stopForeground(failed ? STOP_FOREGROUND_DETACH : STOP_FOREGROUND_REMOVE); super.onDestroy();
     }
 }

@@ -3,6 +3,9 @@
     <string name="server_channel">Домашний сервер</string>
     <string name="server_running">Сервер Habab Home работает</string>
     <string name="server_starting">Запуск домашнего сервера</string>
+    <string name="server_starting_long">Запуск сервера занимает больше времени</string>
+    <string name="server_restarting">Перезапуск домашнего сервера</string>
+    <string name="server_error">Не удалось запустить домашний сервер</string>
     <string name="start">Запустить сервер</string>
     <string name="stop">Остановить сервер</string>
     <string name="open_home">Открыть умный дом</string>

@@ -17,6 +17,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
+    static final String EXTRA_OPEN_HOME_IF_READY = "ru.habab.home.extra.OPEN_HOME_IF_READY";
     private final ExecutorService operations = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean busy;
@@ -36,13 +37,23 @@ public final class MainActivity extends Activity {
         super.onCreate(saved); store = new RuntimeStore(this); home(); handler.post(refresh);
         // ADB provisioning is available only in a debug build, never the release APK.
         if (openAlias(getIntent())) return;
+        if (openHomeFromNotification(getIntent())) return;
         if (BuildConfig.DEBUG && getIntent().hasExtra("install_url")) install(getIntent().getStringExtra("install_url"));
         else if (BuildConfig.DEBUG && getIntent().getBooleanExtra("start_server", false)) startServer();
         else if (BuildConfig.DEBUG && getIntent().getBooleanExtra("provision_voice", false)) provisionVoice();
     }
 
     @Override protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent); setIntent(intent); openAlias(intent);
+        super.onNewIntent(intent); setIntent(intent);
+        if (openAlias(intent)) return;
+        openHomeFromNotification(intent);
+    }
+
+    private boolean openHomeFromNotification(Intent intent) {
+        if (!intent.getBooleanExtra(EXTRA_OPEN_HOME_IF_READY, false)
+                || !"running".equals(ServerService.status)) return false;
+        openHome();
+        return true;
     }
 
     private boolean openAlias(Intent intent) {
