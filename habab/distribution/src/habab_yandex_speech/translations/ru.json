@@ -1,0 +1,25 @@
+{
+  "title": "Habab Yandex SpeechKit",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключить Yandex SpeechKit",
+        "description": "Введите API-ключ сервисного аккаунта Yandex Cloud с ролями ai.speechkit-stt.user и ai.speechkit-tts.user. При сохранении Home Assistant отправит в Yandex SpeechKit короткую фразу для проверки ключа и доступа к синтезу. При выборе провайдера аудио и текст речи передаются в Yandex Cloud; использование сервиса может тарифицироваться. Ключ сохраняется в этой установке Home Assistant.",
+        "data": {
+          "api_key": "API-ключ сервисного аккаунта"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "API-ключ неверен или у него нет доступа к SpeechKit.",
+      "quota": "Yandex SpeechKit сообщил об ограничении квоты или оплаты.",
+      "cannot_connect": "Не удалось подключиться к Yandex SpeechKit.",
+      "timeout": "Проверка Yandex SpeechKit превысила время ожидания.",
+      "invalid_request": "Yandex SpeechKit отклонил проверочный запрос.",
+      "invalid_response": "Yandex SpeechKit вернул неожиданный ответ."
+    },
+    "abort": {
+      "already_configured": "Yandex SpeechKit уже подключён."
+    }
+  }
+}

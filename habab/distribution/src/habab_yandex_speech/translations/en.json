@@ -1,0 +1,25 @@
+{
+  "title": "Habab Yandex SpeechKit",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Yandex SpeechKit",
+        "description": "Enter a Yandex Cloud service-account API key with ai.speechkit-stt.user and ai.speechkit-tts.user roles. Saving sends a short test phrase to Yandex SpeechKit to check the key and TTS access. Speech audio and text are sent to Yandex Cloud when this provider is selected; service usage may be billed. The key is stored in this Home Assistant installation.",
+        "data": {
+          "api_key": "Service-account API key"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The API key is invalid or lacks access to SpeechKit.",
+      "quota": "Yandex SpeechKit reported a quota or billing limit.",
+      "cannot_connect": "Could not connect to Yandex SpeechKit.",
+      "timeout": "The Yandex SpeechKit check timed out.",
+      "invalid_request": "Yandex SpeechKit rejected the check request.",
+      "invalid_response": "Yandex SpeechKit returned an unexpected response."
+    },
+    "abort": {
+      "already_configured": "Yandex SpeechKit is already configured."
+    }
+  }
+}

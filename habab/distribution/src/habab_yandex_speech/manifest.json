@@ -1,0 +1,8 @@
+{
+  "domain": "habab_yandex_speech",
+  "name": "Habab Yandex SpeechKit",
+  "codeowners": [],
+  "config_flow": true,
+  "integration_type": "service",
+  "iot_class": "cloud_push"
+}
