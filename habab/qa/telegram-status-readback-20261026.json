@@ -1,0 +1,83 @@
+{
+  "date": "2026-10-26",
+  "scope": "read-only runtime inventory; no Telegram API or message action",
+  "ha_pollers": {
+    "owner_test": {
+      "configured_entries": 1,
+      "dm_bindings": 1,
+      "group_bindings": 1,
+      "worker_processes": 1
+    },
+    "connect_qa": {
+      "configured_entries": 1,
+      "dm_bindings": 1,
+      "group_bindings": 0,
+      "worker_processes": 1
+    },
+    "third_test": {
+      "configured_entries": 0,
+      "worker_processes": 0
+    },
+    "configured_token_groups_distinct": true
+  },
+  "other_bot_service_tokens": {
+    "observed_configured_services": 4,
+    "distinct_from_ha_groups": true
+  },
+  "status_readback": {
+    "result": "READ",
+    "at_utc": "2026-10-25T22:46:02+00:00",
+    "owner_admin_verified": true,
+    "owner_identity_matches_config": true,
+    "entry_count": 1,
+    "dm_binding_present": true,
+    "group_binding_present": true,
+    "group_owner_matches_dm": true,
+    "worker_count": 1,
+    "phase": "connected",
+    "group_phase": "connected",
+    "group_error": null,
+    "live_group_membership_check_performed": true,
+    "limitation": "status confirmed the bot is admin in the bound group; it does not verify a particular sender or the full ACL matrix",
+    "bot_admin_membership_verified": true,
+    "sender_acl_membership_verified": false
+  },
+  "group_acl_readiness": {
+    "stored_binding_present": true,
+    "live_membership_status": "bot_admin_verified",
+    "stored_owner_matches_dm": true,
+    "scope": "bot admin membership readback only; sender-level ACL and full matrix not verified"
+  },
+  "limitations": [
+    "binding counts are not a full ACL matrix",
+    "no messages, posts, membership-changing operations, or new pollers"
+  ],
+  "status_attempts": [
+    {
+      "result": "NOT_RUN",
+      "reason": "initial local CDP inventory had no owner-admin page"
+    },
+    {
+      "result": "PREFLIGHT_ONLY",
+      "reason": "initial check compared owner IDs with strict Python types and did not call status; follow-up string-normalized comparison matches"
+    },
+    {
+      "result": "READ",
+      "at_utc": "2026-10-25T22:46:02+00:00",
+      "owner_admin_verified": true,
+      "owner_identity_matches_config": true,
+      "entry_count": 1,
+      "dm_binding_present": true,
+      "group_binding_present": true,
+      "group_owner_matches_dm": true,
+      "worker_count": 1,
+      "phase": "connected",
+      "group_phase": "connected",
+      "group_error": null,
+      "live_group_membership_check_performed": true,
+      "limitation": "status confirmed the bot is admin in the bound group; it does not verify a particular sender or the full ACL matrix",
+      "bot_admin_membership_verified": true,
+      "sender_acl_membership_verified": false
+    }
+  ]
+}
