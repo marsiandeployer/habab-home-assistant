@@ -10,11 +10,100 @@ from homeassistant.config_entries import DISCOVERY_SOURCES
 from homeassistant.core import Context
 from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.device_registry import DeviceEntryType
+from homeassistant.helpers.translation import async_get_translations
+from homeassistant.loader import (
+    IntegrationNotFound,
+    async_get_config_flows,
+    async_get_integration,
+    async_get_integration_descriptions,
+)
 from .const import DOMAIN
 from .assistant_status import get_assistant_status
 
 _LOGGER = logging.getLogger(__name__)
 DEVICE_LIST_LIMIT = 200
+INTEGRATION_CATALOG_DEFAULT_LIMIT = 50
+INTEGRATION_CATALOG_MAX_LIMIT = 100
+INTEGRATION_CATALOG_MAX_OFFSET = 10_000
+BUNDLED_CONFIG_FLOW_INTEGRATIONS = (
+    "habab_home",
+    "habab_telegram",
+    "habab_yandex_speech",
+)
+
+
+def _catalog_language(hass):
+    """Return a path-safe language configured by Home Assistant."""
+    language = getattr(getattr(hass, "config", None), "language", None)
+    if not isinstance(language, str) or not language or len(language) > 35:
+        return "en"
+    parts = language.replace("_", "-").split("-")
+    if not all(part and len(part) <= 8 and part.isalnum() for part in parts):
+        return "en"
+    return language
+
+
+async def _integration_catalog(hass, body):
+    """List installed integrations that expose a native config flow."""
+    offset = body.get("offset", 0)
+    limit = body.get("limit", INTEGRATION_CATALOG_DEFAULT_LIMIT)
+    if type(offset) is not int or not 0 <= offset <= INTEGRATION_CATALOG_MAX_OFFSET:
+        raise ValueError("integration_catalog_offset_invalid")
+    if type(limit) is not int or not 1 <= limit <= INTEGRATION_CATALOG_MAX_LIMIT:
+        raise ValueError("integration_catalog_limit_invalid")
+
+    flow_domains = await async_get_config_flows(hass)
+    descriptions = await async_get_integration_descriptions(hass)
+    integration_metadata = {}
+    for source in ("core", "custom"):
+        for domain, metadata in descriptions.get(source, {}).get("integration", {}).items():
+            if domain in flow_domains and metadata.get("config_flow") is True:
+                integration_metadata[domain] = metadata
+    for domain in BUNDLED_CONFIG_FLOW_INTEGRATIONS:
+        try:
+            integration = await async_get_integration(hass, domain)
+        except IntegrationNotFound:
+            continue
+        if integration.config_flow:
+            integration_metadata[domain] = {
+                "name": integration.name,
+                "integration_type": integration.integration_type,
+                "config_flow": True,
+            }
+
+    domains = sorted(integration_metadata)
+    total = len(domains)
+    page_domains = domains[offset : offset + limit]
+    translations = await async_get_translations(
+        hass,
+        _catalog_language(hass),
+        "title",
+        integrations=page_domains,
+    ) if page_domains else {}
+    configured_domains = {
+        entry.domain for entry in hass.config_entries.async_entries()
+    }
+    entries = [
+        {
+            "domain": domain,
+            "name": (
+                translations.get(f"component.{domain}.title")
+                or integration_metadata[domain].get("name")
+                or domain
+            ),
+            "integration_type": integration_metadata[domain].get("integration_type"),
+            "configured": domain in configured_domains,
+        }
+        for domain in page_domains
+    ]
+    next_offset = offset + len(page_domains)
+    return {
+        "integrations": entries,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "next_offset": next_offset if next_offset < total else None,
+    }
 
 
 class AssistExposureError(ValueError):
@@ -219,6 +308,8 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
     if action == "integrations":
         return {"integrations": [{"entry_id": e.entry_id, "domain": e.domain, "title": e.title,
                                   "state": e.state.value} for e in hass.config_entries.async_entries()]}
+    if action == "integration_catalog":
+        return await _integration_catalog(hass, body)
     if action == "devices":
         devices = device_registry.async_get(hass)
         entities = entity_registry.async_get(hass)

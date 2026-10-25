@@ -7,8 +7,17 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.homeassistant import async_setup as async_setup_homeassistant
 from homeassistant.components.homeassistant import exposed_entities
+from homeassistant.config_entries import ConfigEntries
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry, device_registry, entity_registry
+from homeassistant.helpers.translation import async_get_translations
+from homeassistant.loader import (
+    IntegrationNotFound,
+    async_setup as async_setup_loader,
+    async_get_integration,
+    async_get_config_flows,
+    async_get_integration_descriptions,
+)
 from homeassistant.helpers.device_registry import (
     ActiveDeviceRegistryItems,
     DeviceEntry,
@@ -19,6 +28,7 @@ from homeassistant.helpers.device_registry import (
 from homeassistant.components.habab_home.setup_actions import (
     AssistExposureError,
     SetupActionsView,
+    _catalog_language,
     execute,
     flow_result,
 )
@@ -28,6 +38,131 @@ from homeassistant.components.habab_home.voice_context import build_voice_contex
 
 
 class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
+    def test_catalog_language_rejects_path_fragments(self):
+        self.assertEqual(
+            _catalog_language(SimpleNamespace(config=SimpleNamespace(language="../../private"))),
+            "en",
+        )
+
+    async def test_integration_catalog_uses_native_flow_metadata_and_hass_locale(self):
+        hass = SimpleNamespace(
+            config=SimpleNamespace(language="ru-RU"),
+            config_entries=SimpleNamespace(async_entries=lambda: [
+                SimpleNamespace(domain="met"),
+            ]),
+        )
+        flow_domains = {"met", "custom_weather", "counter", "missing_metadata", "no_flow"}
+        descriptions = {
+            "core": {
+                "integration": {
+                    "met": {"name": "Met.no", "config_flow": True, "integration_type": "service"},
+                    "no_flow": {"name": "Legacy", "config_flow": False, "integration_type": "hub"},
+                },
+                "helper": {"counter": {"name": "Counter", "config_flow": True}},
+            },
+            "custom": {
+                "integration": {
+                    "custom_weather": {"name": "Custom weather", "config_flow": True, "integration_type": "hub"},
+                },
+                "helper": {},
+            },
+        }
+        translations = {
+            "component.met.title": "Метеорологический институт",
+            "component.custom_weather.title": "Пользовательская погода",
+        }
+        with patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_config_flows",
+            AsyncMock(return_value=flow_domains),
+        ) as get_flows, patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_integration_descriptions",
+            AsyncMock(return_value=descriptions),
+        ) as get_descriptions, patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_integration",
+            AsyncMock(side_effect=IntegrationNotFound("fixture_missing")),
+        ), patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_translations",
+            AsyncMock(return_value=translations),
+        ) as get_translations:
+            result = await execute(hass, None, "owner", {
+                "action": "integration_catalog",
+                "offset": 0,
+                "limit": 2,
+                # The locale comes from Home Assistant configuration, not the model body.
+                "language": "../../private",
+            })
+
+        self.assertEqual(result, {
+            "integrations": [
+                {"domain": "custom_weather", "name": "Пользовательская погода",
+                 "integration_type": "hub", "configured": False},
+                {"domain": "met", "name": "Метеорологический институт",
+                 "integration_type": "service", "configured": True},
+            ],
+            "offset": 0,
+            "limit": 2,
+            "total": 2,
+            "next_offset": None,
+        })
+        get_flows.assert_awaited_once_with(hass)
+        get_descriptions.assert_awaited_once_with(hass)
+        get_translations.assert_awaited_once_with(
+            hass, "ru-RU", "title", integrations=["custom_weather", "met"]
+        )
+        serialized = json.dumps(result, ensure_ascii=False)
+        for excluded in (
+            "counter", "missing_metadata", "no_flow", "habab_home",
+            "habab_telegram", "habab_yandex_speech", "../../private",
+        ):
+            self.assertNotIn(excluded, serialized)
+
+    async def test_integration_catalog_bounds_pages_and_rejects_boolean_numbers(self):
+        domains = {f"integration_{index:03d}" for index in range(101)}
+        descriptions = {
+            "core": {
+                "integration": {
+                    domain: {"name": domain, "config_flow": True, "integration_type": "hub"}
+                    for domain in domains
+                },
+                "helper": {},
+            },
+            "custom": {"integration": {}, "helper": {}},
+        }
+        hass = SimpleNamespace(
+            config=SimpleNamespace(language="en"),
+            config_entries=SimpleNamespace(async_entries=lambda: []),
+        )
+        with patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_config_flows",
+            AsyncMock(return_value=domains),
+        ), patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_integration_descriptions",
+            AsyncMock(return_value=descriptions),
+        ), patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_integration",
+            AsyncMock(side_effect=IntegrationNotFound("fixture_missing")),
+        ), patch(
+            "homeassistant.components.habab_home.setup_actions.async_get_translations",
+            AsyncMock(return_value={}),
+        ):
+            page = await execute(hass, None, "owner", {
+                "action": "integration_catalog", "offset": 100, "limit": 1,
+            })
+            self.assertEqual(page["total"], 101)
+            self.assertEqual(page["integrations"], [{
+                "domain": "integration_100", "name": "integration_100",
+                "integration_type": "hub", "configured": False,
+            }])
+            self.assertIsNone(page["next_offset"])
+            for body in (
+                {"action": "integration_catalog", "offset": True},
+                {"action": "integration_catalog", "limit": False},
+                {"action": "integration_catalog", "limit": 101},
+                {"action": "integration_catalog", "offset": 10_001},
+            ):
+                with self.subTest(body=body), self.assertRaises(ValueError):
+                    await execute(hass, None, "owner", body)
+
     async def test_assistant_status_reports_voice_capabilities_without_inventing_client_observation(self):
         for provider, supported in (("deepseek", False), ("openai", True), ("habab", True), ("gemini", True)):
             settings = {"provider": provider, "api_key": "fixture-api-secret", "model": "configured-text-model"}
@@ -399,6 +534,87 @@ class NativeAssistExposureTests(unittest.IsolatedAsyncioTestCase):
         registry_entry = entity_registry.async_get(self.hass).async_get(self.entity_id)
         self.assertIs(registry_entry.options["conversation"]["should_expose"], False)
         self.assertIs(registry_entry.options["fixture_other_assistant"]["should_expose"], False)
+
+
+class NativeIntegrationCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.config_dir = tempfile.TemporaryDirectory(prefix="habab-integration-catalog-")
+        self.addCleanup(self.config_dir.cleanup)
+        self.hass = HomeAssistant(self.config_dir.name)
+        async_setup_loader(self.hass)
+        self.hass.config_entries = ConfigEntries(self.hass, {})
+        await self.hass.async_start()
+        self.addAsyncCleanup(self.hass.async_stop, force=True)
+
+    async def test_catalog_matches_real_core_config_flow_catalog_and_titles(self):
+        flow_domains = await async_get_config_flows(self.hass)
+        descriptions = await async_get_integration_descriptions(self.hass)
+        integration_metadata = descriptions["core"]["integration"]
+        catalog_domains = sorted(
+            domain
+            for domain, metadata in integration_metadata.items()
+            if domain in flow_domains and metadata.get("config_flow") is True
+        )
+        bundled_integrations = {}
+        for domain in ("habab_home", "habab_telegram", "habab_yandex_speech"):
+            try:
+                integration = await async_get_integration(self.hass, domain)
+            except IntegrationNotFound:
+                continue
+            if integration.config_flow:
+                bundled_integrations[domain] = integration
+        catalog_domains = sorted(set(catalog_domains) | set(bundled_integrations))
+        self.assertIn("met", catalog_domains)
+        self.assertNotIn("counter", catalog_domains)
+        self.assertEqual(set(bundled_integrations), {
+            "habab_home", "habab_telegram", "habab_yandex_speech",
+        })
+        self.assertTrue(integration_metadata["met"]["name"])
+        met_translations = await async_get_translations(
+            self.hass, self.hass.config.language, "title", integrations=["met"]
+        )
+        expected_met_name = (
+            met_translations.get("component.met.title")
+            or integration_metadata["met"]["name"]
+        )
+
+        result = await execute(self.hass, None, "owner", {
+            "action": "integration_catalog",
+            "offset": catalog_domains.index("met"),
+            "limit": 1,
+        })
+
+        self.assertEqual(result["total"], len(catalog_domains))
+        self.assertEqual(result["integrations"], [{
+            "domain": "met",
+            "name": expected_met_name,
+            "integration_type": integration_metadata["met"]["integration_type"],
+            "configured": False,
+        }])
+        self.assertEqual(result["next_offset"], catalog_domains.index("met") + 1)
+
+        bundled_domains = ["habab_home", "habab_telegram", "habab_yandex_speech"]
+        bundled_start = catalog_domains.index("habab_home")
+        bundled = await execute(self.hass, None, "owner", {
+            "action": "integration_catalog",
+            "offset": bundled_start,
+            "limit": len(bundled_domains),
+        })
+        self.assertEqual(
+            [entry["domain"] for entry in bundled["integrations"]], bundled_domains
+        )
+        expected_bundle_names = {}
+        for domain, integration in bundled_integrations.items():
+            translated = await async_get_translations(
+                self.hass, self.hass.config.language, "title", integrations=[domain]
+            )
+            expected_bundle_names[domain] = (
+                translated.get(f"component.{domain}.title") or integration.name
+            )
+        for entry in bundled["integrations"]:
+            self.assertTrue(entry["name"])
+            self.assertEqual(entry["name"], expected_bundle_names[entry["domain"]])
+            self.assertFalse(entry["configured"])
 
 
 if __name__ == "__main__":
