@@ -1,6 +1,6 @@
 {
   "product": "Habab Home",
-  "version": "0.3.4",
+  "version": "0.3.6",
   "home_assistant": {
     "version": "2026.10.2",
     "image": "ghcr.io/home-assistant/home-assistant:2026.10.2",

@@ -1,7 +1,7 @@
 name: habab-home
 services:
   homeassistant:
-    image: habab-home:0.3.4
+    image: habab-home:0.3.6
     build:
       context: .
       args:

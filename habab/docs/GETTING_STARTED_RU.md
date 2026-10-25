@@ -1,6 +1,6 @@
 # Установка и первый запуск Habab Home
 
-Habab Home — локальный Docker-дистрибутив Home Assistant. На [странице загрузки Habab Home](https://habab.ru/home-assistant) кнопка Windows скачивает BAT-загрузчик `start-home-assistant.bat`. Он загружает и проверяет SHA-256 стабильного ZIP 0.3.1, распаковывает пакет в `%LOCALAPPDATA%\HababHome` и запускает его. В Git checkout используется другой BAT — `habab/distribution/start-windows.bat`; он собирает исходники checkout. Текущий исходный кандидат и интеграция имеют версию 0.3.6; пакетный `release.json` и Compose tag пока содержат 0.3.4. Это отдельные метаданные, а не версия стабильного ZIP. Остальные разделы описывают текущий исходный код; расположение отдельных элементов в ZIP 0.3.1 может отличаться.
+Habab Home — локальный Docker-дистрибутив Home Assistant. На [странице загрузки Habab Home](https://habab.ru/home-assistant) кнопка Windows скачивает BAT-загрузчик `start-home-assistant.bat`. Он загружает и проверяет SHA-256 стабильного ZIP 0.3.1, распаковывает пакет в `%LOCALAPPDATA%\HababHome` и запускает его. В Git checkout используется другой BAT — `habab/distribution/start-windows.bat`; он собирает исходники checkout версии-кандидата 0.3.6. Стабильный Windows ZIP 0.3.1 публикуется отдельно; текущая версия исходников не означает выпуска нового пакета. Остальные разделы описывают текущий исходный код; расположение отдельных элементов в ZIP 0.3.1 может отличаться.
 
 ## Windows
 

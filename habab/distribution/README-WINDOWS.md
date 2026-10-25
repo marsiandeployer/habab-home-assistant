@@ -1,6 +1,6 @@
 # Запуск на Windows
 
-Инструкция для Git-checkout относится к исходному кандидату Habab Home 0.3.4
+Инструкция для Git-checkout относится к исходному кандидату Habab Home 0.3.6
 на Home Assistant Core 2026.10.2. Публичный `start-home-assistant.bat` пока
 скачивает стабильный Windows-пакет 0.3.1.
 Для новой Git-установки из корня checkout запустите отслеживаемый
@@ -69,7 +69,7 @@ start-home-assistant.bat
 `model_error`. Позднее на установленной версии 0.3.0 помощник ответил на запрос
 без этой ошибки; ответ совпал с реестром Home Assistant: три служебных устройства,
 без пылесоса. [Отчёт проверки](../qa/cross-channel-setup/windows-assistant.json).
-Кандидат 0.3.4 на физическом Windows ещё не проверен.
+Кандидат 0.3.6 на физическом Windows ещё не проверен.
 
 Для текущей диагностики запустите `diagnose-assistant.bat`
 (`habab\distribution\diagnose-assistant.bat` в Git-checkout). Он не пересобирает
@@ -181,7 +181,7 @@ tests под Node из образа и 5/5 transport tests под baked SDK; о�
 настроек и устройств: он вернул данные, совпавшие с нативным реестром.
 [Доступ и установленная версия](../qa/cross-channel-setup/windows-access.json),
 [ответ помощника](../qa/cross-channel-setup/windows-assistant.json).
-Кандидат 0.3.4 и подключение физического устройства на Windows пока не проверены.
+Кандидат 0.3.6 и подключение физического устройства на Windows пока не проверены.
 Bluetooth Windows не проброшен в Docker Desktop автоматически.
 
 На P30 отдельно проверены настоящий Telegram-бот, защищённая форма Local To-do
