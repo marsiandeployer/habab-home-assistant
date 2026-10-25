@@ -27,7 +27,10 @@ Actions for 14 days.
   all four repository Actions secrets below. The signed runtime manifest must
   attest `sourceRevision` equal to the selected source SHA; the workflow checks
   `sourceFiles` against that Git tree and verifies its signature, archive hash,
-  and contents with the checked-in trusted key before building the APK. The
+  and contents with the checked-in trusted key before building the APK. It also
+  checks the signed `nodePackages` inventory against the selected source's
+  Node APK lock, including the builder's `icu-data-en` exclusion when network
+  tools are enabled. The
   runtime producer accepts `--source-revision` and signs the value into the
   manifest. Android keystore secrets are exposed only to the signing step after
   Gradle checks finish. A debug APK or runtime for another commit is never used.

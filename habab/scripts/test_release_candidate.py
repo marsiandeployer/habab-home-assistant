@@ -1,8 +1,13 @@
 import importlib.util
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
+import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 import zipfile
 
@@ -120,6 +125,65 @@ class ReleaseCandidateTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "differs from selected source"):
             release_candidate.assemble(self.root, self.revision, "blocked", self.source_tree)
+
+    def test_android_workflow_accepts_and_rejects_locked_node_inventory(self):
+        repository = Path(__file__).resolve().parents[2]
+        workflow = (repository / ".github/workflows/habab-release-candidate.yaml").read_text()
+        blocks = re.findall(r"(?ms)^[ \t]+python3 - <<'PY'\n(.*?)^[ \t]+PY[ \t]*$", workflow)
+        validator = next((textwrap.dedent(block) for block in blocks if "node_lock = json.loads(Path(" in block), None)
+        self.assertIsNotNone(validator, "Android runtime validation block is missing from the workflow")
+
+        revision = "c" * 40
+        with tempfile.TemporaryDirectory(prefix="ci14-node-inventory-") as temporary:
+            root = Path(temporary)
+            distribution = root / "habab/distribution"
+            for name in ("habab_home", "habab_telegram", "habab_yandex_speech", "idigital_sms"):
+                (distribution / "src" / name).mkdir(parents=True)
+            (distribution / "telegram-agent").mkdir()
+            (distribution / "config").mkdir()
+            fixed = {
+                "habab-ha.py": b"ha\n",
+                "install-xiaomi-home.py": b"install\n",
+                "xiaomi-home-release.json": b"{}\n",
+            }
+            for name, content in fixed.items():
+                (distribution / name).write_bytes(content)
+            config = "default_config:\n"
+            (distribution / "config/configuration.yaml").write_text(config)
+            launcher = root / "habab/android/runtime/launch.py"
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text("print('launcher')\n")
+            node_lock_path = root / "habab/android/tools/network_tools/node-apks.lock.json"
+            node_lock_path.parent.mkdir(parents=True)
+            node_lock = {"packages": {
+                "nodejs-24.18.1-r0.apk": {"sha256": "a" * 64},
+                "icu-data-en-78.1-r0.apk": {"sha256": "b" * 64},
+            }}
+            node_lock_path.write_text(json.dumps(node_lock))
+            appended_config = config + "\nautomation: !include automations.yaml\nscript: !include scripts.yaml\nscene: !include scenes.yaml\nrecorder:\nhistory:\n"
+            release = {
+                "sourceRevision": revision,
+                "sourceFiles": {name: hashlib.sha256(content).hexdigest() for name, content in fixed.items()},
+                "nodePackages": {name: item["sha256"] for name, item in node_lock["packages"].items()},
+                "androidLauncherSha256": hashlib.sha256(launcher.read_bytes()).hexdigest(),
+                "configurationSha256": hashlib.sha256(appended_config.encode()).hexdigest(),
+                "url": "https://habab-demo.wpmix.net/downloads/android/runtime.tgz",
+            }
+            runtime = root / "runtime-input/release.json"
+            runtime.parent.mkdir()
+            runtime.write_text(json.dumps(release))
+            environment = {**os.environ, "SOURCE_REVISION": revision}
+
+            accepted = subprocess.run([sys.executable, "-c", validator], cwd=root, env=environment,
+                                      capture_output=True, text=True, check=False)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+            release["nodePackages"]["nodejs-24.18.1-r0.apk"] = "f" * 64
+            runtime.write_text(json.dumps(release))
+            rejected = subprocess.run([sys.executable, "-c", validator], cwd=root, env=environment,
+                                      capture_output=True, text=True, check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("Node APK inventory does not match", rejected.stderr)
 
 
 if __name__ == "__main__":

@@ -240,6 +240,21 @@ jobs:
               raise SystemExit('::error::Signed runtime manifest must attest this exact sourceRevision')
           if release.get('sourceFiles') != expected:
               raise SystemExit('::error::Runtime sourceFiles do not match this exact checkout')
+          node_lock = json.loads(Path('habab/android/tools/network_tools/node-apks.lock.json').read_text())
+          locked_packages = node_lock.get('packages')
+          if not isinstance(locked_packages, dict) or not locked_packages:
+              raise SystemExit('::error::Checkout Node APK lock has no package inventory')
+          network_tools = release.get('networkTools')
+          expected_node_packages = {}
+          for name, record in locked_packages.items():
+              digest = record.get('sha256') if isinstance(record, dict) else None
+              if not isinstance(digest, str) or len(digest) != 64 or any(ch not in '0123456789abcdef' for ch in digest):
+                  raise SystemExit('::error::Checkout Node APK lock has an invalid package digest')
+              if network_tools and name.startswith('icu-data-en-'):
+                  continue
+              expected_node_packages[name] = digest
+          if release.get('nodePackages') != expected_node_packages:
+              raise SystemExit('::error::Runtime Node APK inventory does not match the selected source lock')
           launcher = Path('habab/android/runtime/launch.py')
           if release.get('androidLauncherSha256') != hashlib.sha256(launcher.read_bytes()).hexdigest():
               raise SystemExit('::error::Android runtime launcher does not match this exact checkout')
