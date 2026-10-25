@@ -4,6 +4,9 @@ services:
     image: habab-home:windows-test
     build:
       context: .
+      args:
+        HABAB_SOURCE_REVISION: ${HABAB_SOURCE_REVISION:-unknown}
+        HABAB_SOURCE_DIRTY: ${HABAB_SOURCE_DIRTY:-unknown}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${HABAB_HOME_PORT:-8123}:8123"

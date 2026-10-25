@@ -32,6 +32,43 @@ function Run-Docker {
     if ($LASTEXITCODE -ne 0) { throw "Docker command failed (exit $LASTEXITCODE). See the output above." }
 }
 
+function Set-SourceProvenance {
+    $revision = 'unknown'
+    $dirty = 'unknown'
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($git) {
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $tracked = & $git.Source -C $PSScriptRoot ls-files --error-unmatch Dockerfile release.json 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $candidate = (& $git.Source -C $PSScriptRoot rev-parse --verify HEAD 2>$null | Out-String).Trim()
+                if ($LASTEXITCODE -eq 0 -and $candidate -match '^[0-9a-f]{40,64}$') {
+                    $revision = $candidate
+                    $status = & $git.Source -C $PSScriptRoot status --porcelain --untracked-files=all 2>$null
+                    if ($LASTEXITCODE -eq 0) { $dirty = if ($status) { 'true' } else { 'false' } }
+                }
+            }
+        } finally { $ErrorActionPreference = $previousPreference }
+    }
+    if ($revision -eq 'unknown') {
+        try {
+            $release = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'release.json') -Raw | ConvertFrom-Json
+            if ($release.source_revision -is [string] -and $release.source_revision -match '^[0-9a-f]{40,64}$') {
+                $revision = $release.source_revision
+                if ($release.source_dirty -is [bool]) {
+                    $dirty = if ($release.source_dirty) { 'true' } else { 'false' }
+                } elseif ($release.source_dirty -in @('true', 'false', 'unknown')) {
+                    $dirty = $release.source_dirty
+                }
+            }
+        } catch { }
+    }
+    $env:HABAB_SOURCE_REVISION = $revision
+    $env:HABAB_SOURCE_DIRTY = $dirty
+    Write-Host "Building source revision $revision (dirty: $dirty)."
+}
+
 function Get-DockerKind {
     $previousPreference = $ErrorActionPreference
     try {
@@ -143,6 +180,7 @@ try {
 
     Write-Host 'Building Home Assistant. The first download can take several minutes.'
     $env:HABAB_OPENCODE_SHA256 = 'bootstrap-pending'
+    Set-SourceProvenance
     Run-Docker -DockerArgs @('compose', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'build', 'homeassistant')
     Run-Docker -DockerArgs @('volume', 'create', 'habab-home-opencode-bin')
     $mount = "$($PSScriptRoot):/bootstrap:ro"

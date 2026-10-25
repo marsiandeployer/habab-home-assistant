@@ -4,6 +4,9 @@ services:
     image: habab-home:0.3.4
     build:
       context: .
+      args:
+        HABAB_SOURCE_REVISION: ${HABAB_SOURCE_REVISION:-unknown}
+        HABAB_SOURCE_DIRTY: ${HABAB_SOURCE_DIRTY:-unknown}
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Europe/Moscow}

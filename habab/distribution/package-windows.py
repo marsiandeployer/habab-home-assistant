@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import zipfile
+from source_provenance import release_with_source, resolve_source_provenance
 
 root = Path(__file__).resolve().parent
 output = root.parent / 'public/downloads'
@@ -16,18 +17,24 @@ names = ['Dockerfile', '.dockerignore', 'docker-entrypoint.sh', 'habab-ha.py', '
          'diagnose-assistant.bat', 'diagnose-assistant.ps1', 'diagnose-assistant.py',
          'install-native-frontend.py', 'native-frontend-release.json',
          'install-opencode-volume.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
-         'config/configuration.yaml']
+         'source_provenance.py', 'config/configuration.yaml']
 for directory in ('src/habab_home', 'src/habab_telegram', 'telegram-agent'):
     names += [str(p.relative_to(root)).replace('\\', '/') for p in (root / directory).rglob('*')
               if p.is_file() and p.suffix in {'.py', '.js', '.mjs', '.json', '.svg', '.md'}
               and not {'__pycache__', 'node_modules', 'test', 'tests'}.intersection(p.parts)]
 buffer = io.BytesIO()
+release_data = json.loads((root / 'release.json').read_text(encoding='utf-8'))
+revision, dirty = resolve_source_provenance(root, release_data)
+embedded_release = json.dumps(
+    release_with_source(release_data, revision, dirty), indent=2
+) + '\n'
 with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
     for name in sorted(names):
         info = zipfile.ZipInfo(name, date_time=(2026, 10, 22, 0, 0, 0))
         info.compress_type = zipfile.ZIP_DEFLATED
         info.external_attr = 0o644 << 16
-        data = (root / name).read_bytes()
+        data = (embedded_release.encode('utf-8') if name == 'release.json'
+                else (root / name).read_bytes())
         if name.endswith('.bat'):
             data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
         bundle.writestr(info, data)
