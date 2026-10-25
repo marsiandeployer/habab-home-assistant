@@ -1,0 +1,45 @@
+{
+  "title": "I-Digital SMS",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect I-Digital SMS",
+        "description": "Enter the Direct API key, sender name and one fixed E.164 recipient. Setup only checks local input format and does not contact the provider or send a test SMS. The provider account may charge for every sent part; the reported free test-number allowance has not been verified for your account.",
+        "data": {
+          "api_key": "Direct API key",
+          "sender": "Approved sender name",
+          "recipient": "One recipient phone number"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "Enter the Direct API key in its supplied Base64 form.",
+      "invalid_sender": "Enter a non-empty sender name.",
+      "invalid_recipient": "Enter one E.164 phone number, for example +79990000000.",
+      "invalid_message": "The SMS text must not be empty.",
+      "message_too_long": "The SMS exceeds one provider billing part. Shorten the text before sending.",
+      "authentication_error": "I-Digital rejected the API credentials.",
+      "provider_rejected": "I-Digital rejected the SMS. Check the sender, recipient and account rules.",
+      "unknown_outcome": "The send result is unknown. Do not retry automatically; check the provider status first.",
+      "invalid_response": "I-Digital returned an unexpected response.",
+      "invalid_message_uuid": "Enter the message UUID returned by I-Digital.",
+      "status_unavailable": "I-Digital status is unavailable. Try one explicit status check later."
+    },
+    "abort": {
+      "already_configured": "I-Digital SMS is already configured."
+    },
+    "entity": {
+      "notify": {
+        "sms": {
+          "name": "SMS"
+        }
+      }
+    },
+    "services": {
+      "get_status": {
+        "name": "Get SMS status",
+        "description": "Make one explicit I-Digital status request for a message UUID."
+      }
+    }
+  }
+}

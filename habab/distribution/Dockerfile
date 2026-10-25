@@ -16,6 +16,7 @@ RUN python3 /opt/habab-frontend/install-native-frontend.py
 COPY src/habab_home /usr/src/homeassistant/homeassistant/components/habab_home
 COPY src/habab_telegram /usr/src/homeassistant/homeassistant/components/habab_telegram
 COPY src/habab_yandex_speech /usr/src/homeassistant/homeassistant/components/habab_yandex_speech
+COPY src/idigital_sms /usr/src/homeassistant/homeassistant/components/idigital_sms
 COPY telegram-agent /opt/habab-telegram
 COPY config/configuration.yaml /usr/local/share/habab-home/configuration.yaml
 COPY docker-entrypoint.sh /usr/local/bin/habab-home-entrypoint

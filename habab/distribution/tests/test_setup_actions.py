@@ -556,7 +556,9 @@ class NativeIntegrationCatalogTests(unittest.IsolatedAsyncioTestCase):
             if domain in flow_domains and metadata.get("config_flow") is True
         )
         bundled_integrations = {}
-        for domain in ("habab_home", "habab_telegram", "habab_yandex_speech"):
+        for domain in (
+            "habab_home", "habab_telegram", "habab_yandex_speech", "idigital_sms",
+        ):
             try:
                 integration = await async_get_integration(self.hass, domain)
             except IntegrationNotFound:
@@ -567,7 +569,7 @@ class NativeIntegrationCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("met", catalog_domains)
         self.assertNotIn("counter", catalog_domains)
         self.assertEqual(set(bundled_integrations), {
-            "habab_home", "habab_telegram", "habab_yandex_speech",
+            "habab_home", "habab_telegram", "habab_yandex_speech", "idigital_sms",
         })
         self.assertTrue(integration_metadata["met"]["name"])
         met_translations = await async_get_translations(
@@ -593,16 +595,9 @@ class NativeIntegrationCatalogTests(unittest.IsolatedAsyncioTestCase):
         }])
         self.assertEqual(result["next_offset"], catalog_domains.index("met") + 1)
 
-        bundled_domains = ["habab_home", "habab_telegram", "habab_yandex_speech"]
-        bundled_start = catalog_domains.index("habab_home")
-        bundled = await execute(self.hass, None, "owner", {
-            "action": "integration_catalog",
-            "offset": bundled_start,
-            "limit": len(bundled_domains),
-        })
-        self.assertEqual(
-            [entry["domain"] for entry in bundled["integrations"]], bundled_domains
-        )
+        bundled_domains = [
+            "habab_home", "habab_telegram", "habab_yandex_speech", "idigital_sms",
+        ]
         expected_bundle_names = {}
         for domain, integration in bundled_integrations.items():
             translated = await async_get_translations(
@@ -611,9 +606,17 @@ class NativeIntegrationCatalogTests(unittest.IsolatedAsyncioTestCase):
             expected_bundle_names[domain] = (
                 translated.get(f"component.{domain}.title") or integration.name
             )
-        for entry in bundled["integrations"]:
+        for domain in bundled_domains:
+            bundled = await execute(self.hass, None, "owner", {
+                "action": "integration_catalog",
+                "offset": catalog_domains.index(domain),
+                "limit": 1,
+            })
+            self.assertEqual(len(bundled["integrations"]), 1)
+            entry = bundled["integrations"][0]
+            self.assertEqual(entry["domain"], domain)
             self.assertTrue(entry["name"])
-            self.assertEqual(entry["name"], expected_bundle_names[entry["domain"]])
+            self.assertEqual(entry["name"], expected_bundle_names[domain])
             self.assertFalse(entry["configured"])
 
 

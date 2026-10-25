@@ -31,6 +31,7 @@ BUNDLED_CONFIG_FLOW_INTEGRATIONS = (
     "habab_home",
     "habab_telegram",
     "habab_yandex_speech",
+    "idigital_sms",
 )
 
 

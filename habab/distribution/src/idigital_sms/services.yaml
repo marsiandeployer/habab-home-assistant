@@ -1,0 +1,11 @@
+get_status:
+  name: Get SMS status
+  description: Make one explicit I-Digital status request for a message UUID.
+  fields:
+    message_uuid:
+      name: Message UUID
+      description: UUID returned by the SMS notify entity after provider acceptance.
+      required: true
+      example: 063474ec-a34f-4558-90c5-984395000004
+      selector:
+        text:

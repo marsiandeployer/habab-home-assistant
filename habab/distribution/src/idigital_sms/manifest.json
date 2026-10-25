@@ -1,0 +1,8 @@
+{
+  "domain": "idigital_sms",
+  "name": "I-Digital SMS",
+  "codeowners": [],
+  "config_flow": true,
+  "integration_type": "service",
+  "iot_class": "cloud_push"
+}
