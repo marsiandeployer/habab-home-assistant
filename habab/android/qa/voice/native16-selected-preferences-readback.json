@@ -1,0 +1,10 @@
+{
+  "kind": "p30_native16_selected_nonsecret_preferences",
+  "checkedAt": "2026-10-25T08:16:41.729322+00:00",
+  "voiceEnabled": true,
+  "configuredWakePhrase": "эй дом",
+  "sshTunnelEnabled": false,
+  "sshEndpointConfigured": false,
+  "sealedCredentialsPrintedOrCopied": false,
+  "preferencesChanged": false
+}

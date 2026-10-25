@@ -13,6 +13,10 @@ Updated 2026-10-25 after physical P30 recovery and Native16 installation. Overal
 The active cloud frontend/prompt is newer than the frozen Android runtime2c. They are separate release identities; cloud acceptance must not be described as a phone update. No physical microphone or acoustic voice result is inferred from source tests.
 
 Current evidence:
+- `native16-telegram-parent-checkpoint.json` and attempt1/2 receipts: migration acceptance incomplete, no pairing/question/model call. Attempt2 UI configure failed before an entry was accepted; exact cloud entry was positively restored after phone inactivity proof. No raw transcript/key persisted.
+- `native16-guest-network-preflight.json` and `native16-guest-telegram-ipv4-tls-readback.json`: credential-free guest probes distinguish working weather HTTPS from Telegram IPv4 TCP timeout. This narrows transport troubleshooting but does not retrospectively establish the exact lost UI error.
+- `native16-background-lifecycle-readback.json`: both Android services foreground, own server/voice wake locks present, package already on Doze whitelist; USB powered. Huawei vendor autostart/reboot acceptance is not proved.
+- `native16-selected-preferences-readback.json`: voice enabled with configured phrase эй дом; permanent SSH/HTTPS tunnel disabled/unconfigured. The proposal in `../network/public-https-reverse-tunnel-plan.md` has not been applied.
 - `native19-final-result-parent-qa.json`: future wake candidate ignores partial hypotheses, finalizes before VAD reset; Gradle83passed/1archivecase skipped and lintPASS. Not built into the installed Native16; acoustic/latency acceptance NOT RUN.
 - `native16-voice-stop-start-readback.json`: stopped idle VoiceService publishes valid inactive/off status; service restored in wake with screen off and unchanged Core PID. First harness attempt treated Android stop-command exit255 as failure; it is preserved separately, and the corrected observer requires positive native service/state readback.
 - `native16-core-lan-alias-readback.json`: authenticated CoreRUNNING and homeassistant.local announced; another LAN client, OAuth return and external URL remain unverified.

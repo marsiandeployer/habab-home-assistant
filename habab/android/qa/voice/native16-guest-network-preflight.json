@@ -1,0 +1,23 @@
+{
+  "checks": [
+    {
+      "host": "api.telegram.org",
+      "dnsResolved": true,
+      "errorType": "URLError",
+      "reasonType": "OSError",
+      "elapsedSeconds": 4.33
+    },
+    {
+      "host": "api.met.no",
+      "dnsResolved": true,
+      "httpStatus": 200,
+      "elapsedSeconds": 0.22
+    }
+  ],
+  "caFileExists": true,
+  "kind": "p30_native16_guest_unauthenticated_https_network_probe",
+  "checkedAt": "2026-10-25T08:34:59.884158+00:00",
+  "botApiCredentialUsed": false,
+  "telegramMessageSent": false,
+  "coreRestarted": false
+}

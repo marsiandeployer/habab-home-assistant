@@ -1,0 +1,68 @@
+{
+  "kind": "p30_telegram_migration_operator",
+  "mode": "EXECUTE_AFTER_PARENT_GO",
+  "started_at": "2026-10-25T08:23:55.470Z",
+  "outcome": "INCOMPLETE_FAIL_CLOSED",
+  "gates": {
+    "parent_go": true,
+    "cloud_idle_confirmation": true
+  },
+  "preflight": {
+    "cloud": {
+      "admin": true,
+      "owner": true,
+      "entry_count": 1,
+      "loaded": true,
+      "enabled": true,
+      "connected": true,
+      "identity_matches_title": true
+    },
+    "cloud_runtime_idle": true,
+    "phone": {
+      "admin": true,
+      "owner": true,
+      "entry_count": 0,
+      "not_configured": true
+    },
+    "phone_router_present": false,
+    "phone_weather_available": true,
+    "expected_router_model_available": false
+  },
+  "identity": {},
+  "migration": {
+    "cloud_disabled": false,
+    "phone_configured": false,
+    "phone_paired": false
+  },
+  "e2e": {
+    "sent": false,
+    "answer_seen": false,
+    "model_match": false,
+    "temperature_match": false,
+    "direct_readback_match": false,
+    "runtime_tool_call": false,
+    "runtime_tool_result": false
+  },
+  "rollback": {
+    "attempted": false,
+    "phone_inactive_proven": false,
+    "cloud_reenabled": false
+  },
+  "policy": {
+    "pyrogram_userbot_only": true,
+    "get_updates_called": false,
+    "bot_api_manual_call": false,
+    "chat_history_read": false,
+    "transcript_persisted": false,
+    "screenshot_created": false,
+    "token_logged": false,
+    "nonce_logged": false,
+    "config_entry_deleted": false
+  },
+  "failure": {
+    "stage": "phone_owner_preflight",
+    "name": "Error",
+    "code": "phone_unique_fact_not_available"
+  },
+  "finished_at": "2026-10-25T08:24:03.937Z"
+}

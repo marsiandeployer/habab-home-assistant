@@ -1,0 +1,8 @@
+{
+  "diagnosticError": "CalledProcessError",
+  "kind": "p30_native16_guest_unauthenticated_https_network_probe",
+  "checkedAt": "2026-10-25T08:30:01.626545+00:00",
+  "botApiCredentialUsed": false,
+  "telegramMessageSent": false,
+  "coreRestarted": false
+}

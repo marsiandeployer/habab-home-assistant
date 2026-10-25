@@ -1,0 +1,33 @@
+{
+  "kind": "p30_native16_readonly_background_lifecycle",
+  "checkedAt": "2026-10-25T08:10:03.299228+00:00",
+  "deviceIdleWhitelistHasHabab": true,
+  "foregroundServices": {
+    "ServerService": {
+      "recordPresent": true,
+      "foreground": true,
+      "startRequested": true
+    },
+    "VoiceService": {
+      "recordPresent": true,
+      "foreground": true,
+      "startRequested": true
+    }
+  },
+  "heldOwnWakeLockNames": [
+    "habab:server",
+    "habab:voice"
+  ],
+  "battery": {
+    "AC powered": "false",
+    "USB powered": "true",
+    "Wireless powered": "false",
+    "status": "5",
+    "level": "100",
+    "temperature": "290"
+  },
+  "rebootTested": false,
+  "huaweiVendorAutostartPermissionProven": false,
+  "systemPowerSettingsChanged": false,
+  "otherAppsInspectedOrModified": false
+}

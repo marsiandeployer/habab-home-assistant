@@ -1,0 +1,41 @@
+{
+  "kind": "p30_native16_parent_telegram_handoff_checkpoint",
+  "checkedAt": "2026-10-25T08:41:28.792918+00:00",
+  "operatorSha256": "926ad29f3dd8dc875fe3f5d4c44b4ba88c748e465270ae42bcd3df9df5933743",
+  "attempts": 2,
+  "actualQuestionCount": 0,
+  "pairingMessagesSent": 0,
+  "newModelInference": false,
+  "attempt1": "display-name QA guard mismatch before mutation; actual router model verified independently",
+  "attempt2": "UI configure did not produce a configured entry/pairing state; no exact UI error code captured",
+  "phoneInactiveProvenBeforeRollback": true,
+  "cloudExactEntryRestoredLoadedConnected": true,
+  "cloudEntryAndBindingsDeleted": false,
+  "temporaryPhoneOwnerSessionRevoked": true,
+  "ownedBrowserProfilesClosedAndRemoved": true,
+  "botOwnerAfterAttempt2": "cloud installation",
+  "phoneTelegramAcceptance": "NOT RUN",
+  "networkProof": [
+    "guest api.met.no DNS and HTTPS200",
+    "guest api.telegram.org DNS resolves but IPv4 TCP connect times out before TLS"
+  ],
+  "networkProbeCredentialsUsed": false,
+  "diagnosticHarnessCorrections": [
+    "Exact registry model replaces an English display-name substring.",
+    "Android library path contains equals signs; invoke executable through sh so env does not treat path as assignment."
+  ],
+  "uiFailureNetworkCauseConclusive": false,
+  "noNewMigrationDuringOtherOwnerRollout": true,
+  "sourceWakeCandidateInstalled": false,
+  "publicStableApkPromoted": false,
+  "operatorReviewGuards": [
+    "exact bot/private owner identity",
+    "actual runtime idle checks before disable",
+    "strict not_loaded state before starting another poller",
+    "pending UI request settlement before rollback",
+    "retained exact cloud config and binding",
+    "one generic question with independent device model and weather readback",
+    "old-runtime-compatible bounded direct OpenCode metadata trace",
+    "RAM-only credentials; no screenshots or transcripts"
+  ]
+}

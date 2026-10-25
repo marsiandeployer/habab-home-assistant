@@ -1,0 +1,28 @@
+{
+  "kind": "private_telegram_migration_operator_prep",
+  "date": "2026-10-25",
+  "operator": "/root/.cache/habab-android/voice/telegram_migration_operator.cjs",
+  "operator_sha256": "67f412d1c8aff242ca03c40eed8ff73a2a3618aacfe6f3483b350eec5d0f7a6a",
+  "operator_mode": "0700",
+  "syntax_check": "node --check passed",
+  "execution": "NOT RUN; awaiting explicit parent GO",
+  "runtime_mutations": false,
+  "messages_sent": false,
+  "model_requests": false,
+  "bot_api_or_getupdates_called": false,
+  "workflow": [
+    "fresh cloud and P30 owner/admin and entry-count preflight",
+    "match existing cloud private binding to verified Pyrogram owner in process memory",
+    "disable exact cloud entry and prove unloaded before configuring P30",
+    "configure P30 through authenticated /habab-telegram admin UI",
+    "send one-use pairing command to exact private bot chat using verified owner account",
+    "send one read-only owner question and check independent P30 state and bounded runtime trace"
+  ],
+  "rollback": "On failure, disable exact newly configured P30 entry and prove it unloaded before re-enabling the exact retained cloud entry; if either proof fails, leave cloud disabled and report incomplete fail-closed.",
+  "execution_gates": [
+    "--execute",
+    "HABAB_TELEGRAM_MIGRATION_GO=YES",
+    "HABAB_CLOUD_CHAT_IDLE_CONFIRMED=YES"
+  ],
+  "secret_handling": "Token and one-use nonce stay in process/pipe memory; no IDs, usernames, transcript, token, nonce, or screenshots are persisted."
+}

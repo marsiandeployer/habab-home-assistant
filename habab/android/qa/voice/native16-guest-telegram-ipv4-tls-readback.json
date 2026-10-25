@@ -1,0 +1,11 @@
+{
+  "host": "api.telegram.org",
+  "ipv4DnsResolved": true,
+  "errorType": "TimeoutError",
+  "elapsedSeconds": 3.08,
+  "kind": "p30_native16_guest_telegram_ipv4_tls_probe",
+  "checkedAt": "2026-10-25T08:38:11.956244+00:00",
+  "botApiCredentialUsed": false,
+  "telegramMessageSent": false,
+  "coreRestarted": false
+}
