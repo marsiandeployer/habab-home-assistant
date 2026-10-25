@@ -44,15 +44,63 @@ Home Assistant at `127.0.0.1`, so HA's immediate TCP peer is expected to be
 `127.0.0.1`. Confirm that peer on the target installation before trusting only
 that proxy address for `X-Forwarded-For`; ordinary HA login remains required.
 
-## What this does not provision
+## Operator provision and revoke
 
-This is not a subscription service. There is no billing check, account or
+`manage_home.py` renders one isolated set of relay snippets per home: an
+`sshd_config` Match block, a restricted `authorized_keys` entry, an exact-host
+nginx server block, and an ownership manifest. It does not create a Unix
+account, DNS record, certificate, or subscription. The relay user is
+`habab-home-<id>` and the hostname is fixed to
+`home-<id>.remote.habab.ru`; IDs are lowercase ASCII letters, digits, and
+internal hyphens. The loopback port must be in `32000-39999`. It accepts only
+an `ssh-ed25519` public key. Each home's files have fixed paths derived from
+its ID; arbitrary output paths are not accepted.
+
+Preview first. The sandbox root must be an absolute path, and the tool will
+only create these fixed relative paths inside it:
+
+```bash
+python3 habab/product-tunnel/manage_home.py provision \
+  --home-id example --host home-example.remote.habab.ru --port 32001 \
+  --public-key 'ssh-ed25519 AAAA... operator@example' \
+  --sandbox-root /tmp/product-relay-root
+```
+
+Review the unified diff. To write the snippets and local ownership state into
+that sandbox, repeat the command with `--apply`. Repeating the same provision
+is idempotent. A different home cannot claim a hostname or port already
+present in the managed state. Existing files without a matching ownership
+manifest are left untouched. If a managed file has changed since generation,
+the tool refuses to overwrite or remove it.
+
+Revoke also previews by default and removes only the files for the named home
+when explicitly applied:
+
+```bash
+python3 habab/product-tunnel/manage_home.py revoke --home-id example \
+  --sandbox-root /tmp/product-relay-root
+python3 habab/product-tunnel/manage_home.py revoke --home-id example \
+  --sandbox-root /tmp/product-relay-root --apply
+```
+
+The generated snippets are source material for an operator to install after
+creating the dedicated no-login relay account and preparing its directories.
+The key file is written mode `0600` in the sandbox; production installation
+must preserve root ownership and restrictive directory permissions. Include
+the sshd fragment from the relay's `sshd_config` and run `sshd -t` before
+reload. The nginx fragment relies on the one shared `$connection_upgrade` map
+from [nginx-home.example.conf](nginx-home.example.conf); install it in the
+existing TLS relay's `http` configuration, then run `nginx -t` before reload.
+The tool does not reload either daemon. Confirm DNS and certificate readiness
+separately. Revocation removes snippets and the key file, but the operator
+must reload sshd/nginx to apply the revocation; terminate an already connected
+SSH session separately if immediate disconnection is required.
+
+This is not a subscription service: there is no billing check, account or
 device enrollment API, hostname/DNS/certificate provisioning, relay account
-creation, key revocation workflow, or cloud Home Assistant deployment. The
-existing `support_tunnel.ps1` / `support/relay.py` is intentionally temporary,
-operator-approved support access and is not the per-home product relay. The
-public HTTPS route and the relay-side exact-host/port configuration must be
-implemented and accepted separately before this client can connect.
+creation, or cloud Home Assistant deployment. The existing
+`support_tunnel.ps1` / `support/relay.py` is intentionally temporary,
+operator-approved support access and is not the per-home product relay.
 
 Local automation and local voice remain on the home HA instance. If Internet
 or relay connectivity is lost, remote access is unavailable; this tunnel does
