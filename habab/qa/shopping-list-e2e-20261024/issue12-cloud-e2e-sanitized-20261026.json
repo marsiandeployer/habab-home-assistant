@@ -1,0 +1,69 @@
+{
+  "issue": 12,
+  "coverage": "CLOUD_CASE_PASS",
+  "date": "2026-10-26",
+  "target": "todo.shopping_list",
+  "runtime": {
+    "backend": "authenticated owner-test :8395",
+    "core": "2026.10.2",
+    "habab": "0.3.6",
+    "status": "running"
+  },
+  "prompt": {
+    "source": "public issue #12 body",
+    "text": "добавь хлеб в список покупок",
+    "sha256": "970ed7998564c99dc6501dccc8f968cd4daddbb7a96f05c256a73fe0010ff667"
+  },
+  "baseline": {
+    "api_item_count": 0,
+    "bread_count": 0,
+    "ui_card_count": 1,
+    "ui_item_count": 0,
+    "target_unique_native_list": true,
+    "backend_idle": true
+  },
+  "chat_turn": {
+    "ui_agent_run_count": 1,
+    "prompt_matched": true,
+    "acknowledged": true,
+    "terminal": "TERMINAL_ACK",
+    "diagnostics_active_after_turn": false,
+    "runtime_status_after_turn": "running",
+    "assistant_reply_present": true,
+    "assistant_reply_saved_in_receipt": false
+  },
+  "service": {
+    "event_count": 1,
+    "domain": "todo",
+    "service": "add_item",
+    "service_data_keys": ["entity_id", "item"],
+    "target_matches": true,
+    "item_matches_issue_prompt": true,
+    "owner_context_matches": true
+  },
+  "readback_after_add": {
+    "api_item_count": 1,
+    "new_uid_count": 1,
+    "bread_count": 1,
+    "ui_route": "/todo",
+    "ui_card_count": 1,
+    "ui_visible_bread_count": 1,
+    "api_ui_counts_match": true,
+    "baseline_items_unchanged": true
+  },
+  "cleanup": {
+    "removed_only_unique_new_uid": true,
+    "final_api_item_count": 0,
+    "baseline_restored": true
+  },
+  "privacy": {
+    "item_uids_recorded": false,
+    "credentials_recorded": false,
+    "private_history_or_raw_reply_recorded": false
+  },
+  "harness_source_id": "NOT_RECORDED",
+  "follow_up": {
+    "p30": "NOT_RUN",
+    "windows": "NOT_RUN"
+  }
+}
