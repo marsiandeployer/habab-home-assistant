@@ -332,6 +332,50 @@ export function runtimeLogsExportRequest(isAdmin, confirmationAccepted) {
   };
 }
 
+function feedbackUuid(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function createFeedbackUuid() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === "function") globalThis.crypto.getRandomValues(bytes);
+  else bytes.forEach((_byte, index) => { bytes[index] = Math.floor(Math.random() * 256); });
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function feedbackAttemptFor(sessionId, feedback, previousAttempt) {
+  const normalized = typeof feedback === "string" ? feedback.trim() : "";
+  if (previousAttempt?.session_id === sessionId && previousAttempt.feedback === normalized && feedbackUuid(previousAttempt.idempotency_key)) {
+    return previousAttempt;
+  }
+  return {session_id: sessionId, feedback: normalized, idempotency_key: createFeedbackUuid()};
+}
+
+export async function postConversationFeedback(fetchWithAuth, attempt) {
+  const response = await fetchWithAuth("/api/habab_home/feedback", {
+    method: "POST",
+    cache: "no-store",
+    headers: {"Content-Type": "application/json", Accept: "application/json"},
+    body: JSON.stringify({...attempt, consent: true}),
+  });
+  if (!response.ok) {
+    const error = new Error("feedback_request_failed");
+    error.status = response.status;
+    throw error;
+  }
+  let receipt;
+  try { receipt = await response.json(); }
+  catch (_) { throw new Error("feedback_invalid_response"); }
+  if (!feedbackUuid(receipt?.receipt_id) || receipt.state !== "saved_locally" || receipt.issue_state !== "not_configured") {
+    throw new Error("feedback_invalid_response");
+  }
+  return receipt;
+}
+
 function el(name, className, text) {
   const node = document.createElement(name);
   if (className) node.className = className;
@@ -356,6 +400,11 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.loading = false;
     this.loadingDetail = false;
     this.exporting = false;
+    this.feedbackSubmitting = false;
+    this.feedbackAttempt = undefined;
+    this.feedbackDraft = "";
+    this.feedbackConsent = false;
+    this.feedbackState = undefined;
     this.requestVersion = 0;
     this.detailVersion = 0;
     this.loadedOwner = undefined;
@@ -424,7 +473,7 @@ class HababDiagnosticsPanel extends HTMLElement {
       *{box-sizing:border-box}header{display:flex;align-items:center;gap:var(--ha-space-4,16px);min-height:56px;padding:8px 16px;border-block-end:1px solid var(--divider-color);background:var(--card-background-color)}
       h1{font-size:20px;font-weight:500;margin:0}main{max-width:1200px;margin:auto;padding:var(--ha-space-6,24px)}p{max-width:80ch;margin:0 0 var(--ha-space-3,12px)}
       .intro,.help,.muted{color:var(--secondary-text-color)}.notice{padding:12px;border-inline-start:4px solid var(--primary-color);background:var(--secondary-background-color);margin-block:12px 20px}
-      form{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-items:end;gap:var(--ha-space-3,12px);padding:var(--ha-space-4,16px);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:10px;margin-block:16px}
+      #filters{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-items:end;gap:var(--ha-space-3,12px);padding:var(--ha-space-4,16px);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:10px;margin-block:16px}
       label{display:grid;gap:5px;font-weight:500}input,select,button{font:inherit;color:var(--primary-text-color)}input,select{width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--secondary-text-color);border-radius:6px;background:var(--card-background-color)}
       button{cursor:pointer;min-height:44px;padding:8px 12px;border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color)}button:hover:not(:disabled){background:var(--secondary-background-color)}button:disabled{cursor:default;opacity:.55}
       button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--ha-color-focus,var(--primary-color));outline-offset:2px}.primary{background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color));border-color:transparent;color:var(--ha-color-on-primary-loud,var(--text-primary-color))}
@@ -436,9 +485,10 @@ class HababDiagnosticsPanel extends HTMLElement {
       .event-list{list-style:none;margin:0;padding:0;border-inline-start:2px solid var(--divider-color)}.event{position:relative;padding:4px 0 18px 18px}.event:before{content:"";position:absolute;inset-block-start:10px;inset-inline-start:-6px;width:10px;height:10px;border-radius:50%;background:var(--primary-color);border:1px solid var(--card-background-color)}.event h3{font-size:15px;font-weight:500;margin:0 0 2px}.event time{font-size:12px;color:var(--secondary-text-color)}.event-text{white-space:pre-wrap;overflow-wrap:anywhere;margin-block:8px}.event details{margin-block:8px}.event summary{cursor:pointer;min-height:40px;display:flex;align-items:center;text-decoration:underline;text-underline-offset:3px}.code{font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--secondary-background-color);padding:10px;border-radius:6px;margin:0;max-height:360px;overflow:auto}
       .sources{margin-block:16px;border-block-start:1px solid var(--divider-color);padding-block-start:12px}.sources h3{font-size:15px;font-weight:500;margin:0 0 8px}.source-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px;margin:0;padding:0;list-style:none}.source-list li{display:flex;justify-content:space-between;gap:10px;padding-block:4px;border-block-end:1px solid var(--divider-color)}.source-state{flex:none;color:var(--secondary-text-color)}.source-name{display:grid;gap:2px}.source-reason{font-size:12px;color:var(--secondary-text-color)}.warning{color:var(--warning-color,var(--primary-text-color))}
       .runtime-logs{margin-block:20px;padding-block-start:16px;border-block-start:1px solid var(--divider-color)}.runtime-logs h2{font-size:16px;font-weight:500;margin:0 0 6px}
+      .feedback{margin-block:18px;padding-block:14px;border-block-start:1px solid var(--divider-color)}.feedback h3{font-size:16px;font-weight:500;margin:0 0 6px}.feedback label{display:grid;gap:6px;margin-block:10px}.feedback textarea{width:100%;min-height:88px;padding:10px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--secondary-text-color);border-radius:6px;resize:vertical}.feedback .consent{display:flex;align-items:flex-start;gap:10px;font-weight:400}.feedback input[type=checkbox]{width:22px;height:22px;min-height:22px;flex:none;margin:1px 0 0;accent-color:var(--primary-color)}.feedback button{margin-block:4px}.feedback-status{margin-block:8px}.feedback-status[data-error=true]{color:var(--error-color)}
       [hidden]{display:none!important}a{color:var(--primary-color)}
-      @media(max-width:900px){main{padding:16px}form{grid-template-columns:repeat(2,minmax(0,1fr))}.filters-actions{grid-column:span 2}.workspace{grid-template-columns:minmax(0,1fr)}.source-list{grid-template-columns:minmax(0,1fr)}}
-      @media(max-width:520px){main{padding:12px 12px 24px}header{min-height:52px}form{grid-template-columns:minmax(0,1fr);padding:12px}.filters-actions{grid-column:auto;display:grid;grid-template-columns:1fr}.summary{grid-template-columns:minmax(0,1fr)}.panel h2{padding:12px}.panel-body{padding:12px}.session{padding:12px}.notice{margin-block:10px 14px}}
+      @media(max-width:900px){main{padding:16px}#filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filters-actions{grid-column:span 2}.workspace{grid-template-columns:minmax(0,1fr)}.source-list{grid-template-columns:minmax(0,1fr)}}
+      @media(max-width:520px){main{padding:12px 12px 24px}header{min-height:52px}#filters{grid-template-columns:minmax(0,1fr);padding:12px}.filters-actions{grid-column:auto;display:grid;grid-template-columns:1fr}.summary{grid-template-columns:minmax(0,1fr)}.panel h2{padding:12px}.panel-body{padding:12px}.session{padding:12px}.notice{margin-block:10px 14px}}
     </style>
     <header><ha-menu-button></ha-menu-button><h1>${t("title")}</h1></header>
     <main>
@@ -627,6 +677,12 @@ class HababDiagnosticsPanel extends HTMLElement {
   }
 
   async openSession(session) {
+    if (!this.selectedSession || diagnosticSessionKey(this.selectedSession) !== diagnosticSessionKey(session)) {
+      this.feedbackDraft = "";
+      this.feedbackConsent = false;
+      if (!this.feedbackSubmitting) this.feedbackAttempt = undefined;
+      this.feedbackState = undefined;
+    }
     this.detailAbort?.abort();
     const controller = new AbortController();
     this.detailAbort = controller;
@@ -702,6 +758,7 @@ class HababDiagnosticsPanel extends HTMLElement {
     detail.append(el("p", "help", this.t("processingTimeNote")));
     const events = Array.isArray(this.detail.events) ? this.detail.events : [];
     if (session.error) detail.append(this.renderData(this.t("failureDetails"), session.error));
+    detail.append(this.renderFeedback());
     if (!events.length) {
       detail.append(el("p", "empty", this.t("empty")));
       return;
@@ -712,6 +769,116 @@ class HababDiagnosticsPanel extends HTMLElement {
     detail.append(el("p", "help", this.t("redacted")));
     if (session.at_message_limit === true) detail.append(el("p", "help", this.t("atMessageLimit")));
     else detail.append(el("p", "help", this.t("truncated")));
+  }
+
+  renderFeedback() {
+    const section = el("section", "feedback");
+    section.setAttribute("aria-labelledby", "feedback-heading");
+    const heading = el("h3", "", this.t("diagnosticsFeedbackTitle"));
+    heading.id = "feedback-heading";
+    section.append(heading);
+    section.append(el("p", "help", this.t("diagnosticsFeedbackHelp")));
+    const form = el("form");
+    const feedbackLabel = el("label", "");
+    feedbackLabel.append(el("span", "", this.t("diagnosticsFeedbackLabel")));
+    const textarea = el("textarea");
+    textarea.name = "feedback";
+    textarea.maxLength = 2000;
+    textarea.value = this.feedbackDraft;
+    textarea.addEventListener("input", () => {
+      this.feedbackDraft = textarea.value;
+      if (!this.feedbackAttempt || this.feedbackDraft.trim() !== this.feedbackAttempt.feedback) {
+        this.feedbackAttempt = undefined;
+        this.feedbackState = undefined;
+      }
+    });
+    feedbackLabel.append(textarea);
+    form.append(feedbackLabel);
+    const consentLabel = el("label", "consent");
+    const checkbox = el("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = this.feedbackConsent;
+    checkbox.addEventListener("change", () => {
+      this.feedbackConsent = checkbox.checked;
+      this.feedbackAttempt = undefined;
+      this.feedbackState = undefined;
+      this.updateFeedbackControls(form);
+    });
+    consentLabel.append(checkbox, el("span", "", this.t("diagnosticsFeedbackConsent")));
+    form.append(consentLabel);
+    const button = el("button", "primary", this.t(this.feedbackSubmitting ? "diagnosticsFeedbackSaving" : "diagnosticsFeedbackSave"));
+    button.type = "submit";
+    form.append(button);
+    const currentSessionId = this.selectedSession?.session_id;
+    const state = this.feedbackState?.session_id === currentSessionId ? this.feedbackState : undefined;
+    const status = el("p", "feedback-status", state?.text || "");
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.dataset.error = state?.error ? "true" : "false";
+    form.append(status);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void this.saveFeedback(textarea, checkbox);
+    });
+    section.append(form);
+    this.updateFeedbackControls(form);
+    return section;
+  }
+
+  updateFeedbackControls(form = this.q(".feedback form")) {
+    if (!form) return;
+    const textarea = form.querySelector("textarea");
+    const checkbox = form.querySelector('input[type="checkbox"]');
+    const button = form.querySelector('button[type="submit"]');
+    if (textarea) textarea.disabled = this.feedbackSubmitting;
+    if (checkbox) checkbox.disabled = this.feedbackSubmitting;
+    if (button) button.disabled = this.feedbackSubmitting || this._hass?.user?.is_admin !== true ||
+      !checkbox?.checked || !textarea?.value.trim() || !this.selectedSession;
+  }
+
+  async saveFeedback(textarea, checkbox) {
+    if (this._hass?.user?.is_admin !== true || this.feedbackSubmitting || !this.selectedSession) return;
+    const sessionId = this.selectedSession.session_id;
+    const feedback = textarea.value.trim();
+    if (!feedback || feedback.length > 2000 || !checkbox.checked) {
+      this.feedbackState = {session_id: sessionId, text: this.t("diagnosticsFeedbackInvalid"), error: true};
+      this.renderDetail();
+      return;
+    }
+    this.feedbackDraft = feedback;
+    this.feedbackConsent = checkbox.checked;
+    this.feedbackAttempt = feedbackAttemptFor(sessionId, feedback, this.feedbackAttempt);
+    const attempt = this.feedbackAttempt;
+    this.feedbackSubmitting = true;
+    this.feedbackState = {session_id: sessionId, text: this.t("diagnosticsFeedbackSaving")};
+    this.renderDetail();
+    try {
+      const receipt = await postConversationFeedback(this._hass.fetchWithAuth.bind(this._hass), attempt);
+      this.feedbackState = {
+        session_id: sessionId,
+        text: this.t("diagnosticsFeedbackSaved"),
+        receipt_id: receipt.receipt_id,
+      };
+      this.feedbackAttempt = undefined;
+      if (this.selectedSession?.session_id === sessionId) {
+        this.feedbackDraft = "";
+        this.feedbackConsent = false;
+      }
+    } catch (error) {
+      this.feedbackState = {
+        session_id: sessionId,
+        text: error?.status === 401 ? this.t("unauthorized")
+          : error?.status === 403 ? this.t("accessDenied")
+            : error?.message === "feedback_invalid_response" ? this.t("invalidResponse")
+              : error?.status === 404 ? this.t("expired")
+                : error?.status === 503 ? this.t("diagnosticsFeedbackUnavailable")
+                  : this.t("diagnosticsFeedbackError"),
+        error: true,
+      };
+    } finally {
+      this.feedbackSubmitting = false;
+      this.renderDetail();
+    }
   }
 
   renderEvent(event) {

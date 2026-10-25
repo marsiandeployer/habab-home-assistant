@@ -55,6 +55,38 @@ test("shared runtime logs require admin confirmation and use the instance export
   });
 });
 
+test("feedback retries reuse one idempotency UUID until its payload changes", () => {
+  const first = diagnostics.feedbackAttemptFor("session_123", "  The answer missed the room.  ");
+  const retry = diagnostics.feedbackAttemptFor("session_123", "The answer missed the room.", first);
+  assert.strictEqual(retry, first);
+  assert.match(first.idempotency_key, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  const edited = diagnostics.feedbackAttemptFor("session_123", "A different note", first);
+  assert.notEqual(edited.idempotency_key, first.idempotency_key);
+  assert.equal(edited.feedback, "A different note");
+  const anotherSession = diagnostics.feedbackAttemptFor("session_456", first.feedback, first);
+  assert.notEqual(anotherSession.idempotency_key, first.idempotency_key);
+});
+
+test("feedback POST confirms only a locally saved receipt and keeps HTTP failures visible", async () => {
+  const attempt = diagnostics.feedbackAttemptFor("session_123", "The answer missed the room.");
+  let call;
+  const receiptId = "22222222-2222-4222-8222-222222222222";
+  const receipt = await diagnostics.postConversationFeedback(async (url, options) => {
+    call = {url, options};
+    return {ok: true, json: async () => ({receipt_id: receiptId, state: "saved_locally", issue_state: "not_configured"})};
+  }, attempt);
+  assert.equal(call.url, "/api/habab_home/feedback");
+  assert.equal(call.options.method, "POST");
+  assert.equal(call.options.cache, "no-store");
+  assert.deepEqual(JSON.parse(call.options.body), {...attempt, consent: true});
+  assert.equal(receipt.receipt_id, receiptId);
+  await assert.rejects(diagnostics.postConversationFeedback(async () => ({ok: false, status: 503}), attempt), (error) => {
+    assert.equal(error.status, 503);
+    return true;
+  });
+  await assert.rejects(diagnostics.postConversationFeedback(async () => ({ok: true, json: async () => ({receipt_id: receiptId, state: "queued", issue_state: "created"})}), attempt), /feedback_invalid_response/);
+});
+
 test("diagnostic rendering helpers mask credentials and sensitive structured fields", () => {
   const text = diagnostics.sanitizeDiagnosticText("Bearer abc.def OPENAI_API_KEY=hidden sk-12345678901234567890 /home/private/config.yaml");
   assert.doesNotMatch(text, /abc\.def|hidden|sk-12345678901234567890|\/home\/private/);
