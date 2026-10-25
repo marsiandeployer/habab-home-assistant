@@ -1,0 +1,72 @@
+{
+  "kind": "p30_native17_runtime_and_apk_update",
+  "mode": "EXECUTE_AFTER_EXPLICIT_PARENT_HANDOFF",
+  "outcome": "INCOMPLETE_FIX_FORWARD_REQUIRED",
+  "package": "ru.habab.home",
+  "apkVersionCode": 17,
+  "apkSha256": "996f30dafaddae355f33b03ceb6fc5d6ee21afef7737658f1ae0e2ad9696b8ff",
+  "apkSignerSha256": "d5847538e56e57c1b17ea394a8130cd593277033af7421e251babad6c25cf704",
+  "apkSource": "af48e2f9a",
+  "runtimeSource": "3b59bd8df",
+  "runtimeId": "2f94e2e4d62bf401",
+  "previousRuntimeExpected": "2c6567223ad3ef6b",
+  "trustedRuntimeKeySha256": "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069",
+  "manifestUrl": "https://habab-demo.wpmix.net/downloads/android/release-2f94e2e4d62bf401.json",
+  "archiveSha256": "7a8ac16aab2cb04b6cdcd0da4dbb05f638918ecd7ed28b288d4cda51df0e595c",
+  "archiveBytes": 874181326,
+  "expandedBytes": 2593012337,
+  "executionGates": {
+    "explicitFlag": true,
+    "parentGo": true
+  },
+  "preflight": {
+    "candidateApkHashVerified": true,
+    "candidateApkSignerVerified": true,
+    "trustedRuntimeKeyFingerprintVerified": true,
+    "candidatePackageAndDebugStartVerified": true,
+    "apkBytes": 52487538,
+    "publicManifestSignatureVerified": true,
+    "publicManifestTargetVerified": true,
+    "publicManifestSha256": "f33fdf0eb939847281b34e36f1805e22edced1ab6d00da6f20e5f7dfb785c809",
+    "packageVersionCode": 16,
+    "runtimeIds": {
+      "current": "2c6567223ad3ef6b",
+      "previous": "7119388d53035d71"
+    },
+    "freeBytes": 147021398016,
+    "minimumFreeBytes": 4056552113,
+    "exactPhoneAndCore": true,
+    "phoneTelegramEntryCount": 0,
+    "chatIdle": true,
+    "coreRunning": true,
+    "freshIdleGatesPassed": true,
+    "phoneModel": "VOG-L29"
+  },
+  "deployment": {
+    "voiceStopRequested": true,
+    "voiceStopCommandUnconfirmed": true,
+    "voiceServiceStopped": true,
+    "supervisorFreezeRequested": true,
+    "supervisorFrozen": true,
+    "nativeCoreStopRequested": true,
+    "nativeCoreStopResponse": "accepted"
+  },
+  "voice": {
+    "wasActive": true,
+    "restoreAttempted": false,
+    "restoreVerified": false,
+    "wasOff": false,
+    "restoreOutcome": "not_attempted_core_state_unproven"
+  },
+  "scope": {
+    "cloudTelegramChanged": false,
+    "phoneTelegramConfigured": false,
+    "modelOrChatPromptSent": false,
+    "rollbackAttempted": false
+  },
+  "phase": "stopping_voice_and_native_core",
+  "failure": {
+    "stage": "stopping_voice_and_native_core",
+    "code": "operation_failed"
+  }
+}

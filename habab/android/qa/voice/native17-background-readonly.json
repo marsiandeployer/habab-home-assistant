@@ -1,0 +1,27 @@
+{
+  "kind": "native17_background_voice_readonly_observation",
+  "observedAtUnix": 1792930061,
+  "samples": [
+    {
+      "active": true,
+      "phase": "wake",
+      "screenOn": false,
+      "recordedAt": 1792930053967,
+      "captureFrames": 236129,
+      "wakeCount": 0,
+      "uploadedPcmBytes": 0
+    },
+    {
+      "active": true,
+      "phase": "wake",
+      "screenOn": false,
+      "recordedAt": 1792930059967,
+      "captureFrames": 236429,
+      "wakeCount": 0,
+      "uploadedPcmBytes": 0
+    }
+  ],
+  "microphone_audio_or_transcript_read": false,
+  "acoustic_wake_or_farewell_acceptance": "NOT_RUN_USER_CHECK_PENDING",
+  "settings_or_model_calls": false
+}

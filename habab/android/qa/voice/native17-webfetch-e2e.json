@@ -1,0 +1,31 @@
+{
+  "kind": "native17_visible_chat_webfetch_e2e",
+  "target": "P30 Native17 runtime2f94",
+  "prompt": "Проверь официальную страницу https://github.com/XiaoMi/ha_xiaomi_home и назови минимальную версию Home Assistant Core из раздела установки. Укажи ссылку на источник. Это проверка чтения сайта, настройки дома менять не нужно.",
+  "chat_turns_sent": 1,
+  "settings_mutated_by_runner": false,
+  "raw_conversation_persisted": false,
+  "session_id": "ses_e964f8bb8ffevhDdX5jaDiIBC9",
+  "outcome": "PASS_VISIBLE_CHAT_AND_REAL_WEBFETCH",
+  "result": {
+    "exact_user_turn_visible": true,
+    "answer_present": true,
+    "answer_length": 209,
+    "answer_sha256": "a8309519c4739d184a67cbcad7c3655f4962abfe353e2f27beef6858a12f0f75",
+    "expected_minimum_version_present": true,
+    "official_source_link_present": true,
+    "send_completed": true,
+    "elapsed_ms": 85191,
+    "busy": false,
+    "backend_active": false,
+    "diagnostics_error_name": null
+  },
+  "temporary_owner_session_revoked": true,
+  "tool_trace_verified": true,
+  "remaining_scope": [
+    "actual websearch on phone",
+    "unavailable website behavior",
+    "voice-to-executor web task",
+    "physical Android WebView touch acceptance"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "kind": "native17_phone_served_frontend_browser_readback",
+  "phone_webview_touched": false,
+  "model_prompt_sent": false,
+  "settings_mutated": false,
+  "ui": {
+    "admin": true,
+    "websocket_connected": true,
+    "ha_version": "2026.10.2",
+    "chat_ready": true,
+    "selected_provider": [
+      {
+        "provider": "habab",
+        "model": "gemini-3.1-flash-lite",
+        "state": "loaded",
+        "api_check_status": "verified"
+      }
+    ],
+    "weather_exists": true,
+    "weather_conversation_exposed": true,
+    "chat_component_loaded": true
+  },
+  "script_404_count": 0,
+  "js_error_count": 0,
+  "outcome": "PASS_READ_ONLY_BROWSER_BOOTSTRAP",
+  "temporary_owner_session_revoked": true
+}

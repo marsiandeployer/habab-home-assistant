@@ -1,0 +1,91 @@
+{
+  "kind": "native17_actual_websearch_tool_trace",
+  "exact_qa_turn_matched": true,
+  "qa_user_created": 1792927385154,
+  "permission_all_allow": true,
+  "exa_enabled": true,
+  "assistant_metadata": [
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "tool-calls",
+      "completed": true,
+      "error_type": null,
+      "duration_ms": 7186,
+      "tokens": {
+        "total": 78363,
+        "input": 78343,
+        "output": 20,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      }
+    },
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "tool-calls",
+      "completed": true,
+      "error_type": null,
+      "duration_ms": 7960,
+      "tokens": {
+        "total": 78434,
+        "input": 3567,
+        "output": 27,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 74840
+        }
+      }
+    },
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "stop",
+      "completed": true,
+      "error_type": null,
+      "duration_ms": 6775,
+      "tokens": {
+        "total": 78593,
+        "input": 78478,
+        "output": 115,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      }
+    }
+  ],
+  "tools": [
+    {
+      "tool": "websearch",
+      "status": "error",
+      "output_bytes": 0,
+      "output_sha256": null,
+      "official_documentation_in_output": false,
+      "duration_ms": 230,
+      "error_sanitized": "StatusCode: non 2xx status code (403 POST https://mcp.exa.ai/mcp)",
+      "query_sha256": "715e78ba6e8343e48a2f6a00140063b8e332e731dbba3dd8a1d8afdab0179610"
+    },
+    {
+      "tool": "websearch",
+      "status": "error",
+      "output_bytes": 0,
+      "output_sha256": null,
+      "official_documentation_in_output": false,
+      "duration_ms": 30,
+      "error_sanitized": "StatusCode: non 2xx status code (403 POST https://mcp.exa.ai/mcp)",
+      "query_sha256": "061d1169da98c8371f8ea3a220c5aaa8111de0f84f21637cbd0557fc56b7766b"
+    }
+  ],
+  "websearch_completed": false,
+  "raw_environment_or_credentials_persisted": false,
+  "raw_conversation_persisted": false,
+  "model_request_sent_by_inspector": false,
+  "delegated_child_session_count": 0,
+  "delegated_child_tools": []
+}

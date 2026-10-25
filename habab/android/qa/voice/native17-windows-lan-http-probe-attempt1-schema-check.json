@@ -1,0 +1,18 @@
+{
+  "kind": "native17_existing_windows_browser_lan_probe",
+  "observedAt": "2026-10-25T12:21:52.181Z",
+  "target": "http://192.168.3.70:8123",
+  "settingsChanged": false,
+  "authenticatedActions": false,
+  "modelCalls": false,
+  "profileMode": "dedicated-profile",
+  "httpStatus": 200,
+  "contentType": "application/json",
+  "providersArray": false,
+  "homeAssistantProviderPresent": false,
+  "windowsBrowser": true,
+  "outcome": "NOT_ACCEPTED_WINDOWS_LAN",
+  "errorType": "Error",
+  "reason": "target_readback_failed",
+  "classification": "CHECKER_SCHEMA_ERROR_HTTP_200_OBSERVED"
+}

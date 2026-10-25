@@ -1,0 +1,15 @@
+{
+  "kind": "native17_existing_windows_browser_lan_probe",
+  "observedAt": "2026-10-25T12:22:27.486Z",
+  "target": "http://192.168.3.70:8123",
+  "settingsChanged": false,
+  "authenticatedActions": false,
+  "modelCalls": false,
+  "profileMode": "dedicated-profile",
+  "httpStatus": 200,
+  "contentType": "application/json",
+  "providerObject": true,
+  "homeAssistantProviderPresent": true,
+  "windowsBrowser": true,
+  "outcome": "PASS_WINDOWS_TO_P30_LAN_HTTP"
+}

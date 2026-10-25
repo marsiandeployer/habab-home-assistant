@@ -1,0 +1,28 @@
+{
+  "kind": "native17_visible_chat_websearch_e2e",
+  "target": "P30 Native17 runtime2f94",
+  "prompt": "Найди через веб-поиск официальную документацию Home Assistant о Conversation и приведи одну подходящую ссылку с кратким описанием. Используй результат поиска, а не только память. Ничего в настройках дома не меняй.",
+  "chat_turns_sent": 1,
+  "settings_mutated_by_runner": false,
+  "raw_conversation_persisted": false,
+  "session_id": "ses_e964f8bb8ffevhDdX5jaDiIBC9",
+  "outcome": "FAIL_WEBSEARCH_HTTP403_AND_UNDISCLOSED_SEARCH_FAILURE",
+  "result": {
+    "exact_user_turn_visible": true,
+    "answer_present": true,
+    "answer_length": 504,
+    "answer_sha256": "506b012262436bb287eae7e3ccd4e6ffd383c93bc3f1b5762f9b14853c6228cb",
+    "official_documentation_found": true,
+    "official_source_link_present": true,
+    "send_completed": true,
+    "elapsed_ms": 23705,
+    "busy": false,
+    "backend_active": false,
+    "diagnostics_error_name": null
+  },
+  "temporary_owner_session_revoked": true,
+  "tool_trace_verified": true,
+  "search_result_obtained": false,
+  "failure_disclosed_in_visible_answer": false,
+  "actual_tool_error_status": 403
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "native17_ota_trust_continuity",
+  "native16_and_native17_trusted_runtime_public_key_equal": true,
+  "public_key_sha256": "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069",
+  "runtime_signature_verified_by_same_key": true,
+  "android_package_signer_also_equal": true,
+  "key_rotated": false,
+  "phone_mutated": false
+}

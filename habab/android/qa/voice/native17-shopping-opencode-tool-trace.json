@@ -1,0 +1,87 @@
+{
+  "kind": "native17_shopping_exact_opencode_turn_trace",
+  "qa_user_created": 1792932004329,
+  "same_exact_synthetic_qa_turn": true,
+  "phone_visible_elapsed_ms": 74159,
+  "permission_all_allow": true,
+  "exa_enabled": true,
+  "assistant_metadata": [
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "tool-calls",
+      "completed": true,
+      "duration_ms": 22732,
+      "tokens": {
+        "total": 79202,
+        "input": 79150,
+        "output": 52,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      },
+      "error_type": null
+    },
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "tool-calls",
+      "completed": true,
+      "duration_ms": 11111,
+      "tokens": {
+        "total": 79334,
+        "input": 2392,
+        "output": 88,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 76854
+        }
+      },
+      "error_type": null
+    },
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "stop",
+      "completed": true,
+      "duration_ms": 38788,
+      "tokens": {
+        "total": 79460,
+        "input": 2561,
+        "output": 53,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 76846
+        }
+      },
+      "error_type": null
+    }
+  ],
+  "tools": [
+    {
+      "tool": "bash",
+      "status": "completed",
+      "duration_ms": 225,
+      "output_bytes": 100,
+      "command_targets_exact_todo": true,
+      "command_mentions_add_item": false,
+      "output_contains_own_qa_uid": false
+    },
+    {
+      "tool": "bash",
+      "status": "completed",
+      "duration_ms": 293,
+      "output_bytes": 195,
+      "command_targets_exact_todo": true,
+      "command_mentions_add_item": true,
+      "output_contains_own_qa_uid": false
+    }
+  ],
+  "raw_environment_or_credentials_persisted": false,
+  "raw_conversation_or_user_items_persisted": false,
+  "model_request_sent_by_inspector": false
+}

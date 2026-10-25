@@ -1,0 +1,16 @@
+{
+  "kind": "native17_android_background_prerequisites_readonly",
+  "observedAtUnix": 1792931435,
+  "package": "ru.habab.home",
+  "versionCode17": true,
+  "permissions": {
+    "RECORD_AUDIO": true
+  },
+  "batteryOptimizationWhitelist": true,
+  "serverServicePresent": true,
+  "voiceServicePresent": true,
+  "foregroundServiceFlagPresent": true,
+  "settingsChanged": false,
+  "rawDumpsPersisted": false,
+  "longDurationOrRebootAcceptance": "NOT_RUN"
+}

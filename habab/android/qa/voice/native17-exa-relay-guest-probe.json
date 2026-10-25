@@ -1,0 +1,44 @@
+{
+  "kind": "native17_guest_exa_relay_transport_probe",
+  "model_calls": false,
+  "phone_settings_changed": false,
+  "opencode_client_integrated": false,
+  "checks": [
+    {
+      "path": "/mcp/exa/capabilities",
+      "method": "capabilities",
+      "status": 200,
+      "responseBytes": 114,
+      "durationMs": 200,
+      "capabilities": {
+        "protocol": "habab-exa-mcp-relay-v1",
+        "mcp_url": "/mcp/exa",
+        "tools": [
+          "web_search_exa",
+          "get_code_context_exa"
+        ]
+      }
+    },
+    {
+      "path": "/mcp/exa",
+      "method": "initialize",
+      "status": 200,
+      "responseBytes": 1077,
+      "durationMs": 1170,
+      "jsonrpcSuccess": true
+    },
+    {
+      "path": "/mcp/exa",
+      "method": "tools/list",
+      "status": 200,
+      "responseBytes": 2821,
+      "durationMs": 363,
+      "jsonrpcSuccess": true,
+      "tools": [
+        "web_search_exa",
+        "get_code_context_exa"
+      ]
+    }
+  ],
+  "outcome": "PASS_PHONE_GUEST_PUBLIC_RELAY_TRANSPORT"
+}

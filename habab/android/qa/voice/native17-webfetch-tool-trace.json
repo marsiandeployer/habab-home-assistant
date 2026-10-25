@@ -1,0 +1,97 @@
+{
+  "kind": "native17_actual_webfetch_tool_trace",
+  "exact_qa_turn_matched": true,
+  "qa_user_created": 1792925975066,
+  "permission_all_allow": true,
+  "exa_enabled": true,
+  "assistant_metadata": [
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "tool-calls",
+      "completed": true,
+      "error_type": null,
+      "duration_ms": 8137,
+      "tokens": {
+        "total": 63690,
+        "input": 63661,
+        "output": 29,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      }
+    },
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "tool-calls",
+      "completed": true,
+      "error_type": null,
+      "duration_ms": 26116,
+      "tokens": {
+        "total": 77587,
+        "input": 77478,
+        "output": 109,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 0
+        }
+      }
+    },
+    {
+      "provider": "habab-habab",
+      "model": "gemini-3.1-flash-lite",
+      "finish": "stop",
+      "completed": true,
+      "error_type": null,
+      "duration_ms": 46338,
+      "tokens": {
+        "total": 77792,
+        "input": 2885,
+        "output": 66,
+        "reasoning": 0,
+        "cache": {
+          "write": 0,
+          "read": 74841
+        }
+      }
+    }
+  ],
+  "tools": [
+    {
+      "tool": "webfetch",
+      "status": "completed",
+      "output_bytes": 39531,
+      "output_sha256": "760d35e99b77320d4b4a686b4e401c11a97303f4c2d73c323a89d3656c597e96",
+      "contains_expected_minimum_version": false,
+      "duration_ms": 1083,
+      "url_host": "github.com",
+      "expected_official_url": true
+    },
+    {
+      "tool": "task",
+      "status": "completed",
+      "output_bytes": 486,
+      "output_sha256": "81c0d64bc4b22d0b9b76786e952207821586ddd96fc71865599334583da38403",
+      "contains_expected_minimum_version": true,
+      "duration_ms": 17648,
+      "subagent_type": "explore"
+    }
+  ],
+  "webfetch_completed": true,
+  "raw_environment_or_credentials_persisted": false,
+  "raw_conversation_persisted": false,
+  "model_request_sent_by_inspector": false,
+  "delegated_child_session_count": 1,
+  "delegated_child_tools": [
+    {
+      "tool": "read",
+      "status": "completed",
+      "output_bytes": 53781,
+      "contains_expected_minimum_version": true
+    }
+  ]
+}
