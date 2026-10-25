@@ -280,6 +280,9 @@ function pcm16Base64(samples) {
   return btoa(binary);
 }
 
+const MAX_GEMINI_FRAME_BYTES = 256 * 1024;
+const TRANSCRIPT_DRAIN_TIMEOUT_MS = 5000;
+
 function decodeBase64(value) {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
@@ -307,6 +310,11 @@ export class BrowserGeminiVoice {
     this.responseNumber = 0;
     this.transcriptNumber = 0;
     this.transcriptQueue = Promise.resolve();
+    this.transcriptDrainTimeoutMs = TRANSCRIPT_DRAIN_TIMEOUT_MS;
+    this.transcriptDrainAborted = false;
+    this.transcriptWriteFailed = false;
+    this.messageQueue = Promise.resolve();
+    this.messageGeneration = 0;
     this.canonicalFollowupPending = false;
     this.currentInputLength = 0;
   }
@@ -329,6 +337,8 @@ export class BrowserGeminiVoice {
       throw { code: "browserVoiceFailed" };
     }
     this.socket = new WebSocket(this.session.websocket_url);
+    const messageGeneration = ++this.messageGeneration;
+    this.socket.binaryType = "arraybuffer";
     this.expiryTimer = setTimeout(() => {
       this.onEvent({ type: "expired" });
       void this.finish();
@@ -353,17 +363,49 @@ export class BrowserGeminiVoice {
         } catch (_) { this.fail({ code: "browserVoiceFailed" }); }
       };
       this.socket.onmessage = (event) => {
-        if (this.closed || typeof event.data !== "string") return;
-        let message;
-        try { message = JSON.parse(event.data); }
-        catch (_) { this.fail({ code: "browserVoiceFailed" }); return; }
-        void this.receive(message);
+        this.queueSocketMessage(event.data, messageGeneration);
       };
       this.socket.onerror = () => this.fail({ code: "browserVoiceFailed" });
       this.socket.onclose = () => {
         if (!this.closed) this.fail({ code: "browserVoiceFailed" });
       };
     });
+  }
+
+  queueSocketMessage(data, generation) {
+    if (this.closed || generation !== this.messageGeneration) return;
+    this.messageQueue = this.messageQueue.then(async () => {
+      if (this.closed || generation !== this.messageGeneration) return;
+      const text = await this.decodeSocketMessage(data);
+      if (this.closed || generation !== this.messageGeneration) return;
+      await this.receive(JSON.parse(text));
+    }).catch(() => {
+      if (!this.closed && generation === this.messageGeneration) {
+        this.fail({ code: "browserVoiceFailed" });
+      }
+    });
+  }
+
+  async decodeSocketMessage(data) {
+    let bytes;
+    if (typeof data === "string") {
+      if (data.length > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      bytes = new TextEncoder().encode(data);
+    } else if (data instanceof ArrayBuffer) {
+      if (data.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      bytes = new Uint8Array(data);
+    } else if (ArrayBuffer.isView(data)) {
+      if (data.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    } else if (typeof Blob === "function" && data instanceof Blob) {
+      if (data.size > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      bytes = new Uint8Array(await data.arrayBuffer());
+      if (bytes.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+    } else {
+      throw new Error("invalid_frame");
+    }
+    if (bytes.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+    return new TextDecoder("utf-8", {fatal: true}).decode(bytes);
   }
 
   async receive(message) {
@@ -535,15 +577,30 @@ export class BrowserGeminiVoice {
   }
 
   recordTranscript(role, text) {
-    if (!this.accepting || this.closed || !text.trim()) return;
+    if (!this.accepting || this.closed || this.transcriptDrainAborted || !text.trim()) return;
     const random = globalThis.crypto?.randomUUID?.().replaceAll("-", "");
     const eventId = `browser_${random || `${Date.now().toString(36)}_${++this.transcriptNumber}`}`;
+    const event = {role, text, event_id: eventId};
     this.transcriptQueue = this.transcriptQueue.then(() => {
-      if (this.closed) return;
-      return this.onTranscript({ role, text, event_id: eventId });
+      if (this.transcriptDrainAborted) return;
+      return this.onTranscript(event);
     }).catch(() => {
+      this.transcriptWriteFailed = true;
       if (!this.closed) this.onEvent({ type: "error", code: "browserVoiceFailed" });
     });
+  }
+
+  async drainTranscriptQueue() {
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), this.transcriptDrainTimeoutMs);
+    });
+    const drained = await Promise.race([
+      this.transcriptQueue.then(() => !this.transcriptWriteFailed), timeout,
+    ]);
+    clearTimeout(timer);
+    if (!drained) this.transcriptDrainAborted = true;
+    return drained;
   }
 
   async handleTool(call) {
@@ -605,6 +662,7 @@ export class BrowserGeminiVoice {
     if (this.finishPromise) return this.finishPromise;
     this.closed = true;
     this.accepting = false;
+    this.messageGeneration++;
     clearTimeout(this.expiryTimer);
     clearTimeout(this.credentialTimer);
     this.expiryTimer = undefined;
@@ -623,12 +681,14 @@ export class BrowserGeminiVoice {
     this.playbackContext = undefined;
     this.finishPromise = (async () => {
       let stopError;
+      const transcriptsDrained = await this.drainTranscriptQueue();
+      if (!transcriptsDrained) this.onEvent({ type: "error", code: "browserVoiceFailed" });
       try { await this.onStop(this.session.session_id); }
       catch (_) { stopError = true; }
       if (cue) {
         try { await this.playCue("end"); } catch (_) { /* Stop is already gated; cue failure is non-fatal. */ }
       }
-      this.onEvent({ type: "ended", stopError });
+      this.onEvent({ type: "ended", stopError, transcriptError: !transcriptsDrained });
     })();
     return this.finishPromise;
   }

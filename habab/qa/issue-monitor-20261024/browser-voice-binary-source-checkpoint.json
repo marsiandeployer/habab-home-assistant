@@ -1,0 +1,25 @@
+{
+  "status": "SOURCE_TESTS_PASS_LIVE_NOT_RUN",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/frontend/voice.js": "9e2bdf68820959558469a4756e81e47ca60bb3ae7f4253b12fa7511ee188ca51",
+    "habab/distribution/tests/test-voice-lifecycle.mjs": "ec3c5281807add14afd7ab3a02e64b4df6431568c45b9009d467ff1b5cfe5c7f"
+  },
+  "red_reproduction": {
+    "voice_tests_passed": 19,
+    "voice_tests_failed": 5
+  },
+  "root_independent_after_fix": {
+    "voice_lifecycle": 24,
+    "chat_lifecycle": 17,
+    "exit_code": 0
+  },
+  "invariants": [
+    "Bounded UTF-8 decode for text, ArrayBuffer and Blob Gemini JSON frames",
+    "Preserve receive order and invalidate queued decode after finish",
+    "PCM microphone and socket stop synchronously",
+    "Drain accepted transcript writes before lease stop and END cue, with bounded failure"
+  ],
+  "live_WS": "NOT_RUN",
+  "physical_microphone_and_audibility": "NOT_RUN",
+  "gateway_restart": "NOT_PERFORMED"
+}

@@ -385,6 +385,124 @@ test("browser Gemini auth is the first WS frame and capture waits for setupCompl
   assert.deepEqual(h.state.cues, ["end"]);
 });
 
+test("browser Gemini accepts binary JSON setup and turn frames in order", async (t) => {
+  const h = browserVoiceHarness(t);
+  const started = h.voice.start();
+  const socket = h.state.sockets[0];
+  socket.readyState = 1;
+  socket.onopen();
+  const encode = (message) => new TextEncoder().encode(JSON.stringify(message)).buffer;
+  socket.onmessage({data: encode({setupComplete: {}})});
+  const connected = await Promise.race([
+    started.then(() => true, () => false),
+    new Promise((resolve) => setTimeout(() => resolve(false), 25)),
+  ]);
+  if (!connected) {
+    const closing = h.voice.close();
+    await started.catch(() => {});
+    await closing;
+  }
+  assert.equal(connected, true, "binary setupComplete should start microphone capture");
+  assert.equal(h.state.captureCount, 1);
+
+  socket.onmessage({data: encode({voiceActivity: {type: "ACTIVITY_START"},
+    serverContent: {inputTranscription: {text: "Привет"}}})});
+  socket.onmessage({data: encode({voiceActivity: {type: "ACTIVITY_END"}})});
+  await h.voice.messageQueue;
+  await h.voice.transcriptQueue;
+  assert.deepEqual(h.state.transcripts.map((event) => [event.role, event.text]), [["user", "Привет"]]);
+
+  socket.onmessage({data: encode({serverContent: {
+    modelTurn: {parts: [{inlineData: {mimeType: "audio/pcm;rate=24000", data: "AQI="}}]},
+    outputTranscription: {text: "Здравствуйте"}, turnComplete: true,
+  }})});
+  await h.voice.messageQueue;
+  for (const source of h.state.sources) source.onended?.();
+  await h.voice.transcriptQueue;
+  assert.deepEqual(h.state.transcripts.map((event) => [event.role, event.text]), [
+    ["user", "Привет"], ["assistant", "Здравствуйте"],
+  ]);
+  await h.voice.finish();
+});
+
+test("browser Gemini rejects malformed and oversized binary frames without exposing data", async (t) => {
+  for (const data of [new Uint8Array([0xff]).buffer, new ArrayBuffer(256 * 1024 + 1)]) {
+    const h = browserVoiceHarness(t);
+    const socket = await connectBrowserVoice(h);
+    socket.onmessage({data});
+    await h.voice.messageQueue;
+    assert(h.state.events.some((event) => event.type === "error" && event.code === "browserVoiceFailed"));
+    assert.equal(h.voice.closed, true);
+    assert(!JSON.stringify(h.state.events).includes("\u00ff"));
+  }
+});
+
+test("browser Gemini ignores a delayed binary frame after stop", async (t) => {
+  const h = browserVoiceHarness(t);
+  const started = h.voice.start();
+  const socket = h.state.sockets[0];
+  socket.readyState = 1;
+  socket.onopen();
+  let releaseFrame;
+  class DelayedBlob extends Blob {
+    arrayBuffer() {
+      return new Promise((resolve) => {
+        releaseFrame = async () => resolve(await super.arrayBuffer());
+      });
+    }
+  }
+  socket.onmessage({data: new DelayedBlob([JSON.stringify({setupComplete: {}})])});
+  await new Promise(setImmediate);
+  const ending = h.voice.close();
+  await assert.rejects(started);
+  releaseFrame();
+  await ending;
+  await h.voice.messageQueue;
+  assert.equal(h.state.captureCount || 0, 0);
+  assert.deepEqual(h.state.events.filter((event) => event.type === "ready"), []);
+});
+
+test("browser END drains accepted transcript writes before lease stop and cue", async (t) => {
+  const h = browserVoiceHarness(t);
+  await connectBrowserVoice(h);
+  const sequence = [];
+  let releaseFirst;
+  let writeCount = 0;
+  h.voice.onTranscript = async (event) => {
+    writeCount++;
+    sequence.push(`transcript-${writeCount}-${event.text}-start`);
+    if (writeCount === 1) await new Promise((resolve) => { releaseFirst = resolve; });
+    sequence.push(`transcript-${writeCount}-${event.text}-done`);
+  };
+  h.voice.recordTranscript("user", "first");
+  await new Promise(setImmediate);
+  h.voice.recordTranscript("assistant", "last accepted line");
+  const ending = h.voice.finish();
+  assert.equal(h.voice.accepting, false);
+  assert.deepEqual(h.state.stops, []);
+  assert.deepEqual(h.state.cues, []);
+  releaseFirst();
+  await ending;
+  assert.deepEqual(sequence, [
+    "transcript-1-first-start", "transcript-1-first-done",
+    "transcript-2-last accepted line-start", "transcript-2-last accepted line-done",
+  ]);
+  assert.deepEqual(h.state.cues, ["end"]);
+});
+
+test("browser END reports bounded transcript drain failure and still stops", async (t) => {
+  const h = browserVoiceHarness(t);
+  await connectBrowserVoice(h);
+  h.voice.transcriptDrainTimeoutMs = 10;
+  h.voice.onTranscript = () => new Promise(() => {});
+  h.voice.recordTranscript("assistant", "accepted before end");
+  await new Promise(setImmediate);
+  await h.voice.finish();
+  assert.deepEqual(h.state.stops, ["voice2_test"]);
+  assert.deepEqual(h.state.cues, ["end"]);
+  assert(h.state.events.some((event) => event.type === "error" && event.code === "browserVoiceFailed"));
+});
+
 test("browser transcripts journal recognized fragments once and suppress canonical tool follow-up", async (t) => {
   const h = browserVoiceHarness(t);
   const socket = await connectBrowserVoice(h);
@@ -393,6 +511,7 @@ test("browser transcripts journal recognized fragments once and suppress canonic
     serverContent: {inputTranscription: {text: "Проверь свет"}},
   })});
   socket.onmessage({data: JSON.stringify({voiceActivity: {type: "ACTIVITY_END"}})});
+  await h.voice.messageQueue;
   await h.voice.receive({toolCall: {functionCalls: [{id: "call-1", name: "ask_home_assistant", args: {text: "Проверь свет"}}]},
     serverContent: {generationComplete: true}});
   await new Promise(setImmediate);
@@ -408,6 +527,7 @@ test("browser transcripts journal recognized fragments once and suppress canonic
     modelTurn: {parts: [{inlineData: {mimeType: "audio/pcm;rate=24000", data: "AQI="}}]},
     outputTranscription: {text: "Результат проверки"}, turnComplete: true,
   }})});
+  await h.voice.messageQueue;
   await new Promise(setImmediate);
   for (const source of h.state.sources) source.onended?.();
   await new Promise(setImmediate);
@@ -520,6 +640,7 @@ test("browser end gates capture synchronously and plays END only after lease sto
   assert.equal(socket.readyState, 3);
   staleCapture({data: new Int16Array([3, 4])});
   assert.equal(socket.sent.length, 1, "no PCM can leave after END begins");
+  await new Promise(setImmediate);
   assert.deepEqual(stopStarted, ["voice2_test"]);
   assert.deepEqual(h.state.cues, [], "END cue waits until the stop request settles");
   finishStop();
