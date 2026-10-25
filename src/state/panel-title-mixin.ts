@@ -5,7 +5,11 @@ import type { Constructor, HomeAssistant } from "../types";
 import type { HassBaseEl } from "./hass-base-mixin";
 
 const setPageTitle = (title: string | undefined) => {
-  document.title = title ? `${title} – Home Assistant` : "Home Assistant";
+  const brand =
+    document.documentElement.dataset.hababDemo === "true"
+      ? "Habab Home"
+      : "Home Assistant";
+  document.title = title ? `${title} – ${brand}` : brand;
 };
 
 const getRoutePath = (): string =>
