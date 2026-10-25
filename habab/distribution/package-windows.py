@@ -18,10 +18,14 @@ names = ['Dockerfile', '.dockerignore', 'docker-entrypoint.sh', 'habab-ha.py', '
          'install-native-frontend.py', 'native-frontend-release.json',
          'install-opencode-volume.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
          'source_provenance.py', 'config/configuration.yaml']
-for directory in ('src/habab_home', 'src/habab_telegram', 'telegram-agent'):
+for directory in ('src/habab_home', 'src/habab_telegram', 'src/habab_yandex_speech',
+                  'src/idigital_sms', 'telegram-agent'):
     names += [str(p.relative_to(root)).replace('\\', '/') for p in (root / directory).rglob('*')
               if p.is_file() and p.suffix in {'.py', '.js', '.mjs', '.json', '.svg', '.md'}
               and not {'__pycache__', 'node_modules', 'test', 'tests'}.intersection(p.parts)]
+# Docker copies this one integration resource; keep it explicit instead of
+# widening the source-file allowlist to every YAML file.
+names.append('src/idigital_sms/services.yaml')
 buffer = io.BytesIO()
 release_data = json.loads((root / 'release.json').read_text(encoding='utf-8'))
 revision, dirty = resolve_source_provenance(root, release_data)
