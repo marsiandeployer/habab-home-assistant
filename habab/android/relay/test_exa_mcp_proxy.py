@@ -330,15 +330,69 @@ class ExaMcpProxyTests(unittest.IsolatedAsyncioTestCase):
     async def test_http_429_is_sanitized_and_retries_header_is_filtered(self):
         self.upstream_status = 429
         self.response_payload = {'error': {'message': 'private upstream text'}}
-        response = await self.post_rpc(self.rpc('tools/call', {'name': 'web_search_exa',
-                                                               'arguments': {'query': 'test',
-                                                                             'objective': 'find sources'}}))
+        with patch('exa_mcp_proxy._LOGGER.warning') as log_failure:
+            response = await self.post_rpc(self.rpc('tools/call', {'name': 'web_search_exa',
+                                                                   'arguments': {'query': 'private-query-sentinel',
+                                                                                 'objective': 'private-objective-sentinel'}}),
+                                          headers=self.rpc_headers(**{'Mcp-Session-Id': 'private-session-sentinel'}))
         self.assertEqual(response.status, 429)
         self.assertEqual(response.headers.get('Retry-After'), '9')
         self.assertNotIn('WWW-Authenticate', response.headers)
         payload = await response.json()
         self.assertEqual(payload['error']['message'], 'Exa upstream request failed')
         self.assertNotIn('private upstream text', json.dumps(payload))
+        self.assertEqual(log_failure.call_count, 1)
+        log_values = log_failure.call_args.args
+        self.assertEqual(log_values[1:4], ('upstream_http_error', 429, 'web_search_exa'))
+        self.assertEqual(log_values[4], 1)
+        self.assertIsInstance(log_values[5], int)
+        self.assertEqual(log_values[6], 9)
+        self.assertNotIn('private-query-sentinel', repr(log_values))
+        self.assertNotIn('private-objective-sentinel', repr(log_values))
+        self.assertNotIn('private-session-sentinel', repr(log_values))
+        self.assertNotIn('synthetic-service-key', repr(log_values))
+        self.assertNotIn('private upstream text', repr(log_values))
+
+    async def test_upstream_503_logs_safe_origin_category_and_duration(self):
+        self.upstream_status = 503
+        self.response_payload = {'error': {'message': 'private upstream text'}}
+        with patch('exa_mcp_proxy._LOGGER.warning') as log_failure:
+            response = await self.post_rpc(self.rpc('tools/call', {'name': 'web_search_exa',
+                                                                   'arguments': {'query': 'private-query-sentinel',
+                                                                                 'objective': 'private-objective-sentinel'}}))
+        self.assertEqual(response.status, 503)
+        self.assertEqual(log_failure.call_count, 1)
+        log_values = log_failure.call_args.args
+        self.assertEqual(log_values[0],
+                         'exa_relay_failure category=%s http_status=%d tool=%s inflight=%d duration_ms=%d retry_after=%s')
+        self.assertEqual(len(log_values), 7)
+        self.assertEqual(log_values[1:4], ('upstream_http_error', 503, 'web_search_exa'))
+        self.assertEqual(log_values[4], 1)
+        self.assertIsInstance(log_values[5], int)
+        self.assertEqual(log_values[6], '-')
+        for private_value in ('private-query-sentinel', 'private-objective-sentinel',
+                              'synthetic-service-key', 'private upstream text'):
+            self.assertNotIn(private_value, repr(log_values))
+
+    async def test_local_capacity_429_logs_distinct_safe_category(self):
+        self.proxy.inflight = 4
+        try:
+            with patch('exa_mcp_proxy._LOGGER.warning') as log_failure:
+                response = await self.post_rpc(self.rpc('tools/call', {'name': 'web_search_exa',
+                                                                       'arguments': {'query': 'private-query-sentinel',
+                                                                                     'objective': 'private-objective-sentinel'}}))
+            self.assertEqual(response.status, 429)
+            self.assertEqual(self.records, [])
+            self.assertEqual(log_failure.call_count, 1)
+            log_values = log_failure.call_args.args
+            self.assertEqual(log_values[1:4], ('local_inflight_limit', 429, 'web_search_exa'))
+            self.assertEqual(log_values[4], 4)
+            self.assertIsInstance(log_values[5], int)
+            self.assertEqual(log_values[6], '-')
+            self.assertNotIn('private-query-sentinel', repr(log_values))
+            self.assertNotIn('private-objective-sentinel', repr(log_values))
+        finally:
+            self.proxy.inflight = 0
 
     async def test_upstream_redirect_is_not_followed_and_error_is_sanitized(self):
         self.upstream_status = 302

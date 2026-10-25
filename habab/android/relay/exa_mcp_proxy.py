@@ -5,11 +5,13 @@ from datetime import date
 import hashlib
 import hmac
 import json
+import logging
 import math
 import os
 from pathlib import Path
 import re
 import stat
+import time
 
 from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
 
@@ -27,6 +29,7 @@ QUERY_MAX_CHARS = 4000
 OBJECTIVE_MAX_CHARS = 4096
 NUM_RESULTS_MAX = 25
 MCP_PROTOCOL_VERSION = re.compile(r'\d{4}-\d{2}-\d{2}\Z')
+_LOGGER = logging.getLogger(__name__)
 
 TOOL_REQUIREMENTS = {
     'web_search_exa': {'required': {'query', 'objective'}, 'properties': {'query', 'objective', 'numResults'}},
@@ -38,6 +41,22 @@ def jsonrpc_error(request_id, code, message, *, status=400, headers=None):
     return web.json_response({'jsonrpc': '2.0', 'id': request_id,
                               'error': {'code': code, 'message': message}},
                              status=status, headers=headers)
+
+
+def _failure_tool_name(payload):
+    params = payload.get('params') if isinstance(payload, dict) else None
+    name = params.get('name') if isinstance(params, dict) else None
+    return name if name in TOOL_NAMES else 'none'
+
+
+def _log_failure(category, status, tool, inflight, started_at, retry_after=None):
+    if not isinstance(retry_after, int) or isinstance(retry_after, bool) or retry_after < 0:
+        retry_after = '-'
+    _LOGGER.warning(
+        'exa_relay_failure category=%s http_status=%d tool=%s inflight=%d duration_ms=%d retry_after=%s',
+        category, status, tool, inflight, max(0, int((time.monotonic() - started_at) * 1000)),
+        retry_after,
+    )
 
 
 def _object_without_duplicate_keys(pairs):
@@ -274,6 +293,7 @@ class ExaMcpProxy:
                                  headers={'Cache-Control': 'no-store'})
 
     async def handle(self, request):
+        started_at = time.monotonic()
         if not self.authorized(request):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.query:
@@ -315,6 +335,7 @@ class ExaMcpProxy:
         if validation_error:
             code, message = validation_error
             return jsonrpc_error(request_id, code, message)
+        tool = _failure_tool_name(payload)
 
         upstream_headers = {
             'Accept': 'application/json, text/event-stream',
@@ -335,6 +356,7 @@ class ExaMcpProxy:
             upstream_headers['Mcp-Session-Id'] = session_ids[0]
 
         if self.inflight >= MAX_INFLIGHT:
+            _log_failure('local_inflight_limit', 429, tool, self.inflight, started_at)
             return jsonrpc_error(request_id, -32000, 'Exa relay is busy', status=429)
         self.inflight += 1
         try:
@@ -346,11 +368,15 @@ class ExaMcpProxy:
                 if upstream.status in (202, 204):
                     return web.Response(status=upstream.status, headers=response_headers)
                 if 300 <= upstream.status < 400:
+                    _log_failure('upstream_redirect', 502, tool, self.inflight, started_at)
                     return jsonrpc_error(request_id, -32000, 'Exa upstream redirect rejected', status=502)
                 if upstream.status >= 400:
                     error_headers = {'Cache-Control': 'no-store'}
                     if 'Retry-After' in response_headers:
                         error_headers['Retry-After'] = response_headers['Retry-After']
+                    retry_after = response_headers.get('Retry-After')
+                    _log_failure('upstream_http_error', upstream.status, tool, self.inflight,
+                                 started_at, int(retry_after) if retry_after is not None else None)
                     return jsonrpc_error(request_id, -32000, 'Exa upstream request failed',
                                          status=upstream.status, headers=error_headers)
                 content_type = upstream.headers.get('Content-Type', '').split(';', 1)[0].strip().lower()
@@ -360,45 +386,61 @@ class ExaMcpProxy:
                         async for block in upstream.content.iter_chunked(16384):
                             response_body.extend(block)
                             if len(response_body) > MAX_RESPONSE_BYTES:
+                                _log_failure('upstream_response_too_large', 502, tool,
+                                             self.inflight, started_at)
                                 return jsonrpc_error(request_id, -32000, 'Exa upstream response is too large', status=502)
                         try:
                             bounded = _rewrite_tool_catalog_sse(bytes(response_body))
                         except ValueError:
+                            _log_failure('upstream_tool_catalog_invalid', 502, tool,
+                                         self.inflight, started_at)
                             return jsonrpc_error(request_id, -32000, 'Exa tool catalog is incompatible', status=502)
                         if len(bounded) > MAX_RESPONSE_BYTES:
+                            _log_failure('upstream_response_too_large', 502, tool,
+                                         self.inflight, started_at)
                             return jsonrpc_error(request_id, -32000, 'Exa upstream response is too large', status=502)
                         response_headers['Content-Type'] = upstream.headers.get('Content-Type', 'text/event-stream')
                         return web.Response(body=bounded, status=upstream.status, headers=response_headers)
                     response_headers['Content-Type'] = upstream.headers.get('Content-Type', 'text/event-stream')
                     return await self._stream_sse(request, upstream, response_headers)
                 if content_type != 'application/json':
+                    _log_failure('upstream_content_type_invalid', 502, tool, self.inflight, started_at)
                     return jsonrpc_error(request_id, -32000, 'Invalid Exa upstream response', status=502)
                 payload_out = bytearray()
                 async for block in upstream.content.iter_chunked(65536):
                     payload_out.extend(block)
                     if len(payload_out) > MAX_RESPONSE_BYTES:
+                        _log_failure('upstream_response_too_large', 502, tool,
+                                     self.inflight, started_at)
                         return jsonrpc_error(request_id, -32000, 'Exa upstream response is too large', status=502)
                 try:
                     parsed = json.loads(payload_out)
                     if not isinstance(parsed, (dict, list)):
                         raise ValueError
                 except (ValueError, UnicodeError, TypeError):
+                    _log_failure('upstream_json_invalid', 502, tool, self.inflight, started_at)
                     return jsonrpc_error(request_id, -32000, 'Invalid Exa upstream response', status=502)
                 if isinstance(payload, dict) and payload.get('method') == 'tools/list':
                     try:
                         parsed = _bounded_tool_catalog(parsed)
                     except ValueError:
+                        _log_failure('upstream_tool_catalog_invalid', 502, tool,
+                                     self.inflight, started_at)
                         return jsonrpc_error(request_id, -32000, 'Exa tool catalog is incompatible', status=502)
                     payload_out = bytearray(json.dumps(parsed, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))
                     if len(payload_out) > MAX_RESPONSE_BYTES:
+                        _log_failure('upstream_response_too_large', 502, tool,
+                                     self.inflight, started_at)
                         return jsonrpc_error(request_id, -32000, 'Exa upstream response is too large', status=502)
                 response_headers['Content-Type'] = upstream.headers.get('Content-Type', 'application/json')
                 return web.Response(body=bytes(payload_out), status=upstream.status, headers=response_headers)
         except asyncio.CancelledError:
             raise
         except asyncio.TimeoutError:
+            _log_failure('upstream_timeout', 504, tool, self.inflight, started_at)
             return jsonrpc_error(request_id, -32000, 'Exa upstream timed out', status=504)
         except Exception:
+            _log_failure('upstream_transport_error', 502, tool, self.inflight, started_at)
             return jsonrpc_error(request_id, -32000, 'Exa upstream unavailable', status=502)
         finally:
             self.inflight -= 1
