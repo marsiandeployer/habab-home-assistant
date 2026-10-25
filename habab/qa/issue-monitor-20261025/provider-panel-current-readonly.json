@@ -1,0 +1,36 @@
+{
+  "checked_at": "2026-10-25T14:50:30Z",
+  "target": "owner-test /habab-ai",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "routes": [
+    "/owner-test",
+    "/habab-ai"
+  ],
+  "panel": {
+    "mounted": true,
+    "admin": true,
+    "ready": true,
+    "route": "/habab-ai"
+  },
+  "page_errors": [],
+  "http_error_responses": 0,
+  "failed_requests": [
+    {
+      "path": "/frontend_latest/54537.f4833c5913c76cf2.js",
+      "failure": "net::ERR_ABORTED"
+    }
+  ],
+  "prior_dom_exceptions": {
+    "status": "NOT_REPRODUCED",
+    "scope": "desktop-only"
+  },
+  "network_verdict": "NOT_FULL_NETWORK_PASS",
+  "network_note": "One frontend chunk request was aborted; this does not establish a full network pass.",
+  "provider_model_checks": "NOT_RUN",
+  "credentials_captured": false,
+  "response_bodies_captured": false,
+  "settings_mutated": false
+}

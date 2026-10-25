@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-10-25T14:51:29.561Z",
+  "zip_mode": "600",
+  "provider_key_lookup": true,
+  "control_password_lookup": true,
+  "zip_crc_valid": true,
+  "provider_key_absent": true,
+  "opencode_control_password_absent": true,
+  "zip_bytes": 12381,
+  "zip_sha256": "040198461d4f05368349041ff93d1fdcfa4aa4b31151c040532ffcae6f26f006",
+  "entry_count": 13,
+  "log_entry_count": 12,
+  "scope_kind": "home_assistant_instance",
+  "session_id_is_null": true,
+  "validation_status": "passed",
+  "zip_deleted": true
+}

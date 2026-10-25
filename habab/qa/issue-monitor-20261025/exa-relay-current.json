@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "2026-10-25T14:53:47Z",
+  "source_commit": "05393f8cd4223ca8793ddfcbc7c5e2074f84bafa",
+  "source_sha256": "8750a3cff17bcf3d905d9151147c5ac50ad8f8f1d87cf24cbd6e8c51d7fd56ba",
+  "release_id": "05393f8cd",
+  "declared_application_version": null,
+  "protocol": "habab-exa-mcp-relay-v1",
+  "pm2": {
+    "save_succeeded": true,
+    "saved_process_count": 35,
+    "live_process_count": 36,
+    "common_process_count": 35,
+    "common_cwd_or_script_mismatches": 0,
+    "saved_only_process_count": 0,
+    "live_only_processes": ["pm2-logrotate"],
+    "exa_pid": 495526,
+    "exa_status": "online",
+    "exa_release_path": "/root/.local/share/habab-exa-mcp-relay/releases/05393f8cd",
+    "voice_relay_pid": 286678,
+    "voice_relay_unchanged": true
+  },
+  "health": {
+    "http_status": 200,
+    "service_match": true,
+    "ok": true
+  },
+  "capability": {
+    "http_status": 200,
+    "protocol_match": true,
+    "mcp_url_match": true,
+    "required_tools_present": true,
+    "required_tool_count": 2
+  },
+  "direct_mcp_check": {
+    "initialize_http_status": 200,
+    "initialize_jsonrpc_success": true,
+    "session_header_present": true,
+    "initialized_notification_http_status": 202,
+    "tools_call_count": 1,
+    "tools_call_http_status": 200,
+    "tools_call_jsonrpc_success": true,
+    "is_error_field_present": false,
+    "is_error": null
+  }
+}
