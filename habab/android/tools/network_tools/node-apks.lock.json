@@ -1,0 +1,117 @@
+{
+  "alpineRelease": "3.24",
+  "architecture": "aarch64",
+  "nodeVersion": "24.18.1-r0",
+  "packages": {
+    "ada-libs-3.3.0-r0.apk": {
+      "bytes": 232253,
+      "sha256": "70dd9fe3d2e2153213a93f7a76cef202b2d939839696a7c4d8a4c97cb29cca04",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/ada-libs-3.3.0-r0.apk"
+    },
+    "brotli-libs-1.2.1-r0.apk": {
+      "bytes": 424994,
+      "sha256": "f802b9d5a329c216f02e73607cb8f662c434767e41686367ac0afcf6d0d45d64",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/brotli-libs-1.2.1-r0.apk"
+    },
+    "busybox-1.37.0-r31.apk": {
+      "bytes": 521974,
+      "sha256": "18e3490a6f024004b2b13dd4b54bd50ccd82894938023b2d4eab389a4edcba70",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/busybox-1.37.0-r31.apk"
+    },
+    "busybox-binsh-1.37.0-r31.apk": {
+      "bytes": 1547,
+      "sha256": "f3a1b2257cfa114ff20de05c665f380695385d589908bfc9af5768f39fef9ef5",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/busybox-binsh-1.37.0-r31.apk"
+    },
+    "c-ares-1.34.9-r0.apk": {
+      "bytes": 111041,
+      "sha256": "1bda7f36597a3f6d616b0c8bd25cd611299bf353ec5ee2ae102e97694885c2f1",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/c-ares-1.34.9-r0.apk"
+    },
+    "ca-certificates-20261020-r0.apk": {
+      "bytes": 130942,
+      "sha256": "6e3a34ed8b40718f9b9291319f7890638156a3d63807284a66d9672d3a8b1d3e",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/ca-certificates-20261020-r0.apk"
+    },
+    "icu-data-en-78.1-r0.apk": {
+      "bytes": 1025819,
+      "sha256": "3fa1dfb91a081f73c32a46f6ec054196caa37c9fd9569c433ddf6b29415dcf13",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/icu-data-en-78.1-r0.apk"
+    },
+    "icu-libs-78.1-r0.apk": {
+      "bytes": 1957437,
+      "sha256": "2393882dcf1e3f5be98696665c3468dd0d2a85cd568d50abd232729863df9738",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/icu-libs-78.1-r0.apk"
+    },
+    "libcrypto3-3.5.9-r0.apk": {
+      "bytes": 2286800,
+      "sha256": "2676a2b0b6e23ea2edccf3ee982b9842a665d52603d047de3d0a185dc316d983",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcrypto3-3.5.9-r0.apk"
+    },
+    "libgcc-15.2.0-r5.apk": {
+      "bytes": 66323,
+      "sha256": "369aaa6e9d099a737bad6dd3e6c2fe7bb1547ca26d22b94ee0411228f709b403",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libgcc-15.2.0-r5.apk"
+    },
+    "libssl3-3.5.9-r0.apk": {
+      "bytes": 373023,
+      "sha256": "20ac252b276d73f2c69c1d25f84537c7fba81caefc026c6be1094b394af2082e",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libssl3-3.5.9-r0.apk"
+    },
+    "libstdc++-15.2.0-r5.apk": {
+      "bytes": 908984,
+      "sha256": "2302e766d4e4926038ec166ecb85837ee884576115236ddb565e3a5fca4a11d7",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libstdc%2B%2B-15.2.0-r5.apk"
+    },
+    "musl-1.2.6-r3.apk": {
+      "bytes": 417730,
+      "sha256": "2e17864102278d9049c3a56f1bceed9e8cf287065617e579325123443daed8a5",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/musl-1.2.6-r3.apk"
+    },
+    "nghttp2-libs-1.70.0-r0.apk": {
+      "bytes": 63644,
+      "sha256": "7ef451f4dcdc065aa872c2f3c78b9d9bb4348caa5bcc70dee0c9e1fcf8e4c1fd",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/nghttp2-libs-1.70.0-r0.apk"
+    },
+    "nodejs-24.18.1-r0.apk": {
+      "bytes": 19197055,
+      "sha256": "73bb381ae2387f3e5ee661ee23628bb25e6aba5c7c82b54fd6e869be2edb4071",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/nodejs-24.18.1-r0.apk"
+    },
+    "simdjson-4.2.4-r0.apk": {
+      "bytes": 52111,
+      "sha256": "8e35f0644c8157c0d5ccdaaf001e70bb6640777b1b680e714e6a453d178829fd",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/simdjson-4.2.4-r0.apk"
+    },
+    "simdutf-9.0.0-r0.apk": {
+      "bytes": 101563,
+      "sha256": "336f5dfe8b0f784462cbccb4b58f71c15d64388c784ebca8568c8615b6f3c6b2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/simdutf-9.0.0-r0.apk"
+    },
+    "sqlite-libs-3.53.4-r0.apk": {
+      "bytes": 852532,
+      "sha256": "b39d8d73c1208838a436f2d481ba605b52a095f8d6ff781556eafc81cd1a13e9",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/sqlite-libs-3.53.4-r0.apk"
+    },
+    "ssl_client-1.37.0-r31.apk": {
+      "bytes": 5078,
+      "sha256": "fa2911d412b7922b17a07829914ee630c2cd7091ef558abd4329ffb6020f879d",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/ssl_client-1.37.0-r31.apk"
+    },
+    "zlib-1.3.2-r1.apk": {
+      "bytes": 54334,
+      "sha256": "1f77a542ac6634761b9fe38d8bdca19b154071dcfa25432e73f2bc8a0740a33f",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zlib-1.3.2-r1.apk"
+    },
+    "zstd-libs-1.5.7-r2.apk": {
+      "bytes": 365383,
+      "sha256": "2bb5136c89f5b0bbe1554c8915a3b520d5aa63ae2a51d4d821eb81698db5a818",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zstd-libs-1.5.7-r2.apk"
+    }
+  },
+  "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+  "schema": 1,
+  "sourceManifestSha256": "f33fdf0eb939847281b34e36f1805e22edced1ab6d00da6f20e5f7dfb785c809",
+  "sourceRelease": "2f94e2e4d62bf401",
+  "trustedPublicKeySha256": "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069"
+}

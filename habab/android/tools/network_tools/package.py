@@ -238,10 +238,12 @@ def install(rootfs, cache, helper_image=APK_HELPER):
         python_launcher = rootfs / 'usr/local/bin/habab-python-network'
         payload = rootfs / 'opt/habab-network-tools/python'
         count, payload_sha256 = _payload(payload)
+        expected_database = installed.get('installedDatabaseSha256',
+                                         installed.get('apkTransaction', {}).get('installedDatabaseAfterSha256'))
         if (not chromium.is_file()
                 or sha256(chromium) != installed.get('chromiumExecutableSha256')
                 or not package_database.is_file()
-                or sha256(package_database) != installed.get('apkTransaction', {}).get('installedDatabaseAfterSha256')
+                or sha256(package_database) != expected_database
                 or not browser_launcher.is_file()
                 or sha256(browser_launcher) != installed.get('browserLauncherSha256')
                 or not chromium_command.is_symlink()
@@ -285,6 +287,7 @@ def install(rootfs, cache, helper_image=APK_HELPER):
         'chromiumVersion': lock['alpine']['chromium']['version'],
         'chromiumExecutableSha256': sha256(chromium),
         'apkTransaction': transaction,
+        'installedDatabaseSha256': transaction.get('installedDatabaseAfterSha256'),
         'kurigramVersion': lock['kurigram']['version'],
         'kurigramWheelSha256': sha256(wheel),
         'coreDependencyVersions': dependencies,
@@ -297,4 +300,46 @@ def install(rootfs, cache, helper_image=APK_HELPER):
     marker_path.parent.mkdir(parents=True, exist_ok=True)
     marker_path.write_text(json.dumps(installed, sort_keys=True, indent=2) + '\n')
     pending_path.unlink(missing_ok=True)
+    return installed
+
+
+def finalize_package_database(rootfs, installed, node_packages):
+    """Record the final APK DB after the pinned Node transaction has run."""
+    marker_path = rootfs / MARKER
+    if not marker_path.is_file():
+        raise ValueError('Network-tools install receipt is missing before final APK database recording')
+    marker = json.loads(marker_path.read_text())
+    lock_sha256 = sha256(LOCK_PATH)
+    if marker.get('lockSha256') != lock_sha256 or installed.get('lockSha256') != lock_sha256:
+        raise ValueError('Network-tools install receipt lock changed before final APK database recording')
+    database = rootfs / 'lib/apk/db/installed'
+    if not database.is_file():
+        raise ValueError('Final APK database is missing')
+    digest = sha256(database)
+    transaction_hash = marker.get('apkTransaction', {}).get('installedDatabaseAfterSha256')
+    if (not transaction_hash
+            or installed.get('apkTransaction', {}).get('installedDatabaseAfterSha256') != transaction_hash):
+        raise ValueError('Chromium transaction database hash is missing')
+    node_lock = json.loads((TOOLS / 'node-apks.lock.json').read_text())
+    expected_node = node_lock['packages']['nodejs-' + node_lock['nodeVersion'] + '.apk']['sha256']
+    if node_packages.get('nodejs-' + node_lock['nodeVersion'] + '.apk') != expected_node:
+        raise ValueError('Final APK database lacks the pinned Node package inventory')
+    records = {}
+    for block in database.read_text().split('\n\n'):
+        fields = {line[0]: line[2:] for line in block.splitlines()
+                  if len(line) > 2 and line[1] == ':'}
+        if fields.get('P'):
+            records[fields['P']] = fields
+    node = records.get('nodejs', {})
+    chromium = records.get('chromium', {})
+    if (node.get('V') != node_lock['nodeVersion'] or node.get('A') != node_lock['architecture']
+            or chromium.get('V') != installed.get('chromiumVersion')):
+        raise ValueError('Final APK database does not contain pinned Node and Chromium packages')
+    inventory_hash = hashlib.sha256(json.dumps(
+        node_packages, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    marker['installedDatabaseSha256'] = digest
+    marker['nodePackagesSha256'] = inventory_hash
+    marker_path.write_text(json.dumps(marker, sort_keys=True, indent=2) + '\n')
+    installed['installedDatabaseSha256'] = digest
+    installed['nodePackagesSha256'] = inventory_hash
     return installed

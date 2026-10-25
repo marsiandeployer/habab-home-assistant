@@ -19,11 +19,15 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import uuid
+import urllib.parse
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT.parent / 'distribution'
 IMAGE = 'ghcr.io/home-assistant/home-assistant@sha256:1edf9ce6c140826cdfcd6358802cf3466e38045cd7ed62ccf42c78980ff937ae'
+NODE_APK_HELPER = 'ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4'
+NODE_APK_REPOSITORY = 'https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64'
 
 
 def sha256(path):
@@ -116,26 +120,86 @@ def install_opencode(rootfs, cache):
     return record['version'], sha256(destination / 'opencode')
 
 
-def install_node(rootfs, cache):
-    """Fetch foreign Alpine packages on an ephemeral amd64 helper, never run ARM."""
+def install_node(rootfs, cache, helper_image, network_tools=False):
+    """Install hash-pinned foreign Alpine packages through the guest APK database."""
+    lock_path = ROOT / 'tools/network_tools/node-apks.lock.json'
+    lock = json.loads(lock_path.read_text())
+    if (lock.get('schema') != 1 or lock.get('architecture') != 'aarch64'
+            or lock.get('repository') != NODE_APK_REPOSITORY
+            or lock.get('nodeVersion') != '24.18.1-r0'):
+        raise ValueError('Unsupported pinned Node APK lock')
+    if helper_image != NODE_APK_HELPER:
+        raise ValueError('Unexpected Node APK resolver image pin')
+    release = (rootfs / 'etc/alpine-release').read_text().strip().split('.')
+    if release[:2] != lock['alpineRelease'].split('.'):
+        raise ValueError('Pinned Node APKs require Alpine ' + lock['alpineRelease'])
     packages = cache / 'node-apks'
     packages.mkdir(exist_ok=True)
-    # The helper uses the matching, pinned image index's amd64 member.
-    amd64 = 'ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4'
-    if not list(packages.glob('nodejs-*.apk')):
-        subprocess.run(['docker', 'run', '--rm', '--platform', 'linux/amd64', '--entrypoint', '/bin/sh',
-                        '-v', str(packages) + ':/out', '-v', str(rootfs / 'etc/apk/keys') + ':/etc/apk/keys:ro', amd64, '-ec',
-                        'apk --arch aarch64 update\nexec apk fetch --recursive --arch aarch64 --output /out nodejs=24.18.1-r0'], check=True)
-    if not list(packages.glob('nodejs-24.18.1-r0.apk')):
-        raise ValueError('Pinned ARM64 Node package was not fetched')
-    inventory = {}
-    for package in sorted(packages.glob('*.apk')):
-        inventory[package.name] = sha256(package)
-        # APK v2 is concatenated gzip streams. tar --ignore-zeros reads the data
-        # after the signature/control archives. Do not run package scripts.
-        subprocess.run(['tar', '--warning=no-unknown-keyword', '--ignore-zeros', '-xzf', str(package),
-                        '--exclude=./.*', '--exclude=.PKGINFO', '--exclude=.SIGN.*',
-                        '--no-same-owner', '-C', str(rootfs)], check=True)
+    records = lock['packages']
+    if not isinstance(records, dict) or not records:
+        raise ValueError('Pinned Node APK package list is empty')
+    unexpected = {path.name for path in packages.glob('*.apk')} - set(records)
+    if unexpected:
+        raise ValueError('Unexpected files in pinned Node APK cache: ' + ', '.join(sorted(unexpected)))
+    for name, record in sorted(records.items()):
+        if (Path(name).name != name or not name.endswith('.apk')
+                or not re.fullmatch(r'[0-9a-f]{64}', record.get('sha256', ''))
+                or not isinstance(record.get('bytes'), int)
+                or record.get('url') != lock['repository'].rstrip('/') + '/' + urllib.parse.quote(name)):
+            raise ValueError('Malformed pinned Node APK record: ' + name)
+        package = packages / name
+        if package.is_symlink():
+            raise ValueError('Pinned Node APK cache contains a symlink: ' + name)
+        if not package.exists():
+            partial = package.with_suffix(package.suffix + '.partial')
+            try:
+                urllib.request.urlretrieve(record['url'], partial)
+                if partial.stat().st_size != record['bytes'] or sha256(partial) != record['sha256']:
+                    raise ValueError('Pinned Node APK checksum mismatch: ' + name)
+                partial.replace(package)
+            finally:
+                partial.unlink(missing_ok=True)
+        if package.stat().st_size != record['bytes'] or sha256(package) != record['sha256']:
+            raise ValueError('Cached Node APK checksum mismatch: ' + name)
+
+    # Chromium installs icu-data-full from its own pinned transaction. Installing
+    # icu-data-en alongside it is an APK conflict, so leave that package out here.
+    selected = [(name, record) for name, record in sorted(records.items())
+                if not (network_tools and name.startswith('icu-data-en-'))]
+    container_name = 'habab-node-apks-' + uuid.uuid4().hex
+    command = ['docker', 'run', '--rm', '--name', container_name, '--network', 'none',
+               '--platform', 'linux/amd64', '--entrypoint', '/bin/sh',
+               '-v', str(rootfs) + ':/target', '-v', str(packages) + ':/node-apks:ro',
+               helper_image, '-ec', 'exec "$@"', 'apk']
+    apk = ['apk', '--root', '/target', '--arch', 'aarch64', '--no-network',
+           '--repositories-file', '/dev/null', '--no-scripts', 'add']
+    command.extend(apk + ['/node-apks/' + name for name, _ in selected])
+    try:
+        subprocess.run(command, check=True, timeout=300)
+    finally:
+        try:
+            cleanup = subprocess.run(['docker', 'rm', '-f', container_name], check=False,
+                                     capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            cleanup = subprocess.run(['docker', 'rm', '-f', container_name], check=False,
+                                     capture_output=True, text=True, timeout=30)
+        if cleanup.returncode and 'No such container' not in cleanup.stderr:
+            raise RuntimeError('Unable to remove the Node APK helper container ' + container_name)
+
+    db = rootfs / 'lib/apk/db/installed'
+    installed = {}
+    for block in db.read_text().split('\n\n'):
+        fields = {line[0]: line[2:] for line in block.splitlines()
+                  if len(line) > 2 and line[1] == ':'}
+        if fields.get('P'):
+            installed[fields['P']] = fields
+    node = installed.get('nodejs', {})
+    if node.get('V') != lock['nodeVersion'] or node.get('A') != lock['architecture']:
+        raise ValueError('Pinned Node package was not registered by the APK transaction')
+    expected_icu = 'icu-data-full' if network_tools else 'icu-data-en'
+    if expected_icu not in installed:
+        raise ValueError('Pinned Node APK transaction lacks ' + expected_icu)
+    inventory = {name: record['sha256'] for name, record in selected}
     modules = rootfs / 'opt/habab-telegram/node_modules'
     modules.mkdir(parents=True, exist_ok=True)
     link = modules / 'noxon-telegram'
@@ -209,6 +273,14 @@ def install_network_tools(rootfs, cache, helper_image):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.install(rootfs, cache, helper_image)
+
+
+def finalize_network_tools_package_database(rootfs, network_tools, node_packages):
+    spec = importlib.util.spec_from_file_location(
+        'android_network_tools', ROOT / 'tools/network_tools/package.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.finalize_package_database(rootfs, network_tools, node_packages)
 
 
 def validate_source_revision(source_revision):
@@ -286,12 +358,14 @@ def main():
         base.unlink()
     inventory = copy_sources(rootfs)
     version, opencode_digest = install_opencode(rootfs, cache)
-    node = install_node(rootfs, cache)
     native_frontend = install_frontend(rootfs, cache)
     network_tools = None
+    helper_image = NODE_APK_HELPER
     if args.network_tools:
-        helper_image = 'ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4'
         network_tools = install_network_tools(rootfs, cache, helper_image)
+    node = install_node(rootfs, cache, helper_image, network_tools=args.network_tools)
+    if network_tools is not None:
+        network_tools = finalize_network_tools_package_database(rootfs, network_tools, node)
     launcher = rootfs / 'usr/local/share/habab-android/launch.py'
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_bytes((ROOT / 'runtime/launch.py').read_bytes())
