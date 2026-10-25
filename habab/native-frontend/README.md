@@ -16,13 +16,13 @@ Released `.7` patch SHA-256: `06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da1
 `distribution/native-frontend-release.json` and the current owner runtime use
 the `.8` wheel below. The current `bridge.patch` is an unbuilt `.9` source
 candidate with SHA-256
-`c8939ff5d04041587db53fbe7eadf97e573ac89b5e6ee4c9f8ec01ea1fa51954`.
+`d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`.
 `build-wheel.sh` targets `20260930.4+habab.9` in a fresh
 `habab-native-frontend9-build` worktree. The candidate keeps the dirty-state
 reload provider and moves the native UI bridge import into the app entrypoint,
-so the bridge and its lazy native-form imports have one app runtime owner. This
-is source/build intent only: `.9` has not been built, published, or checked in
-an owner browser.
+so the bridge and its lazy native-form imports have one app runtime owner. The
+build adds a bounded path for the modern and legacy bundles. `.9` has not been
+built, published, or checked in an owner browser.
 
 The `.8` wheel was built privately as
 `home_assistant_frontend-20260930.4+habab.8-py3-none-any.whl`: 111,324,155 bytes,
@@ -87,6 +87,14 @@ matching stock catalogs and hashes into generated translation metadata before
 Rspack bundles it, verifies every declared locale and fragment resolves to a
 stock file, then packages the assets as
 `home_assistant_frontend-20260930.4+habab.9-py3-none-any.whl`.
+
+The wheel build runs `rspack-prod-app-modern` followed by
+`rspack-prod-app-legacy` so the two compiler configurations do not overlap.
+`HABAB_TERSER_WORKERS=1` limits each pass to one worker. Other frontend builds
+keep the existing automatic Terser parallelism unless they set this option.
+`SKIP_FETCH_NIGHTLY_TRANSLATIONS=1` applies to all translation stages; the
+builder runs the normal license generation step and does not reuse a prior
+wheel's license output.
 
 The pinned patch also fixes Roboto copying in `gather-static`: the filter keeps
 directories and `.woff2` files, so absolute source paths under dotted parents

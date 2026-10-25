@@ -2646,3 +2646,115 @@ diff --git a/test/util/register-service-worker.test.ts b/test/util/register-serv
    it.each([
      { elapsed: 1_000, visual: 59, announced: 60 },
      { elapsed: 20_000, visual: 40, announced: 40 },
+
+diff --git a/build-scripts/rspack.cjs b/build-scripts/rspack.cjs
+index 1ada1cd24a41..a63f57eb271f 100644
+--- a/build-scripts/rspack.cjs
++++ b/build-scripts/rspack.cjs
+@@ -17,6 +17,20 @@
+ const SafeWebpackBar = require("./safe-webpackbar.cjs");
+ const paths = require("./paths.cjs");
+ const bundle = require("./bundle.cjs");
++
++const getTerserParallelism = (value = process.env.HABAB_TERSER_WORKERS) => {
++  if (value === undefined) {
++    return true;
++  }
++  if (!/^\d+$/.test(value)) {
++    throw new Error("HABAB_TERSER_WORKERS must be a positive integer");
++  }
++  const workers = Number(value);
++  if (!Number.isSafeInteger(workers) || workers < 1) {
++    throw new Error("HABAB_TERSER_WORKERS must be a positive integer");
++  }
++  return workers;
++};
+ 
+ // Build-toolchain packages whose version changes the emitted bytes but which
+ // are loader/compiler machinery, not modules in the build graph — so rspack's
+@@ -218,7 +232,7 @@
+     optimization: {
+       minimizer: [
+         new TerserPlugin({
+-          parallel: true,
++          parallel: getTerserParallelism(),
+           extractComments: true,
+           terserOptions: bundle.terserOptions({ latestBuild, isTestBuild }),
+         }),
+@@ -559,6 +573,7 @@
+   );
+ 
+ module.exports = {
++  getTerserParallelism,
+   createAppConfig,
+   createDemoConfig,
+   createCastConfig,
+diff --git a/build-scripts/gulp/rspack.js b/build-scripts/gulp/rspack.js
+index 9347abba93fd..b4a57f783f94 100644
+--- a/build-scripts/gulp/rspack.js
++++ b/build-scripts/gulp/rspack.js
+@@ -179,6 +179,17 @@
+   )
+ );
+ 
++gulp.task("rspack-prod-app-legacy", () =>
++  prodBuild(
++    createAppConfig({
++      isProdBuild: true,
++      isStatsBuild: env.isStatsBuild(),
++      isTestBuild: env.isTestBuild(),
++      latestBuild: false,
++    })
++  )
++);
++
+ gulp.task("rspack-dev-server-demo", () =>
+   runDevServer({
+     compiler: rspack(
+diff --git a/test/build-scripts/rspack-config.test.js b/test/build-scripts/rspack-config.test.js
+new file mode 100644
+index 000000000000..e8091b42ad3f7af23fe9406412d508bc1079e101
+@@ -0,0 +1,43 @@
++/**
++ * @vitest-environment node
++ */
++
++import { afterEach, describe, expect, it } from "vitest";
++import process from "node:process";
++import rspackConfig from "../../build-scripts/rspack.cjs";
++
++const originalWorkers = process.env.HABAB_TERSER_WORKERS;
++const { getTerserParallelism } = rspackConfig;
++
++afterEach(() => {
++  if (originalWorkers === undefined) {
++    delete process.env.HABAB_TERSER_WORKERS;
++  } else {
++    process.env.HABAB_TERSER_WORKERS = originalWorkers;
++  }
++});
++
++describe("Terser worker configuration", () => {
++  it("keeps Rspack's default parallel worker selection when unset", () => {
++    delete process.env.HABAB_TERSER_WORKERS;
++
++    expect(getTerserParallelism()).toBe(true);
++  });
++
++  it("accepts a positive integer worker count", () => {
++    process.env.HABAB_TERSER_WORKERS = "1";
++
++    expect(getTerserParallelism()).toBe(1);
++  });
++
++  it.each(["", "0", "-1", "1.5", "many", "9007199254740992"])(
++    "rejects invalid worker count %s",
++    (value) => {
++      process.env.HABAB_TERSER_WORKERS = value;
++
++      expect(() => getTerserParallelism()).toThrow(
++        "HABAB_TERSER_WORKERS must be a positive integer"
++      );
++    }
++  );
++});

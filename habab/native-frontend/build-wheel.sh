@@ -6,7 +6,7 @@ worktree="${HABAB_NATIVE_FRONTEND_WORKTREE:-/root/.local/share/habab-native-fron
 translations="${HABAB_NATIVE_FRONTEND_TRANSLATIONS:-/root/.local/share/habab-native-frontend-translations-official/translations}"
 source_commit="26690e06b0bf64a1487929245c32842ef92c62b5"
 patch_file="$repo_root/habab/native-frontend/bridge.patch"
-patch_sha="c8939ff5d04041587db53fbe7eadf97e573ac89b5e6ee4c9f8ec01ea1fa51954"
+patch_sha="d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092"
 catalog_sha="154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce"
 wheel_version="20260930.4+habab.9"
 wheel_name="home_assistant_frontend-${wheel_version}-py3-none-any.whl"
@@ -54,6 +54,7 @@ export COREPACK_HOME="${COREPACK_HOME:-/root/.local/share/habab-native-frontend-
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 export SOURCE_DATE_EPOCH="$(git -C "$worktree" show -s --format=%ct HEAD)"
 export NODE_ENV=production
+export SKIP_FETCH_NIGHTLY_TRANSLATIONS=1
 cd "$worktree"
 corepack enable pnpm
 [[ "$(pnpm --version)" == "11.28.0" ]] || {
@@ -77,6 +78,9 @@ pnpm exec eslint \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
   src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts \
+  test/build-scripts/rspack-config.test.js \
+  build-scripts/rspack.cjs \
+  build-scripts/gulp/rspack.js \
   src/entrypoints/app.ts \
   src/entrypoints/core.ts \
   src/panels/lovelace/hui-root.ts \
@@ -102,6 +106,8 @@ pnpm exec prettier --check \
   src/dialogs/config-flow/show-dialog-config-flow.ts \
   src/dialogs/config-flow/show-dialog-options-flow.ts \
   src/dialogs/voice-command-dialog/show-ha-voice-command-dialog.ts \
+  build-scripts/rspack.cjs \
+  build-scripts/gulp/rspack.js \
   src/entrypoints/app.ts \
   src/entrypoints/core.ts \
   src/panels/lovelace/hui-root.ts \
@@ -112,13 +118,15 @@ pnpm exec prettier --check \
   test/util/register-service-worker.test.ts \
   test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts \
   test/habab/native-ui-bridge.test.ts \
+  test/build-scripts/rspack-config.test.js \
   test/data/recorder-info.test.ts
 # Vitest's import graph includes generated translation metadata. Prepare it
 # from the pinned source catalog before tests, without fetching nightly files.
-SKIP_FETCH_NIGHTLY_TRANSLATIONS=1 pnpm exec gulp build-translations
+pnpm exec gulp build-translations
 pnpm exec vitest run --config test/vitest.config.ts \
   test/panels/home/ha-panel-home.test.ts \
   test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \
+  test/build-scripts/rspack-config.test.js \
   test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts \
   test/habab/native-ui-bridge.test.ts \
   test/mixins/dirty-state-provider-mixin.test.ts \
@@ -187,7 +195,8 @@ pnpm lint:types
 pnpm exec gulp copy-static-app
 python3 "$repo_root/habab/qa/native-font-assets/check-font-assets.py" \
   --static-dir "$worktree/hass_frontend/static"
-pnpm exec gulp rspack-prod-app
+HABAB_TERSER_WORKERS=1 pnpm exec gulp rspack-prod-app-modern
+HABAB_TERSER_WORKERS=1 pnpm exec gulp rspack-prod-app-legacy
 pnpm exec gulp gen-pages-app-prod gen-service-worker-app-prod
 pnpm exec gulp compress-app
 pnpm exec gulp prune-compress-cache
