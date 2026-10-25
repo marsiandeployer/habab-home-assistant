@@ -35,6 +35,15 @@ actually observed by HA; retain native login and do not enable anonymous or
 trusted-network authentication. Disconnecting this client stops the tunnel;
 subscription cancellation must also revoke the relay key and hostname route.
 
+The relay-side source examples are [sshd-home.example.conf](sshd-home.example.conf)
+and [nginx-home.example.conf](nginx-home.example.conf). They show the sample
+home `habab-home-example`, hostname `home-example.remote.habab.ru`, and
+loopback port `32001`; replace these with values provisioned for one home.
+With this reverse tunnel, the SSH client on the home computer connects to
+Home Assistant at `127.0.0.1`, so HA's immediate TCP peer is expected to be
+`127.0.0.1`. Confirm that peer on the target installation before trusting only
+that proxy address for `X-Forwarded-For`; ordinary HA login remains required.
+
 ## What this does not provision
 
 This is not a subscription service. There is no billing check, account or
