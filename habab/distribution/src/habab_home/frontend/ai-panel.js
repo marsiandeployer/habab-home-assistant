@@ -13,6 +13,8 @@ class HababAIPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this.provider = "openai";
+    this.providerSelectionExplicit = false;
+    this.initialProviderSelectionApplied = false;
     this.connections = [];
     this.connectionsLoaded = false;
     this.connectionCheckStates = new Map();
@@ -104,6 +106,7 @@ class HababAIPanel extends HTMLElement {
     this.q("nav").addEventListener("click", (event) => {
       const button = event.target.closest("[data-provider]");
       if (!button || this.busy) return;
+      this.providerSelectionExplicit = true;
       this.provider = button.dataset.provider;
       this.selectProvider();
     });
@@ -179,6 +182,14 @@ class HababAIPanel extends HTMLElement {
     if (connections.status === "fulfilled") {
       this.connections = connections.value.connections;
       this.connectionsLoaded = true;
+      if (!this.initialProviderSelectionApplied) {
+        this.initialProviderSelectionApplied = true;
+        const selected = this.connections.filter((item) => item.assistant_selected);
+        if (!this.providerSelectionExplicit && !this.keyEdited && !this.modelEdited &&
+            selected.length === 1 && providers[selected[0].provider]) {
+          this.provider = selected[0].provider;
+        }
+      }
       this.selectProvider({ preserveDraft: true });
     } else {
       this.connectionsLoaded = false;
