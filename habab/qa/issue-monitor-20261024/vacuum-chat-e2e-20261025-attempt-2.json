@@ -1,0 +1,56 @@
+{
+  "checked_at": "2026-10-25T10:18:14.565Z",
+  "verdict": "FAIL",
+  "target_alias": "accepted-owner-test",
+  "execution_window_id": "owner-vacuum-20261025-2",
+  "release": {
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "runtime": "habab-owner-test",
+    "product_version": "0.3.6",
+    "core_version": "2026.10.2"
+  },
+  "route": "/home/overview",
+  "physical_motion_observed": false,
+  "device_preflight": {
+    "one_available_vacuum": true,
+    "start_precondition_met": true,
+    "initial_state": "docked",
+    "supported_commands": true,
+    "friendly_name_available": true,
+    "supported_features": 12312
+  },
+  "actions": {},
+  "emergency_recovery": {
+    "attempted": false,
+    "complete": null
+  },
+  "cleanup": {
+    "owned_browser_closed": true,
+    "native_observer_closed": true
+  },
+  "failure": {
+    "stage": "chat_start",
+    "code": "native_ws_event_timeout",
+    "source_error_name": "Error"
+  },
+  "route_pathname": "/home/overview",
+  "service_worker": {
+    "controller_ready_before_commands": true,
+    "settled_without_controllerchange_for_ms": 8000,
+    "controller_change_count_before_commands": 0,
+    "this_wait_is_not_reload_fix_proof": true
+  },
+  "owner_admin": true,
+  "chat": {
+    "same_session_across_cycle": true,
+    "initial_idle": true,
+    "initial_draft_empty": true,
+    "initial_history_length": 39
+  },
+  "native_observer": {
+    "authenticated_same_admin": true,
+    "continuous": true
+  },
+  "finished_at": "2026-10-25T10:20:08.658Z"
+}

@@ -1,0 +1,13 @@
+{
+  "status": "SAFE_PREFLIGHT_ABORT_NOT_ACTION_ACCEPTANCE",
+  "runner_failure": "vacuum_not_unique_startable_target",
+  "initial_expected": "idle_or_docked",
+  "fresh_native_state_after_abort": "cleaning",
+  "origin_of_reported_state_change": "UNKNOWN",
+  "chat_prompts_sent": 0,
+  "service_calls_observed": 0,
+  "operator_recovery_attempted": false,
+  "physical_motion_observed": false,
+  "owned_browser_closed": true,
+  "full_chat_cycle": "NOT_ACCEPTED"
+}

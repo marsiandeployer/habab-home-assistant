@@ -8,7 +8,7 @@ const crypto = require('node:crypto');
 const puppeteer = require('../../node_modules/puppeteer-core');
 const WebSocket = require('../../node_modules/ws');
 const {withOwnedChromium} = require('/root/tools/chrome-daemon/owned-browser.cjs');
-const {NativeHaServiceObserver, hasCompletedSendCallbacks, serviceEventTargetsOnlyEntity} =
+const {NativeHaServiceObserver, hasCompletedSendCallbacks, serviceEventProjection, serviceEventTargetsOnlyEntity} =
   require('./service-call-e2e.cjs');
 
 const ORIGIN = 'https://habab-demo.wpmix.net';
@@ -167,8 +167,11 @@ async function preflight(runtime, options) {
 
 function eventMatches(event, entityId, service, ownerId) {
   return event?.event_type === 'call_service' && event.domain === 'vacuum' && event.service === service &&
-    serviceEventTargetsOnlyEntity(event, entityId) && event.target_fields?.length === 1 &&
-    event.target_fields[0] === 'entity_id' && event.context_user_id === ownerId;
+    serviceEventTargetsOnlyEntity(event, entityId) && event.context_user_id === ownerId;
+}
+
+function canStartVacuumFrom(state) {
+  return state === 'idle' || state === 'docked';
 }
 
 const DEVICE_BINDING_FIELDS = Object.freeze(['entity_id', 'entity_registry_id', 'device_id',
@@ -545,7 +548,9 @@ async function sendVisiblePrompt(page, prompt, expectedSession, expectedOwner, t
 
 async function readVacuumIdentity(page) {
   const identity = await readDeviceIdentity(page);
-  if (!/^vacuum\.[a-z0-9_]+$/.test(identity.entity_id) || identity.state !== 'idle') throw fail('vacuum_not_unique_idle_target');
+  if (!/^vacuum\.[a-z0-9_]+$/.test(identity.entity_id) || !canStartVacuumFrom(identity.state)) {
+    throw fail('vacuum_not_unique_startable_target');
+  }
   return identity;
 }
 
@@ -844,7 +849,7 @@ async function main() {
       release: {image: identity.image, source: identity.source, runtime: identity.runtime,
         product_version: identity.product_version, core_version: identity.core_version},
       route: '/home/overview', physical_motion_observed: false,
-      device_preflight: {one_available_vacuum: false, starts_idle: false, supported_commands: false},
+      device_preflight: {one_available_vacuum: false, start_precondition_met: false, supported_commands: false},
       actions: {}, emergency_recovery: {attempted: false, complete: null},
       cleanup: {owned_browser_closed: false}, failure: null};
     trace = {started_at: report.checked_at, stage, execution_window_id: options['execution-window-id'],
@@ -968,10 +973,12 @@ async function main() {
           throw fail(SAFE_CODE.test(error?.message || '') ? error.message : 'vacuum_registry_read_failed');
         });
         const restBefore = await readRestState(runtime, target.entity_id);
-        if (!restBefore || restBefore.state !== 'idle' || restBefore.supported_features !== target.supported_features) {
+        if (!restBefore || !canStartVacuumFrom(restBefore.state) || restBefore.state !== target.state ||
+            restBefore.supported_features !== target.supported_features) {
           throw fail('vacuum_native_readback_precondition_mismatch');
         }
-        report.device_preflight = {one_available_vacuum: true, starts_idle: true,
+        report.device_preflight = {one_available_vacuum: true, start_precondition_met: true,
+          initial_state: restBefore.state,
           supported_commands: true, friendly_name_available: Boolean(target.friendly_name),
           supported_features: target.supported_features};
         trace.device = target;
@@ -992,7 +999,7 @@ async function main() {
         persistTrace(trace);
 
         const actions = [
-          {name: 'start', service: 'start', fromStates: ['idle'], states: ['cleaning'], stateTimeout: LIMIT.startState},
+          {name: 'start', service: 'start', fromStates: ['idle', 'docked'], states: ['cleaning'], stateTimeout: LIMIT.startState},
           {name: 'stop', service: 'stop', fromStates: ['cleaning'], states: ['idle', 'paused'], stateTimeout: LIMIT.stopState},
           {name: 'return_home', service: 'return_to_base', fromStates: ['idle', 'paused'], states: ['docked'], stateTimeout: LIMIT.dockState},
         ];
@@ -1091,7 +1098,8 @@ async function main() {
   }
 }
 
-module.exports = {sameDeviceBinding, hasOwnedStart, latestTurnMessageEvidence, hasVerifiedSendCompletion,
+module.exports = {eventMatches, canStartVacuumFrom, sameDeviceBinding, hasOwnedStart,
+  latestTurnMessageEvidence, hasVerifiedSendCompletion,
   canAttemptEmergencyStop, canAttemptEmergencyDock, emergencyRecoveryComplete, deriveDeviceIdentity};
 
 if (require.main === module) {

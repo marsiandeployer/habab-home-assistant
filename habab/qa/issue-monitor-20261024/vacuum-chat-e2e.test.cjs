@@ -4,13 +4,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   sameDeviceBinding,
+  eventMatches,
   hasOwnedStart,
   latestTurnMessageEvidence,
   hasVerifiedSendCompletion,
   canAttemptEmergencyStop,
   canAttemptEmergencyDock,
   emergencyRecoveryComplete,
+  canStartVacuumFrom,
 } = require('./vacuum-chat-e2e.cjs');
+const {serviceEventProjection} = require('./service-call-e2e.cjs');
 
 const identity = Object.freeze({entity_id: 'vacuum.qa_robot', entity_registry_id: 'entity-1',
   device_id: 'device-1', config_entry_id: 'entry-1', platform: 'xiaomi_miio', supported_features: 8216});
@@ -26,6 +29,41 @@ const callbacks = Object.freeze([
 const startEvent = Object.freeze({event_type: 'call_service', domain: 'vacuum', service: 'start',
   entity_ids: ['vacuum.qa_robot'], device_ids: [], area_ids: [], floor_ids: [], label_ids: [],
   target_fields: ['entity_id'], context_user_id: ownerId});
+
+test('start preflight accepts an idle or docked robot and rejects every moving or unavailable state', () => {
+  assert.equal(canStartVacuumFrom('idle'), true);
+  assert.equal(canStartVacuumFrom('docked'), true);
+  for (const state of ['cleaning', 'returning', 'paused', 'unavailable', 'unknown', 'error', null]) {
+    assert.equal(canStartVacuumFrom(state), false, `do not start from ${state}`);
+  }
+});
+
+test('vacuum matcher accepts Core service_data entity target with empty target_fields', () => {
+  const projected = serviceEventProjection({event_type: 'call_service', context: {user_id: ownerId}, data: {
+    domain: 'vacuum', service: 'start', service_data: {entity_id: 'vacuum.qa_robot'}, target: {},
+  }}, 0);
+  assert.deepEqual(projected.entity_ids, ['vacuum.qa_robot']);
+  assert.deepEqual(projected.target_fields, []);
+  assert.equal(eventMatches(projected, 'vacuum.qa_robot', 'start', ownerId), true);
+});
+
+test('vacuum matcher still rejects missing, wrong, extra, and foreign-owner targets', () => {
+  const project = (serviceData = {}, target = {}, contextOwner = ownerId) => serviceEventProjection({
+    event_type: 'call_service', context: {user_id: contextOwner}, data: {
+      domain: 'vacuum', service: 'start', service_data: serviceData, target,
+    },
+  }, 0);
+  assert.equal(eventMatches(project(), 'vacuum.qa_robot', 'start', ownerId), false,
+    'reject a projected service event with no entity target');
+  assert.equal(eventMatches(project({entity_id: 'vacuum.other'}), 'vacuum.qa_robot', 'start', ownerId), false,
+    'reject another entity target');
+  assert.equal(eventMatches(project({entity_id: 'vacuum.qa_robot', device_id: 'device-2'}),
+    'vacuum.qa_robot', 'start', ownerId), false, 'reject an additional device target');
+  assert.equal(eventMatches(project({}, {entity_id: 'vacuum.qa_robot', area_id: 'area-2'}),
+    'vacuum.qa_robot', 'start', ownerId), false, 'reject an additional area target');
+  assert.equal(eventMatches(project({entity_id: 'vacuum.qa_robot'}, {}, 'other-owner'),
+    'vacuum.qa_robot', 'start', ownerId), false, 'reject another owner context');
+});
 
 test('a changed registry binding blocks emergency service actions', () => {
   assert.equal(sameDeviceBinding(identity, identity), true);

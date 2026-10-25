@@ -1,0 +1,31 @@
+{
+  "overall": "FAIL_NOT_ALL_CHAT",
+  "original_receipt_preserved": true,
+  "first_failure_layer": "test matcher rejected valid Core service_data.entity_id projection with empty target_fields",
+  "root_independent_start_proof": {
+    "accepted_exact_turn": true,
+    "completed_exact_turn": true,
+    "single_start_event": true,
+    "exact_entity_target": true,
+    "exact_owner_context": true,
+    "native_state_cleaning": true,
+    "physical_motion_observed": false
+  },
+  "operator_recovery": {
+    "separate_from_chat_E2E": true,
+    "owned_target_registry_binding_rechecked": true,
+    "stop_event_verified": true,
+    "stop_state": "idle",
+    "return_command_sent": true,
+    "current_state": "docked",
+    "docked_confirmed": true,
+    "process": "COMPLETED",
+    "return_event_verified": true,
+    "root_independent_final_state": "docked"
+  },
+  "corrected_runner_tests": {
+    "passed": 10,
+    "foreign_targets_and_owner_still_rejected": true
+  },
+  "repeat_full_cycle": "NOT_RUN"
+}

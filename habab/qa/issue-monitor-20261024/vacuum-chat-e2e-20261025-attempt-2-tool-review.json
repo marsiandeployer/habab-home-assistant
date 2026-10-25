@@ -1,0 +1,10 @@
+{
+  "checked_at": "2026-10-25T10:22:12.324487+00:00",
+  "source": "exact current mapped OpenCode turn; read-only session GET",
+  "attempt": "vacuum-attempt-2",
+  "assistant_message_count": 1,
+  "tool_invocation_count": 0,
+  "tool_invocations": [],
+  "same_turn_start_action_tool_call": false,
+  "verdict": "NO_TOOL_PARTS"
+}
