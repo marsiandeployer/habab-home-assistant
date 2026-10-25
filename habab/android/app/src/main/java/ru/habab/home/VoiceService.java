@@ -34,6 +34,8 @@ public final class VoiceService extends Service {
     private final java.util.concurrent.ConcurrentHashMap<String, Long> timings = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile String lastCue;
     private volatile long lastCueAt;
+    private volatile long lastCueElapsedRealtimeAt = -1;
+    private volatile long lastCueCompletedElapsedRealtimeAt = -1;
     private volatile boolean lastCueCompleted;
     private long cueSequence;
     private AudioManager manager;
@@ -189,7 +191,10 @@ public final class VoiceService extends Service {
                     .put("provider", voiceProvider).put("model", voiceModel).put("connectedAt", voiceConnectedAt)
                     .put("active", connected != null && connected.ready() && !connected.finishing()));
             if (lastError != null) result.put("lastError", lastError).put("lastErrorAt", lastErrorAt);
-            if (lastCue != null) result.put("lastCue", lastCue).put("lastCueAt", lastCueAt).put("lastCueCompleted", lastCueCompleted);
+            if (lastCue != null) result.put("lastCue", lastCue).put("lastCueAt", lastCueAt)
+                    .put("lastCueElapsedRealtimeAt", lastCueElapsedRealtimeAt)
+                    .put("lastCueCompletedElapsedRealtimeAt", lastCueCompletedElapsedRealtimeAt)
+                    .put("lastCueCompleted", lastCueCompleted);
             VoiceStatusFile.write(new File(getFilesDir(), "voice-status.json").toPath(),
                     result.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) { /* Foreground status still reports failure. */ }
@@ -328,8 +333,13 @@ public final class VoiceService extends Service {
             long sequence = ++cueSequence;
             lastCue = cue.name().toLowerCase(java.util.Locale.ROOT);
             lastCueAt = System.currentTimeMillis(); lastCueCompleted = false;
+            lastCueElapsedRealtimeAt = SystemClock.elapsedRealtime();
+            lastCueCompletedElapsedRealtimeAt = -1;
             java.util.concurrent.CompletableFuture<Boolean> completion = cues.play(cue);
-            completion.thenAccept(complete -> { synchronized (cueLock) { if (sequence == cueSequence) lastCueCompleted = complete; } });
+            completion.thenAccept(complete -> { synchronized (cueLock) { if (sequence == cueSequence) {
+                lastCueCompletedElapsedRealtimeAt = SystemClock.elapsedRealtime();
+                lastCueCompleted = complete;
+            } } });
             return completion;
         }
     }

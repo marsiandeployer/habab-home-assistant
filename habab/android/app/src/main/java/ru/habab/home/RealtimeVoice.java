@@ -37,6 +37,7 @@ final class RealtimeVoice implements AutoCloseable {
     private final java.util.concurrent.atomic.AtomicInteger pendingTools = new java.util.concurrent.atomic.AtomicInteger();
     private volatile boolean closed, ready, ending;
     private volatile WebSocket socket;
+    private volatile long acceptedEndElapsedAt = -1;
     private AudioTrack track;
     private String sessionId, outputItem;
     private String negotiatedProvider, negotiatedModel;
@@ -155,17 +156,27 @@ final class RealtimeVoice implements AutoCloseable {
         synchronized (history) {
             if (closed || ending) return;
             ending = true; listener.phase("finishing");
+            endTiming("end_finish_enter_ms");
             toolSession.end();
             credentials.cancelInteractions();
             try { interruptOutput(); }
-            catch (Exception error) { fail("voice_playback_failed"); return; }
+            catch (Exception error) { endTiming("end_playback_stop_failed_ms"); fail("voice_playback_failed"); return; }
+            endTiming("end_playback_stopped_ms");
             // Stop media and provider transport before notifying END after accepted history writes.
             synchronized (connectionLock) {
                 WebSocket current = socket; socket = null; ready = false;
                 if (current != null) current.cancel();
             }
+            endTiming("end_socket_cancel_requested_ms");
             flushTranscripts();
-            history.finish(listener::ended, () -> fail("voice_history_failed"));
+            history.finish(() -> {
+                endTiming("end_history_drained_ms");
+                endTiming("end_listener_callback_ms");
+                listener.ended();
+            }, () -> {
+                endTiming("end_history_failed_ms");
+                fail("voice_history_failed");
+            });
         }
     }
 
@@ -213,12 +224,16 @@ final class RealtimeVoice implements AutoCloseable {
     }
 
     private void event(JSONObject event) throws Exception {
+        boolean endToolEvent = "response.function_call_arguments.done".equals(event.optString("type"))
+                && "end_voice_session".equals(event.optString("name"));
+        long eventReceivedAt = endToolEvent ? android.os.SystemClock.elapsedRealtime() : -1;
+        if (endToolEvent) timing("end_tool_event_received_elapsed_ms", eventReceivedAt);
         history.dispatch(() -> {
-            if (!closed && !ending) handleEvent(event);
+            if (!closed && !ending) handleEvent(event, eventReceivedAt);
         });
     }
 
-    private void handleEvent(JSONObject event) throws Exception {
+    private void handleEvent(JSONObject event, long eventReceivedAt) throws Exception {
         String type = event.optString("type");
         if (type.equals("habab.input_transcript")) {
             queueTranscript(new JSONObject().put("kind", "event").put("role", "user")
@@ -295,6 +310,10 @@ final class RealtimeVoice implements AutoCloseable {
             String name = event.optString("name");
             if (name.equals("end_voice_session")) {
                 if (new JSONObject(event.getString("arguments")).length() != 0) { fail("invalid_voice_tool"); return; }
+                acceptedEndElapsedAt = android.os.SystemClock.elapsedRealtime();
+                if (eventReceivedAt >= 0)
+                    timing("end_tool_dispatch_ms", acceptedEndElapsedAt - eventReceivedAt);
+                timing("end_tool_accepted_elapsed_ms", acceptedEndElapsedAt);
                 finish(); return;
             }
             if (!name.equals("ask_home_assistant") || ++toolCalls > 8) { fail("invalid_voice_tool"); return; }
@@ -489,6 +508,11 @@ final class RealtimeVoice implements AutoCloseable {
         listener.timing(name, duration);
         // Fixed metric names and durations only: never transcript, audio or credentials.
         android.util.Log.i("HababVoiceTiming", name + "=" + duration);
+    }
+
+    private void endTiming(String name) {
+        long startedAt = acceptedEndElapsedAt;
+        if (startedAt >= 0) timing(name, android.os.SystemClock.elapsedRealtime() - startedAt);
     }
 
     private void flushTranscripts() {
