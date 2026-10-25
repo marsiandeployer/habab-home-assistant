@@ -1,0 +1,20 @@
+{
+  "scope": "issue16_live_acl_smoke",
+  "status": "PASS",
+  "started_at": "2026-10-25T20:38:41.106Z",
+  "endpoint": "owner-test-loopback-8395",
+  "before_user_set_sha256": "9b1735b8ae7d1cd991cacd526039146928c5662eb3b2b4ec9924a6796d2f9dcc",
+  "after_user_set_sha256": "9b1735b8ae7d1cd991cacd526039146928c5662eb3b2b4ec9924a6796d2f9dcc",
+  "created_user_id_sha256": "bc3aadd8a055d13c2d24ff05e56cecbbf9b45e7141a924bea2f5dcbd442928d7",
+  "assertions": {
+    "nonadmin_list_and_export_denied": true,
+    "promoted_admin_own_list_empty": true,
+    "foreign_detail_hidden": true,
+    "exact_fixture_absent_after_cleanup": true
+  },
+  "cleanup_state": "verified",
+  "failure_stage": null,
+  "fixture_refresh_token_revoked": true,
+  "finished_at": "2026-10-25T20:38:41.706Z",
+  "fixture_name_sha256": "61fe18f38970865e3c341c920de946a967c9d88eb0dac2d2b2647b6eeb3ecc2e"
+}
