@@ -6,7 +6,7 @@
 
 ## Frontend Docker-дистрибутива
 
-Docker Core остаётся на 2026.10.2. Полный frontend собирается из Core-совместимого upstream tag `20260930.4` с патчем `habab.3`; это отдельная сборка от публичного демо в `habab/build/`. Wheel версии `20260930.4+habab.3` публикуется по неизменяемому HTTPS URL с SHA-256 в пути. При `docker build` `install-native-frontend.py` сверяет закреплённые версию, имя файла, размер, origin и digest, затем устанавливает wheel без дополнительных пакетов. В том же build находятся API bridge v1 для глобального чата и native `step-flow-form`; context host использует HA `contextMixin` и сохраняет native callbacks, переводы, selectors и валидацию. Сбой загрузки или несовпадение digest останавливают сборку.
+Docker Core остаётся на 2026.10.2. Полный frontend собирается из Core-совместимого upstream tag `20260930.4` с патчем `habab.9`; это отдельная сборка от публичного демо в `habab/build/`. Wheel версии `20260930.4+habab.9` публикуется по неизменяемому HTTPS URL с SHA-256 в пути. При `docker build` `install-native-frontend.py` сверяет закреплённые версию, имя файла, размер, origin и digest, затем устанавливает wheel без дополнительных пакетов. В том же build находятся API bridge v1 для глобального чата и native `step-flow-form`; context host использует HA `contextMixin` и сохраняет native callbacks, переводы, selectors и валидацию. Сбой загрузки или несовпадение digest останавливают сборку.
 
 При обновлении Docker Core найдите совпадающие Core и frontend upstream версии, перенесите downstream patch на этот frontend, соберите полный wheel и обновите его закреплённые метаданные только после повторной сборки и QA. Самостоятельная замена frontend wheel не обновляет Home Assistant Core или пользовательские данные.
 

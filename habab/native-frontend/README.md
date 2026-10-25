@@ -11,18 +11,34 @@ dialog fallback remains available.
 
 Released `.7` patch SHA-256: `06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da19afcf36c4267bb`.
 
-## `.8` promoted release and `.9` source candidate
+## `.9` source release and `.8` previous wheel
 
 `distribution/native-frontend-release.json` and the current owner runtime use
-the `.8` wheel below. The current `bridge.patch` is an unbuilt `.9` source
-candidate with SHA-256
+the `.9` wheel below. The current `bridge.patch` is the `.9` source
+with SHA-256
 `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`.
 `build-wheel.sh` targets `20260930.4+habab.9` in a fresh
 `habab-native-frontend9-build` worktree. The candidate keeps the dirty-state
 reload provider and moves the native UI bridge import into the app entrypoint,
 so the bridge and its lazy native-form imports have one app runtime owner. The
-build adds a bounded path for the modern and legacy bundles. `.9` has not been
-built, published, or checked in an owner browser.
+canonical build completed on 2026-10-25 from Habab source revision
+`2c3cdcc221eacc96b6bedcd3246c20c362cea6e5`. Its wheel is
+`home_assistant_frontend-20260930.4+habab.9-py3-none-any.whl`, 110,461,281
+bytes, SHA-256
+`9faecade64144e2a6af3c3a4edc951e183292eaab0147cc49f85f8ec555d2952`.
+Independent readback verified its full digest, ZIP CRC, metadata, and the
+public artifact response. The build ran 75 focused tests across 8 files,
+generated license data normally, and compiled modern then legacy bundles.
+It ran with a 5 GiB memory cap, no swap, a two-CPU quota, and a 256-task limit.
+The largest sampled `MemoryCurrent` was 3,013,914,624 bytes and the largest
+sampled task count was 45; the removed cgroup did not leave exact kernel peak
+counters.
+The owner runtime is on `.9`. The owner browser rendered the protected Yandex
+form, accepted keyboard input, retained it across a polling update, and cancelled
+the flow without creating an entry. See
+[`native-form-manual-pass.json`](../qa/owner-native-yandex-form-20261025/native-form-manual-pass.json).
+This verifies native form interaction, not an LLM response or live speech.
+The source manifest now pins `.9`; the Windows package is released separately.
 
 The `.8` wheel was built privately as
 `home_assistant_frontend-20260930.4+habab.8-py3-none-any.whl`: 111,324,155 bytes,
@@ -36,23 +52,22 @@ the Russian catalog fingerprint remains
 The independent wheel readback is recorded in
 [`native-frontend-wheel8-independent-review.json`](../qa/issue-monitor-20261024/native-frontend-wheel8-independent-review.json).
 
-This private build used cached pinned dependencies and direct package binaries.
-Modern and legacy bundles were built sequentially with Terser concurrency 1 in a
-5 GiB cgroup. The runner used a three-line offline `build-translations`
-preparation, so the result does not prove that an unmodified canonical builder
-reproduces the wheel. The license asset was reused byte-for-byte from `.7` because
-the `gen-licenses` cache index was unavailable; license generation was not rerun.
+This historical private `.8` build used cached pinned dependencies and direct
+package binaries. Modern and legacy bundles were built sequentially with Terser
+concurrency 1 in a 5 GiB cgroup. Its runner used an offline `build-translations`
+preparation, and reused the `.7` license asset because the `gen-licenses` cache
+index was unavailable. The canonical `.9` build used the normal license
+generation stage instead.
 
 The immutable `.8` artifact is available on the artifact server, with its full
-HTTPS body verified against the digest and size. It remains the promoted
-manifest version and is installed in the current owner runtime. A local
+HTTPS body verified against the digest and size. It is the previous promoted
+wheel. A local
 candidate image was built from clean commit
 `f803277c68511622e3ad780d10a8a046cb9ef478` on branch
 `qa/owner-frontend8-20261025`: all 44 component files matched and 80 baked backend
 tests passed without a source overlay. See
 [`frontend8-candidate-image-independent.json`](../qa/issue-monitor-20261024/frontend8-candidate-image-independent.json).
-Build and archive readback are not live acceptance. The release manifest stays
-on `.8` until a later candidate is built and promoted.
+Build and archive readback are not live acceptance. The historical image receipt does not cover later source changes or the `.9` wheel.
 
 ## Rebuild
 

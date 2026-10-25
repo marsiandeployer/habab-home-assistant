@@ -1,0 +1,34 @@
+{
+  "checked_at": "2026-10-25T16:20:59.001Z",
+  "target": "https://habab-demo.wpmix.net/owner-test",
+  "viewport": {
+    "width": 1280,
+    "height": 800
+  },
+  "scope": "Native protected form rendering, keyboard input and cancellation; no LLM or provider acceptance",
+  "domain": "habab_yandex_speech",
+  "native_password_rendered": true,
+  "element_click_scrolled_into_view": true,
+  "deep_input_focus_confirmed": true,
+  "initial_coordinate_hit": "chat_composer_textarea",
+  "keyboard_input": {
+    "connected": true,
+    "length": 19,
+    "match": true
+  },
+  "after_poll_3000ms": {
+    "connected": true,
+    "length": 19,
+    "match": true
+  },
+  "cancelled_via_ui": true,
+  "backend_phase_after_cancel": "abort",
+  "entries_before": 12,
+  "entries_after": 12,
+  "yandex_entries_after": 0,
+  "model_call_performed": false,
+  "provider_form_submitted": false,
+  "pass": true,
+  "installed_frontend_version": "20260930.4+habab.9",
+  "screenshot_reviewed": true
+}
