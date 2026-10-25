@@ -1,0 +1,32 @@
+{
+  "kind": "p30_native16_screen_off_status_readback",
+  "checkedAt": "2026-10-25T07:57:09.921694+00:00",
+  "durationSeconds": 34.19,
+  "samples": 20,
+  "invalidJson": 0,
+  "transportErrors": 0,
+  "allScreenOff": true,
+  "allActive": true,
+  "phases": [
+    "wake"
+  ],
+  "first": {
+    "phase": "wake",
+    "active": true,
+    "captureFrames": 3725,
+    "screenOn": false,
+    "recordedAt": 1792914995601,
+    "wakeCount": 0
+  },
+  "last": {
+    "phase": "wake",
+    "active": true,
+    "captureFrames": 5339,
+    "screenOn": false,
+    "recordedAt": 1792915027881,
+    "wakeCount": 0
+  },
+  "captureAdvanced": true,
+  "acousticWakeOrFarewellAcceptance": false,
+  "rebootOr48HourAcceptance": false
+}

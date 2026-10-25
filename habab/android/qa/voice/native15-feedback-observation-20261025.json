@@ -1,0 +1,31 @@
+{
+  "checkedAt": "2026-10-25T07:53:11.253179+00:00",
+  "kind": "owner_requested_latest_android_voice_history_inspection",
+  "device": "Huawei P30 Pro",
+  "installedNative": 15,
+  "runtime": "2c6567223ad3ef6b",
+  "readOnly": true,
+  "newInference": false,
+  "apkUpdated": false,
+  "latestVoiceFeedbackMarkerRecognized": true,
+  "latestAssistantResponseInvitesDetails": true,
+  "recentStoredEventProtocol": "native_gemini_event.v1",
+  "recentVoiceEventsInInspectedWindow": 10,
+  "executorToolPartsInInspectedWindow": 0,
+  "recentAssistantDeniedWebsiteAndFilesystemAccess": true,
+  "feedbackUploadOrIssueCreationConfirmed": false,
+  "sourceFeedbackSpecificVoiceToolPresent": false,
+  "sourceVoiceToolNames": [
+    "ask_home_assistant",
+    "end_voice_session"
+  ],
+  "issue": 18,
+  "rawTranscriptPersisted": false,
+  "rawCredentialsPersisted": false,
+  "temporaryOwnerSessionsRevoked": true,
+  "limits": [
+    "OpenCode persisted journal inspection does not prove every transient provider event was captured.",
+    "The prompt marker alone does not supply the feedback details.",
+    "No new acoustic test or feedback end-to-end PASS is claimed."
+  ]
+}

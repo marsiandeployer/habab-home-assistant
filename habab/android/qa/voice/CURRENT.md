@@ -1,18 +1,29 @@
 # Android and owner-test QA: current handoff
 
-Checked 2026-10-24 UTC (2026-10-25 Moscow). Overall acceptance is incomplete.
+Updated 2026-10-25 after physical P30 recovery and Native16 installation. Overall acceptance is incomplete.
 
 | Target | Last verified state | Remaining proof |
 | --- | --- | --- |
-| Physical P30 | Matching-signer APK15 installed; old Core stopped cleanly; runtime2c extraction began | ADB18537 is now connection-refused. Extraction/rotation, server restart and configuration preservation after extraction remain unknown |
-| Native15 candidate | Runtime2c/source6d9565be3, Habab0.3.6/Core2026.10.2; 70 JVM tests with full archive, assemble and lint passed | New physical voice, background operation and 48-hour stability are NOT RUN |
+| Physical P30 | ADB18537 device; matching-signer APK16 installed, Core2026.10.2/Habab0.3.6 RUNNING. Four config/auth files preserved byte-for-byte before restart; runtime2c and previous711 retained. Installed launcher seeded guest loopback hosts. Prior-active VoiceService restored in fresh active/wake state | Real negative wake/farewell, acoustic interruption/echo, reboot/autostart and 48-hour acceptance remain incomplete |
+| Native16 | APK sourcefc8a71a01; frozen runtime2c/source6d9565be3. Offline assemble/lint and focused guest-hosts tests passed; installed on P30 | Does not contain false-wake or farewell-policy fixes (#19/#20); preview APK is not promoted to public stable CTA |
 | Authenticated cloud owner-test | Active image22ae7a87/sourceaaeab54b5; 59 image source hashes match; Core RUNNING, Habab/Gemini selected and loaded; served chat SHA7f80a639 matches | Original inventory, risk, lifecycle and service scenarios on this newly deployed image remain pending with the web owner |
-| Native HA setting | Conversation exposure for weather.forecast_pogoda_doma, originally changed through the visible chat, is still explicitly true after container replacement | This persistence check is cloud-only; the corresponding phone forecast has a different entity ID and has not been changed |
+| Native HA setting | Cloud forecast exposure persisted after container replacement. On P30 Native15, visible served web chat changed only weather.forecast_home_assistant Conversation exposure false→true; native readback and actual OpenCode assist_exposure set/get trace verified | Phone-served desktop browser proof is not a touch test of the Android WebView. Recheck semantics after future runtime upgrades |
 | Browser Gemini relay | Source commit1e87c1c6c; 30 local tests passed; browser mode defaults disabled | Relay deployment/configuration, backend browser lease, frontend and real browser audio remain pending |
 
 The active cloud frontend/prompt is newer than the frozen Android runtime2c. They are separate release identities; cloud acceptance must not be described as a phone update. No physical microphone or acoustic voice result is inferred from source tests.
 
 Current evidence:
+- `native16-background-status-readback.json`: 20/20 valid snapshots over34.19s, screen off and active/wake throughout, capture advanced; this is a short background check, not acoustic or 48-hour acceptance.
+- `native16-phone-apk-update.json`: physical guarded APK-only update, installed launcher hosts seed, four-file preservation, unchanged runtime, Core readiness, restored voice and temporary-session revocation.
+- `native16-candidate-build.json`: frozen clean-source artifact SHA/signature/input/build validation.
+- `native15-feedback-observation-20261025.json`: latest user-requested voice history inspection; feedback marker recognized, assistant invited details, no upload/issue creation proved. Transcript was not copied into the receipt.
+- `native15-voice-metadata-after-user-reports.json`: actual native Gemini Live connection/replies with screen off and completed END-cue metadata. User reports false wake and delayed farewell; these are not acoustic PASS.
+- `native15-recovered-runtime-readback.json` and `native15-recovered-owner-baseline.json`: recovered runtime payload and semantic owner/provider/router/shopping baseline.
+- `native15-exposure-tool-trace.json`: completed actual phone OpenCode set/get calls for the forecast exposure scenario.
+- `native15-telegram-live-preflight-20261025.json`: bot remains owned by the cloud installation; P30 has no bot entry. Owner identity matches the existing private Telegram binding; no migration or message was performed.
+- `relay-browser-reenrollment-preflight.json`: original authorized operator credential recoverable in RAM; Google catalog200 includes configured text/live models. No key printed/new credential file, no relay restart or inference.
+
+Historical evidence below describes its recorded checkpoint; later recovery supersedes the old transport/installation blockers:
 - `native-status-android-compile-qa.json`: clean sourcee83e22906 compiled and linted offline against AndroidSDK34 in an isolated RAM workspace; old2c inputs pinned, noAPK or device action.
 - `phone-bridge-cleanup.json`: unused parent HTTP bridge18124 stopped with zero clients; recreate only after transport recovery.
 - `native-status-publication-source-qa.json`: future native status writer uses atomic replacement and final off/error publication,3 focused JVM tests and Java8 API compilation passed. Interrupted-write cause was not reproduced on the host; fix is not in installedAPK15 and has no Android device proof.
