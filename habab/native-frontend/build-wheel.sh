@@ -9,17 +9,76 @@ patch_file="$repo_root/habab/native-frontend/bridge.patch"
 patch_sha="d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092"
 catalog_sha="154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce"
 wheel_version="20260930.4+habab.9"
+artifact_root="${HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT:-$repo_root/habab/public/downloads/native-frontend}"
+retention_tool="${RELEASE_RETENTION_TOOL:-/root/tools/release-retention/retention.py}"
+retention_state="${HABAB_NATIVE_FRONTEND_RETENTION_STATE:-/root/tools/release-retention/states/habab-native-frontend.json}"
 wheel_name="home_assistant_frontend-${wheel_version}-py3-none-any.whl"
 staging="$(mktemp -d /root/.local/share/habab-native-frontend-wheel.XXXXXX)"
 pyproject_backup="$staging/pyproject.toml"
+wheel_tmp=""
 
 cleanup() {
   if [[ -f "$pyproject_backup" ]]; then
     cp "$pyproject_backup" "$worktree/pyproject.toml"
   fi
+  if [[ -n "$wheel_tmp" && -e "$wheel_tmp" ]]; then
+    rm -f "$wheel_tmp"
+  fi
   rm -rf "$staging"
 }
 trap cleanup EXIT
+
+[[ "$wheel_version" =~ ^20260930\.4\+habab\.[0-9]+$ ]] || {
+  echo "Wheel version must match the pinned Core version and Habab release suffix" >&2
+  exit 1
+}
+[[ "$artifact_root" == /* && "$retention_tool" == /* && "$retention_state" == /* ]] || {
+  echo "Artifact root and retention paths must be absolute" >&2
+  exit 1
+}
+retention_release="${wheel_version#*+}"
+retention_skip_reason=""
+if [[ ! -f "$retention_tool" ]]; then
+  retention_skip_reason="retention tool is absent: $retention_tool"
+elif [[ ! -f "$retention_state" ]]; then
+  retention_skip_reason="retention state is absent: $retention_state"
+else
+  if ! retention_skip_reason="$(python3 - "$retention_state" "$artifact_root" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+state_path = Path(sys.argv[1])
+artifact_root = Path(sys.argv[2]).resolve()
+try:
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    print("retention state cannot be read")
+    raise SystemExit(1)
+if not isinstance(data, dict):
+    print("retention state must be a JSON object")
+    raise SystemExit(1)
+
+root_value = data.get("root")
+root = Path(root_value) if isinstance(root_value, str) else Path()
+if data.get("schema") != 1 or not root.is_absolute() or root.resolve() != root or not root.is_dir():
+    print("retention state has no valid canonical root")
+    raise SystemExit(1)
+if root != artifact_root:
+    print(f"retention root does not match artifact root: {root}")
+    raise SystemExit(1)
+
+current, previous = data.get("current"), data.get("previous")
+releases = data.get("releases")
+if (not current or not previous or current == previous or not isinstance(releases, dict)
+        or current not in releases or previous not in releases):
+    print("retention current/previous pointers are not initialized")
+    raise SystemExit(1)
+PY
+)"; then
+    :
+  fi
+fi
 
 [[ "$(git -C "$worktree" rev-parse HEAD)" == "$source_commit" ]] || {
   echo "Worktree must be at pinned frontend commit $source_commit" >&2
@@ -231,14 +290,48 @@ python3 "$repo_root/habab/qa/native-font-assets/check-font-assets.py" \
   --wheel "$staging/wheel/$wheel_name" \
   --report "$repo_root/habab/qa/native-font-assets/font-assets-report.json"
 artifact_sha="$(sha256sum "$staging/wheel/$wheel_name" | cut -d' ' -f1)"
-artifact_dir="$repo_root/habab/public/downloads/native-frontend/$artifact_sha"
+artifact_dir="$artifact_root/$artifact_sha"
 mkdir -p "$artifact_dir"
-[[ ! -e "$artifact_dir/$wheel_name" ]] || {
-  echo "Immutable artifact already exists; refusing to overwrite it" >&2
+mkdir -p "$artifact_root"
+[[ ! -L "$artifact_dir" ]] || {
+  echo "Artifact hash directory must not be a symlink" >&2
   exit 1
 }
-cp "$staging/wheel/$wheel_name" "$artifact_dir/$wheel_name"
+if [[ -e "$artifact_dir" ]]; then
+  [[ -d "$artifact_dir" ]] || {
+    echo "Artifact hash path is not a directory" >&2
+    exit 1
+  }
+else
+  mkdir "$artifact_dir"
+fi
+artifact_root_real="$(realpath -e "$artifact_root")"
+artifact_dir_real="$(realpath -e "$artifact_dir")"
+[[ "$artifact_dir_real" == "$artifact_root_real/$artifact_sha" ]] || {
+  echo "Artifact hash directory escaped the configured artifact root" >&2
+  exit 1
+}
+if [[ -e "$artifact_dir/$wheel_name" || -L "$artifact_dir/$wheel_name" ]]; then
+  [[ -f "$artifact_dir/$wheel_name" && ! -L "$artifact_dir/$wheel_name" && \
+    "$(sha256sum "$artifact_dir/$wheel_name" | cut -d' ' -f1)" == "$artifact_sha" ]] || {
+    echo "Immutable artifact already exists with different or invalid contents" >&2
+    exit 1
+  }
+else
+  wheel_tmp="$(mktemp "$artifact_dir/.$wheel_name.tmp.XXXXXX")"
+  cp "$staging/wheel/$wheel_name" "$wheel_tmp"
+  [[ "$(sha256sum "$wheel_tmp" | cut -d' ' -f1)" == "$artifact_sha" ]]
+  mv "$wheel_tmp" "$artifact_dir/$wheel_name"
+  wheel_tmp=""
+fi
 [[ "$(sha256sum "$artifact_dir/$wheel_name" | cut -d' ' -f1)" == "$artifact_sha" ]]
+if [[ -n "$retention_skip_reason" ]]; then
+  printf 'release retention SKIP: %s\n' "$retention_skip_reason" >&2
+else
+  python3 "$retention_tool" --state "$retention_state" \
+    --release "$retention_release" --artifact "$artifact_sha" --apply
+  printf 'release retention applied: %s (%s)\n' "$retention_release" "$artifact_sha"
+fi
 printf 'patch_sha256=%s\ntranslation_catalog_sha256=%s\nwheel_sha256=%s\nwheel_bytes=' "$patch_sha" "$catalog_sha" "$artifact_sha"
 wc -c < "$artifact_dir/$wheel_name"
 printf 'wheel_path=%s\n' "$artifact_dir/$wheel_name"

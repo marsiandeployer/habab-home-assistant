@@ -126,7 +126,13 @@ The catalog check fingerprints all 19 `ru-*.json` files by relative path and
 content SHA-256. Expected catalog fingerprint:
 `154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce`.
 The artifact directory is keyed by the final wheel SHA-256, matching the
-installer URL convention.
+installer URL convention. After the wheel copy passes its SHA-256 readback,
+`build-wheel.sh` registers that hash directory in the shared retention state;
+only the current and previous wheel releases remain. Set
+`HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT` and
+`HABAB_NATIVE_FRONTEND_RETENTION_STATE` together for a separate artifact root
+and matching state. Missing retention tooling/state or uninitialized release
+pointers are reported as `SKIP`; no different root is updated.
 
 The released `.7` wheel is 111,675,760 bytes with SHA-256
 `1d518e7cf632827f04481f0ef0d8ad3aec65d17b25cdc73f1b79c34de0ee1867`.
