@@ -95,9 +95,30 @@ class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
             "external_reachability": "not_verified",
             "source": "android_connectivity_manager",
         }
-        with patch.object(assistant_status, "web_access_context", return_value=web_access):
+        home_snapshot = {"web_access": web_access, "assist_exposure": "unknown", "states": []}
+        with patch.object(assistant_status, "build_voice_context", return_value=home_snapshot) as builder:
             result = await self.status({"provider": "habab", "api_key": "fixture-key"})
         self.assertEqual(result["web_access"], web_access)
+        self.assertIs(result["web_access"], result["home_snapshot"]["web_access"])
+        self.assertEqual(result["home_snapshot"], home_snapshot)
+        self.assertEqual(builder.call_count, 1)
+
+    async def test_home_snapshot_is_rebuilt_for_each_status_call(self):
+        snapshots = [
+            {"generated_at": "2026-10-25T12:00:00+03:00", "expires_at": "2026-10-25T12:00:30+03:00",
+             "assist_exposure": "verified", "states": [{"entity_id": "vacuum.home", "state": "cleaning"}],
+             "web_access": {"status": "unknown"}},
+            {"generated_at": "2026-10-25T12:00:05+03:00", "expires_at": "2026-10-25T12:00:35+03:00",
+             "assist_exposure": "verified", "states": [{"entity_id": "vacuum.home", "state": "docked"}],
+             "web_access": {"status": "unknown"}},
+        ]
+        with patch.object(assistant_status, "build_voice_context", side_effect=snapshots) as builder:
+            first = await self.status({"provider": "habab", "api_key": "fixture-key"})
+            second = await self.status({"provider": "habab", "api_key": "fixture-key"})
+        self.assertEqual(first["home_snapshot"]["states"][0]["state"], "cleaning")
+        self.assertEqual(second["home_snapshot"]["states"][0]["state"], "docked")
+        self.assertNotEqual(first["home_snapshot"]["generated_at"], second["home_snapshot"]["generated_at"])
+        self.assertEqual(builder.call_count, 2)
 
     async def test_absent_or_unknown_provider_reports_no_selected_transport(self):
         hass = SimpleNamespace(data={DOMAIN: {

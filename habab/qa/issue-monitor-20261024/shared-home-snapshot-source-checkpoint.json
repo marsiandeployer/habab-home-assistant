@@ -1,0 +1,30 @@
+{
+  "issue": 2,
+  "status": "SOURCE_TESTS_PASS_LIVE_NOT_RUN",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/assistant_identity.py": "3e4798b5a6c30c45084074b8a31ad3d72307f7877db119d26edbed9e10a923f8",
+    "habab/distribution/src/habab_home/assistant_status.py": "4369e21bfe19955fb65de2fee274d584f0eba65018a724b78f9af851f46891d8",
+    "habab/distribution/tests/test_assistant_status.py": "9e3c8ef0d8fc0059b203d29f05408a1c1a00b8b6f9647411e2111e8efb936b12",
+    "habab/distribution/tests/test_setup_agent.py": "1ead40d5de3435f736a469389a154235c01ff0dcfdfc728d39deabdcfaef18a8"
+  },
+  "trigger": "Vacuum attempt2 falsely repeated prior cleaning state while actual preflight/final state were docked; current-turn raw trace had zero tools",
+  "fix": "Reuse existing bounded Assist-exposed voice home snapshot in every shared assistant status, including repeated turns; top-level web_access shares that snapshot",
+  "root_independent_tests": {
+    "passed": 41,
+    "modules": [
+      "android_network",
+      "android_mdns",
+      "voice_context",
+      "assistant_status",
+      "setup_agent"
+    ],
+    "isolation": "pinned Core network none read-only mounts"
+  },
+  "root_native_preflight": {
+    "vacuum_conversation_exposed": true,
+    "vacuum_final_state": "docked"
+  },
+  "model_acceptance": "NOT_RUN",
+  "physical_repeat": "NOT_RUN",
+  "privacy": "Existing exposure rules and bounds retained; no full registry upload or semantic routing"
+}

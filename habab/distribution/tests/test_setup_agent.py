@@ -106,6 +106,42 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                          ("GET", "session/ses_alice/message?limit=60"))
         agent.diagnostics.clear.assert_called_once_with("alice", "ses_alice")
 
+    async def test_each_turn_injects_fresh_snapshot_alongside_prior_history(self):
+        agent = self.agent()
+        prior = {"info": {"role": "assistant"}, "parts": [
+            {"type": "text", "text": "После прошлого запуска пылесос был готов к уборке."}
+        ]}
+        agent.request = AsyncMock(side_effect=[
+            {"info": {"role": "assistant"}}, [prior],
+            {"info": {"role": "assistant"}}, [prior],
+        ])
+        status = {
+            "selected_provider": "deepseek", "voice": {"observed_client": {"outbound_audio": "not_observed"}},
+            "telegram": {"phase": "not_checked"},
+        }
+        first_snapshot = {
+            "generated_at": "2026-10-25T12:00:00+03:00", "expires_at": "2026-10-25T12:00:30+03:00",
+            "assist_exposure": "verified", "states": [{"entity_id": "vacuum.home", "state": "cleaning"}],
+        }
+        second_snapshot = {
+            "generated_at": "2026-10-25T12:00:05+03:00", "expires_at": "2026-10-25T12:00:35+03:00",
+            "assist_exposure": "verified", "states": [{"entity_id": "vacuum.home", "state": "docked"}],
+        }
+        with patch("homeassistant.components.habab_home.setup_agent.get_assistant_status",
+                   new=AsyncMock(side_effect=[{**status, "home_snapshot": first_snapshot},
+                                              {**status, "home_snapshot": second_snapshot}])):
+            first_result = await agent.run("alice", "ses_alice", "проверь состояние")
+            second_result = await agent.run("alice", "ses_alice", "проверь ещё раз")
+
+        payloads = [call.args[2] for call in agent.request.await_args_list if call.args[0] == "POST"]
+        injected = [json.loads(payload["parts"][0]["text"].split("\n", 1)[1]) for payload in payloads]
+        self.assertEqual(injected[0]["home_snapshot"]["states"][0]["state"], "cleaning")
+        self.assertEqual(injected[1]["home_snapshot"]["states"][0]["state"], "docked")
+        self.assertNotEqual(injected[0]["home_snapshot"]["generated_at"],
+                            injected[1]["home_snapshot"]["generated_at"])
+        self.assertEqual(first_result["messages"][0]["text"], prior["parts"][0]["text"])
+        self.assertEqual(second_result["messages"][0]["text"], prior["parts"][0]["text"])
+
     async def test_actual_message_uses_selected_provider_instead_of_hardcoded_deepseek(self):
         for provider in ("openai", "habab"):
             agent = self.agent()

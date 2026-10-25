@@ -2,8 +2,8 @@
 import os
 
 from .const import DOMAIN, VERSION
-from .android_network import web_access_context
 from .runtime_context import DOCKER_RUNTIME_KIND, RUNTIME_KIND_ENV
+from .voice_context import build_voice_context
 
 
 async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=True):
@@ -34,10 +34,12 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
         telegram_state = {"phase": "not_checked", "group": {"phase": "not_checked"}}
     else:
         telegram_state = {}
+    home_snapshot = build_voice_context(hass)
     return {
         "assistant": "Habab", "version": VERSION,
         "ha_runtime": os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND),
-        "web_access": web_access_context(),
+        "web_access": home_snapshot["web_access"],
+        "home_snapshot": home_snapshot,
         "selected_provider": settings.get("provider"),
         "selected_text_model": settings.get("model"),
         "voice": {
