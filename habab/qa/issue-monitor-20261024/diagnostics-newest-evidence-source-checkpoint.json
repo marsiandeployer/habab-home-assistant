@@ -1,0 +1,23 @@
+{
+  "issue": 16,
+  "status": "SOURCE_ACCEPTED_LIVE_NOT_RUN",
+  "source_sha256": {
+    "habab/distribution/src/habab_home/diagnostics.py": "6b38e0f0584148115271b7b1420e1cff1d49c803aa7a158c3fdb2f3ccd5aaf2d",
+    "habab/distribution/tests/test_diagnostics.py": "16d4535fb0d1a71472844533d903affe6f7ea58e2c8c1f7d5493220317c66b66"
+  },
+  "root_independent_tests": {
+    "image": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "suite": "python3 -m unittest discover -s /qa -p test_diagnostics.py -q",
+    "passed": 21,
+    "isolation": "network none, read-only source mounts"
+  },
+  "verified_behavior": [
+    "Newest messages receive bounded projection budget first",
+    "Newest selected sessions receive aggregate export budget first, then archive order is chronological",
+    "At most five sessions and sixty messages per session, one bounded runtime GET each",
+    "Owner mapping rechecked before projection; redaction and export limits retained",
+    "Synthetic runtime status excluded; protocol-marked voice retained"
+  ],
+  "live_API_acceptance": "NOT_RUN",
+  "deployment": "NOT_RUN"
+}

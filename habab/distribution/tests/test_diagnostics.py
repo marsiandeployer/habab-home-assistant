@@ -215,7 +215,10 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                 Request(owner, hass), "web-alice")
         payload = json.loads(response.body)
         self.assertTrue(payload["session"]["events_truncated"])
-        self.assertNotIn("LATE_BYTE_SENTINEL", response.body.decode())
+        projected_events = [event for event in payload["events"] if event["available"]]
+        self.assertEqual([event["id"] for event in projected_events], ["0.0", "1.0"])
+        self.assertNotEqual(projected_events[0]["text"], "bounded text " * 100)
+        self.assertEqual(projected_events[1]["text"], "LATE_BYTE_SENTINEL")
         budget = diagnostics.ProjectionBudget(max_bytes=1000, max_events=10)
         cleaned = diagnostics._clean_value(
             None, {"items": ["value"] * 100}, budget=budget)
@@ -238,6 +241,98 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                 None, {"items": ["first", "SECOND_ITEM_SENTINEL"]}, budget=item_budget)
         self.assertEqual(item_cleaned["items"], ["first", "[truncated]"])
         self.assertGreater(item_budget.truncation_count, 0)
+
+    async def test_newest_conversation_evidence_survives_older_large_tool_output(self):
+        messages = [
+            {"info": {"role": "assistant", "time": {"created": 1792933200000}},
+             "parts": [{"type": "tool", "tool": "habab-ha", "state": {
+                 "status": "completed", "input": {"action": "devices"},
+                 "output": "OLD_LARGE_OUTPUT_START " + "x" * 4000 + " OLD_LATE_SENTINEL",
+             }}]},
+            {"info": {"role": "user", "time": {"created": 1792933300000}},
+             "parts": [{"type": "text", "text": "LATEST_USER_SENTINEL"}]},
+            {"info": {"role": "assistant", "time": {"created": 1792933400000}},
+             "parts": [{"type": "tool", "tool": "habab-ha", "state": {
+                 "status": "completed", "input": {"action": "states"},
+                 "output": "LATEST_TOOL_SENTINEL",
+             }}]},
+            {"info": {"role": "assistant", "time": {"created": 1792933500000}},
+             "parts": [{"type": "text", "text": "LATEST_REPLY_SENTINEL"}]},
+        ]
+        budget = diagnostics.ProjectionBudget(max_bytes=160, max_events=20)
+        events = diagnostics.project_messages(None, messages, "web", budget)
+        serialized = json.dumps(events)
+
+        self.assertIn("LATEST_USER_SENTINEL", serialized)
+        self.assertIn("LATEST_TOOL_SENTINEL", serialized)
+        self.assertIn("LATEST_REPLY_SENTINEL", serialized)
+        self.assertNotIn("OLD_LATE_SENTINEL", serialized)
+        self.assertGreater(budget.truncation_count, 0)
+        self.assertEqual(
+            [event["id"] for event in events],
+            ["0.0.call", "0.0.result", "1.0", "2.0.call", "2.0.result", "3.0"],
+        )
+
+    async def test_projection_preserves_source_part_order_and_stable_ids(self):
+        messages = [{
+            "info": {"role": "assistant", "time": {"created": 1792933200000}},
+            "parts": [
+                {"type": "text", "text": "before tool"},
+                {"type": "tool", "tool": "habab-ha", "state": {
+                    "status": "completed", "input": {"action": "states"},
+                    "output": "tool result",
+                }},
+                {"type": "text", "text": "after tool"},
+            ],
+        }]
+
+        events = diagnostics.project_messages(None, messages, "web")
+
+        self.assertEqual([event["id"] for event in events], [
+            "0.0", "0.1.call", "0.1.result", "0.2",
+        ])
+        self.assertEqual([event.get("text") or event.get("output") for event in events], [
+            "before tool", None, "tool result", "after tool",
+        ])
+
+    async def test_projection_keeps_last_sixty_messages(self):
+        messages = [{"info": {"role": "user"},
+                     "parts": [{"type": "text", "text": f"MESSAGE_{index}"}]}
+                    for index in range(65)]
+
+        events = diagnostics.project_messages(None, messages, "web")
+
+        self.assertEqual(len(events), diagnostics.MAX_MESSAGES)
+        self.assertEqual(events[0]["id"], "0.0")
+        self.assertEqual(events[0]["text"], "MESSAGE_5")
+        self.assertEqual(events[-1]["id"], "59.0")
+        self.assertEqual(events[-1]["text"], "MESSAGE_64")
+
+    async def test_projection_excludes_synthetic_runtime_status_but_keeps_marked_voice(self):
+        voice_raw, _digest, voice_metadata = encode_voice_event(
+            "evt-trusted-voice", "user", "TRUSTED_VOICE_SENTINEL")
+        messages = [
+            {"info": {"role": "assistant"},
+             "parts": [{"type": "text", "synthetic": True,
+                        "text": "HABAB_RUNTIME_STATUS\nUNTRUSTED_ASSISTANT_STATUS"}]},
+            {"info": {"role": "user"},
+             "parts": [{"type": "text", "synthetic": True,
+                        "text": "HABAB_RUNTIME_STATUS\nUNTRUSTED_USER_STATUS"},
+                       {"type": "text", "text": "REAL_USER_SENTINEL"},
+                       {"type": "text", "synthetic": True,
+                        "text": voice_raw, "metadata": voice_metadata}]},
+        ]
+
+        events = diagnostics.project_messages(None, messages, "web")
+        projected_text = json.dumps(events)
+
+        self.assertNotIn("HABAB_RUNTIME_STATUS", projected_text)
+        self.assertNotIn("UNTRUSTED_ASSISTANT_STATUS", projected_text)
+        self.assertNotIn("UNTRUSTED_USER_STATUS", projected_text)
+        self.assertIn("REAL_USER_SENTINEL", projected_text)
+        self.assertIn("TRUSTED_VOICE_SENTINEL", projected_text)
+        voice_event = next(event for event in events if event["channel"] == "voice")
+        self.assertEqual(voice_event["kind"], "voice_transcript")
 
     async def test_voice_filter_uses_valid_persisted_voice_markers_not_plain_web_text(self):
         voice_raw, _digest, voice_metadata = encode_voice_event(
@@ -374,7 +469,7 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(secret, history_text)
             self.assertTrue(archive.read("opencode/availability.json"))
 
-    async def test_export_marks_projection_truncation_and_omits_later_payload(self):
+    async def test_export_marks_projection_truncation_and_keeps_newest_payload(self):
         messages = [
             {"info": {"role": "assistant", "time": {"created": 1792933200000,
                                                            "completed": 1792933201000}},
@@ -393,7 +488,60 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
             manifest = json.loads(archive.read("manifest.json"))
             self.assertTrue(manifest["projection_truncated"])
             self.assertTrue(manifest["truncated"])
-            self.assertNotIn("LATE_EXPORT_SENTINEL", archive.read("history.json").decode())
+            history = archive.read("history.json").decode()
+            self.assertIn("LATE_EXPORT_SENTINEL", history)
+            self.assertNotIn("Первый ответ", history)
+
+    async def test_multi_session_export_budgets_newer_session_before_old_large_session(self):
+        old_messages = [{
+            "info": {"role": "assistant", "time": {"created": 1792933200000}},
+            "parts": [{"type": "tool", "tool": "habab-ha", "state": {
+                "status": "completed", "input": {"action": "devices"},
+                "output": "OLD_SESSION_OUTPUT_START " + "old-data " * 500 + " OLD_SESSION_LATE_SENTINEL",
+            }}],
+        }]
+        new_messages = [
+            {"info": {"role": "user", "time": {"created": 1792933400000}},
+             "parts": [{"type": "text", "text": "LATEST_SESSION_USER"}]},
+            {"info": {"role": "assistant", "time": {"created": 1792933500000}},
+             "parts": [{"type": "tool", "tool": "habab-ha", "state": {
+                 "status": "completed", "input": {"action": "states"},
+                 "output": "LATEST_SESSION_TOOL",
+             }}]},
+            {"info": {"role": "assistant", "time": {"created": 1792933600000}},
+             "parts": [{"type": "text", "text": "LATEST_SESSION_REPLY"}]},
+        ]
+        owner, hass, assistant, runtime = runtime_fixture()
+        assistant.web_sessions = {}
+        assistant.telegram_sessions = {
+            "alice:bot-entry:1001": "tg-a-old",
+            "alice:bot-entry:1002": "tg-z-new",
+        }
+        runtime.request.side_effect = [old_messages, new_messages]
+
+        with patch.object(diagnostics, "MAX_PROJECTED_BYTES", 160):
+            response = await diagnostics.DiagnosticsExportView().post(
+                Request(owner, hass, data={"from": "2026-10-25T00:00:00Z",
+                                            "to": "2026-10-26T00:00:00Z",
+                                            "channel": "telegram"}))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(runtime.request.await_count, 2)
+        runtime.request.assert_any_await(
+            "GET", "session/tg-a-old/message?limit=60")
+        runtime.request.assert_any_await(
+            "GET", "session/tg-z-new/message?limit=60")
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            history = json.loads(archive.read("history.json"))
+        self.assertTrue(manifest["projection_truncated"])
+        serialized = json.dumps(history)
+        self.assertIn("LATEST_SESSION_USER", serialized)
+        self.assertIn("LATEST_SESSION_TOOL", serialized)
+        self.assertIn("LATEST_SESSION_REPLY", serialized)
+        self.assertNotIn("OLD_SESSION_LATE_SENTINEL", serialized)
+        self.assertEqual([item["session"]["session_id"] for item in history["sessions"]],
+                         ["tg-a-old", "tg-z-new"])
 
     async def test_export_rejects_foreign_session_period_without_timezone_and_oversize(self):
         owner, hass, _assistant, _runtime = runtime_fixture(tool_messages())

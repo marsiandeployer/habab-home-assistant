@@ -317,6 +317,30 @@ def _duration_ms(message: dict) -> int | None:
     return min(int((ended - created).total_seconds() * 1000), 86_400_000)
 
 
+def _event_order_key(event: dict) -> tuple[int, int, int]:
+    """Order projected events by their stable source message and part IDs."""
+    parts = str(event.get("id", "")).split(".")
+    try:
+        message_index = int(parts[0])
+    except (ValueError, IndexError):
+        return MAX_MESSAGES, MAX_PARTS_PER_MESSAGE, 2
+    if len(parts) == 2 and parts[1] == "error":
+        return message_index, -1, 0
+    if len(parts) == 3 and parts[1] == "voice":
+        try:
+            return message_index, -1, int(parts[2])
+        except ValueError:
+            return message_index, -1, 0
+    if len(parts) >= 2:
+        try:
+            part_index = int(parts[1])
+        except ValueError:
+            return message_index, MAX_PARTS_PER_MESSAGE, 2
+        result_index = 1 if len(parts) > 2 and parts[2] == "result" else 0
+        return message_index, part_index, result_index
+    return message_index, MAX_PARTS_PER_MESSAGE, 2
+
+
 def _voice_event(part: dict, budget: ProjectionBudget) -> dict | None:
     metadata = part.get("metadata")
     if isinstance(metadata, dict) and metadata.get(VOICE_EVENT_PROTOCOL_KEY):
@@ -409,7 +433,11 @@ def project_messages(runtime, raw_messages, channel: str,
     events = []
     if not isinstance(raw_messages, list):
         return events
-    for message_index, message in enumerate(raw_messages[-MAX_MESSAGES:]):
+    bounded_messages = raw_messages[-MAX_MESSAGES:]
+    indexed_messages = list(enumerate(bounded_messages))
+    # Reserve output budget for the newest conversation evidence first. Final
+    # sorting below restores chronological message and part order for display.
+    for message_index, message in reversed(indexed_messages):
         if budget.remaining_bytes <= 0:
             budget.mark_truncated()
             break
@@ -493,7 +521,7 @@ def project_messages(runtime, raw_messages, channel: str,
         events.extend(_tool_events(runtime, message, channel, created, message_index, budget))
         if budget.truncation_count > truncations_before_message:
             break
-    events.sort(key=lambda event: (event.get("at") or "", event["id"]))
+    events.sort(key=lambda event: (event.get("at") or "", _event_order_key(event)))
     return events
 
 
@@ -547,9 +575,19 @@ def _matches_window(events: list[dict], start: datetime | None, end: datetime | 
 async def _session_data(hass, owner: str, mapping: dict,
                         budget: ProjectionBudget | None = None) -> tuple[dict, list[dict], list]:
     assistant = hass.data[DOMAIN]["assistant"]
+    runtime, messages, message_limit_reached = await _load_session_messages(
+        hass, owner, mapping)
+    return _project_session_messages(
+        assistant, runtime, owner, mapping, messages,
+        message_limit_reached=message_limit_reached,
+        budget=budget,
+    )
+
+
+async def _load_session_messages(hass, owner: str, mapping: dict) -> tuple[object, list, bool]:
+    """Fetch one already-mapped session once, retaining only its bounded history."""
+    assistant = hass.data[DOMAIN]["assistant"]
     runtime = assistant.runtime
-    budget = budget or ProjectionBudget()
-    truncations_before = budget.truncation_count
     if not _mapping_is_current(assistant, owner, mapping):
         raise AgentError("not_found")
     raw_messages = await runtime.request(
@@ -558,15 +596,40 @@ async def _session_data(hass, owner: str, mapping: dict,
         raise AgentError("not_found")
     if not isinstance(raw_messages, list):
         raise AgentError("invalid_runtime_response")
-    messages = raw_messages[-MAX_MESSAGES:]
-    if len(raw_messages) > MAX_MESSAGES:
+    return runtime, raw_messages[-MAX_MESSAGES:], len(raw_messages) > MAX_MESSAGES
+
+
+def _session_time_bounds(messages: list) -> tuple[datetime | None, datetime | None]:
+    """Read creation/activity timestamps from the bounded runtime message metadata."""
+    created_times = []
+    activity_times = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        created, ended = _message_times(message)
+        if created is not None:
+            created_times.append(created)
+            activity_times.append(created)
+        if ended is not None and (created is None or ended >= created):
+            activity_times.append(ended)
+    return (min(created_times) if created_times else None,
+            max(activity_times) if activity_times else None)
+
+
+def _project_session_messages(assistant, runtime, owner: str, mapping: dict,
+                              messages: list, *, message_limit_reached: bool = False,
+                              budget: ProjectionBudget | None = None) -> tuple[dict, list[dict], list]:
+    if not _mapping_is_current(assistant, owner, mapping):
+        raise AgentError("not_found")
+    budget = budget or ProjectionBudget()
+    truncations_before = budget.truncation_count
+    if message_limit_reached:
         budget.mark_truncated()
     events = project_messages(runtime, messages, mapping["channel"], budget)
     status, error = _session_status(runtime, owner, mapping["session_id"], messages)
     voice_present = any(event.get("channel") == "voice" for event in events)
     modes = [mapping["channel"]] + (["voice"] if mapping["channel"] == "web" and voice_present else [])
-    timestamps = [_parse_time(event["at"]) for event in events if event.get("at")]
-    timestamps = [item for item in timestamps if item is not None]
+    created_at, updated_at = _session_time_bounds(messages)
     provider_models = []
     for message in messages:
         if budget.remaining_bytes <= 0:
@@ -584,8 +647,8 @@ async def _session_data(hass, owner: str, mapping: dict,
         "session_id": mapping["session_id"], "channel": mapping["channel"],
         "modes": modes, "status": status,
         "provider_models": provider_models,
-        "created_at": _iso(min(timestamps)) if timestamps else None,
-        "updated_at": _iso(max(timestamps)) if timestamps else None,
+        "created_at": _iso(created_at),
+        "updated_at": _iso(updated_at),
         "processing_duration_ms": sum(
             _duration_ms(message) or 0 for message in messages
             if isinstance(message, dict)
@@ -616,7 +679,7 @@ def _stage_rows(events: list[dict], channel: str) -> list[dict]:
     if any(event.get("channel") == "voice" for event in events):
         if "voice_transport" not in present:
             result.append(_unavailable_stage("voice_transport", "voice"))
-    return sorted(result, key=lambda event: (event.get("at") or "", event["id"]))
+    return sorted(result, key=lambda event: (event.get("at") or "", _event_order_key(event)))
 
 
 def _valid_channel(value: str | None) -> str:
@@ -805,10 +868,45 @@ class DiagnosticsExportView(HomeAssistantView):
         exported = []
         history_available = True
         projection_budget = ProjectionBudget()
-        for record in records:
+        loaded_sessions = []
+        for record_index, record in enumerate(records):
             try:
-                session, events, _raw = await _session_data(
-                    hass, owner.id, record, projection_budget)
+                runtime, messages, message_limit_reached = await _load_session_messages(
+                    hass, owner.id, record)
+                _created_at, activity_at = _session_time_bounds(messages)
+                loaded_sessions.append({
+                    "record": record, "record_index": record_index,
+                    "runtime": runtime, "messages": messages,
+                    "message_limit_reached": message_limit_reached,
+                    "activity_at": activity_at,
+                })
+            except AgentError:
+                history_available = False
+                loaded_sessions.append({
+                    "record": record, "record_index": record_index,
+                    "runtime": None, "messages": [],
+                    "message_limit_reached": False, "activity_at": None,
+                })
+
+        # Fetch each bounded history once, then give the shared projection
+        # budget to the most recently active mapped sessions first.
+        unknown_time = datetime.min.replace(tzinfo=timezone.utc)
+        loaded_sessions.sort(
+            key=lambda item: (item["activity_at"] is not None,
+                              item["activity_at"] or unknown_time),
+            reverse=True,
+        )
+        exported_with_recency = []
+        for item in loaded_sessions:
+            record = item["record"]
+            try:
+                if item["runtime"] is None:
+                    raise AgentError("runtime_unavailable")
+                session, events, _raw = _project_session_messages(
+                    assistant, item["runtime"], owner.id, record, item["messages"],
+                    message_limit_reached=item["message_limit_reached"],
+                    budget=projection_budget,
+                )
             except AgentError:
                 history_available = False
                 session = {"session_id": record["session_id"], "channel": record["channel"],
@@ -824,7 +922,15 @@ class DiagnosticsExportView(HomeAssistantView):
             if not events and session["status"] == "unknown":
                 events.append(_unavailable_stage("conversation_history", session["channel"],
                                                  "runtime_unavailable"))
-            exported.append({"session": session, "events": _stage_rows(events, session["channel"])})
+            exported_with_recency.append((
+                item["activity_at"], item["record_index"],
+                {"session": session, "events": _stage_rows(events, session["channel"])},
+            ))
+        oldest_time = datetime.max.replace(tzinfo=timezone.utc)
+        exported_with_recency.sort(
+            key=lambda item: (item[0] is None, item[0] or oldest_time, item[1]),
+        )
+        exported = [item[2] for item in exported_with_recency]
         if session_id is not None and not exported:
             return self.json_message("not_found", status_code=404)
         manifest = {
