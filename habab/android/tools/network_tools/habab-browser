@@ -1,0 +1,8 @@
+#!/bin/sh
+# Real Alpine Chromium with an ephemeral profile and Android/PRoot-safe flags.
+set -eu
+profile="$(mktemp -d "${TMPDIR:-/tmp}/habab-browser.XXXXXXXX")"
+cleanup() { rm -rf -- "$profile"; }
+trap cleanup EXIT HUP INT TERM
+/usr/bin/chromium --headless=new --no-sandbox --disable-dev-shm-usage \
+  --disable-gpu --user-data-dir="$profile" "$@"

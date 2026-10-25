@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "alpine": {
+    "release": "3.24.1",
+    "architecture": "aarch64",
+    "repositories": {
+      "main": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main",
+      "community": "https://dl-cdn.alpinelinux.org/alpine/v3.24/community"
+    },
+    "apkIndexesSha256": {
+      "main": "7556d3113ff60990eb2ed32c5dfe50c141e38232f73188a83ed1b884ad086071",
+      "community": "7e3d5abb6b7ae09135213fbbc7048fd3af440e3095ea3018533c513baa94d987"
+    },
+    "chromium": {
+      "package": "chromium",
+      "version": "155.0.8059.84-r0",
+      "apkControlHash": "Q1vHFilTs3Vnv3sp7H1Y/aZLczr6o=",
+      "compressedBytes": 145743675,
+      "installedBytes": 311356417
+    }
+  },
+  "kurigram": {
+    "distribution": "Kurigram",
+    "version": "2.2.26",
+    "filename": "kurigram-2.2.26-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/2b/e0/a00020c21725550c9309e6e03787acf7236de2f284c8d9bc57644ae2160a/kurigram-2.2.26-py3-none-any.whl",
+    "sha256": "f53cee6119a579b74620f45b5f83d543cd3bd510a8a6a1b4b3852e21603241e9",
+    "bytes": 6044442,
+    "python": "3.14",
+    "coreDependencies": {
+      "pyaes": "1.6.1",
+      "python-socks": "3.1.1"
+    }
+  }
+}

@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -199,8 +200,39 @@ def install_frontend(rootfs, cache):
             'payloadFiles': count, 'payloadSha256': digest}
 
 
-def require_build_space(cache, rootfs):
-    minimum = (2 if rootfs.exists() else 8) * 1024 ** 3
+def install_network_tools(rootfs, cache, helper_image):
+    """Install explicitly requested, hash-pinned browser and Pyrogram API."""
+    spec = importlib.util.spec_from_file_location(
+        'android_network_tools', ROOT / 'tools/network_tools/package.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.install(rootfs, cache, helper_image)
+
+
+def validate_source_revision(source_revision):
+    """Attest a clean committed Android/distribution source tree before writes."""
+    repository = ROOT.parents[1]
+    try:
+        top = subprocess.run(['git', '-C', str(repository), 'rev-parse', '--show-toplevel'],
+                             check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        head = subprocess.run(['git', '-C', str(repository), 'rev-parse', '--verify', 'HEAD'],
+                              check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        status = subprocess.run([
+            'git', '-C', str(repository), 'status', '--porcelain=v1', '--untracked-files=all',
+            '--', 'habab/android', 'habab/distribution',
+        ], check=True, capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise ValueError('Runtime source provenance requires a readable Git checkout') from error
+    if Path(top).resolve() != repository.resolve():
+        raise ValueError('Runtime source provenance resolved to a different Git checkout')
+    if head != source_revision:
+        raise ValueError('source-revision does not match the checked-out Git HEAD')
+    if status:
+        raise ValueError('Runtime inputs in habab/android or habab/distribution are dirty')
+
+
+def require_build_space(cache, rootfs, network_tools=False):
+    minimum = ((2 if rootfs.exists() else 8) + (2 if network_tools else 0)) * 1024 ** 3
     available = shutil.disk_usage(cache).free
     if available < minimum:
         raise OSError(f'Runtime build needs {minimum // 1024 ** 3} GiB free; only {available // 1024 ** 2} MiB available')
@@ -210,16 +242,31 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--signing-key', type=Path, required=True, help='Private RSA signing key outside repository')
     parser.add_argument('--public-base', required=True, help='HTTPS directory serving this release')
+    parser.add_argument('--source-revision', required=True,
+                        help='Full 40-character committed source SHA used to build this runtime')
+    parser.add_argument('--network-tools', action='store_true',
+                        help='Include pinned headless Chromium and Kurigram tools (large download)')
     args = parser.parse_args()
+    if not re.fullmatch(r'[0-9a-f]{40}', args.source_revision):
+        parser.error('source-revision must be a full 40-character lowercase hexadecimal commit SHA')
     if not args.public_base.startswith('https://'):
         parser.error('public-base must use HTTPS')
+    try:
+        validate_source_revision(args.source_revision)
+    except ValueError as error:
+        parser.error(str(error))
     cache = ROOT / 'build/runtime'
     cache.mkdir(parents=True, exist_ok=True)
     lock = (cache / 'package.lock').open('w')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     rootfs = cache / 'rootfs'
+    if not args.network_tools:
+        network_state = rootfs / 'etc/habab-android-network-tools.json'
+        network_pending = rootfs / 'etc/habab-android-network-tools.installing'
+        if network_state.exists() or network_pending.exists():
+            raise ValueError('This cached rootfs contains an opt-in network-tools install; rebuild its rootfs to omit it')
     base = cache / 'rootfs.tar'
-    require_build_space(cache, rootfs)
+    require_build_space(cache, rootfs, args.network_tools)
     if not rootfs.exists():
         export_image(base)
         # Validate names before GNU tar extracts; it protects against writing
@@ -239,6 +286,10 @@ def main():
     version, opencode_digest = install_opencode(rootfs, cache)
     node = install_node(rootfs, cache)
     native_frontend = install_frontend(rootfs, cache)
+    network_tools = None
+    if args.network_tools:
+        helper_image = 'ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4'
+        network_tools = install_network_tools(rootfs, cache, helper_image)
     launcher = rootfs / 'usr/local/share/habab-android/launch.py'
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_bytes((ROOT / 'runtime/launch.py').read_bytes())
@@ -265,10 +316,13 @@ def main():
     seed.write_text(config)
     release = {'schema': 1, 'archiveFormat': 3, 'architecture': 'aarch64', 'coreVersion': '2026.10.2',
                'hababVersion': json.loads((DIST / 'src/habab_home/manifest.json').read_text())['version'],
+               'sourceRevision': args.source_revision,
                'baseImage': IMAGE, 'opencodeVersion': version, 'opencodeSha256': opencode_digest,
                'androidLauncherSha256': sha256(launcher),
                'sourceFiles': inventory, 'nodePackages': node,
                'configurationSha256': sha256(seed), 'nativeFrontend': native_frontend}
+    if network_tools is not None:
+        release['networkTools'] = network_tools
     identity = hashlib.sha256(json.dumps(release, sort_keys=True).encode()).hexdigest()[:16]
     release['id'] = identity
     (rootfs / 'etc/habab-android-release.json').write_text(json.dumps(release, sort_keys=True, indent=2) + '\n')

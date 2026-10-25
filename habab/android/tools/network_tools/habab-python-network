@@ -1,0 +1,5 @@
+#!/bin/sh
+# Isolate the compatibility package from Home Assistant's global site-packages.
+set -eu
+export PYTHONPATH="/opt/habab-network-tools/python${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/local/bin/python3 "$@"
