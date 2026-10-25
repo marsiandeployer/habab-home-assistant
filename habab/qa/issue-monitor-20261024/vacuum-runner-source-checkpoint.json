@@ -1,0 +1,15 @@
+{
+  "issue": 2,
+  "independent_synthetic_tests": 7,
+  "device_commands_sent": 0,
+  "live_acceptance": "NOT_RUN",
+  "readiness": "source reviewed; requires fresh image/source attestation, idle/owner/device binding checks and execution window",
+  "recovery": "requires observed owned start, fresh exact binding and verified stop/dock events plus state; otherwise manual recovery and FAIL",
+  "checked_at": "2026-10-25T08:09:52.408880+00:00",
+  "scope": "source candidate only",
+  "source_sha256": {
+    "habab/qa/issue-monitor-20261024/VACUUM_CHAT_E2E_PLAN.md": "dd4c3926ebd3a96db82b25091cb29561b99f8e2cbb4360cc8a262ab7518b205b",
+    "habab/qa/issue-monitor-20261024/vacuum-chat-e2e.cjs": "7157c6edb7f28117b658221ac13d21c6485182d7cbe95b0d70b74d4bbb10aa03",
+    "habab/qa/issue-monitor-20261024/vacuum-chat-e2e.test.cjs": "05456168fd1c116d2a94d3b2383b244879f6b12f77d7ba65c4dc27b6d17ebb06"
+  }
+}
