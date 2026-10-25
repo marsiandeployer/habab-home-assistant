@@ -4,7 +4,7 @@
 
 - public/ — опубликованная сборка и независимые формы в public/integrations/.
 - app.py, habab_demo/ — Flask API состояния виртуальных устройств с PostgreSQL и изоляцией сессий.
-- distribution/ — исходный кандидат Habab Home 0.3.4 на Home Assistant Core 2026.10.2, без OS/Supervisor. Публичный Windows-архив пока 0.3.1.
+- distribution/ — исходный кандидат Habab Home 0.3.6 на Home Assistant Core 2026.10.2, без OS/Supervisor, с frontend `20260930.4+habab.9`. Пакет основного Windows-загрузчика — 0.3.1; отдельный [preview-загрузчик кандидата 0.3.6](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-45203ea388bf.bat) предназначен для проверки актуального кандидата.
 - build/ — русский перевод, publisher и архив исходного patch.
 - deploy/, ecosystem.config.cjs — пример deployment нашего сервера, адаптируйте пути и роли PostgreSQL.
 - qa/, tests/ — браузерные проверки и тесты API.

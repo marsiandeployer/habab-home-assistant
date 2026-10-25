@@ -1,0 +1,64 @@
+{
+  "receipt_type": "habab-home-clean-image-boot",
+  "recorded_on": "2026-10-25",
+  "source_commit": "9c04db9699454f94c404c8eaa346fa53129ae5c6",
+  "source_dirty": false,
+  "image": {
+    "tag": "habab-home:candidate-9c04db9699454f94c404c8eaa346fa53129ae5c6",
+    "id": "sha256:150df0ca43d1bcc6c1741b4fdb194fcf35604f5c15fa5827349f5d426131efbf",
+    "version": "0.3.6",
+    "core_version": "2026.10.2",
+    "frontend_version": "20260930.4+habab.9",
+    "frontend_sha256": "9faecade64144e2a6af3c3a4edc951e183292eaab0147cc49f85f8ec555d2952"
+  },
+  "build": {
+    "clean_image_build": true,
+    "base_pull": false
+  },
+  "runtime": {
+    "clean_linux_boot": true,
+    "physical_windows_run": false,
+    "network": "bridge",
+    "published_binding": "loopback ephemeral port",
+    "mounted_paths": ["/config only"],
+    "privileged": false,
+    "added_capabilities": 0,
+    "devices": 0,
+    "external_provider_entries": 0,
+    "provider_keys": 0,
+    "account_writes": 0,
+    "custom_integration_initialized": true
+  },
+  "http_checks": {
+    "GET /": 200,
+    "GET /onboarding.html": 200,
+    "GET /api/onboarding": 200,
+    "GET /api/": 401
+  },
+  "onboarding": {
+    "steps_total": 4,
+    "all_steps_done": false,
+    "steps": {
+      "user": false,
+      "core_config": false,
+      "analytics": false,
+      "integration": false
+    }
+  },
+  "sanitized_log_summary": {
+    "critical": 0,
+    "errors_or_exceptions": 0,
+    "warnings": {
+      "py.warnings": 1,
+      "homeassistant.components.http.ban": 1
+    },
+    "raw_log_text_included": false,
+    "note": "The probe included one unauthenticated API GET; the HTTP ban warning may be related."
+  },
+  "cleanup": {
+    "owned_container_removed": true,
+    "isolated_config_removed": true,
+    "candidate_image_retained": true
+  },
+  "acceptance_boundary": "Clean Linux image boot only; physical Windows/device acceptance was not run."
+}

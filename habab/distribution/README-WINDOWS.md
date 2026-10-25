@@ -1,12 +1,17 @@
 # Запуск на Windows
 
 Инструкция для Git-checkout относится к исходному кандидату Habab Home 0.3.6
-на Home Assistant Core 2026.10.2. Публичный `start-home-assistant.bat` пока
-скачивает стабильный Windows-пакет 0.3.1.
+на Home Assistant Core 2026.10.2 с frontend `20260930.4+habab.9`. Публичный
+`start-home-assistant.bat` скачивает пакет основного загрузчика 0.3.1. Для
+проверки актуального кандидата используйте отдельный
+[preview-загрузчик 0.3.6](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-45203ea388bf.bat),
+собранный из коммита исходников `9c04db9699454f94c404c8eaa346fa53129ae5c6`; SHA-256 ZIP:
+`45203ea388bfd0af33d866aa196e9f8534444eb2a5171d13260d5f4b8e67c08f`. Это
+предварительный пакет; основная загрузка по-прежнему выдаёт 0.3.1.
 Для новой Git-установки из корня checkout запустите отслеживаемый
 `habab\distribution\start-windows.bat`; двойной щелчок тоже подходит. Для
 обновления сначала выполните `git pull`. Батник пересобирает локальный Docker-
-образ с закреплённым frontend `20260930.4+habab.4` и повторно использует том
+образ с закреплённым frontend `20260930.4+habab.9` и повторно использует том
 `config`. Сохраните рядом остальные файлы `distribution`; не удаляйте том и не
 выполняйте `docker compose down -v`, если нужно сохранить Home Assistant.
 
@@ -154,6 +159,15 @@ docker compose --env-file .env.opencode-windows -p habab-home-windows -f compose
 Повторный запуск того же батника сохраняет том настроек. Пакет использует отдельное имя Compose-проекта `habab-home-windows`.
 
 ## Что проверено
+
+Для исходного кандидата 0.3.6 собран чистый Docker-образ для Linux
+`sha256:150df0ca43d1bcc6c1741b4fdb194fcf35604f5c15fa5827349f5d426131efbf`;
+изолированный запуск прошёл: главная страница и onboarding вернули 200, Core
+2026.10.2 и frontend `20260930.4+habab.9` запустились, модуль Habab
+инициализировался. Аккаунт, провайдер и устройства не создавались; первичная
+настройка осталась незавершённой. Контейнер и новая конфигурация удалены, образ
+сохранён. [Отчёт](../qa/windows-candidate-0.3.6/clean-image-boot.json). Установка на
+физической Windows не проверялась.
 
 Изолированный Linux Docker QA для принятого образа 0.3.0 без overlays прошёл 7/7 browser
 сценариев и 100 Python, 26 JavaScript и 10 native frontend tests; lint,
