@@ -271,7 +271,9 @@ class SetupAgent:
                     if len(raw) > 2_000_000:
                         raise AgentError("response_too_large")
                 return json.loads(raw) if raw else None
-        except (ClientError, TimeoutError, ValueError) as error:
+        except TimeoutError as error:
+            raise AgentError("runtime_timeout") from error
+        except (ClientError, ValueError) as error:
             raise AgentError("runtime_error") from error
 
     async def ensure(self):
@@ -473,7 +475,12 @@ class SetupAgent:
                     raise AgentError("model_error")
                 self.diagnostics.clear(owner, session_id)
                 return {"session_id": session_id, "messages": visible}
-            except (AgentError, asyncio.CancelledError):
+            except AgentError as error:
+                if error.code == "runtime_timeout":
+                    self.diagnostics.record(owner, session_id, {"message": "timeout"})
+                await self.abort(owner, session_id)
+                raise
+            except asyncio.CancelledError:
                 await self.abort(owner, session_id)
                 raise
             finally:

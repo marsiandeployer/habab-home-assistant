@@ -27,6 +27,7 @@ from homeassistant.components.habab_home.setup_agent import (
     habab_service_origin,
     verify_binary,
 )
+from homeassistant.components.habab_home.agent_diagnostics import AgentDiagnostics
 from homeassistant.components.habab_home.voice_history import encode_voice_event
 from homeassistant.components.habab_home.assistant_identity import ASSISTANT_IDENTITY
 from homeassistant.components.habab_home.runtime_context import (
@@ -310,6 +311,43 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.code, "model_error")
         agent.diagnostics.record.assert_called_once()
 
+    async def test_runtime_request_timeout_keeps_safe_code_and_original_cause(self):
+        agent = self.agent()
+        del agent.request
+
+        class TimedOutRequest:
+            async def __aenter__(self):
+                raise TimeoutError("private provider detail")
+
+            async def __aexit__(self, *_):
+                return None
+
+        session = SimpleNamespace(request=Mock(return_value=TimedOutRequest()))
+        with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                   return_value=session):
+            with self.assertRaises(AgentError) as error:
+                await agent.request("POST", "session/test/message", timeout=180)
+
+        self.assertEqual(error.exception.code, "runtime_timeout")
+        self.assertIsInstance(error.exception.__cause__, TimeoutError)
+        self.assertNotIn("private provider detail", str(error.exception))
+
+    async def test_run_records_timeout_diagnostic_aborts_and_clears_active(self):
+        agent = self.agent()
+        agent.diagnostics = AgentDiagnostics()
+        agent.request.side_effect = AgentError("runtime_timeout")
+        agent.abort = AsyncMock(return_value=True)
+
+        with self.assertRaises(AgentError) as error:
+            await agent.run("alice", "ses_alice", "test")
+
+        self.assertEqual(error.exception.code, "runtime_timeout")
+        diagnostic = agent.diagnostics.get("alice", "ses_alice")
+        self.assertTrue(diagnostic["mentions_timeout"])
+        self.assertNotIn("message", diagnostic)
+        agent.abort.assert_awaited_once_with("alice", "ses_alice")
+        self.assertIsNone(agent.active)
+
     def test_history_omits_tool_outputs_reasoning_and_synthetic_secrets(self):
         agent = self.agent()
         messages = [{"info": {"role": "assistant"}, "parts": [
@@ -366,7 +404,7 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(PROMPT.startswith(ASSISTANT_IDENTITY))
         self.assertEqual(
             hashlib.sha256(PROMPT.removeprefix(ASSISTANT_IDENTITY).encode()).hexdigest(),
-            "0be6d83577a009be74f09f81717d5cabd68f7699261667814b1d183f22242173",
+            "bc685f0609500b7479dafcdfb9906af86a580ee244b7b70f4de7a256f9dbd041",
         )
         self.assertIs(runtime_prompt("docker", PROMPT), PROMPT)
 
