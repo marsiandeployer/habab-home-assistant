@@ -1,0 +1,69 @@
+{
+  "artifacts": [
+    {
+      "bytes": 290827,
+      "crc": "PASS",
+      "embedded_source_revision_match": true,
+      "filename": "habab-home-windows-1a844fb6f7a3.zip",
+      "members": 110,
+      "post_retention_head_status": 200,
+      "public_get_status": 200,
+      "sha256": "1a844fb6f7a30e16925fd3aa05ff20c0653cf45caf55def36530cdd3a2e746f7"
+    },
+    {
+      "bytes": 894,
+      "filename": "start-home-assistant-preview-0.3.6-1a844fb6f7a3.bat",
+      "pins_zip_filename_and_sha256": true,
+      "post_retention_head_status": 200,
+      "public_get_status": 200,
+      "sha256": "c89ef4ea45633da4659956f7aaa526ed22840bc69ba270565929d3a035f1b1cb"
+    },
+    {
+      "bytes": 625,
+      "filename": "windows-preview-0.3.6-1a844fb6f7a3.json",
+      "post_retention_head_status": 200,
+      "public_get_status": 200,
+      "sha256": "20e15edcb196c5dda6da1cef67321f2b1ff94edff14fca2db4558d3550e05a8d",
+      "source_revision_match": true
+    }
+  ],
+  "channel": "preview",
+  "full_zip_redownload_after_publication": false,
+  "generated_at_utc": "2026-10-25T23:47:42Z",
+  "physical_windows_install": "NOT_RUN",
+  "retention": {
+    "current": "preview-0.3.6-1a844fb6f7a3",
+    "current_head_statuses": [
+      200,
+      200,
+      200
+    ],
+    "generic_windows_package_manifest_unchanged": true,
+    "other_orphan_archives_touched": false,
+    "previous": "preview-0.3.6-59d23122eb97",
+    "previous_head_statuses": [
+      200,
+      200,
+      200
+    ],
+    "removed_registered_old_artifacts": [
+      {
+        "filename": "habab-home-windows-45203ea388bf.zip",
+        "local_absent": true,
+        "public_head_status": 404
+      },
+      {
+        "filename": "start-home-assistant-preview-0.3.6-45203ea388bf.bat",
+        "local_absent": true,
+        "public_head_status": 404
+      }
+    ],
+    "stable_windows_package_0_3_1_unchanged": true,
+    "unregistered_preview_metadata_alias_preserved": true
+  },
+  "schema": 1,
+  "source_dirty": false,
+  "source_revision": "3bdc03b6d13f41d142550703e698591bf032563d",
+  "stable_promotion": "NOT_DONE",
+  "version": "0.3.6"
+}

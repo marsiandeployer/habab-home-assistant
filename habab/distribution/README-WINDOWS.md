@@ -3,11 +3,11 @@
 Инструкция для Git-checkout относится к исходному кандидату Habab Home 0.3.6
 на Home Assistant Core 2026.10.2 с frontend `20260930.4+habab.9`. Публичный
 `start-home-assistant.bat` скачивает пакет основного загрузчика 0.3.1. Для
-проверки кандидата используйте отдельный [preview-загрузчик 0.3.6](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-59d23122eb97.bat)
-из коммита исходников `48c2c65586cf152ebb2f28a4287291e58e89a3b4`. Публичные
-[метаданные пакета](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-59d23122eb97.json)
-указывают ZIP `habab-home-windows-59d23122eb97.zip` размером 281251 байт и
-SHA-256 `59d23122eb972ba865f5e891a81bfc68b45fdd6979f76fdd80774cf9bd5459b8`.
+проверки кандидата используйте отдельный [preview-загрузчик 0.3.6](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-1a844fb6f7a3.bat)
+из коммита исходников `3bdc03b6d13f41d142550703e698591bf032563d`. Публичные
+[метаданные пакета](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-1a844fb6f7a3.json)
+указывают ZIP `habab-home-windows-1a844fb6f7a3.zip` размером 290827 байт и
+SHA-256 `1a844fb6f7a30e16925fd3aa05ff20c0653cf45caf55def36530cdd3a2e746f7`.
 Это предварительный пакет; физическая установка этого preview на Windows не
 запускалась, а основной загрузчик по-прежнему выдаёт 0.3.1.
 Для новой Git-установки из корня checkout запустите отслеживаемый
