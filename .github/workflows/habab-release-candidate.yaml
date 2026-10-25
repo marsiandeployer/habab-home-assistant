@@ -227,7 +227,8 @@ jobs:
           for source_dir in source_dirs:
               for path in sorted(source_dir.rglob('*')):
                   relative = path.relative_to(distribution)
-                  if path.is_file() and path.suffix in allowed and not {
+                  include_services = relative.as_posix() == 'src/idigital_sms/services.yaml'
+                  if path.is_file() and (path.suffix in allowed or include_services) and not {
                       '__pycache__', 'node_modules', 'tests', 'test', '.git'
                   }.intersection(relative.parts):
                       expected[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()

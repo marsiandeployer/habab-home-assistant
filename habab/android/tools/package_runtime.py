@@ -73,7 +73,9 @@ def copy_sources(rootfs):
         if destination.exists():
             shutil.rmtree(destination)
         for source in sorted(directory.rglob('*')):
-            if not source.is_file() or source.suffix not in allowed:
+            relative = source.relative_to(DIST)
+            include_services = relative.as_posix() == 'src/idigital_sms/services.yaml'
+            if not source.is_file() or (source.suffix not in allowed and not include_services):
                 continue
             if {'__pycache__', 'node_modules', 'tests', 'test', '.git'}.intersection(source.relative_to(directory).parts):
                 continue
@@ -81,7 +83,7 @@ def copy_sources(rootfs):
             target = destination / source.relative_to(directory)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
-            inventory[str(source.relative_to(DIST))] = hashlib.sha256(data).hexdigest()
+            inventory[relative.as_posix()] = hashlib.sha256(data).hexdigest()
     for name, target in [
         ('habab-ha.py', 'usr/local/bin/habab-ha'),
         ('install-xiaomi-home.py', 'usr/local/bin/habab-install-xiaomi-home'),
