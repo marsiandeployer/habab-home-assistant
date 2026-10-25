@@ -19,6 +19,8 @@ from homeassistant.loader import (
 )
 from .const import DOMAIN
 from .assistant_status import get_assistant_status
+from .feedback_action import save_feedback_action
+from .feedback import FeedbackError
 
 _LOGGER = logging.getLogger(__name__)
 DEVICE_LIST_LIMIT = 200
@@ -279,6 +281,11 @@ def discovered_flows(hass, manager):
 
 async def execute(hass, manager, owner, body, trusted_origin=None):
     action = body.get("action")
+    if action == "save_feedback":
+        try:
+            return await save_feedback_action(hass, manager, owner, body)
+        except FeedbackError as error:
+            return {"error": error.code}
     if action == "assistant_status":
         return await get_assistant_status(hass, owner)
     if action == "discover_devices":
