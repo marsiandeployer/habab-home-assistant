@@ -448,12 +448,12 @@ test("explicit submitted prompts use the shared public chat transport", () => {
   assert.equal(instance.openParams.start_listening, true);
 });
 
-test("native pipeline selectors retain explicit, last-used, and preferred pipeline choices", async () => {
+test("native pipeline selection honors an explicit ID and never falls back when it disappears", async () => {
   const pipelines = [{id: "one"}, {id: "two"}];
   assert.equal(setupChatModule.chooseAssistPipeline("two", pipelines, "one", "one"), pipelines[1]);
   assert.equal(setupChatModule.chooseAssistPipeline("last_used", pipelines, "one", "two"), pipelines[1]);
   assert.equal(setupChatModule.chooseAssistPipeline("preferred", pipelines, "two", "one"), pipelines[1]);
-  assert.equal(setupChatModule.chooseAssistPipeline("removed-pipeline", pipelines, "one", undefined), pipelines[0]);
+  assert.equal(setupChatModule.chooseAssistPipeline("removed-pipeline", pipelines, "one", undefined), undefined);
   assert.equal(setupChatModule.chooseAssistPipeline("last_used", [], undefined, undefined), undefined);
 });
 

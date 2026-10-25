@@ -71,9 +71,7 @@ export function chooseAssistPipeline(requestedId, pipelines, preferredId, lastUs
   let id = requestedId === "preferred" ? preferredId
     : requestedId === "last_used" || !requestedId ? lastUsedId || preferredId
       : requestedId;
-  let selected = pipelines.find((pipeline) => pipeline?.id === id);
-  if (!selected && preferredId) selected = pipelines.find((pipeline) => pipeline?.id === preferredId);
-  return selected;
+  return pipelines.find((pipeline) => pipeline?.id === id);
 }
 
 export function selectBrowserVoiceRoute(capability) {
@@ -149,6 +147,10 @@ function installChat() {
       voiceModeHabab: "Habab",
       voiceModeAssist: "Assist",
       nativeAssistTitle: "Обработка идёт через выбранный pipeline Home Assistant Assist; он может использовать облачные сервисы. Если TTS не настроен, ответ появится только текстом.",
+      assistPipelineLabel: "Голосовой помощник Home Assistant",
+      assistPipelineDefault: "Использовать выбранный в Home Assistant",
+      assistPipelineUnavailable: "Выбранный голосовой помощник больше недоступен. Выберите другой в списке.",
+      assistPipelinesFailed: "Не удалось загрузить голосовые помощники Home Assistant.",
       nativeAssistMic: "Сказать через выбранный pipeline Home Assistant Assist",
       nativeAssistHistory: "Ответ обработан выбранным pipeline Assist Home Assistant. Эти реплики видны только в текущем экране; Habab их не сохраняет.",
       nativeAssistFailed: "Выбранный pipeline Assist Home Assistant не вернул текст ответа.",
@@ -198,6 +200,10 @@ function installChat() {
       voiceModeHabab: "Habab",
       voiceModeAssist: "Assist",
       nativeAssistTitle: "Uses the selected Home Assistant Assist pipeline, which may use cloud services. If TTS is not configured, the response appears as text only.",
+      assistPipelineLabel: "Home Assistant voice assistant",
+      assistPipelineDefault: "Use the Home Assistant selection",
+      assistPipelineUnavailable: "The selected voice assistant is no longer available. Choose another from the list.",
+      assistPipelinesFailed: "Home Assistant voice assistants could not be loaded.",
       nativeAssistMic: "Send voice through the selected Home Assistant Assist pipeline",
       nativeAssistHistory: "Handled by the selected Home Assistant Assist pipeline. These messages appear only on this screen; Habab does not save them.",
       nativeAssistFailed: "The selected Home Assistant Assist pipeline returned no response text.",
@@ -261,6 +267,8 @@ function installChat() {
       this.voiceBusy = false;
       this.voiceGeneration = 0;
       this.voiceMode = "habab";
+      this.assistPipelineId = undefined;
+      this.assistPipelineChoiceSet = false;
       this.nativeAssistRun = false;
       this.nativeAssistPipeline = undefined;
       this.nativeAssistConversation = undefined;
@@ -324,6 +332,10 @@ function installChat() {
       this.cleanupVoice();
       this.nativeAssistConversation = undefined;
       this.pendingNativeAssistScope = undefined;
+      this.assistPipelineId = undefined;
+      this.assistPipelineChoiceSet = false;
+      this.assistPipelines = undefined;
+      this.preferredPipelineId = undefined;
       if (this.openParams) this.openParams.start_listening = false;
       if (this.integrationCard) this.integrationCard.active = false;
       const dialog = this.shadowRoot?.querySelector?.("dialog");
@@ -479,7 +491,7 @@ function installChat() {
         #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:24px;line-height:1.3;font-weight:500;margin:0 0 16px}
         .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
         .quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
-        footer{padding:12px 20px 20px}#voice-mode-help{font-size:12px;color:var(--secondary-text-color,#5f6368);margin:0 0 8px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
+        footer{padding:12px 20px 20px}.assist-pipeline-control{display:block;margin:0 0 8px;font-size:12px;color:var(--secondary-text-color,#5f6368)}.assist-pipeline{display:block;width:100%;min-height:40px;margin-block-start:4px;padding:6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff)}#voice-mode-help{font-size:12px;color:var(--secondary-text-color,#5f6368);margin:0 0 8px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
         :host([data-assistant-open]){inset:0;z-index:10;pointer-events:none}:host([data-assistant-open]) .launcher{display:none}:host([data-assistant-open]) dialog{inset:0 0 0 auto;width:var(--habab-assistant-chat-width,50vw);height:100dvh;border-radius:0;border-block:0;border-inline-end:0;box-shadow:-8px 0 28px #0002}:host([data-assistant-open]) dialog:not([open]){display:none}:host([data-assistant-open]) dialog::backdrop{background:transparent}
         @media(max-width:720px){:host{inset:0;z-index:1000}:host([data-assistant-open]) dialog{inset-inline:0;inset-block-start:50dvh;inset-block-end:0;width:100vw;height:50dvh;max-height:50dvh;border-radius:0}:host([data-assistant-open][data-assistant-mobile-expanded]) dialog{inset-block-start:var(--assistant-viewport-offset-top,0px);height:var(--assistant-viewport-height,100dvh);max-height:var(--assistant-viewport-height,100dvh)}:host([data-assistant-mobile-expanded]) .collapse{display:grid}:host(:not([data-assistant-open])) .launcher{position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom))}}
@@ -488,7 +500,7 @@ function installChat() {
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
         <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><select class="voice-mode" aria-label="${t.voiceModeLabel}" title="${t.nativeAssistTitle}"><option value="habab">${t.voiceModeHabab}</option><option value="assist">${t.voiceModeAssist}</option></select><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
+      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
@@ -500,12 +512,20 @@ function installChat() {
       this.q(".voice-mode").value = this.voiceMode;
       this.q(".voice-mode").addEventListener("change", (event) => {
         this.voiceMode = event.currentTarget.value === "assist" ? "assist" : "habab";
+        this.updatePipelineControl();
+        if (this.voiceMode === "assist") void this.loadPipelineOptions();
         this.updateVoiceModeHelp();
         this.controls();
       });
+      this.q(".assist-pipeline").addEventListener("change", (event) => {
+        this.assistPipelineChoiceSet = true;
+        this.assistPipelineId = event.currentTarget.value || undefined;
+        if (this.openParams) this.openParams.invalid_pipeline_id = false;
+        this.status("");
+      });
       this.q(".mic").onclick = () => this.voiceBusy ? this.finishVoice()
         : this.voiceMode === "assist"
-          ? this.startVoice(this.openParams?.pipeline_id || "last_used", this.openParams?.invalid_pipeline_id === true, true)
+          ? this.startVoice(this.assistPipelineChoiceSet ? this.assistPipelineId || "last_used" : this.openParams?.pipeline_id || "last_used", this.openParams?.invalid_pipeline_id === true, true)
           : this.startVoice("last_used");
       this.q(".fresh").onclick = () => this.connect(true);
       this.q(".retry").onclick = () => this.connect();
@@ -676,6 +696,10 @@ function installChat() {
       voiceMode.title = t.nativeAssistTitle;
       voiceMode.options[0].textContent = t.voiceModeHabab;
       voiceMode.options[1].textContent = t.voiceModeAssist;
+      const pipelineSelect = this.q(".assist-pipeline");
+      pipelineSelect.options[0].textContent = t.assistPipelineDefault;
+      this.q(".assist-pipeline-control").firstChild.textContent = t.assistPipelineLabel;
+      this.updatePipelineControl();
       this.updateVoiceModeHelp();
       this.q("#messages").setAttribute("aria-label", t.title);
       const textarea = this.q("textarea");
@@ -709,6 +733,7 @@ function installChat() {
       this.setAssistantOpen(true);
       const dialog = this.q("dialog");
       if (!dialog.open) dialog.show();
+      if (this.voiceMode === "assist") void this.loadPipelineOptions();
       if (this.integrationCard) this.integrationCard.active = true;
       if (focusComposer) this.q("textarea").focus({preventScroll: true});
       else this.q(".close").focus({preventScroll: true});
@@ -739,6 +764,7 @@ function installChat() {
       this.q(".voice-mode").hidden = this.demo;
       this.q(".mic").disabled = this.demo || !this.sessionId || (this.busy && !this.voiceBusy) || this.setupRestarting;
       this.q(".mic").hidden = this.demo;
+      this.q(".assist-pipeline").disabled = this.busy || this.setupRestarting;
       const micLabel = this.voiceBusy ? this.t.stopVoice : this.voiceMode === "assist" ? this.t.nativeAssistMic : this.t.mic;
       this.q(".mic").title = micLabel;
       this.q(".mic").setAttribute("aria-label", micLabel);
@@ -756,6 +782,38 @@ function installChat() {
       if (!help) return;
       help.textContent = this.voiceMode === "assist" ? this.t.nativeAssistTitle : "";
       help.hidden = this.voiceMode !== "assist";
+    }
+
+    updatePipelineControl() {
+      const control = this.q(".assist-pipeline-control");
+      if (control) control.hidden = this.voiceMode !== "assist";
+    }
+
+    async loadPipelineOptions() {
+      const select = this.q(".assist-pipeline");
+      if (!select || this.demo) return;
+      try {
+        const pipelines = await this.pipelines(true);
+        if (!this.isCurrentOwnerContext()) return;
+        select.replaceChildren(new Option(this.t.assistPipelineDefault, ""));
+        for (const pipeline of pipelines) {
+          if (typeof pipeline?.id !== "string" || !pipeline.id || typeof pipeline.name !== "string") continue;
+          select.add(new Option(pipeline.name, pipeline.id));
+        }
+        const displayId = this.assistPipelineChoiceSet ? this.assistPipelineId
+          : this.openParams?.pipeline_id !== "last_used" ? this.openParams?.pipeline_id : undefined;
+        if (displayId && pipelines.some((pipeline) => pipeline?.id === displayId)) {
+          select.value = displayId;
+        } else if (displayId) {
+          select.add(new Option(this.t.assistPipelineUnavailable, displayId));
+          select.value = displayId;
+          this.status(this.t.assistPipelineUnavailable, true);
+        } else {
+          select.value = "";
+        }
+      } catch (_) {
+        if (this.isCurrentOwnerContext()) this.status(this.t.assistPipelinesFailed, true);
+      }
     }
 
     syncReloadState() {
@@ -776,6 +834,15 @@ function installChat() {
 
     async connect(fresh = false) {
       if (this.busy || !this.isCurrentOwnerContext()) return;
+      if (fresh) {
+        this.assistPipelineId = undefined;
+        this.assistPipelineChoiceSet = false;
+        if (this.openParams) {
+          this.openParams.pipeline_id = "last_used";
+          this.openParams.invalid_pipeline_id = false;
+        }
+        this.q(".assist-pipeline").value = "";
+      }
       this.busy = true;
       this.status(this.t.loading);
       this.controls();
@@ -832,9 +899,11 @@ function installChat() {
       }
     }
 
-    async pipelines() {
-      if (this.assistPipelines) return this.assistPipelines;
+    async pipelines(refresh = false) {
+      if (!refresh && this.assistPipelines) return this.assistPipelines;
+      const ownerId = this.ownerId;
       const result = await this.hass.callWS({type: "assist_pipeline/pipeline/list"});
+      if (ownerId !== this.ownerId || !this.isCurrentOwnerContext()) throw {code: "context_unavailable"};
       if (!Array.isArray(result?.pipelines)) throw {code: "invalid_pipeline_list"};
       this.assistPipelines = result.pipelines;
       this.preferredPipelineId = result.preferred_pipeline;
@@ -864,12 +933,14 @@ function installChat() {
           if (route !== "ha_assist_pipeline") throw {code: "browserVoiceUnavailable"};
         }
         if (invalidId) throw {code: "noAssistPipeline"};
-        const pipelines = await this.pipelines();
+        const explicitPipelineId = nativeAssist && requestedId !== "last_used" && requestedId !== "preferred"
+          ? requestedId : undefined;
+        const pipelines = await this.pipelines(!!explicitPipelineId);
         if (generation !== this.voiceGeneration || !this.q("dialog").open) return;
         let lastUsedId;
         try { lastUsedId = JSON.parse(localStorage.getItem("AssistPipelineId")); } catch (_) { lastUsedId = undefined; }
         const pipeline = chooseAssistPipeline(requestedId, pipelines, this.preferredPipelineId, lastUsedId);
-        if (!pipeline) throw {code: "noAssistPipeline"};
+        if (!pipeline) throw {code: explicitPipelineId ? "assistPipelineUnavailable" : "noAssistPipeline"};
         if (!pipeline.stt_engine) throw {code: "speechRequired"};
         if (nativeAssist && !pipeline.conversation_engine) throw {code: "noAssistPipeline"};
         this.voiceReplyPipeline = pipeline.tts_engine ? pipeline : undefined;
