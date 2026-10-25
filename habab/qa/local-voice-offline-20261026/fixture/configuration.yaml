@@ -1,0 +1,24 @@
+default_config:
+assist_pipeline:
+
+http:
+  server_port: 18444
+
+input_boolean:
+  qa_virtual_light_state:
+    name: QA virtual light state
+    initial: off
+
+template:
+  - light:
+      - name: QA virtual light
+        unique_id: qa_virtual_light
+        state: "{{ is_state('input_boolean.qa_virtual_light_state', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.qa_virtual_light_state
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.qa_virtual_light_state
