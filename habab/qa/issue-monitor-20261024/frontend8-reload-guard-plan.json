@@ -1,0 +1,49 @@
+{
+  "status": "REUSABLE_QA_PLAN",
+  "scope": "Authenticated owner-test browser acceptance for frontend.8 service-worker reload protection",
+  "target": "https://habab-demo.wpmix.net/owner-test then /home/overview",
+  "execution_gate": "Require a fresh owner-test auth file and explicit root GO. Supply a unique attempt label; the runner refuses to overwrite existing private or public receipts.",
+  "command_template": "node habab/qa/issue-monitor-20261024/frontend8-reload-guard.cjs --attempt attempt7 --execute",
+  "expected_candidate": {
+    "container": "habab-owner-test",
+    "image_digest": "sha256:fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928",
+    "source_commit": "f803277c68511622e3ad780d10a8a046cb9ef478",
+    "frontend": "20260930.4+habab.8",
+    "runtime_hotfix_init_py_sha256": "b594844a055cab6b677788e69720f66450227474743b3db0b786ab7e97d980d1"
+  },
+  "scenario": [
+    "Launch an owned headless Chromium profile at 1280x800 with ordinary service-worker behavior.",
+    "Install passive document, controllerchange, dirty-state, request, and websocket telemetry before navigation.",
+    "Authenticate, visit /owner-test then /home/overview, and verify admin, canonical session, idle chat, and dirty-provider API.",
+    "Require the actual hashed chat entry, strings.js, voice.js, and rendered chat textarea to be ready before proceeding.",
+    "Proceed only if the fresh profile has a real installing service worker with no active controller or prior controllerchange.",
+    "Enter a non-sent draft through trusted keyboard input; require the chat provider to publish global dirty.",
+    "Wait up to 150 seconds for a native trusted controllerchange; require same document, chat instance, owner/session, retained draft, and no document navigation while dirty.",
+    "Confirm textarea focus, clear via trusted keyboard events using explicit modifier down/up, and capture text length/hash, focus, selection, chat flags, aggregate dirty, and other dirty providers.",
+    "After the normal global-clean event, wait up to 75 seconds for the deferred reload; verify same owner/session and an empty draft."
+  ],
+  "pass_criteria": [
+    "The first real service-worker controllerchange occurs after the unsent draft is dirty.",
+    "No top-level document navigation occurs between draft input and global clean.",
+    "The same chat component retains the draft across controllerchange.",
+    "A document reload occurs only after the draft clears and the frontend reports clean.",
+    "The post-reload page retains the authenticated owner and canonical chat session with an empty draft.",
+    "No assistant run, config mutation, or Home Assistant service call is observed."
+  ],
+  "stop_conditions": [
+    "Runtime image/source/hotfix hashes do not match the expected build.",
+    "Auth file is older than 20 minutes or has an invalid shape.",
+    "The worker is already active or controlling before draft input; stop without resetting or unregistering it.",
+    "Admin/session/runtime is not idle, provider API is unavailable, or any unexpected asset/page error occurs.",
+    "Any model run, config mutation, or HA service call is observed."
+  ],
+  "keyboard_regression": {
+    "test_file": "habab/qa/issue-monitor-20261024/frontend8-reload-guard-keyboard.test.cjs",
+    "purpose": "Use the installed Puppeteer CdpKeyboard implementation to reject invalid chord strings and verify modifier cleanup."
+  },
+  "limits": [
+    "Browser scenario covers the chat provider only; native editor coexistence remains source-test evidence.",
+    "No chat message, model prompt, device command, config write, or helper action is sent."
+  ],
+  "evidence_index": "See frontend8-reload-guard-manifest.json for attempts 1-6 and source-archive SHA links."
+}

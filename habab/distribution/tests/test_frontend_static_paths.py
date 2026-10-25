@@ -44,4 +44,3 @@ class FrontendStaticPathsTests(unittest.TestCase):
             local_file = _resolve_static_path(resolved_path, static_paths)
             assert local_file is not None, f"No registered static route for {resolved_path}"
             assert local_file.is_file(), f"Missing module served at {resolved_path}"
-

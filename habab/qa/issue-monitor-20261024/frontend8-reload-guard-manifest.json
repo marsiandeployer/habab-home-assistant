@@ -1,0 +1,100 @@
+{
+  "format": "frontend8-reload-guard-evidence-index-v1",
+  "attempts": [
+    {
+      "attempt": 1,
+      "receipt": "frontend8-reload-guard-attempt1.json",
+      "receipt_sha256": "89ababfdaf8608204aaaab8aa40a8bae7c8544331fc168f4e4df3b221e74e9ce",
+      "status": "FAIL",
+      "archived_runner_source": null,
+      "note": "Attempt1 executable source snapshot was not preserved; receipt remains unchanged."
+    },
+    {
+      "attempt": 2,
+      "receipt": "frontend8-reload-guard-attempt2.json",
+      "receipt_sha256": "d2a2767f0e292f9677f42544d04a42a8e3c872583d7586ad9316695530dc4179",
+      "status": "FAIL",
+      "archived_runner_source": {
+        "file": "frontend8-reload-guard-attempt2.cjs",
+        "sha256": "8c7c9540bdd81842d0eace3dd9fec79638264c42d3dc6c72b55f0790d8105442"
+      },
+      "archived_plan_source": {
+        "file": "frontend8-reload-guard-attempt2-plan.json",
+        "sha256": "3371c37b1798108581f5480086dd93e15b4d3344b3e4a2a6a32c2267f6906380"
+      },
+      "bootstrap_ready": true,
+      "draft_retained_after_activation": false,
+      "deferred_reload_after_clean": false
+    },
+    {
+      "attempt": 3,
+      "receipt": "frontend8-reload-guard-attempt3.json",
+      "receipt_sha256": "752c3871381d709157df0c0dfc82befd55cc7dd7b49a9fca634724dc12e50124",
+      "status": "FAIL",
+      "archived_runner_source": {
+        "file": "frontend8-reload-guard-attempt3.cjs",
+        "sha256": "0979ad0c1d0fc556a50fa81d02e215e5af92bb4b2b985a639910a7324da33903"
+      },
+      "archived_plan_source": {
+        "file": "frontend8-reload-guard-attempt3-plan.json",
+        "sha256": "8988660dfef422fcf29df7bd0c5826382e0145622f001033383d418884329a77"
+      },
+      "bootstrap_ready": true,
+      "draft_retained_after_activation": true,
+      "deferred_reload_after_clean": false
+    },
+    {
+      "attempt": 4,
+      "receipt": "frontend8-reload-guard-attempt4.json",
+      "receipt_sha256": "8284fcb85fcb8dfbd75e3205be6d50734c0a5274ba840d5c9ac0adc8fea68579",
+      "status": "FAIL",
+      "archived_runner_source": {
+        "file": "frontend8-reload-guard-attempt4.cjs",
+        "sha256": "1ec2dc38931de1420235f7548cfe5852e1e52cf0d69a7e5b3ac84ecfa504ba38"
+      },
+      "archived_plan_source": {
+        "file": "frontend8-reload-guard-attempt4-plan.json",
+        "sha256": "2d9db8961dbf41da5c18371786107f22b91799380111cb29f85470a6be96e347"
+      },
+      "bootstrap_ready": true,
+      "draft_retained_after_activation": true,
+      "deferred_reload_after_clean": false
+    },
+    {
+      "attempt": 5,
+      "receipt": "frontend8-reload-guard-attempt5.json",
+      "receipt_sha256": "60f60e7773dabab4a6ec10c15f93d0c26b543d1fdd9893841155179f5d093c53",
+      "status": "FAIL",
+      "archived_runner_source": {
+        "file": "frontend8-reload-guard-attempt5.cjs",
+        "sha256": "33396ebb8ff2464abe30b54e1ade01411ef677eb5aca854f3a5357a484a73874"
+      },
+      "archived_plan_source": {
+        "file": "frontend8-reload-guard-attempt5-plan.json",
+        "sha256": "dcca8bfb32680939f2d8b60ecccf477cc782226a7d87e5a17096c69fd6cc54e1"
+      },
+      "bootstrap_ready": false,
+      "draft_retained_after_activation": false,
+      "deferred_reload_after_clean": false
+    },
+    {
+      "attempt": 6,
+      "receipt": "frontend8-reload-guard-attempt6.json",
+      "receipt_sha256": "d6497e034f5dde1e47578b356c5500e3a8ab62ec2486ffe3117fd5b9084121dc",
+      "status": "PASS",
+      "archived_runner_source": {
+        "file": "frontend8-reload-guard-attempt6.cjs",
+        "sha256": "3d415adea4ada0b2e75919e2e1488a0805e102c86a38395e1fbc6fe8793c81ad"
+      },
+      "archived_plan_source": {
+        "file": "frontend8-reload-guard-attempt6-plan.json",
+        "sha256": "87ba28772b3809d0e9b909e3c0040955562949649dfc56b8447aa0036e799931"
+      },
+      "bootstrap_ready": true,
+      "draft_retained_after_activation": true,
+      "deferred_reload_after_clean": true
+    }
+  ],
+  "private_source_archive_manifest_sha256": "b468bd414b92683f177bbe12967f637435e0b13b34a6685bf8e46d5d52b2f4cd",
+  "source_note": "Attempts2-6 source and plans are archived privately under their listed basenames. Attempt6 source SHA identifies the exact runner copy for the passing receipt. Attempt1 source snapshot is unavailable."
+}
