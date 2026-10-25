@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import time
+from urllib.parse import urlsplit
 
 from aiohttp import BasicAuth, ClientError, ClientTimeout
 
@@ -37,6 +39,15 @@ from .voice_history import (
 )
 
 PORT = 4197
+EXA_CAPABILITY_PROTOCOL = "habab-exa-mcp-relay-v1"
+EXA_CAPABILITY_TOOLS = frozenset({"web_search_exa", "get_code_context_exa"})
+EXA_CAPABILITY_MAX_BYTES = 16 * 1024
+EXA_CAPABILITY_TIMEOUT = 8
+EXA_CAPABILITY_RETRY_SECONDS = 60
+EXA_CAPABILITY_CHUNK_BYTES = 4096
+EXA_MCP_TIMEOUT = 30_000
+EXA_MCP_NAME = "exa"
+EXA_MCP_ENV_KEY = "HABAB_HABAB_KEY"
 VOICE_TURN_METADATA_KEY = "habab_voice_turn"
 VOICE_TURN_METADATA_VALUE = "native_realtime.v1"
 VOICE_TURN_EVENT_ID_KEY = "habab_voice_event_id"
@@ -116,6 +127,12 @@ Bluetooth override с BlueZ применим только к Linux-хосту. �
 ошибкой, заблокирован или не дал подходящих результатов, прямо сообщи, что поиск не
 подтвердил ответ; не выдавай ссылки или сведения из памяти за найденные или проверенные.
 Знания из памяти можешь привести отдельно, явно обозначив, что они не проверены поиском.
+В HABAB_RUNTIME_STATUS поле external_search описывает только проверку capability при
+запуске runtime, а не успешность конкретного поиска. При state=unavailable скажи, что
+поиск сейчас недоступен; не делай прямой запрос к Exa и не переключайся на другой backend.
+При другом состоянии используй только реально предоставленный инструмент и его результат;
+ошибка инструмента означает, что поиск не выполнен. Не называй инструмент доступным,
+успешным или источник проверенным по одной конфигурации.
 Пиши, что именно проверил/изменил, с опорой на результат команды. Ошибка команды
 не является успешным подключением. Не обещай физическую работу без проверки.
 """
@@ -135,6 +152,68 @@ def verify_binary(path, digest):
         raise AgentError("binary_changed")
 
 
+def habab_service_origin():
+    """Derive only the fixed service origin from the selected Habab API base."""
+    parsed = urlsplit(provider_api_base("habab"))
+    if (parsed.scheme != "https" or parsed.hostname != "habab-voice.wpmix.net"
+            or parsed.username is not None or parsed.password is not None
+            or parsed.port is not None):
+        raise ValueError("invalid_habab_endpoint")
+    return "https://habab-voice.wpmix.net"
+
+
+def exa_mcp_config():
+    """Build the fixed remote MCP configuration without embedding credentials."""
+    return {
+        "type": "remote",
+        "url": habab_service_origin() + "/mcp/exa",
+        "enabled": True,
+        "headers": {"Authorization": "Bearer {env:" + EXA_MCP_ENV_KEY + "}"},
+        "oauth": False,
+        "timeout": EXA_MCP_TIMEOUT,
+    }
+
+
+async def fetch_habab_exa_capability(client, api_key):
+    """Verify the relay contract with a bounded, authenticated, read-only request."""
+    try:
+        async with client.get(
+            habab_service_origin() + "/mcp/exa/capabilities",
+            headers={"Authorization": "Bearer " + api_key},
+            timeout=ClientTimeout(total=EXA_CAPABILITY_TIMEOUT),
+            allow_redirects=False,
+        ) as response:
+            if response.status != 200:
+                return False
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None and int(content_length) > EXA_CAPABILITY_MAX_BYTES:
+                return False
+            raw = bytearray()
+            while len(raw) <= EXA_CAPABILITY_MAX_BYTES:
+                chunk = await response.content.read(min(
+                    EXA_CAPABILITY_CHUNK_BYTES,
+                    EXA_CAPABILITY_MAX_BYTES + 1 - len(raw),
+                ))
+                if not chunk:
+                    break
+                raw.extend(chunk)
+                if len(raw) > EXA_CAPABILITY_MAX_BYTES:
+                    return False
+        if len(raw) > EXA_CAPABILITY_MAX_BYTES:
+            return False
+        payload = json.loads(raw)
+    except (ClientError, TimeoutError, ValueError, TypeError, OverflowError):
+        return False
+    if (not isinstance(payload, dict)
+            or payload.get("protocol") != EXA_CAPABILITY_PROTOCOL
+            or payload.get("mcp_url") != "/mcp/exa"):
+        return False
+    tools = payload.get("tools")
+    return (isinstance(tools, list) and len(tools) == len(EXA_CAPABILITY_TOOLS)
+            and all(isinstance(tool, str) for tool in tools)
+            and set(tools) == EXA_CAPABILITY_TOOLS)
+
+
 class SetupAgent:
     def __init__(self, hass):
         self.hass = hass
@@ -143,6 +222,8 @@ class SetupAgent:
         self.control_token = secrets.token_urlsafe(32)
         self.flow_owners = {}
         self.fingerprint = None
+        self.external_search_status = {"mode": "not_checked", "state": "not_checked"}
+        self.external_search_retry_at = None
         self.lock = asyncio.Lock()
         self.active = None
         self.diagnostics = AgentDiagnostics()
@@ -201,8 +282,39 @@ class SetupAgent:
         provider_id = "habab-" + provider
         key_name = "HABAB_" + provider.upper() + "_KEY"
         fingerprint = runtime_fingerprint(settings, runtime_kind)
-        if self.process and self.process.returncode is None and fingerprint == self.fingerprint:
-            return
+        same_runtime = (self.process and self.process.returncode is None
+                        and fingerprint == self.fingerprint)
+        if same_runtime:
+            if (provider != "habab" or self.external_search_status.get("state") != "unavailable"
+                    or self.external_search_retry_at is None
+                    or time.monotonic() < self.external_search_retry_at):
+                return
+        mcp = {}
+        if provider == "habab":
+            exa_available = await fetch_habab_exa_capability(
+                async_get_clientsession(self.hass), settings["api_key"])
+            if exa_available:
+                mcp[EXA_MCP_NAME] = exa_mcp_config()
+                self.external_search_retry_at = None
+                self.external_search_status = {
+                    "mode": "habab_exa_mcp_relay",
+                    "state": "capability_verified",
+                }
+            else:
+                self.external_search_retry_at = time.monotonic() + EXA_CAPABILITY_RETRY_SECONDS
+                self.external_search_status = {
+                    "mode": "habab_exa_mcp_relay",
+                    "state": "unavailable",
+                    "reason": "capability_check_failed",
+                }
+                if same_runtime:
+                    return
+        else:
+            self.external_search_retry_at = None
+            self.external_search_status = {
+                "mode": "opencode_builtin_exa",
+                "state": "configured_unverified",
+            }
         await self.close()
         binary = os.environ.get("HABAB_OPENCODE_BINARY", "/opt/habab-opencode/opencode")
         await self.hass.async_add_executor_job(
@@ -211,7 +323,7 @@ class SetupAgent:
         await self.hass.async_add_executor_job(self.prepare_directories)
         config = {
             "$schema": "https://opencode.ai/config.json", "autoupdate": False,
-            "share": "disabled", "snapshot": False, "plugin": [], "mcp": {},
+            "share": "disabled", "snapshot": False, "plugin": [], "mcp": mcp,
             "lsp": False, "formatter": False, "enabled_providers": [provider_id],
             "model": f"{provider_id}/{settings['model']}",
             "permission": {"*": "allow"},
@@ -234,7 +346,7 @@ class SetupAgent:
             "XDG_CACHE_HOME": str(self.root / "cache"),
             "OPENCODE_CONFIG_CONTENT": json.dumps(config),
             "OPENCODE_DISABLE_PROJECT_CONFIG": "true", "OPENCODE_DISABLE_AUTOUPDATE": "true",
-            "OPENCODE_ENABLE_EXA": "1",
+            "OPENCODE_ENABLE_EXA": "0" if provider == "habab" else "1",
             "OPENCODE_SERVER_PASSWORD": self.password,
             key_name: settings["api_key"],
             "HABAB_HA_CONTROL_TOKEN": self.control_token,
@@ -334,6 +446,7 @@ class SetupAgent:
             self.active = (owner, session_id)
             try:
                 status = await get_assistant_status(self.hass, owner, settings, verify_telegram=False)
+                status["external_search"] = dict(self.external_search_status)
                 response = await self.request("POST", f"session/{session_id}/message", {
                     "agent": "build", "model": {"providerID": "habab-" + settings["provider"], "modelID": settings["model"]},
                     "system": runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT),
