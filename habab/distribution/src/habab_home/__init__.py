@@ -69,6 +69,9 @@ async def async_setup(hass, config):
     from .diagnostics import async_register_views as register_diagnostics_views
 
     register_diagnostics_views(hass)
+    from .feedback import async_register_views as register_feedback_views
+
+    register_feedback_views(hass)
     from .integration_setup import IntegrationSetup, async_register_commands as register_integration_setup_commands
 
     hass.data[DOMAIN]["integration_setup"] = IntegrationSetup(hass, agent)

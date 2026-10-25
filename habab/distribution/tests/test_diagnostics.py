@@ -2,6 +2,8 @@
 
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 import zipfile
 from types import SimpleNamespace
@@ -49,7 +51,12 @@ def tool_messages():
         "info": {"role": "assistant", "providerID": "habab-deepseek", "modelID": "deepseek-chat",
                  "time": {"created": 1792933200000, "completed": 1792933201000}},
         "parts": [
-            {"type": "text", "text": "Сейчас проверю. OPENAI_API_KEY=short-env-key private_key=short-private-key"},
+            {"type": "text", "text": "Сейчас проверю. OPENAI_API_KEY=short-env-key private_key=short-private-key "
+             "details={\"password\": \"short-json-password\"} "
+             "escaped={\\\"apiKey\\\": \\\"short-json-api-key\\\"} "
+             "scalar={\"password\":123456789,\"token\":987654321,\"secret\":true,\"oauth\":null} "
+             "escaped_scalar={\\\"id_token\\\":7654321} "
+             r'escaped_unicode={\"pass\\u0077ord\":\"short-escaped-unicode-secret\"}'},
             {"type": "tool", "tool": "habab-ha", "callID": "call-safe-1", "state": {
                 "status": "completed",
                 "input": {"action": "states", "api_key": "nested-private",
@@ -57,6 +64,7 @@ def tool_messages():
                           "ssh_private_key": "short-json-private",
                           "signing_key": "short-signing-key"},
                 "output": "Authorization: Bearer runtime-private-token\n"
+                          'details={"refresh_token": "short-json-refresh"}\n'
                           "Cookie: session=private-cookie; refresh=private-refresh\n"
                           "https://example.invalid/callback?oauth_token=short-oauth&"
                           "id_token=short-id-token&encryption_key=short-query-encryption\n"
@@ -78,6 +86,8 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
             (diagnostics.DiagnosticsExportView(), "post", (Request(
                 SimpleNamespace(id="guest", is_active=True, is_admin=False), hass,
                 data={"session_id": "web-alice"}),)),
+            (diagnostics.DiagnosticsRuntimeLogsExportView(), "post", (Request(
+                SimpleNamespace(id="guest", is_active=True, is_admin=False), hass),)),
         ]:
             response = await getattr(view, method)(*args)
             self.assertEqual(response.status, 403)
@@ -158,10 +168,19 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         for secret in ("nested-private", "camel-private", "runtime-private-token", "private-cookie",
                        "private-refresh", "configured-provider-secret", "short-env-key",
                        "short-env-json", "short-oauth", "short-id-token", "short-private-key",
-                       "short-json-private", "short-signing-key", "short-query-encryption"):
+                       "short-json-private", "short-signing-key", "short-query-encryption",
+                       "short-json-password", "short-json-api-key", "short-json-refresh",
+                       "123456789", "987654321", "7654321", "short-escaped-unicode-secret"):
             self.assertNotIn(secret, body)
         payload = json.loads(body)
         events = payload["events"]
+        assistant_text = next(event["text"] for event in events if event["kind"] == "assistant_text")
+        self.assertIn('details={"password": "[redacted]"}', assistant_text)
+        self.assertIn('escaped={\\"apiKey\\": \\"[redacted]\\"}', assistant_text)
+        self.assertIn('scalar={"password":"[redacted]","token":"[redacted]",'
+                      '"secret":"[redacted]","oauth":"[redacted]"}', assistant_text)
+        self.assertIn('escaped_scalar={\\"id_token\\":\\"[redacted]\\"}', assistant_text)
+        self.assertIn(r'escaped_unicode={\"pass\\u0077ord\":\"[redacted]\"}', assistant_text)
         self.assertEqual(payload["session"]["provider_models"], [
             {"provider": "habab-deepseek", "model": "deepseek-chat"}])
         self.assertEqual(payload["session"]["processing_duration_ms"], 1000)
@@ -461,11 +480,19 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("configured-provider-secret", history)
             self.assertNotIn("short-env-key", history)
             self.assertNotIn("short-env-json", history)
+            self.assertNotIn("short-json-password", history)
+            self.assertNotIn("short-json-api-key", history)
+            self.assertNotIn("short-json-refresh", history)
+            for numeric_secret in ("123456789", "987654321", "7654321"):
+                self.assertNotIn(numeric_secret, history)
+            self.assertNotIn("short-escaped-unicode-secret", history)
             self.assertNotIn("short-oauth", history)
             self.assertNotIn("short-id-token", history)
             for secret in ("short-env-key", "short-env-json", "short-oauth", "short-id-token",
                            "short-private-key", "short-json-private", "short-signing-key",
-                           "short-query-encryption"):
+                           "short-query-encryption", "short-json-password", "short-json-api-key",
+                           "short-json-refresh", "123456789", "987654321", "7654321",
+                           "short-escaped-unicode-secret"):
                 self.assertNotIn(secret, history_text)
             self.assertTrue(archive.read("opencode/availability.json"))
 
@@ -562,7 +589,115 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                 Request(owner, hass, data={"session_id": "web-alice"}))
         self.assertEqual(oversized.status, 413)
 
-    async def test_registration_exposes_only_admin_panel_and_three_http_views(self):
+    def configure_instance_log_paths(self, hass, runtime, root):
+        config_root = Path(root)
+        runtime.root = config_root / ".habab-opencode"
+        hass.config = SimpleNamespace(path=lambda *parts: str(config_root.joinpath(*parts)))
+        hass.async_add_executor_job = AsyncMock(side_effect=lambda function, *args: function(*args))
+        return config_root, runtime.root / "data" / "opencode" / "log"
+
+    async def test_instance_log_export_is_separate_admin_only_bounded_and_redacted(self):
+        owner, hass, _assistant, runtime = runtime_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            config_root, opencode_log_dir = self.configure_instance_log_paths(hass, runtime, directory)
+            opencode_log_dir.mkdir(parents=True)
+            (opencode_log_dir / "2026-10-25T120000.log").write_text(
+                "INFO OPENAI_API_KEY=short-provider-key\n"
+                "WARN Authorization: Bearer short-runtime-token\n"
+                "https://example.invalid/?oauth_token=short-oauth-token\n"
+                "Configured configured-provider-secret\n", encoding="utf-8")
+            (config_root / "home-assistant.log").write_text(
+                "ERROR password=short-ha-password\n", encoding="utf-8")
+
+            response = await diagnostics.DiagnosticsRuntimeLogsExportView().post(
+                Request(owner, hass, data={}))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.content_type, "application/zip")
+        self.assertEqual(response.headers["Content-Disposition"],
+                         'attachment; filename="habab-runtime-logs.zip"')
+        self.assertEqual(runtime.request.await_count, 0)
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            self.assertEqual(set(archive.namelist()), {
+                "logs/manifest.json", "opencode/logs/2026-10-25T120000.log",
+                "homeassistant/home-assistant.log"})
+            manifest = json.loads(archive.read("logs/manifest.json"))
+            content = archive.read("opencode/logs/2026-10-25T120000.log").decode()
+            ha_content = archive.read("homeassistant/home-assistant.log").decode()
+            self.assertEqual(manifest["scope"]["kind"], "home_assistant_instance")
+            self.assertTrue(manifest["scope"]["shared_across_conversations"])
+            self.assertTrue(manifest["scope"]["shared_across_users"])
+            self.assertIsNone(manifest["scope"]["session_id"])
+            self.assertTrue(manifest["sources"]["opencode_logs"]["available"])
+            self.assertTrue(manifest["sources"]["home_assistant_logs"]["available"])
+            self.assertFalse(manifest["truncated"])
+            for secret in ("short-provider-key", "short-runtime-token", "short-oauth-token",
+                           "configured-provider-secret", "short-ha-password"):
+                self.assertNotIn(secret, content + ha_content + archive.read("logs/manifest.json").decode())
+            self.assertIn("[redacted]", content)
+            self.assertIn("[redacted]", ha_content)
+
+    async def test_instance_log_export_rejects_nonempty_scope_and_never_follows_symlinks(self):
+        owner, hass, _assistant, runtime = runtime_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            config_root, opencode_log_dir = self.configure_instance_log_paths(hass, runtime, directory)
+            opencode_log_dir.mkdir(parents=True)
+            outside = config_root / "outside.log"
+            outside.write_text("TRAVERSAL_SECRET=never-read", encoding="utf-8")
+            (opencode_log_dir / "2026-10-25T120000.log").symlink_to(outside)
+
+            traversal = await diagnostics.DiagnosticsRuntimeLogsExportView().post(
+                Request(owner, hass, data={"path": str(outside)}))
+            self.assertEqual(traversal.status, 400)
+            response = await diagnostics.DiagnosticsRuntimeLogsExportView().post(
+                Request(owner, hass, data={}))
+
+        self.assertEqual(response.status, 200)
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            manifest = json.loads(archive.read("logs/manifest.json"))
+            self.assertEqual(set(archive.namelist()), {"logs/manifest.json"})
+            self.assertFalse(manifest["sources"]["opencode_logs"]["available"])
+            self.assertEqual(manifest["sources"]["opencode_logs"]["reason"], "unsafe_files_skipped")
+            self.assertEqual(manifest["sources"]["opencode_logs"]["unsafe_files"], 1)
+            self.assertNotIn(b"TRAVERSAL_SECRET", b"".join(archive.read(name) for name in archive.namelist()))
+        hass.async_add_executor_job.assert_awaited_once()
+
+    async def test_instance_log_export_caps_files_and_marks_tail_truncation(self):
+        owner, hass, _assistant, runtime = runtime_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            config_root, opencode_log_dir = self.configure_instance_log_paths(hass, runtime, directory)
+            opencode_log_dir.mkdir(parents=True)
+            for second in range(12):
+                name = f"2026-10-25T1200{second:02d}.log"
+                opencode_log_dir.joinpath(name).write_text(f"OLDER_{second}\n", encoding="utf-8")
+            current = opencode_log_dir / "2026-10-25T130000.log"
+            current.write_text("OLD_PREFIX_MUST_BE_DROPPED\n" + "fill-line\n" * 1200 + "LATEST_LOG_LINE\n",
+                               encoding="utf-8")
+            for index in range(5):
+                config_root.joinpath("home-assistant.log" if index == 0 else f"home-assistant.log.{index}") \
+                    .write_text(f"HA_ROTATION_{index}\n", encoding="utf-8")
+
+            response = await diagnostics.DiagnosticsRuntimeLogsExportView().post(
+                Request(owner, hass, data={}))
+
+        self.assertEqual(response.status, 200)
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            manifest = json.loads(archive.read("logs/manifest.json"))
+            opencode_names = [name for name in archive.namelist() if name.startswith("opencode/logs/")]
+            ha_names = [name for name in archive.namelist() if name.startswith("homeassistant/")]
+            self.assertEqual(len(opencode_names), diagnostics.MAX_OPENCODE_LOG_FILES)
+            self.assertEqual(len(ha_names), diagnostics.MAX_HA_LOG_FILES)
+            self.assertEqual(manifest["sources"]["opencode_logs"]["omitted_files"], 3)
+            self.assertEqual(manifest["sources"]["home_assistant_logs"]["omitted_files"], 2)
+            self.assertTrue(manifest["truncated"])
+            current_name = "opencode/logs/2026-10-25T130000.log"
+            tail = archive.read(current_name).decode()
+            self.assertIn("LATEST_LOG_LINE", tail)
+            self.assertNotIn("OLD_PREFIX_MUST_BE_DROPPED", tail)
+            self.assertLessEqual(sum(info.file_size for info in archive.infolist()),
+                                 diagnostics.MAX_EXPORT_BYTES)
+
+    async def test_registration_exposes_only_admin_panel_and_http_views(self):
         http = SimpleNamespace(register_view=Mock())
         hass = SimpleNamespace(http=http)
         diagnostics.async_register_views(hass)
@@ -571,5 +706,6 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
             "/api/habab_home/diagnostics/sessions",
             "/api/habab_home/diagnostics/sessions/{session_id}",
             "/api/habab_home/diagnostics/export",
+            "/api/habab_home/diagnostics/runtime-logs/export",
         })
         self.assertTrue(all(view.requires_auth for view in views))

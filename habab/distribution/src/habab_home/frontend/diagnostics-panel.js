@@ -1,3 +1,5 @@
+import { strings } from "./strings.js";
+
 const CHANNELS = new Set(["all", "web", "telegram", "voice"]);
 const STATUSES = new Set(["all", "active", "error", "completed", "cancelled", "unknown"]);
 const SENSITIVE_KEY = /(?:api.?key|(?:^|[_-])key$|secret|password|token|cookie|authorization|credential)/i;
@@ -322,6 +324,14 @@ export function diagnosticChannelLabel(channel, modes, words) {
   return words.web;
 }
 
+export function runtimeLogsExportRequest(isAdmin, confirmationAccepted) {
+  if (isAdmin !== true || confirmationAccepted !== true) return undefined;
+  return {
+    endpoint: "/api/habab_home/diagnostics/runtime-logs/export",
+    body: {},
+  };
+}
+
 function el(name, className, text) {
   const node = document.createElement(name);
   if (className) node.className = className;
@@ -371,6 +381,7 @@ class HababDiagnosticsPanel extends HTMLElement {
       this.clearPrivateData();
       this.loadedOwner = undefined;
       this.renderStatus(this.t("accessDenied"), true);
+      this.updateControls();
       return;
     }
     if (ownerId !== this.loadedOwner) {
@@ -403,7 +414,7 @@ class HababDiagnosticsPanel extends HTMLElement {
   }
 
   get words() { return copy[this.language || "en"]; }
-  t(key) { return this.words[key] || this.words.unknown; }
+  t(key) { return this.words[key] || strings[this.language || "en"][key] || this.words.unknown; }
   q(selector) { return this.shadowRoot.querySelector(selector); }
 
   render() {
@@ -423,7 +434,8 @@ class HababDiagnosticsPanel extends HTMLElement {
       .session-list{list-style:none;padding:0;margin:0}.session-list li+li{border-block-start:1px solid var(--divider-color)}.session{display:grid;width:100%;min-height:78px;text-align:start;border:0;border-radius:0;padding:12px 16px;gap:3px}.session[aria-current=true]{background:var(--secondary-background-color);box-shadow:inset 3px 0 var(--primary-color)}.session-title{font-weight:500;overflow-wrap:anywhere}.session-meta{color:var(--secondary-text-color);font-size:12px;display:flex;flex-wrap:wrap;gap:4px 10px}
       .panel-body{padding:14px 16px}.empty{padding:18px 16px;color:var(--secondary-text-color)}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 14px}.summary div{min-width:0}.summary dt{color:var(--secondary-text-color);font-size:12px}.summary dd{margin:2px 0 0;overflow-wrap:anywhere}
       .event-list{list-style:none;margin:0;padding:0;border-inline-start:2px solid var(--divider-color)}.event{position:relative;padding:4px 0 18px 18px}.event:before{content:"";position:absolute;inset-block-start:10px;inset-inline-start:-6px;width:10px;height:10px;border-radius:50%;background:var(--primary-color);border:1px solid var(--card-background-color)}.event h3{font-size:15px;font-weight:500;margin:0 0 2px}.event time{font-size:12px;color:var(--secondary-text-color)}.event-text{white-space:pre-wrap;overflow-wrap:anywhere;margin-block:8px}.event details{margin-block:8px}.event summary{cursor:pointer;min-height:40px;display:flex;align-items:center;text-decoration:underline;text-underline-offset:3px}.code{font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--secondary-background-color);padding:10px;border-radius:6px;margin:0;max-height:360px;overflow:auto}
-    .sources{margin-block:16px;border-block-start:1px solid var(--divider-color);padding-block-start:12px}.sources h3{font-size:15px;font-weight:500;margin:0 0 8px}.source-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px;margin:0;padding:0;list-style:none}.source-list li{display:flex;justify-content:space-between;gap:10px;padding-block:4px;border-block-end:1px solid var(--divider-color)}.source-state{flex:none;color:var(--secondary-text-color)}.source-name{display:grid;gap:2px}.source-reason{font-size:12px;color:var(--secondary-text-color)}.warning{color:var(--warning-color,var(--primary-text-color))}
+      .sources{margin-block:16px;border-block-start:1px solid var(--divider-color);padding-block-start:12px}.sources h3{font-size:15px;font-weight:500;margin:0 0 8px}.source-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px;margin:0;padding:0;list-style:none}.source-list li{display:flex;justify-content:space-between;gap:10px;padding-block:4px;border-block-end:1px solid var(--divider-color)}.source-state{flex:none;color:var(--secondary-text-color)}.source-name{display:grid;gap:2px}.source-reason{font-size:12px;color:var(--secondary-text-color)}.warning{color:var(--warning-color,var(--primary-text-color))}
+      .runtime-logs{margin-block:20px;padding-block-start:16px;border-block-start:1px solid var(--divider-color)}.runtime-logs h2{font-size:16px;font-weight:500;margin:0 0 6px}
       [hidden]{display:none!important}a{color:var(--primary-color)}
       @media(max-width:900px){main{padding:16px}form{grid-template-columns:repeat(2,minmax(0,1fr))}.filters-actions{grid-column:span 2}.workspace{grid-template-columns:minmax(0,1fr)}.source-list{grid-template-columns:minmax(0,1fr)}}
       @media(max-width:520px){main{padding:12px 12px 24px}header{min-height:52px}form{grid-template-columns:minmax(0,1fr);padding:12px}.filters-actions{grid-column:auto;display:grid;grid-template-columns:1fr}.summary{grid-template-columns:minmax(0,1fr)}.panel h2{padding:12px}.panel-body{padding:12px}.session{padding:12px}.notice{margin-block:10px 14px}}
@@ -444,6 +456,11 @@ class HababDiagnosticsPanel extends HTMLElement {
       <p id="status" class="status" role="status" aria-live="polite"></p>
       <div class="actions"><button type="button" id="download-session" disabled>${t("selectedDownload")}</button><button type="button" id="download-period" disabled title="${t("periodHelp")}">${t("periodDownload")}</button></div>
       <p class="help" id="period-help">${t("periodHelp")}</p>
+      <section class="runtime-logs" aria-labelledby="runtime-logs-heading">
+        <h2 id="runtime-logs-heading">${t("diagnosticsRuntimeLogsTitle")}</h2>
+        <p class="help">${t("diagnosticsRuntimeLogsScope")}</p>
+        <div class="actions"><button type="button" id="download-runtime-logs" disabled>${t("diagnosticsRuntimeLogsExport")}</button></div>
+      </section>
       <div class="workspace">
         <section class="panel" aria-labelledby="sessions-heading"><h2 id="sessions-heading">${t("conversation")}</h2><div id="session-list"></div><div class="panel-body"><button type="button" id="load-more" hidden>${t("loadMore")}</button></div></section>
         <section class="panel" aria-labelledby="detail-heading"><h2 id="detail-heading">${t("events")}</h2><div class="panel-body" id="detail"></div></section>
@@ -466,6 +483,7 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.q("#load-more").addEventListener("click", () => void this.loadSessions(true));
     this.q("#download-session").addEventListener("click", () => void this.downloadSelectedSession());
     this.q("#download-period").addEventListener("click", () => void this.downloadPeriod());
+    this.q("#download-runtime-logs").addEventListener("click", () => void this.downloadRuntimeLogs());
     for (const [selector, key] of [["#from", "from"], ["#to", "to"], ["#channel", "channel"], ["#status-filter", "status"], ["#session-id", "session_id"]]) {
       const input = this.q(selector);
       input.value = this.filters[key] || "";
@@ -788,10 +806,12 @@ class HababDiagnosticsPanel extends HTMLElement {
   updateControls() {
     const selected = this.q("#download-session");
     const period = this.q("#download-period");
+    const runtimeLogs = this.q("#download-runtime-logs");
     const loadMore = this.q("#load-more");
-    if (!selected || !period || !loadMore) return;
+    if (!selected || !period || !runtimeLogs || !loadMore) return;
     selected.disabled = !this.selectedSession || this.exporting || this._hass?.user?.is_admin !== true;
     period.disabled = !this.canExportPeriod() || this.exporting || this._hass?.user?.is_admin !== true;
+    runtimeLogs.disabled = this.exporting || this._hass?.user?.is_admin !== true;
     loadMore.hidden = !this.cursor;
     loadMore.disabled = this.loading;
   }
@@ -813,7 +833,22 @@ class HababDiagnosticsPanel extends HTMLElement {
     await this.downloadArchive({from: period.from, to: period.to, ...(period.channel !== "all" ? {channel: period.channel} : {})});
   }
 
-  async downloadArchive(scope) {
+  async downloadRuntimeLogs() {
+    const isAdmin = this._hass?.user?.is_admin === true;
+    if (!isAdmin || this.exporting) return;
+    const accepted = window.confirm(this.t("diagnosticsRuntimeLogsConfirm"));
+    const request = runtimeLogsExportRequest(isAdmin, accepted);
+    if (!request) return;
+    await this.downloadArchive(request.body, {
+      endpoint: request.endpoint,
+      fallbackName: "habab-runtime-logs.zip",
+    });
+  }
+
+  async downloadArchive(
+    scope,
+    {endpoint = "/api/habab_home/diagnostics/export", fallbackName = "habab-diagnostics.zip"} = {},
+  ) {
     if (this._hass?.user?.is_admin !== true || this.exporting) return;
     this.exportAbort?.abort();
     const controller = new AbortController();
@@ -822,7 +857,7 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.updateControls();
     this.renderStatus(this.t("downloading"));
     try {
-      const response = await this._hass.fetchWithAuth("/api/habab_home/diagnostics/export", {
+      const response = await this._hass.fetchWithAuth(endpoint, {
         method: "POST", cache: "no-store", signal: controller.signal,
         headers: {"Content-Type": "application/json", Accept: "application/zip"},
         body: JSON.stringify(scope),
@@ -840,7 +875,7 @@ class HababDiagnosticsPanel extends HTMLElement {
       this.exportObjectUrl = objectUrl;
       const anchor = el("a");
       anchor.href = objectUrl;
-      anchor.download = this.downloadName(response.headers?.get("content-disposition"));
+      anchor.download = this.downloadName(response.headers?.get("content-disposition"), fallbackName);
       anchor.hidden = true;
       this.shadowRoot.append(anchor);
       anchor.click();
@@ -863,9 +898,9 @@ class HababDiagnosticsPanel extends HTMLElement {
     }
   }
 
-  downloadName(disposition) {
+  downloadName(disposition, fallback = "habab-diagnostics.zip") {
     const match = typeof disposition === "string" ? disposition.match(/filename="([A-Za-z0-9._-]{1,80})"/i) : undefined;
-    return match?.[1] || "habab-diagnostics.zip";
+    return match?.[1] || fallback;
   }
 }
 

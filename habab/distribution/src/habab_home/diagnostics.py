@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import errno
 import io
 from itertools import islice
 import json
+import os
 import re
+import stat
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import quote
 import zipfile
 
@@ -32,6 +36,10 @@ MAX_PROJECTED_ITEMS = 5000
 MAX_PROVIDER_MODELS = 10
 MAX_RUNTIME_RESPONSE_BYTES = 2_000_000
 MAX_TEXT_SCAN_CHARS = 32 * 1024
+MAX_OPENCODE_LOG_FILES = 10
+MAX_HA_LOG_FILES = 3
+MAX_INSTANCE_LOG_FILE_BYTES = 8 * 1024
+MAX_INSTANCE_LOG_BYTES = 192 * 1024
 MAX_WINDOW = timedelta(days=31)
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 CHANNELS = {"all", "web", "telegram", "voice"}
@@ -39,16 +47,31 @@ STATUSES = {"all", "active", "error", "cancelled", "completed", "unknown"}
 _SENSITIVE_FIELD = re.compile(
     r"(?:^|[_-])(?:api[_-]?key|private[_-]?key|signing[_-]?key|encryption[_-]?key|"
     r"secret[_-]?key|token|secret|password|passwd|authorization|cookie|"
-    r"credential|oauth|access[_-]?key|refresh[_-]?token|verification[_-]?code|auth[_-]?code)"
+    r"credential|oauth|access[_-]?key|refresh[_-]?token|id[_-]?token|"
+    r"verification[_-]?code|auth[_-]?code)"
     r"(?:$|[_-])", re.IGNORECASE,
 )
 _BEARER = re.compile(r"\b(?:Bearer|Basic)\s+[A-Za-z0-9+/_=.-]{8,}", re.IGNORECASE)
 _SECRET_ASSIGNMENT = re.compile(
-    r"(?<![A-Za-z0-9])(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|private[_-]?key|"
+    r"(?<![A-Za-z0-9\"'])(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|private[_-]?key|"
     r"signing[_-]?key|encryption[_-]?key|secret[_-]?key|access[_-]?token|"
     r"refresh[_-]?token|oauth[_-]?token|id[_-]?token|token|password|passwd|"
     r"client[_-]?secret|secret|authorization|cookie|oauth[_-]?code|verification[_-]?code)"
     r"(\s*[:=]\s*)([^\s,;]+)", re.IGNORECASE,
+)
+_JSON_SECRET_FIELD = re.compile(
+    r'(?P<key_open>")(?P<key>(?:\\.|[^"\\]){0,256})(?P<key_close>")'
+    r'(?P<separator>\s*:\s*)(?:'
+    r'(?P<value_open>")(?P<value>(?:\\.|[^"\\])*)(?P<value_close>")'
+    r'|(?P<scalar>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)'
+    r'(?=\s*[,}\]]))'
+)
+_ESCAPED_JSON_SECRET_FIELD = re.compile(
+    r'(?P<key_open>\\")(?P<key>(?:\\.|[^"\\]){0,256}?)(?P<key_close>\\")'
+    r'(?P<separator>\s*:\s*)(?:'
+    r'(?P<value_open>\\")(?P<value>(?:\\\\|\\(?!")|[^\\])*)(?P<value_close>\\")'
+    r'|(?P<scalar>-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)'
+    r'(?=\s*[,}\]]))'
 )
 _COOKIE_HEADER = re.compile(r"\b(?:set-cookie|cookie)\s*:\s*[^\r\n]+", re.IGNORECASE)
 _QUERY_SECRET = re.compile(
@@ -58,6 +81,8 @@ _QUERY_SECRET = re.compile(
 )
 _TELEGRAM_TOKEN = re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{20,}\b")
 _LONG_OPAQUE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_./+=-]{48,}(?![A-Za-z0-9])")
+_OPENCODE_LOG_NAME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{6}\.log\Z")
+_HA_LOG_NAME = re.compile(r"home-assistant\.log(?:\.\d{1,3})?\Z")
 
 
 def _sources(history_available: bool, reason: str | None = None,
@@ -217,12 +242,254 @@ def _redact_text(runtime, value: str, limit: int = 12000,
     text = runtime.clean(value) if runtime is not None and callable(getattr(runtime, "clean", None)) else value
     text = _BEARER.sub("[redacted credential]", text)
     text = _COOKIE_HEADER.sub("[redacted cookie header]", text)
+    def redact_json_secret(match):
+        key = match.group("key")
+        if len(key) > 256:
+            return match.group(0)
+        sensitive = False
+        for _ in range(2):
+            try:
+                key = json.loads('"' + key + '"')
+            except (json.JSONDecodeError, TypeError):
+                break
+            if isinstance(key, str) and _SENSITIVE_FIELD.fullmatch(key):
+                sensitive = True
+                break
+        if not sensitive:
+            return match.group(0)
+        quote = match.group("value_open") or match.group("key_open")
+        return (match.group("key_open") + match.group("key") + match.group("key_close")
+                + match.group("separator") + quote + "[redacted]"
+                + (match.group("value_close") or quote))
+    text = _JSON_SECRET_FIELD.sub(redact_json_secret, text)
+    text = _ESCAPED_JSON_SECRET_FIELD.sub(redact_json_secret, text)
     text = _SECRET_ASSIGNMENT.sub(lambda match: match.group(1) + "[redacted]", text)
     text = _QUERY_SECRET.sub(r"\1[redacted]", text)
     text = _TELEGRAM_TOKEN.sub("[redacted credential]", text)
     text = _LONG_OPAQUE.sub("[redacted opaque value]", text)
     text = text[:limit]
     return budget.clean_string(text) if budget is not None else text
+
+
+def _safe_directory(path: Path, boundary: Path) -> bool:
+    """Reject symlinked or non-directory components under a fixed config root."""
+    try:
+        path = Path(os.path.abspath(path))
+        boundary = Path(os.path.abspath(boundary))
+        relative = path.relative_to(boundary)
+        current = boundary
+        candidates = [current]
+        for part in relative.parts:
+            current = current / part
+            candidates.append(current)
+        for candidate in candidates:
+            info = candidate.lstat()
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _read_log_tail(
+    path: Path, limit: int
+) -> tuple[bytes | None, int | None, bool, str | None]:
+    """Read at most `limit` bytes from a regular non-symlink file's tail."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        reason = "unsafe_file" if error.errno in {errno.ELOOP, errno.EMLINK} else "read_error"
+        return None, None, False, reason
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            return None, None, False, "unsafe_file"
+        size = info.st_size
+        offset = max(0, size - limit)
+        length = min(size, limit)
+        raw = os.pread(descriptor, length, offset)
+        truncated = offset > 0 or len(raw) < size
+        if offset and raw:
+            line_end = raw.find(b"\n")
+            raw = raw[line_end + 1:] if line_end >= 0 else b""
+        return raw, size, truncated, None
+    finally:
+        os.close(descriptor)
+
+
+def _collect_log_source(
+    directory: Path,
+    *,
+    filename_pattern: re.Pattern,
+    archive_prefix: str,
+    max_files: int,
+    boundary: Path,
+) -> tuple[dict, list[tuple[str, bytes, int, bool]]]:
+    """Collect metadata and bounded raw tails from one fixed log directory."""
+    source = {
+        "available": False, "reason": None, "scope": "home_assistant_instance",
+        "candidate_files": 0, "included_files": [], "omitted_files": 0,
+        "unsafe_files": 0, "read_errors": 0, "truncated_files": 0, "bytes": 0,
+    }
+    if not _safe_directory(directory, boundary):
+        source["reason"] = "directory_missing_or_unsafe"
+        return source, []
+    try:
+        with os.scandir(directory) as iterator:
+            candidates = []
+            matching_count = 0
+            for entry in iterator:
+                if not filename_pattern.fullmatch(entry.name):
+                    continue
+                matching_count += 1
+                if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+                    source["unsafe_files"] += 1
+                else:
+                    candidates.append(entry.name)
+    except OSError:
+        source["reason"] = "directory_unreadable"
+        return source, []
+    candidates.sort(reverse=True)
+    source["candidate_files"] = matching_count
+    selected = candidates[:max_files]
+    source["omitted_files"] = max(0, len(candidates) - len(selected))
+    result = []
+    for name in selected:
+        raw, original_bytes, truncated, error = _read_log_tail(
+            directory / name, MAX_INSTANCE_LOG_FILE_BYTES)
+        if error == "unsafe_file":
+            source["unsafe_files"] += 1
+            continue
+        if error:
+            source["read_errors"] += 1
+            continue
+        if raw is None or original_bytes is None:
+            source["read_errors"] += 1
+            continue
+        archive_name = f"{archive_prefix}/{name}"
+        result.append((archive_name, raw, original_bytes, truncated))
+    if result:
+        source["available"] = True
+    elif source["unsafe_files"]:
+        source["reason"] = "unsafe_files_skipped"
+    elif source["candidate_files"] == 0:
+        source["reason"] = "no_matching_files"
+    else:
+        source["reason"] = "files_unreadable"
+    return source, result
+
+
+def _ha_log_sort_key(name: str) -> tuple[int, int]:
+    if name == "home-assistant.log":
+        return (0, 0)
+    suffix = name.removeprefix("home-assistant.log.")
+    return (1, int(suffix))
+
+
+def _collect_instance_log_tails(
+    config_root: Path, opencode_root: Path
+) -> tuple[dict, list[tuple[str, bytes, int, bool]]]:
+    """Use only OpenCode's known log folder and Home Assistant's fixed log names."""
+    sources = {}
+    files = []
+    runtime_log_dir = opencode_root / "data" / "opencode" / "log"
+    opencode_source, opencode_files = _collect_log_source(
+        runtime_log_dir, filename_pattern=_OPENCODE_LOG_NAME,
+        archive_prefix="opencode/logs", max_files=MAX_OPENCODE_LOG_FILES,
+        boundary=config_root)
+    files.extend(opencode_files)
+    sources["opencode_logs"] = opencode_source
+
+    # Home Assistant Core's configured log and numeric rotations are a separate
+    # instance-wide source; no arbitrary filesystem paths enter from the request.
+    ha_source = {
+        "available": False, "reason": None, "scope": "home_assistant_instance",
+        "candidate_files": 0, "included_files": [], "omitted_files": 0,
+        "unsafe_files": 0, "read_errors": 0, "truncated_files": 0, "bytes": 0,
+    }
+    if not _safe_directory(config_root, config_root):
+        ha_source["reason"] = "directory_missing_or_unsafe"
+    else:
+        try:
+            with os.scandir(config_root) as iterator:
+                names = [entry.name for entry in iterator if _HA_LOG_NAME.fullmatch(entry.name)]
+            ha_source["candidate_files"] = len(names)
+            safe_names = []
+            for name in names:
+                try:
+                    info = (config_root / name).lstat()
+                except OSError:
+                    ha_source["read_errors"] += 1
+                    continue
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                    ha_source["unsafe_files"] += 1
+                else:
+                    safe_names.append(name)
+            names = safe_names
+            names.sort(key=_ha_log_sort_key)
+            selected = names[:MAX_HA_LOG_FILES]
+            ha_source["omitted_files"] = max(0, len(names) - len(selected))
+            for name in selected:
+                raw, original_bytes, truncated, error = _read_log_tail(
+                    config_root / name, MAX_INSTANCE_LOG_FILE_BYTES)
+                if error == "unsafe_file":
+                    ha_source["unsafe_files"] += 1
+                    continue
+                if error or raw is None or original_bytes is None:
+                    ha_source["read_errors"] += 1
+                    continue
+                files.append((f"homeassistant/{name}", raw, original_bytes, truncated))
+            if any(item[0].startswith("homeassistant/") for item in files):
+                ha_source["available"] = True
+            elif ha_source["unsafe_files"]:
+                ha_source["reason"] = "unsafe_files_skipped"
+            elif not names:
+                ha_source["reason"] = "no_matching_files"
+            else:
+                ha_source["reason"] = "files_unreadable"
+        except OSError:
+            ha_source["reason"] = "directory_unreadable"
+    sources["home_assistant_logs"] = ha_source
+    return sources, files
+
+
+def _redact_instance_log_tails(
+    runtime, sources: dict, raw_files: list[tuple[str, bytes, int, bool]]
+) -> dict[str, bytes]:
+    """Redact bounded log text and cap the combined included log payload."""
+    archive_files = {}
+    remaining = MAX_INSTANCE_LOG_BYTES
+    source_for_prefix = {
+        "opencode/logs/": sources["opencode_logs"],
+        "homeassistant/": sources["home_assistant_logs"],
+    }
+    for archive_name, raw, original_bytes, truncated in raw_files:
+        text = raw.decode("utf-8", errors="replace")
+        text_truncated = len(text) > MAX_TEXT_SCAN_CHARS
+        cleaned = _redact_text(runtime, text, limit=MAX_TEXT_SCAN_CHARS)
+        encoded = cleaned.encode("utf-8")
+        if len(encoded) > remaining:
+            encoded = encoded[:remaining].decode("utf-8", errors="ignore").encode("utf-8")
+            truncated = True
+        if len(encoded) > remaining:
+            encoded = b""
+            truncated = True
+        truncated = truncated or text_truncated
+        remaining -= len(encoded)
+        archive_files[archive_name] = encoded
+        source = next(value for prefix, value in source_for_prefix.items()
+                      if archive_name.startswith(prefix))
+        source["included_files"].append({
+            "name": archive_name.rsplit("/", 1)[-1],
+            "original_bytes": original_bytes,
+            "included_bytes": len(encoded),
+            "truncated": truncated,
+        })
+        source["bytes"] += len(encoded)
+        if truncated:
+            source["truncated_files"] += 1
+    return archive_files
 
 
 def _clean_value(runtime, value, *, depth=0, budget: ProjectionBudget | None = None):
@@ -996,7 +1263,97 @@ class DiagnosticsExportView(HomeAssistantView):
         return response
 
 
+class DiagnosticsRuntimeLogsExportView(HomeAssistantView):
+    """Explicit admin-only export of bounded logs shared by this HA instance."""
+
+    url = "/api/habab_home/diagnostics/runtime-logs/export"
+    name = "api:habab_home:diagnostics:runtime_logs_export"
+    requires_auth = True
+
+    async def post(self, request):
+        if _admin(request) is None:
+            return self.json_message("not_allowed", status_code=403)
+        content_length = getattr(request, "content_length", None)
+        if content_length is not None and content_length > 8192:
+            return self.json_message("invalid_export", status_code=413)
+        try:
+            data = await request.json()
+            if not isinstance(data, dict) or data:
+                raise ValueError("empty_request_required")
+        except (ValueError, TypeError):
+            return self.json_message("invalid_export", status_code=400)
+
+        hass = request.app["hass"]
+        assistant = hass.data.get(DOMAIN, {}).get("assistant")
+        runtime = getattr(assistant, "runtime", None)
+        if runtime is None or not isinstance(getattr(runtime, "root", None), (str, Path)):
+            return self.json_message("runtime_logs_unavailable", status_code=503)
+        config_root = Path(hass.config.path()).absolute()
+        opencode_root = Path(hass.config.path(".habab-opencode")).absolute()
+        if Path(runtime.root).absolute() != opencode_root:
+            return self.json_message("runtime_logs_unavailable", status_code=503)
+
+        sources, raw_files = await hass.async_add_executor_job(
+            _collect_instance_log_tails, config_root, opencode_root)
+        log_files = _redact_instance_log_tails(runtime, sources, raw_files)
+        truncated = any(source["truncated_files"] or source["omitted_files"]
+                        for source in sources.values())
+        captured_at = datetime.now(timezone.utc)
+        manifest = {
+            "product": "Habab Home",
+            "scope": {
+                "kind": "home_assistant_instance",
+                "shared_across_conversations": True,
+                "shared_across_users": True,
+                "session_id": None,
+                "warning": "These bounded runtime logs may contain events from other conversations on this instance.",
+            },
+            "captured_at": _iso(captured_at),
+            "timezone": "UTC",
+            "sources": sources,
+            "limits": {
+                "opencode_files": MAX_OPENCODE_LOG_FILES,
+                "home_assistant_files": MAX_HA_LOG_FILES,
+                "bytes_per_file_tail": MAX_INSTANCE_LOG_FILE_BYTES,
+                "total_redacted_log_bytes": MAX_INSTANCE_LOG_BYTES,
+                "text_scan_chars_per_file": MAX_TEXT_SCAN_CHARS,
+                "archive_bytes": MAX_EXPORT_BYTES,
+            },
+            "redactions_applied": [
+                "configured provider and runtime secrets",
+                "secret-named assignments and credential-like strings",
+                "oversized text tails truncated before export",
+            ],
+            "excluded": [
+                "conversation history and tool payloads",
+                "provider configuration and Home Assistant config files",
+                "audio and native Assist history",
+                "files outside the fixed OpenCode and Home Assistant log allowlists",
+            ],
+            "truncated": truncated,
+        }
+        archive_files = {
+            "logs/manifest.json": json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+            **log_files,
+        }
+        if sum(map(len, archive_files.values())) > MAX_EXPORT_BYTES:
+            return self.json_message("export_too_large", status_code=413)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, content in archive_files.items():
+                archive.writestr(name, content)
+        payload = buffer.getvalue()
+        if len(payload) > MAX_EXPORT_BYTES:
+            return self.json_message("export_too_large", status_code=413)
+        response = web.Response(body=payload, content_type="application/zip")
+        response.headers["Content-Disposition"] = 'attachment; filename="habab-runtime-logs.zip"'
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
 def async_register_views(hass):
     hass.http.register_view(DiagnosticsSessionsView())
     hass.http.register_view(DiagnosticsSessionView())
     hass.http.register_view(DiagnosticsExportView())
+    hass.http.register_view(DiagnosticsRuntimeLogsExportView())

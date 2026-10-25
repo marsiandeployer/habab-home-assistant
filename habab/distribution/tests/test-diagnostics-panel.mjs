@@ -45,6 +45,16 @@ test("diagnostic labels separate assistant language from recorded tool events", 
   assert.equal(diagnostics.diagnosticChannelLabel("telegram", ["telegram"], words), "Telegram");
 });
 
+test("shared runtime logs require admin confirmation and use the instance export route", () => {
+  assert.equal(diagnostics.runtimeLogsExportRequest(false, true), undefined);
+  assert.equal(diagnostics.runtimeLogsExportRequest(true, false), undefined);
+  assert.equal(diagnostics.runtimeLogsExportRequest(true, "yes"), undefined);
+  assert.deepEqual(diagnostics.runtimeLogsExportRequest(true, true), {
+    endpoint: "/api/habab_home/diagnostics/runtime-logs/export",
+    body: {},
+  });
+});
+
 test("diagnostic rendering helpers mask credentials and sensitive structured fields", () => {
   const text = diagnostics.sanitizeDiagnosticText("Bearer abc.def OPENAI_API_KEY=hidden sk-12345678901234567890 /home/private/config.yaml");
   assert.doesNotMatch(text, /abc\.def|hidden|sk-12345678901234567890|\/home\/private/);
