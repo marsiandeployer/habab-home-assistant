@@ -10,6 +10,24 @@ Telegram-компонент из текущего Docker-пакета. Данн�
 приёмка, выполнение команды OpenCode, автозапуск и 48 часов работы с
 выключенным экраном обязательны перед использованием как постоянного сервера.
 
+## Текущий preview
+
+Опубликованный preview — [APK 0.1.11-preview, versionCode 19](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.11-preview-code19-5b3946fadbda.apk).
+Его [отчёт сборки](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.11-preview-code19-5b3946fadbda.json)
+связывает APK с runtime `3149ea67a5e9691e` и исходным commit
+`3485669f466d7c5337fb3b7866fac737f9d871c3`.
+
+VersionCode 19 был задан внешним скриптом инициализации Gradle; настройки
+исходников по-прежнему задают versionCode 18 и `0.1.10-notification`. В отчёте
+нет SHA-256 этого скрипта, поэтому исходников недостаточно для точного
+повторения preview-сборки. Подпись APK проверена; сканирование не обнаружило
+встроенных учётных данных. APK не устанавливали и в stable не переводили.
+Перед preview-обновлением сохраните резервную копию данных.
+
+Runtime работает в PRoot от имени приложения. UID 0 внутри гостя не даёт root
+на Android; эта установка не предоставляет HAOS/Supervisor и доступ к системным
+службам Android. Запуск и обновление на устройстве остаются непроверенными.
+
 ## Сборка
 
 Нужны Java 17, Gradle 8.5, Android SDK с `platforms;android-34` и

@@ -3,11 +3,13 @@
 Инструкция для Git-checkout относится к исходному кандидату Habab Home 0.3.6
 на Home Assistant Core 2026.10.2 с frontend `20260930.4+habab.9`. Публичный
 `start-home-assistant.bat` скачивает пакет основного загрузчика 0.3.1. Для
-проверки актуального кандидата используйте отдельный
-[preview-загрузчик 0.3.6](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-45203ea388bf.bat),
-собранный из коммита исходников `9c04db9699454f94c404c8eaa346fa53129ae5c6`; SHA-256 ZIP:
-`45203ea388bfd0af33d866aa196e9f8534444eb2a5171d13260d5f4b8e67c08f`. Это
-предварительный пакет; основная загрузка по-прежнему выдаёт 0.3.1.
+проверки кандидата используйте отдельный [preview-загрузчик 0.3.6](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-59d23122eb97.bat)
+из коммита исходников `48c2c65586cf152ebb2f28a4287291e58e89a3b4`. Публичные
+[метаданные пакета](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-59d23122eb97.json)
+указывают ZIP `habab-home-windows-59d23122eb97.zip` размером 281251 байт и
+SHA-256 `59d23122eb972ba865f5e891a81bfc68b45fdd6979f76fdd80774cf9bd5459b8`.
+Это предварительный пакет; физическая установка этого preview на Windows не
+запускалась, а основной загрузчик по-прежнему выдаёт 0.3.1.
 Для новой Git-установки из корня checkout запустите отслеживаемый
 `habab\distribution\start-windows.bat`; двойной щелчок тоже подходит. Для
 обновления сначала выполните `git pull`. Батник пересобирает локальный Docker-
