@@ -1,0 +1,109 @@
+{
+  "result": "build_succeeded_private_candidate",
+  "timestamp_local": "2026-10-25",
+  "source": {
+    "frontend_repo": "home-assistant/frontend",
+    "commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
+    "bridge_patch_sha256": "c47ee0a56a56f4b8c260ea3b4db3d6111da22e9a6f7d29b1d428882f50ec4010",
+    "stock_catalog_sha256": "154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce",
+    "package_json_sha256": "16ff49ced822097fc2f60f016d7d2ce46f95c46cb79fbb3c1aa53a49db8d16be",
+    "pnpm_lock_sha256": "227e437a49097265c3261f6046b417bae1f4e2e1438f9be6e314be7f4f6a64b3",
+    "pnpm_modules_lock_sha256": "227e437a49097265c3261f6046b417bae1f4e2e1438f9be6e314be7f4f6a64b3",
+    "pnpm_modules_metadata_sha256": "77ee8b58872338f206a59f9a0b5c72a52d9822620a594bb749a40bedaa6f02e9"
+  },
+  "artifact": {
+    "filename": "home_assistant_frontend-20260930.4+habab.8-py3-none-any.whl",
+    "sha256": "8aff0182e0665185edd42ff1659bc68247f39acc998f75f8232c6be750ef9f9a",
+    "bytes": 111324155,
+    "zip_integrity": "passed",
+    "metadata": {
+      "version": "20260930.4+habab.8",
+      "requires_python": ">=3.14.0",
+      "wheel_tag": "py3-none-any"
+    },
+    "font_verification": {
+      "static_woff2_count": 12,
+      "Roboto-Regular.woff2_sha256": "47107401d0adb375ab9aa167f9d62489a849d510e740a307b5a4db60e5db3562",
+      "Roboto-Medium.woff2_sha256": "96025fe9db6578d8bc7f4b8be739750b1490e07221c2b1f16acde2ea7669cedf",
+      "Roboto-Bold.woff2_sha256": "8e44376b735dcc9027acbcc8a0df64c3f886a23529eff27b022f344d719e90f2"
+    }
+  },
+  "validation": {
+    "prettier": "passed",
+    "focused_vitest": "7 files, 67 tests passed",
+    "modern_rspack": "passed, 2 asset-size warnings",
+    "legacy_rspack": "passed, 2 asset-size warnings",
+    "compression": "Brotli and Zopfli tasks passed",
+    "python_wheel_build": "passed",
+    "manual_archive_check": "passed; modern frontend_latest and legacy frontend_es5 trees present",
+    "cgroup": {
+      "memory_max_bytes": 5368709120,
+      "swap_max_bytes": 0,
+      "memory_events": {
+        "low": 0,
+        "high": 0,
+        "max": 0,
+        "oom": 0,
+        "oom_kill": 0
+      }
+    }
+  },
+  "attempt_history": [
+    {
+      "attempt": 1,
+      "result": "clean_guard_rejected_missing_explicit_worktree_or_catalog_environment",
+      "preserved_log": "logs/attempt1-clean-guard.log"
+    },
+    {
+      "attempt": 2,
+      "result": "focused_tests_passed_then_license_generation_failed_because_cached_pnpm_store_lacked_package_index",
+      "preserved_log": "logs/attempt2-missing-store-index.log"
+    },
+    {
+      "attempt": 3,
+      "result": "rspack_multi_compiler_killed_by_memcg_oom",
+      "preserved_log": "logs/attempt3-rspack-cgroup-oom.log",
+      "preserved_cgroup_receipt": "logs/attempt3-cgroup-oom.json"
+    },
+    {
+      "attempt": 4,
+      "result": "success",
+      "unit": "habab-native-frontend-wheel8-attempt4-20261025-080312.scope",
+      "preserved_log": "logs/build-attempt4.log",
+      "build_log_sha256": "a89c511509419c35415cee47a6a112bfad42370e3d0df38ecc7a875fcd69e6e6"
+    }
+  ],
+  "attempt4_build_adaptations": [
+    "Used a fresh tmpfs worktree and a dedicated systemd scope capped at 5 GiB with swap disabled.",
+    "Verified pinned package, lock, and node_modules hashes; used cached direct binaries without pnpm install or mass dependency fetch.",
+    "Used Node 24.21.0 and pinned pnpm dependency state.",
+    "Ran modern and legacy Rspack configs sequentially and capped Terser workers at one; retained both output trees and their original config options.",
+    "Built offline translations before focused Vitest; copied the pinned stock catalog and reconciled metadata as the public build script specifies.",
+    "Reused byte-identical 336886-byte third-party license text from the existing .7 wheel (SHA-256 79168768f5a317979c8700fc6b1e2eba3115badd1d9cd2db3e04bc6f731b1ad1); gen-licenses was not regenerated because the cached pnpm store lacks its package index. Package, lock, patch, and source identities matched the prior wheel input."
+  ],
+  "temporary_builder": {
+    "sha256": "09eb4114fffed7bfd6e164e24e8e99d176ed8fcafe7ac71c4f7df5de3bd4a0bd",
+    "note": "Temporary-only build adaptation; this is not a claim that the canonical unmodified builder produced the wheel. Public build-wheel.sh now includes only the reviewed translation-metadata preparation fix, validated with bash -n and git diff --check.",
+    "preserved_script": "logs/build-wheel-attempt4-temporary.sh",
+    "preserved_diff": "logs/temporary-builder-vs-public.patch"
+  },
+  "public_release": "Immutable candidate published and HTTPS body verified; stable manifest still .7; not deployed.",
+  "public_build_script_fix": {
+    "sha256": "3760347f2857a89dd6d2901d820771b3dab191e2a8ce99b9cc22bcdc9644c9ea",
+    "change": "Runs SKIP_FETCH_NIGHTLY_TRANSLATIONS=1 pnpm exec gulp build-translations before focused Vitest, so generated translationMetadata.json exists in a fresh worktree without network fetch.",
+    "validation": [
+      "bash -n passed",
+      "git diff --check passed",
+      "same translation preparation task passed in successful attempt 4 before 7 files / 67 Vitest tests passed"
+    ]
+  },
+  "additional_preparation_failures": [
+    {
+      "phase": "preparation_failure_between_attempt1_and_attempt2",
+      "result": "focused_vitest_failed_because_fresh_worktree_lacked_generated_translationMetadata.json; 64 tests passed before the failure",
+      "resolution": "added offline build-translations preparation before focused Vitest; successful attempt4 repeated that preparation and passed 7 files / 67 tests",
+      "preserved_log": null,
+      "log_status": "unavailable in retained attempt logs"
+    }
+  ]
+}

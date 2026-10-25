@@ -111,6 +111,9 @@ pnpm exec prettier --check \
   test/dialogs/voice-command-dialog/show-ha-voice-command-dialog.test.ts \
   test/habab/native-ui-bridge.test.ts \
   test/data/recorder-info.test.ts
+# Vitest's import graph includes generated translation metadata. Prepare it
+# from the pinned source catalog before tests, without fetching nightly files.
+SKIP_FETCH_NIGHTLY_TRANSLATIONS=1 pnpm exec gulp build-translations
 pnpm exec vitest run --config test/vitest.config.ts \
   test/panels/home/ha-panel-home.test.ts \
   test/panels/lovelace/strategies/common-controls-section-strategy.test.ts \

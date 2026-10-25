@@ -1,0 +1,22 @@
+{
+  "checked_at": "2026-10-25T08:16:29.007708+00:00",
+  "wheel_sha256": "8aff0182e0665185edd42ff1659bc68247f39acc998f75f8232c6be750ef9f9a",
+  "bytes": 111324155,
+  "metadata_version": "20260930.4+habab.8",
+  "requires_python": ">=3.14.0",
+  "zip_crc": "PASS",
+  "variants": {
+    "frontend_latest": {
+      "js_files": 1134,
+      "shared_reload_provider_present": true
+    },
+    "frontend_es5": {
+      "js_files": 1165,
+      "shared_reload_provider_present": true
+    }
+  },
+  "woff2_count": 12,
+  "publicly_published": false,
+  "deployed": false,
+  "initial_harness_failure": "host Python3.10 lacks hashlib.file_digest; replaced with streaming SHA256"
+}

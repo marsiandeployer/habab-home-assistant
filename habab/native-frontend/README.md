@@ -1,30 +1,49 @@
 # Matched Home Assistant frontend bridge
 
 This patch targets Home Assistant frontend tag `20260930.4`, commit
-`26690e06b0bf64a1487929245c32842ef92c62b5`. The released `habab.7` patch adds the admin-only
-assistant handoff, the versioned `window.hababNativeUi` bridge, and Home favorites
-that remain visible without `usage_prediction`. Vacuum favorites use a full-width
-native Home tile with supported start/pause, stop, and return-home controls. A Home data
-subscription refreshes the open panel when favorites change, without replacing
-the user's saved Home settings. The native dialog fallback remains available.
+`26690e06b0bf64a1487929245c32842ef92c62b5`. The released `habab.7` patch adds
+the admin-only assistant handoff, the versioned `window.hababNativeUi` bridge,
+and Home favorites that remain visible without `usage_prediction`. Vacuum
+favorites use a full-width native Home tile with supported start/pause, stop, and
+return-home controls. A Home data subscription refreshes the open panel when
+favorites change, without replacing the user's saved Home settings. The native
+dialog fallback remains available.
 
 Released `.7` patch SHA-256: `06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da19afcf36c4267bb`.
 
-## Pending source candidate
+## `.8` candidate artifact
 
-The current `bridge.patch` is a pending `.8` source candidate with SHA-256
+The current `bridge.patch` is the `.8` source candidate with SHA-256
 `c47ee0a56a56f4b8c260ea3b4db3d6111da22e9a6f7d29b1d428882f50ec4010`.
 `build-wheel.sh` targets `20260930.4+habab.8`. The change adds
 `window.haRegisterDirtyStateProvider`, backed by `DirtyStateProviderMixin`, so an
 external frontend component can register unsaved state with Home Assistant's
 service-worker reload guard and defer reload until it is safe.
 
-No `.8` wheel has been built, so there is no `.8` wheel digest or size. Isolated cached-dependency checks passed: ESLint, Prettier, and 67 focused Vitest
-tests under Node 22.21.1; real Gulp input generation and the TypeScript check
-under Node 24.21.0. The complete builder under pinned Node 24 and the wheel build
-remain pending. At this review on 2026-10-25, the filesystem had about 1.5 GiB free. The release
-manifest still describes the published `.7` wheel below; `.8` is not a released
-artifact.
+The `.8` wheel was built privately as
+`home_assistant_frontend-20260930.4+habab.8-py3-none-any.whl`: 111,324,155 bytes,
+SHA-256 `8aff0182e0665185edd42ff1659bc68247f39acc998f75f8232c6be750ef9f9a`.
+Independent readback passed SHA-256, ZIP CRC, and wheel metadata checks. It found
+1,134 modern JavaScript files and 1,165 legacy files; both include the shared
+reload provider. The wheel contains 12 WOFF2 font assets. The focused 67-test run
+under Node 24 and build preparation/type checks passed; font checks passed and
+the Russian catalog fingerprint remains
+`154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce`.
+The independent wheel readback is recorded in
+[`native-frontend-wheel8-independent-review.json`](../qa/issue-monitor-20261024/native-frontend-wheel8-independent-review.json).
+
+This private build used cached pinned dependencies and direct package binaries.
+Modern and legacy bundles were built sequentially with Terser concurrency 1 in a
+5 GiB cgroup. The runner used a three-line offline `build-translations`
+preparation, so the result does not prove that an unmodified canonical builder
+reproduces the wheel. The license asset was reused byte-for-byte from `.7` because
+the `gen-licenses` cache index was unavailable; license generation was not rerun.
+
+The immutable `.8` candidate is available on the artifact server, with its full
+HTTPS body verified against the digest and size. It has not been included in a
+new image or deployed to an owner installation. Build and archive readback are
+not live acceptance. `distribution/native-frontend-release.json`
+continues to identify the published `.7` wheel below.
 
 ## Rebuild
 
@@ -121,8 +140,8 @@ pnpm exec vitest run --config test/vitest.config.ts test/dialogs/voice-command-d
 ```
 
 The `.7` wheel build completed successfully. This does not establish public
-release or physical-device acceptance. The `.8` source candidate has passed
-the isolated checks described above; its wheel build and full builder gates
+release or physical-device acceptance. The `.8` private wheel build and archive
+checks are recorded above; public release and owner-installation acceptance
 remain pending.
 
 The browser integration and wheel installation checks are performed by the
