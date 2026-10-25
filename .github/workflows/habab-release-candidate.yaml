@@ -3,15 +3,20 @@ name: Habab release candidate
 on:
   workflow_dispatch:
     inputs:
+      target_scope:
+        description: Build all candidate targets, only Windows, both Linux architectures, or only Android
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - windows
+          - linux
+          - android
       source_ref:
         description: Full commit SHA or existing tag (branches are rejected)
         required: true
         type: string
-      include_android:
-        description: Attempt Android only with a same-source signed runtime and configured signing secrets
-        required: false
-        default: false
-        type: boolean
       android_runtime_manifest_url:
         description: HTTPS URL of an already signed runtime manifest carrying sourceRevision
         required: false
@@ -53,6 +58,7 @@ jobs:
 
   windows-source:
     needs: resolve-source
+    if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'windows' }}
     runs-on: ubuntu-latest
     steps:
       - name: Fetch only Windows package source blobs
@@ -109,10 +115,11 @@ jobs:
           name: candidate-windows
           path: candidate
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   linux-image:
     needs: resolve-source
+    if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'linux' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -160,11 +167,11 @@ jobs:
           name: candidate-${{ matrix.artifact }}
           path: candidate
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   android:
     needs: resolve-source
-    if: ${{ inputs.include_android }}
+    if: ${{ inputs.target_scope == 'android' }}
     runs-on: ubuntu-latest
     env:
       RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
@@ -337,11 +344,20 @@ jobs:
           name: candidate-android
           path: candidate
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
   assemble-candidate:
     needs: [resolve-source, windows-source, linux-image, android]
-    if: ${{ always() && needs.resolve-source.result == 'success' && needs.windows-source.result == 'success' && needs.linux-image.result == 'success' && (needs.android.result == 'success' || needs.android.result == 'skipped') }}
+    if: >-
+      ${{
+        always() && needs.resolve-source.result == 'success' &&
+        ((inputs.target_scope == 'all' || inputs.target_scope == 'windows') && needs.windows-source.result == 'success' ||
+         (inputs.target_scope == 'linux' || inputs.target_scope == 'android') && needs.windows-source.result == 'skipped') &&
+        ((inputs.target_scope == 'all' || inputs.target_scope == 'linux') && needs.linux-image.result == 'success' ||
+         (inputs.target_scope == 'windows' || inputs.target_scope == 'android') && needs.linux-image.result == 'skipped') &&
+        (inputs.target_scope == 'android' && needs.android.result == 'success' ||
+         inputs.target_scope != 'android' && needs.android.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Fetch only candidate manifest source blobs
@@ -374,6 +390,7 @@ jobs:
         env:
           SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
           ANDROID_RESULT: ${{ needs.android.result }}
+          TARGET_SCOPE: ${{ inputs.target_scope }}
         run: |
           set -euo pipefail
           mkdir -p candidate/android
@@ -383,11 +400,11 @@ jobs:
           else
             android_state=built
           fi
-          python3 habab/scripts/release-candidate.py --root candidate --source-tree . --source-revision "$SOURCE_REVISION" --android-state "$android_state" --output candidate/release-candidate.json
+          python3 habab/scripts/release-candidate.py --root candidate --source-tree . --source-revision "$SOURCE_REVISION" --target-scope "$TARGET_SCOPE" --android-state "$android_state" --output candidate/release-candidate.json
           python3 -m json.tool candidate/release-candidate.json >/dev/null
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: habab-release-candidate-${{ needs.resolve-source.outputs.source_revision }}
           path: candidate/release-candidate.json
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1

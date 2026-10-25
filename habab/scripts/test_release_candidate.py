@@ -98,6 +98,26 @@ class ReleaseCandidateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "another source revision"):
             release_candidate.assemble(self.root, self.revision, "blocked", self.source_tree)
 
+    def test_windows_scope_omits_unselected_platforms(self):
+        self.add_windows_package()
+
+        manifest = release_candidate.assemble(
+            self.root, self.revision, "blocked", self.source_tree, "windows")
+
+        self.assertEqual(set(manifest["targets"]), {"windows"})
+        self.assertTrue(all(item["artifact"] == "candidate-windows" for item in manifest["artifacts"]))
+
+    def test_rejects_invalid_target_scope(self):
+        with self.assertRaisesRegex(ValueError, "target scope must be"):
+            release_candidate.assemble(self.root, self.revision, "blocked", self.source_tree, "desktop")
+
+    def test_rejects_missing_selected_linux_architecture(self):
+        self.fill_targets()
+        (self.root / "linux-arm64/status.json").unlink()
+
+        with self.assertRaisesRegex(ValueError, "Missing linux-arm64 status readback"):
+            release_candidate.assemble(self.root, self.revision, "blocked", self.source_tree, "linux")
+
     def test_rejects_dirty_source_attestation(self):
         self.fill_targets()
         path = self.root / "windows/status.json"

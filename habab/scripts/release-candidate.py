@@ -13,6 +13,12 @@ import zipfile
 
 _SHA = re.compile(r"\A[0-9a-f]{40,64}\Z")
 _TARGETS = ("windows", "linux-amd64", "linux-arm64", "android")
+_TARGET_SCOPES = {
+    "all": _TARGETS,
+    "windows": ("windows",),
+    "linux": ("linux-amd64", "linux-arm64"),
+    "android": ("android",),
+}
 _ARTIFACT_NAMES = {
     "windows": "candidate-windows",
     "linux-amd64": "candidate-linux-amd64",
@@ -88,17 +94,19 @@ def verify_windows_package(directory: Path, source_tree: Path, source_revision: 
 
 
 def assemble(root: Path, source_revision: str, android_state: str,
-             source_tree: Path | None = None) -> dict:
+             source_tree: Path | None = None, target_scope: str = "all") -> dict:
     if not _SHA.fullmatch(source_revision):
         raise ValueError("source revision must be a full Git SHA")
     if android_state not in {"blocked", "built"}:
         raise ValueError("Android state must be blocked or built")
+    if target_scope not in _TARGET_SCOPES:
+        raise ValueError("target scope must be all, windows, linux, or android")
 
     root = root.resolve()
     source_tree = source_tree.resolve() if source_tree else None
     targets = {}
     files = []
-    for target in _TARGETS:
+    for target in _TARGET_SCOPES[target_scope]:
         directory = root / target
         status_path = directory / "status.json"
         if not status_path.is_file():
@@ -147,10 +155,12 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True, help="Downloaded target artifacts")
     parser.add_argument("--source-tree", type=Path, required=True, help="Clean checkout at the selected revision")
     parser.add_argument("--source-revision", required=True)
+    parser.add_argument("--target-scope", choices=tuple(_TARGET_SCOPES), default="all")
     parser.add_argument("--android-state", choices=("blocked", "built"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    manifest = assemble(args.root, args.source_revision, args.android_state, args.source_tree)
+    manifest = assemble(args.root, args.source_revision, args.android_state,
+                        args.source_tree, args.target_scope)
     args.output.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(f"candidate manifest written: {args.output}")
 
