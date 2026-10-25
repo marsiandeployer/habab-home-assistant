@@ -63,7 +63,7 @@ def export_image(path):
 def copy_sources(rootfs):
     inventory = {}
     sources = []
-    for name in ('habab_home', 'habab_telegram'):
+    for name in ('habab_home', 'habab_telegram', 'habab_yandex_speech', 'idigital_sms'):
         sources.append((DIST / 'src' / name, rootfs / 'usr/src/homeassistant/homeassistant/components' / name))
     sources.append((DIST / 'telegram-agent', rootfs / 'opt/habab-telegram'))
     allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css'}

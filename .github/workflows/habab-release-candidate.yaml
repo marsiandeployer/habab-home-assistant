@@ -222,6 +222,7 @@ jobs:
           expected = {}
           allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css'}
           source_dirs = [distribution / 'src/habab_home', distribution / 'src/habab_telegram',
+                         distribution / 'src/habab_yandex_speech', distribution / 'src/idigital_sms',
                          distribution / 'telegram-agent']
           for source_dir in source_dirs:
               for path in sorted(source_dir.rglob('*')):
