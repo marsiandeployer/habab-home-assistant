@@ -21,13 +21,14 @@ STAGE = ROOT / 'tmp/ha-frontend-build/publish-stage'
 PUBLISHED_ASSET_DIRS = ('assets', 'frontend_es5', 'frontend_latest', 'static', 'stub_config')
 PUBLISHED_ASSET_FILES = ('_headers', 'manifest.json', 'LICENSE.md')
 PUBLISHED_ENTRYPOINT = ROOT / 'build/flat-entrypoint.html'
+UPSTREAM_BASELINE = '92599a88037ef5b7bd822efd7301028d824f7f5b'
 RELEASE = os.environ.get('HABAB_DEMO_RELEASE', '20261021-ui5')
 if not re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,79}', RELEASE):
     raise ValueError('Invalid HABAB_DEMO_RELEASE')
 PREFIX = f'/demos/home-assistant/releases/{RELEASE}/'
 
 
-def stage_published_frontend(source_root, stage, entrypoint):
+def stage_published_frontend(source_root, stage, entrypoint, *, license_source=None):
     """Copy only the retained flat frontend inputs, excluding adjacent public artifacts."""
     for name in PUBLISHED_ASSET_DIRS:
         source = source_root / name
@@ -35,10 +36,12 @@ def stage_published_frontend(source_root, stage, entrypoint):
             raise ValueError(f'Missing compiled frontend directory: {name}')
         if any(path.is_symlink() for path in source.rglob('*')):
             raise ValueError(f'Symlink in compiled frontend directory: {name}')
+    asset_sources = {}
     for name in PUBLISHED_ASSET_FILES:
-        source = source_root / name
+        source = license_source if name == 'LICENSE.md' and license_source is not None else source_root / name
         if source.is_symlink() or not source.is_file():
             raise ValueError(f'Missing compiled frontend file: {name}')
+        asset_sources[name] = source
     if entrypoint.is_symlink() or not entrypoint.is_file():
         raise ValueError('Flat frontend entrypoint is missing')
 
@@ -49,7 +52,7 @@ def stage_published_frontend(source_root, stage, entrypoint):
         for name in PUBLISHED_ASSET_DIRS:
             shutil.copytree(source_root / name, stage / name)
         for name in PUBLISHED_ASSET_FILES:
-            shutil.copy2(source_root / name, stage / name)
+            shutil.copy2(asset_sources[name], stage / name)
         shutil.copy2(entrypoint, stage / 'index.html')
     except Exception:
         shutil.rmtree(stage, ignore_errors=True)
@@ -118,25 +121,85 @@ def scope_html(html):
     return html.replace('</body>', '<script src="/demos/home-assistant/integrations/telegram-setup.js?v=20261023-1" defer></script><script type="module" src="/demos/home-assistant/integrations/setup-chat.js?v=5"></script></body>')
 
 
+def source_revision(value):
+    if value is not None and not re.fullmatch(r'[0-9a-f]{40}', value):
+        raise ValueError('Frontend source revision must be a full lowercase Git SHA-1')
+    return value
+
+
+def validate_source_options(*, from_published, source_dir, entrypoint, frontend_revision):
+    if from_published and source_dir:
+        raise ValueError('--from-published and --source-dir are mutually exclusive')
+    if source_dir and entrypoint:
+        raise ValueError('--entrypoint cannot be combined with --source-dir')
+    if frontend_revision and not source_dir:
+        raise ValueError('--frontend-source-revision requires --source-dir')
+    revision = source_revision(frontend_revision)
+    if source_dir and not revision:
+        raise ValueError('--source-dir requires --frontend-source-revision')
+    return revision
+
+
+def attribution_text(frontend_revision):
+    fork_revision = frontend_revision or 'unknown'
+    return (
+        '# Home Assistant frontend demo\n\n'
+        f'This demo uses the Habab frontend fork at source revision `{fork_revision}`. '
+        f'Its Home Assistant upstream baseline is commit `{UPSTREAM_BASELINE}`. '
+        'The upstream project is licensed under Apache License 2.0; see [LICENSE.md](LICENSE.md). '
+        'Habab changes: Russian demo labels and native Russian locale; subpath-safe, self-hosted assets; '
+        'bounded demo-state persistence with visible API error handling; and the origin-wide service worker is disabled. '
+        'The demo runs mock states only and does not connect to Home Assistant Core or devices. '
+        'This build is not an official Home Assistant service or endorsement.\n'
+    )
+
+
+def write_provenance(stage, frontend_revision):
+    provenance = {
+        'frontend_source_revision': frontend_revision,
+        'home_assistant_upstream_baseline': UPSTREAM_BASELINE,
+    }
+    (stage / 'BUILD-PROVENANCE.json').write_text(
+        json.dumps(provenance, indent=2) + '\n', encoding='utf-8')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--from-published', action='store_true',
                         help='Repackage the retained flat compiler output without recompiling')
+    parser.add_argument('--source-dir', type=Path,
+                        help='Use an external compiled frontend output directory')
+    parser.add_argument('--frontend-source-revision',
+                        help='Full Git SHA-1 of the source used for the compiled frontend')
     parser.add_argument('--entrypoint', type=Path,
                         help='Explicit retained flat index for a repeat repackage')
     args = parser.parse_args()
+    try:
+        frontend_revision = validate_source_options(
+            from_published=args.from_published,
+            source_dir=args.source_dir,
+            entrypoint=args.entrypoint,
+            frontend_revision=args.frontend_source_revision,
+        )
+    except ValueError as err:
+        raise SystemExit(str(err)) from err
     if (TARGET / 'releases' / RELEASE).exists():
         raise SystemExit('Release already exists; choose a new HABAB_DEMO_RELEASE')
-    source_root = TARGET if args.from_published else SOURCE
+    source_root = TARGET if args.from_published else args.source_dir or SOURCE
+    if args.source_dir and (source_root.is_symlink() or not source_root.is_dir()):
+        raise SystemExit('Compiled frontend source directory is missing or is a symlink')
     if not (source_root / 'index.html').is_file():
         raise SystemExit(f'Upstream build is missing: {source_root}')
     entrypoint = args.entrypoint or (PUBLISHED_ENTRYPOINT if args.from_published else source_root / 'index.html')
     source_html = entrypoint.read_text(encoding='utf-8')
     if args.from_published and '/releases/' in source_html:
         raise SystemExit('Already repackaged; rebuild from the pinned upstream source')
-    if args.from_published:
+    if args.from_published or args.source_dir:
         try:
-            stage_published_frontend(source_root, STAGE, entrypoint)
+            stage_published_frontend(
+                source_root, STAGE, entrypoint,
+                license_source=UPSTREAM / 'LICENSE.md' if args.source_dir else None,
+            )
         except ValueError as err:
             raise SystemExit(str(err)) from err
     else:
@@ -145,19 +208,10 @@ def main():
         shutil.copytree(source_root, STAGE, ignore=shutil.ignore_patterns('releases'))
     (TARGET / 'integrations').mkdir(exist_ok=True)
     assistant = publish_assistant(TARGET, ROOT / 'distribution/src/habab_home/frontend/setup-chat.js')
-    if not args.from_published:
+    if not args.from_published and not args.source_dir:
         shutil.copy2(UPSTREAM / 'LICENSE.md', STAGE / 'LICENSE.md')
-    (STAGE / 'ATTRIBUTION.md').write_text(
-        '# Home Assistant frontend demo\n\n'
-        'This interactive demo is compiled from the official Home Assistant frontend '
-        'repository at commit `92599a88037ef5b7bd822efd7301028d824f7f5b`. '
-        'The upstream project is licensed under Apache License 2.0; see [LICENSE.md](LICENSE.md). '
-        'Habab changes: Russian demo labels and native Russian locale; subpath-safe, self-hosted assets; '
-        'bounded demo-state persistence with visible API error handling; and the origin-wide service worker is disabled. '
-        'The demo runs mock states only and does not connect to Home Assistant Core or devices. '
-        'This build is not an official Home Assistant service or endorsement.\n',
-        encoding='utf-8',
-    )
+    (STAGE / 'ATTRIBUTION.md').write_text(attribution_text(frontend_revision), encoding='utf-8')
+    write_provenance(STAGE, frontend_revision)
 
     index = STAGE / 'index.html'
     html = render_entrypoint(scope_html(source_html), assistant['module_url'])

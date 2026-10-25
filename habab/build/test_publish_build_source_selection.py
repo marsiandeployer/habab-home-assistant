@@ -1,13 +1,90 @@
+import json
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from publish_build import PUBLISHED_ASSET_DIRS, PUBLISHED_ASSET_FILES, stage_published_frontend
+from publish_build import (
+    PUBLISHED_ASSET_DIRS,
+    PUBLISHED_ASSET_FILES,
+    UPSTREAM_BASELINE,
+    attribution_text,
+    stage_published_frontend,
+    validate_source_options,
+    write_provenance,
+)
 
 
 class PublishedFrontendSelectionTests(unittest.TestCase):
+    def test_external_compiled_source_stages_allowlist_and_trusted_license(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'compiled'
+            root.mkdir()
+            (root / 'index.html').write_text('<title>Home Assistant Demo</title>', encoding='utf-8')
+            for name in PUBLISHED_ASSET_DIRS:
+                directory = root / name
+                directory.mkdir()
+                (directory / 'asset.txt').write_text(name, encoding='utf-8')
+            for name in ('_headers', 'manifest.json'):
+                (root / name).write_text(name, encoding='utf-8')
+            (root / 'downloads').mkdir()
+            (root / 'downloads/extra.bin').write_bytes(b'not an input')
+            upstream_license = Path(temporary) / 'trusted-LICENSE.md'
+            upstream_license.write_text('trusted Apache license', encoding='utf-8')
+            stage = Path(temporary) / 'stage'
+
+            stage_published_frontend(
+                root, stage, root / 'index.html', license_source=upstream_license)
+
+            files = {str(path.relative_to(stage)) for path in stage.rglob('*') if path.is_file()}
+            self.assertEqual(
+                files,
+                {f'{name}/asset.txt' for name in PUBLISHED_ASSET_DIRS}
+                | {'_headers', 'manifest.json', 'LICENSE.md', 'index.html'},
+            )
+            self.assertEqual((stage / 'LICENSE.md').read_text(encoding='utf-8'), 'trusted Apache license')
+            self.assertEqual((root / 'index.html').read_text(encoding='utf-8'), '<title>Home Assistant Demo</title>')
+
+    def test_external_source_requires_full_revision_and_rejects_conflicting_modes(self):
+        revision = 'e5babaf2ad473dd0282b959a4ef2863aacdbf3fb'
+        source = Path('/compiled')
+        self.assertEqual(
+            validate_source_options(
+                from_published=False, source_dir=source, entrypoint=None,
+                frontend_revision=revision),
+            revision,
+        )
+        for options, error in (
+            ({'from_published': False, 'source_dir': source, 'entrypoint': None, 'frontend_revision': None},
+             'requires --frontend-source-revision'),
+            ({'from_published': False, 'source_dir': source, 'entrypoint': None, 'frontend_revision': 'bad'},
+             'full lowercase Git SHA-1'),
+            ({'from_published': True, 'source_dir': source, 'entrypoint': None, 'frontend_revision': revision},
+             'mutually exclusive'),
+            ({'from_published': False, 'source_dir': source, 'entrypoint': Path('/custom/index.html'), 'frontend_revision': revision},
+             'cannot be combined'),
+            ({'from_published': False, 'source_dir': None, 'entrypoint': None, 'frontend_revision': revision},
+             'requires --source-dir'),
+        ):
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                validate_source_options(**options)
+
+    def test_attribution_and_provenance_separate_fork_from_upstream_baseline(self):
+        revision = 'e5babaf2ad473dd0282b959a4ef2863aacdbf3fb'
+        self.assertIn(f'source revision `{revision}`', attribution_text(revision))
+        self.assertIn(f'upstream baseline is commit `{UPSTREAM_BASELINE}`', attribution_text(revision))
+        self.assertIn('source revision `unknown`', attribution_text(None))
+        with tempfile.TemporaryDirectory() as temporary:
+            stage = Path(temporary)
+            write_provenance(stage, revision)
+            data = json.loads((stage / 'BUILD-PROVENANCE.json').read_text(encoding='utf-8'))
+            self.assertEqual(data, {
+                'frontend_source_revision': revision,
+                'home_assistant_upstream_baseline': UPSTREAM_BASELINE,
+            })
+            self.assertNotIn(temporary, (stage / 'BUILD-PROVENANCE.json').read_text(encoding='utf-8'))
+
     def test_stages_compiled_frontend_allowlist_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / 'public'
