@@ -159,7 +159,7 @@ final class RealtimeVoice implements AutoCloseable {
             credentials.cancelInteractions();
             try { interruptOutput(); }
             catch (Exception error) { fail("voice_playback_failed"); return; }
-            // Stop media immediately. Only fast local journal writes remain before END.
+            // Stop media and provider transport before notifying END after accepted history writes.
             synchronized (connectionLock) {
                 WebSocket current = socket; socket = null; ready = false;
                 if (current != null) current.cancel();
@@ -196,14 +196,20 @@ final class RealtimeVoice implements AutoCloseable {
         boolean rejected, sent;
         synchronized (connectionLock) {
             WebSocket current = socket;
-            boolean allowed = !closed && current != null
-                    && (toolCallId == null || !cancelledTools.contains(toolCallId))
-                    && (expectedEpoch == null || !ending && expectedEpoch == interruptionEpoch.get());
+            boolean allowed = canSend(closed, ending, current != null,
+                    toolCallId == null || !cancelledTools.contains(toolCallId), expectedEpoch,
+                    interruptionEpoch.get());
             sent = allowed && current.send(wire.toString());
             rejected = allowed && !sent;
         }
         if (rejected) fail("realtime_send_failed");
         return sent;
+    }
+
+    static boolean canSend(boolean closed, boolean ending, boolean hasSocket, boolean toolAllowed,
+            Long expectedEpoch, long currentEpoch) {
+        return !closed && !ending && hasSocket && toolAllowed
+                && (expectedEpoch == null || expectedEpoch == currentEpoch);
     }
 
     private void event(JSONObject event) throws Exception {
