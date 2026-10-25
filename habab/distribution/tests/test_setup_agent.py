@@ -244,7 +244,7 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(PROMPT.startswith(ASSISTANT_IDENTITY))
         self.assertEqual(
             hashlib.sha256(PROMPT.removeprefix(ASSISTANT_IDENTITY).encode()).hexdigest(),
-            "01e3d7ff9d74deb367fb5dea05e1eb8fbcedac58ae4f3443ff37b963ade0a92d",
+            "60ce6e9ca7f69d680e6c5472382aee01c05787db65cf7dbae9ef9a9f08d03a5b",
         )
         self.assertIs(runtime_prompt("docker", PROMPT), PROMPT)
 
