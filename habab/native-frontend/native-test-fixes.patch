@@ -1,0 +1,107 @@
+diff --git a/test/panels/home/ha-panel-home.test.ts b/test/panels/home/ha-panel-home.test.ts
+--- a/test/panels/home/ha-panel-home.test.ts
++++ b/test/panels/home/ha-panel-home.test.ts
+@@ -8,6 +8,8 @@
+   updateComplete: Promise<boolean>;
+   _showBanner: boolean;
+   _loadConfigPromise?: Promise<void>;
++  _testSetLovelace: ReturnType<typeof vi.spyOn>;
++  _testWaitForSetup: () => Promise<void>;
+   [key: string]: unknown;
+ };
+ 
+@@ -16,19 +18,37 @@
+     customElements.define(tag, class extends HTMLElement {});
+   }
+ }
+-vi.stubGlobal(
+-  "ResizeObserver",
+-  class {
++vi.mock("@lit-labs/observers/resize-controller", () => ({
++  ResizeController: class {
++    value = 0;
++
+     observe = vi.fn();
+ 
+     unobserve = vi.fn();
+ 
+     disconnect = vi.fn();
+-  }
+-);
++  },
++}));
+ vi.mock("../../../src/components/ha-button", () => ({}));
+ vi.mock("../../../src/components/ha-svg-icon", () => ({}));
+ vi.mock("../../../src/panels/lovelace/hui-root", () => ({}));
++vi.mock(
++  "../../../src/panels/lovelace/strategies/home/home-dashboard-strategy",
++  () => {
++    class HomeDashboardStrategy extends HTMLElement {
++      static generate = vi.fn(async () => ({ views: [] }));
++    }
++    if (!customElements.get("home-dashboard-strategy")) {
++      customElements.define("home-dashboard-strategy", HomeDashboardStrategy);
++    }
++    return { HomeDashboardStrategy };
++  }
++);
++vi.mock(
++  "../../../src/panels/lovelace/strategies/home/home-overview-view-strategy",
++  () => ({ preloadHomeEnergyPreferences: vi.fn() })
++);
++vi.mock("../../../src/panels/lovelace/views/hui-sections-view", () => ({}));
+ vi.mock("../../../src/data/frontend", async (importOriginal) => {
+   const actual = await importOriginal<object>();
+   return {
+@@ -64,11 +84,33 @@
+   const hass = provideHass(host, { panels: {} });
+   document.body.append(host);
+   const panel = document.createElement("ha-panel-home") as unknown as HomePanel;
++  const setLovelace = (panel as any)._setLovelace.bind(
++    panel
++  ) as () => Promise<void>;
++  const setupTasks: Promise<void>[] = [];
++  panel._testSetLovelace = vi
++    .spyOn(panel as any, "_setLovelace")
++    .mockImplementation(() => {
++      const task = setLovelace();
++      setupTasks.push(task);
++      return task;
++    });
++  panel._testWaitForSetup = async () => {
++    await panel._loadConfigPromise;
++    await vi.waitFor(() => expect(setupTasks.length).toBeGreaterThan(0));
++    await Promise.all(setupTasks);
++    await Promise.all([
++      import("../../../src/panels/lovelace/strategies/home/home-dashboard-strategy"),
++      import("../../../src/panels/lovelace/strategies/home/home-overview-view-strategy"),
++      import("../../../src/panels/lovelace/views/hui-sections-view"),
++    ]);
++    await panel.updateComplete;
++  };
+   host.append(panel);
+   panel.hass = hass;
+   await panel.updateComplete;
+   if (waitForLoad) {
+-    await panel._loadConfigPromise;
++    await panel._testWaitForSetup();
+   }
+   return panel;
+ };
+@@ -157,14 +199,13 @@
+     const liveConfig: HomeFrontendSystemData = {
+       favorite_entities: ["vacuum.dacha"],
+     };
+-    const setLovelace = vi.spyOn(panel as any, "_setLovelace");
+     homeSubscription?.({ value: liveConfig });
+     await panel.updateComplete;
+     expect((panel as any)._config).toEqual(liveConfig);
+-    expect(setLovelace).toHaveBeenCalled();
++    expect(panel._testSetLovelace).toHaveBeenCalled();
+ 
+     resolveHomeFetch({ favorite_entities: ["light.kitchen"] });
+-    await panel._loadConfigPromise;
++    await panel._testWaitForSetup();
+     expect((panel as any)._config).toEqual(liveConfig);
+   });
+ });

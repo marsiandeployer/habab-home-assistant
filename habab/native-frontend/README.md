@@ -69,38 +69,48 @@ tests passed without a source overlay. See
 [`frontend8-candidate-image-independent.json`](../qa/issue-monitor-20261024/frontend8-candidate-image-independent.json).
 Build and archive readback are not live acceptance. The historical image receipt does not cover later source changes or the `.9` wheel.
 
-## Native product branding profile for the next `.12` candidate
+## Native product branding profile for the `.13` candidate
 
-`native-branding.patch` applies after the unchanged `.9` `bridge.patch` on pinned
-source `26690e06b0bf64a1487929245c32842ef92c62b5`. It updates browser/app and
-sidebar names, standard favicon and Apple touch links, authorization/onboarding
-marks, and the launch-screen mark. The official source assets are from
-`/root/hababru/public/brand/`; the patch installs them under `public/static/habab/`
-for `/static/habab/` URLs. It keeps Open Home Foundation attribution, logo, and
-existing element IDs. Manifest icon declarations are a separate source change.
-The full-color SVG is not used as a Safari mask icon.
+The `.13` source profile uses these overlays, in order, on pinned source
+`26690e06b0bf64a1487929245c32842ef92c62b5`:
 
-The installed `.11` candidate is private and is not a release; its sidebar
-title clips on desktop. This source profile is for `.12`; no wheel was built here.
+1. `bridge.patch` (`.9` native bridge)
+2. `native-test-fixes.patch` (test-only `ResizeController` compatibility fix)
+3. `native-branding.patch` (Habab branding, sidebar title wrap, preloader cleanup)
+
+The branding patch uses official assets from `/root/hababru/public/brand/` at
+`/static/habab/`. It removes the Open Home Foundation logo, name, and “A project
+from the” text only from the native preloader, along with the lockup styles and
+excess margin. The Habab.ru credit remains with bottom safe-area spacing. Source
+copyright/license files and the rest of the application's branding are outside
+this change. Manifest icon declarations remain a separate source change. The
+full-color SVG is not used as a Safari mask icon.
+
+The private `.11` install exposed sidebar title clipping. The `.12` private
+build failed its mandatory `ResizeController` test. The test-only overlay passed
+3/3 focused tests under `NODE_ENV=production`; no `.13` wheel has been built.
+The public `.9` release pointer remains unchanged.
 
 SHA-256 values:
 
-- `bridge.patch` (unchanged):
-  `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`
+- `bridge.patch`: `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`
+- `native-test-fixes.patch`:
+  `0792a6073d8b5adde35bff1f9466230d689e2942f4307b16fbcb97fedba0360a`
 - `native-branding.patch`:
-  `0dcd173f25222ae53a6c04b82a6d35c3f40e1d168d333f9a79dc4aa034567f07`
-- composed patch:
-  `6022010aeaaa19192bec70659045c6654b8b668959641d88c44cfecf8ea559e1`
+  `b2c03dc54b90747c6e29f23448f95e115d096bfb93137ca1548f4f7538695a54`
+- composed three-patch input:
+  `70986af7797de84526ba5d3004f98e6008ca45d65a8471a1be85a3a3bd494481`
 
-The composed patch passed `git apply --check` on the exact pinned source
-snapshot. The sidebar title wraps naturally and uses the pinned condensed line-height
-theme token. For a separately authorized `.12` build, use the existing builder with
-a fresh clean pinned worktree, a private artifact root, and an absent retention
-state (the builder records retention as `SKIP`):
+The three patches contain 46 diff sections across 41 unique target paths;
+they must be applied in the listed order.
+
+For a separately authorized `.13` build, use the existing frozen builder with a
+fresh pinned worktree, the private artifact root, and an absent retention state
+(the builder records retention as `SKIP`):
 
 ```sh
-candidate=/root/.local/share/habab-native-frontend12-candidate
-worktree=/root/.local/share/habab-native-frontend12-build
+candidate=/root/.local/share/habab-native-frontend13-candidate
+worktree=/root/.local/share/habab-native-frontend13-build
 patch="$candidate/composed.patch"
 artifact_root="$candidate/artifacts"
 retention_state="$candidate/retention-not-initialized.json"
@@ -108,18 +118,20 @@ test ! -e "$candidate" && test ! -e "$worktree"
 mkdir -p "$artifact_root"
 test ! -e "$retention_state"
 git worktree add --detach "$worktree" 26690e06b0bf64a1487929245c32842ef92c62b5
-cat habab/native-frontend/bridge.patch habab/native-frontend/native-branding.patch > "$patch"
+cat habab/native-frontend/bridge.patch \
+  habab/native-frontend/native-test-fixes.patch \
+  habab/native-frontend/native-branding.patch > "$patch"
 HABAB_NATIVE_FRONTEND_WORKTREE="$worktree" \
 HABAB_NATIVE_FRONTEND_PATCH_FILE="$patch" \
-HABAB_NATIVE_FRONTEND_PATCH_SHA=6022010aeaaa19192bec70659045c6654b8b668959641d88c44cfecf8ea559e1 \
-HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.12 \
+HABAB_NATIVE_FRONTEND_PATCH_SHA=70986af7797de84526ba5d3004f98e6008ca45d65a8471a1be85a3a3bd494481 \
+HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.13 \
 HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT="$artifact_root" \
 HABAB_NATIVE_FRONTEND_RETENTION_STATE="$retention_state" \
 bash habab/native-frontend/build-wheel.sh
 ```
 
-The recipe is documented only; build, release, and runtime acceptance were not
-run as part of this source change.
+This recipe is documentation only; build, release, and runtime acceptance were
+not run for `.13`.
 
 ## Rebuild
 

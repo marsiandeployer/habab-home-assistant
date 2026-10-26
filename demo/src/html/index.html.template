@@ -88,7 +88,7 @@
         animation: launch-lockup-in var(--ha-animation-duration-normal, 250ms) ease-out both;
       }
       #ha-launch-screen-info-box > *,
-      #ha-launch-screen .ohf-logo {
+      #ha-launch-screen .habab-attribution {
         animation: launch-lockup-in var(--ha-animation-duration-normal, 250ms) ease-out both;
       }
       #ha-launch-screen .ha-logo {
@@ -104,31 +104,11 @@
         flex: 1;
         padding-top: 16px;
       }
-      .ohf-logo {
-        margin: max(var(--safe-area-inset-bottom, 0px), 48px) 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-        opacity: .66;
-      }
-      .ohf-logo span {
-        font-size: 12px;
-        line-height: 12px;
-        text-transform: uppercase;
-      }
       .habab-attribution {
+        margin: max(var(--safe-area-inset-bottom, 0px), 16px) 0;
         color: inherit;
         font-size: 12px;
         line-height: 16px;
-      }
-      .ohf-logo picture {
-        display: flex;
-      }
-      .ohf-logo img {
-        width: 237px;
-        aspect-ratio: 237 / 24;
-        height: auto;
       }
       @media (max-height: 560px) {
         #ha-launch-screen .ha-launch-screen-spacer-top {
@@ -137,9 +117,6 @@
         }
         #ha-launch-screen .ha-launch-screen-spacer-bottom {
           padding-top: 16px;
-        }
-        .ohf-logo {
-          margin-block: 24px;
         }
       }
     </style>
@@ -151,14 +128,7 @@
         <img class="ha-logo" src="/static/images/home-assistant-logo-loading.svg" alt="Home Assistant">
       </div>
       <div id="ha-launch-screen-info-box" class="ha-launch-screen-spacer-bottom"></div>
-      <div class="ohf-logo">
-        <a class="habab-attribution" href="https://habab.ru">Сделано в habab.ru</a>
-        <span id="ha-launch-screen-attribution">A project from the</span>
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="/static/images/open-home-foundation-on-dark.svg">
-          <img src="/static/images/open-home-foundation-on-light.svg" alt="Open Home Foundation" width="237" height="24">
-        </picture>
-      </div>
+      <a class="habab-attribution" href="https://habab.ru">Сделано в habab.ru</a>
     </div>
     <ha-demo></ha-demo>
     <%= renderTemplate("../../../src/html/_js_base.html.template") %>
