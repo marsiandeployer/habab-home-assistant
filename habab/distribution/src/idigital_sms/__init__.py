@@ -33,7 +33,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             result = await client.get_status(call.data["message_uuid"])
         except IDigitalError as err:
             _LOGGER.warning("I-Digital SMS status query failed: %s", err.code)
-            raise HomeAssistantError(err.code) from None
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key=err.code,
+            ) from None
         return result
 
     if not hass.services.has_service(DOMAIN, SERVICE_GET_STATUS):

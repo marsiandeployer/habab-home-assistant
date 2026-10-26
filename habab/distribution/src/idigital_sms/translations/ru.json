@@ -76,6 +76,12 @@
     },
     "invalid_response": {
       "message": "I-Digital вернул неожиданный ответ."
+    },
+    "invalid_message_uuid": {
+      "message": "Введите UUID сообщения, полученный от I-Digital."
+    },
+    "status_unavailable": {
+      "message": "Статус I-Digital недоступен. Позже выполните одну явную проверку статуса."
     }
   }
 }

@@ -33,8 +33,16 @@ class _FakeNotifyEntity:
 
 
 class _FakeHomeAssistantError(Exception):
-    def __init__(self, *args, translation_key=None, **_kwargs):
+    def __init__(
+        self,
+        *args,
+        translation_key=None,
+        translation_domain=None,
+        **_kwargs,
+    ):
         super().__init__(*args or (translation_key,))
+        self.translation_key = translation_key
+        self.translation_domain = translation_domain
 
 
 class _FakeStore:
@@ -65,6 +73,43 @@ def _load_notify_module():
     }):
         spec = importlib.util.spec_from_file_location(
             f"{_PACKAGE}.notify", _SRC / "notify.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+def _load_integration_module():
+    config_entries = types.ModuleType("homeassistant.config_entries")
+    config_entries.ConfigEntry = object
+    const = types.ModuleType("homeassistant.const")
+    const.Platform = types.SimpleNamespace(NOTIFY="notify")
+    core = types.ModuleType("homeassistant.core")
+    core.HomeAssistant = object
+    core.ServiceCall = object
+    core.SupportsResponse = types.SimpleNamespace(ONLY="only")
+    exceptions = types.ModuleType("homeassistant.exceptions")
+    exceptions.HomeAssistantError = _FakeHomeAssistantError
+    helpers = types.ModuleType("homeassistant.helpers")
+    helpers.__path__ = []
+    aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
+    aiohttp_client.async_get_clientsession = lambda hass: hass.session
+    voluptuous = types.ModuleType("voluptuous")
+    voluptuous.Schema = lambda schema: schema
+    voluptuous.Required = lambda key: key
+    with patch.dict(sys.modules, {
+        "homeassistant": types.ModuleType("homeassistant"),
+        "homeassistant.config_entries": config_entries,
+        "homeassistant.const": const,
+        "homeassistant.core": core,
+        "homeassistant.exceptions": exceptions,
+        "homeassistant.helpers": helpers,
+        "homeassistant.helpers.aiohttp_client": aiohttp_client,
+        "voluptuous": voluptuous,
+    }):
+        spec = importlib.util.spec_from_file_location(
+            f"{_PACKAGE}.integration", _SRC / "__init__.py"
         )
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
@@ -143,6 +188,28 @@ class MemoryStore:
         self.state.update(copy.deepcopy(state))
 
 
+class FakeServiceRegistry:
+    def __init__(self):
+        self.handlers = {}
+        self.options = {}
+
+    def has_service(self, domain, service):
+        return (domain, service) in self.handlers
+
+    def async_register(self, domain, service, handler, **_kwargs):
+        service_key = (domain, service)
+        self.handlers[service_key] = handler
+        self.options[service_key] = _kwargs
+
+
+class FakeConfigEntries:
+    def __init__(self):
+        self.forwarded = []
+
+    async def async_forward_entry_setups(self, entry, platforms):
+        self.forwarded.append((entry, platforms))
+
+
 def make_client(session):
     # Test-only credentials and RFC 5737 documentation address; never transmitted.
     api_key = base64.b64encode(b"123:placeholder").decode()
@@ -155,6 +222,94 @@ def make_client(session):
 
 
 class IDigitalSmsProtocolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_entry_setup_is_local_and_status_service_uses_explicit_lookup(self):
+        integration = _load_integration_module()
+        session = FakeSession(FakeResponse(200, {"status": "delivered"}))
+        hass = types.SimpleNamespace(
+            data={},
+            session=session,
+            services=FakeServiceRegistry(),
+            config_entries=FakeConfigEntries(),
+        )
+        entry = types.SimpleNamespace(
+            entry_id="test-entry",
+            data={
+                "api_key": base64.b64encode(b"123:placeholder").decode(),
+                "sender": "approved-sender",
+                "recipient": "+19995550123",
+            },
+        )
+
+        self.assertTrue(await integration.async_setup_entry(hass, entry))
+        self.assertEqual(session.calls, [])
+        self.assertEqual(len(hass.config_entries.forwarded), 1)
+        self.assertEqual(
+            hass.services.options[("idigital_sms", "get_status")]["supports_response"],
+            "only",
+        )
+        self.assertIn(
+            "message_uuid",
+            hass.services.options[("idigital_sms", "get_status")]["schema"],
+        )
+
+        status_service = hass.services.handlers[("idigital_sms", "get_status")]
+        result = await status_service(types.SimpleNamespace(data={
+            "message_uuid": "063474ec-a34f-4558-90c5-984395000004",
+        }))
+
+        self.assertEqual(result, {
+            "status": "delivered",
+            "provider_status": "delivered",
+        })
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(session.calls[0][0], "GET")
+
+    async def test_status_service_errors_are_translated_before_network(self):
+        integration = _load_integration_module()
+        session = FakeSession(FakeResponse(503, {"error": "unavailable"}))
+        hass = types.SimpleNamespace(
+            data={},
+            session=session,
+            services=FakeServiceRegistry(),
+            config_entries=FakeConfigEntries(),
+        )
+        entry = types.SimpleNamespace(
+            entry_id="test-entry",
+            data={
+                "api_key": base64.b64encode(b"123:placeholder").decode(),
+                "sender": "approved-sender",
+                "recipient": "+19995550123",
+            },
+        )
+        await integration.async_setup_entry(hass, entry)
+        status_service = hass.services.handlers[("idigital_sms", "get_status")]
+
+        with self.assertRaises(_FakeHomeAssistantError) as invalid:
+            await status_service(types.SimpleNamespace(data={"message_uuid": "bad"}))
+        self.assertEqual(invalid.exception.translation_domain, "idigital_sms")
+        self.assertEqual(invalid.exception.translation_key, "invalid_message_uuid")
+        self.assertEqual(session.calls, [])
+
+        with self.assertRaises(_FakeHomeAssistantError) as unavailable:
+            await status_service(types.SimpleNamespace(data={
+                "message_uuid": "063474ec-a34f-4558-90c5-984395000004",
+            }))
+        self.assertEqual(unavailable.exception.translation_domain, "idigital_sms")
+        self.assertEqual(unavailable.exception.translation_key, "status_unavailable")
+        self.assertEqual(len(session.calls), 1)
+
+        for path in (
+            _SRC / "strings.json",
+            _SRC / "translations" / "en.json",
+            _SRC / "translations" / "ru.json",
+        ):
+            translations = json.loads(path.read_text())
+            self.assertIn(
+                "invalid_message_uuid",
+                translations["exceptions"],
+            )
+            self.assertIn("status_unavailable", translations["exceptions"])
+
     async def test_fragmented_valid_response_is_read_through_eof(self):
         message_uuid = "063474ec-a34f-4558-90c5-984395000004"
         session = FakeSession(FakeResponse(200, {

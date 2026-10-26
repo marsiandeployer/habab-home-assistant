@@ -76,6 +76,12 @@
     },
     "invalid_response": {
       "message": "I-Digital returned an unexpected response."
+    },
+    "invalid_message_uuid": {
+      "message": "Enter the message UUID returned by I-Digital."
+    },
+    "status_unavailable": {
+      "message": "I-Digital status is unavailable. Try one explicit status check later."
     }
   }
 }
