@@ -83,6 +83,12 @@ class FactoryReuseTests(unittest.TestCase):
             (distribution / 'config/configuration.yaml').write_text('automation: !include automations.yaml\n')
             (distribution / 'src/habab_home').mkdir(parents=True)
             (distribution / 'src/habab_home/manifest.json').write_text('{"version":"test"}')
+            (distribution / 'src/habab_home/__init__.py').write_text('new_backend = True\n')
+            for name in ('habab-ha.py', 'install-xiaomi-home.py', 'xiaomi-home-release.json'):
+                (distribution / name).write_text('{}')
+            vendor = distribution / 'telegram-agent/vendor/noxon-telegram'
+            vendor.mkdir(parents=True)
+            (vendor / 'package.json').write_text('{"name":"noxon-telegram","type":"module"}')
             helper = work / 'habab/native-frontend/candidate.py'
             helper.parent.mkdir()
             shutil.copyfile(candidate_helper, helper)
@@ -99,6 +105,12 @@ class FactoryReuseTests(unittest.TestCase):
                 item = tarfile.TarInfo('etc')
                 item.type = tarfile.DIRTYPE
                 archive.addfile(item)
+                item = tarfile.TarInfo('opt/habab-telegram/node_modules/noxon-telegram')
+                item.type = tarfile.SYMTYPE
+                item.linkname = '../vendor/noxon-telegram'
+                archive.addfile(item)
+                item = tarfile.TarInfo('usr/src/homeassistant/homeassistant/components/habab_home/stale.py')
+                archive.addfile(item)
             commands = []
             def run(command, **kwargs):
                 commands.append(command[0])
@@ -114,7 +126,6 @@ class FactoryReuseTests(unittest.TestCase):
                     patch.object(sys, 'argv', arguments), \
                     patch.object(runtime, 'validate_source_revision'), \
                     patch.object(runtime, 'reusable_factory_release', return_value=factory), \
-                    patch.object(runtime, 'copy_sources', return_value={}), \
                     patch.object(runtime, 'install_serialx_unix', return_value={}), \
                     patch.object(runtime, 'install_frontend', return_value={'version': 'fresh'}), \
                     patch.object(runtime, 'export_image', side_effect=AssertionError('Docker export forbidden')), \
@@ -135,4 +146,14 @@ class FactoryReuseTests(unittest.TestCase):
             self.assertEqual(release['sourceRevision'], 'a' * 40)
             self.assertEqual(release['nodePackages'], factory['nodePackages'])
             self.assertEqual(release['networkTools'], factory['networkTools'])
+            self.assertIn('src/habab_home/__init__.py', release['sourceFiles'])
+            with tarfile.open(next((android / 'dist').glob('habab-runtime-*.tgz'))) as archive:
+                link = archive.getmember('opt/habab-telegram/node_modules/noxon-telegram')
+                self.assertTrue(link.issym())
+                self.assertEqual(link.linkname, '../vendor/noxon-telegram')
+                self.assertEqual(archive.extractfile(
+                    'usr/src/homeassistant/homeassistant/components/habab_home/__init__.py').read(),
+                    b'new_backend = True\n')
+                with self.assertRaises(KeyError):
+                    archive.getmember('usr/src/homeassistant/homeassistant/components/habab_home/stale.py')
             self.assertTrue((work / 'factory.tgz').exists(), 'Factory input must never be removed')

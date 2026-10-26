@@ -180,6 +180,14 @@ def install_opencode(rootfs, cache):
     return record['version'], sha256(destination / 'opencode')
 
 
+def link_telegram_vendor(rootfs):
+    modules = rootfs / 'opt/habab-telegram/node_modules'
+    modules.mkdir(parents=True, exist_ok=True)
+    link = modules / 'noxon-telegram'
+    if not link.exists():
+        link.symlink_to('../vendor/noxon-telegram')
+
+
 def install_node(rootfs, cache, helper_image, network_tools=False):
     """Install hash-pinned foreign Alpine packages through the guest APK database."""
     lock_path = ROOT / 'tools/network_tools/node-apks.lock.json'
@@ -260,11 +268,7 @@ def install_node(rootfs, cache, helper_image, network_tools=False):
     if expected_icu not in installed:
         raise ValueError('Pinned Node APK transaction lacks ' + expected_icu)
     inventory = {name: record['sha256'] for name, record in selected}
-    modules = rootfs / 'opt/habab-telegram/node_modules'
-    modules.mkdir(parents=True, exist_ok=True)
-    link = modules / 'noxon-telegram'
-    if not link.exists():
-        link.symlink_to('../vendor/noxon-telegram')
+    link_telegram_vendor(rootfs)
     return inventory
 
 
@@ -491,6 +495,7 @@ def main():
     if reused is not None:
         network_tools = reused.get('networkTools')
         node = reused['nodePackages']
+        link_telegram_vendor(rootfs)
     elif args.network_tools:
         network_tools = install_network_tools(rootfs, cache, helper_image)
     if reused is None:

@@ -132,6 +132,9 @@ def verify(manifest, public_key, expected_source_revision=None, require_serialx_
         'opt/habab-opencode/opencode', 'etc/habab-android-release.json',
         'usr/local/share/habab-android/launch.py',
     }
+    telegram_link = 'opt/habab-telegram/node_modules/noxon-telegram'
+    if 'telegram-agent/worker.mjs' in release.get('sourceFiles', {}):
+        required.add(telegram_link)
     if serialx_unix is not None:
         required.add(serialx_metadata_path)
     files, symlinks, total = 0, 0, 0
@@ -147,6 +150,9 @@ def verify(manifest, public_key, expected_source_revision=None, require_serialx_
                 raise ValueError('Device/FIFO in release')
             if member.name.startswith(('config/', 'root/.ssh/', 'root/.config/', 'root/.local/share/')):
                 raise ValueError('Private runtime data in installation package')
+            if member.name == telegram_link and (
+                    not member.issym() or member.linkname != '../vendor/noxon-telegram'):
+                raise ValueError('Invalid Telegram vendored Node module link')
             required.discard(member.name)
             if member.issym():
                 symlinks += 1

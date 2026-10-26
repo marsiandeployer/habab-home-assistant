@@ -35,7 +35,7 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
             capture_output=True,
         )
 
-    def make_release(self, *, wrong_serialx_hash=False):
+    def make_release(self, *, wrong_serialx_hash=False, telegram_link=None):
         site = 'usr/local/lib/python3.14/site-packages'
         init_path = f'{site}/serialx/platforms/__init__.py'
         unix_path = f'{site}/serialx/platforms/serial_unix.py'
@@ -70,12 +70,19 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
                 {'serialxUnixTransport': attestation}, sort_keys=True
             ).encode(),
         }
+        if telegram_link is not None:
+            contents['opt/habab-telegram/worker.mjs'] = b'import "noxon-telegram";\n'
         archive = self.directory / 'runtime.tgz'
         with tarfile.open(archive, 'w:gz') as bundle:
             for name, data in contents.items():
                 member = tarfile.TarInfo(name)
                 member.size = len(data)
                 bundle.addfile(member, BytesIO(data))
+            if telegram_link:
+                link = tarfile.TarInfo('opt/habab-telegram/node_modules/noxon-telegram')
+                link.type = tarfile.SYMTYPE
+                link.linkname = '../vendor/noxon-telegram'
+                bundle.addfile(link)
 
         manifest = self.directory / 'release.json'
         release = {
@@ -87,7 +94,8 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
             'unpackedBytes': sum(map(len, contents.values())),
             'opencodeSha256': hashlib.sha256(b'opencode').hexdigest(),
             'androidLauncherSha256': hashlib.sha256(b'launcher').hexdigest(),
-            'sourceFiles': {},
+            'sourceFiles': ({'telegram-agent/worker.mjs': hashlib.sha256(
+                contents['opt/habab-telegram/worker.mjs']).hexdigest()} if telegram_link is not None else {}),
             'serialxUnixTransport': attestation,
         }
         manifest.write_text(json.dumps(release, sort_keys=True))
@@ -122,6 +130,15 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, 'payload mismatch'):
             verify(manifest, self.public_key, require_serialx_unix=True)
+
+    def test_signed_archive_rejects_missing_required_telegram_module_link(self):
+        manifest = self.make_release(telegram_link=False)
+        with self.assertRaisesRegex(ValueError, 'node_modules/noxon-telegram'):
+            verify(manifest, self.public_key, require_serialx_unix=True)
+
+    def test_signed_archive_accepts_the_required_telegram_module_link(self):
+        manifest = self.make_release(telegram_link=True)
+        verify(manifest, self.public_key, require_serialx_unix=True)
 
 
 if __name__ == '__main__':
