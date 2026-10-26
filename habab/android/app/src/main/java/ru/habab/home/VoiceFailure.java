@@ -17,7 +17,7 @@ final class VoiceFailure extends IOException {
             "invalid_realtime_event", "realtime_connection_failed", "realtime_connection_closed",
             "realtime_upload_backpressure", "realtime_send_failed", "invalid_voice_tool", "invalid_voice_command",
             "voice_playback_timeout", "voice_audio_busy", "voice_audio_interrupted", "voice_history_failed", "realtime_response_failed", "realtime_provider_error",
-            "realtime_playback_backpressure", "voice_playback_failed", "voice_playback_unavailable",
+            "realtime_playback_backpressure", "voice_playback_failed", "voice_playback_unavailable", "voice_duplicate_route_unavailable",
             "voice_connection_too_slow", "voice_session_ended", "voice_signal_unavailable", "microphone_permission_revoked", "microphone_unavailable",
             "microphone_read_failed", "invalid_wake_phrase", "unsupported_wake_word",
             "voice_model_checksum_mismatch", "invalid_voice_model", "voice_model_too_large",

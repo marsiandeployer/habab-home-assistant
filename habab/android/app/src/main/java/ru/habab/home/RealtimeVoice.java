@@ -11,8 +11,9 @@ import org.json.*;
 
 /** Native PCM transport. Master provider credentials never enter this class. */
 final class RealtimeVoice implements AutoCloseable {
-    interface Listener { void phase(String value); void completed(); void failed(String code); default void ended() {} default void timing(String name, long duration) {} default void routed(int type) {} default void connected(String provider, String model) {} }
+    interface Listener { void phase(String value); void completed(); void failed(String code); default void ended() {} default void timing(String name, long value) {} default void finishTrigger(String value) {} default void routed(int type, String name) {} default void connected(String provider, String model) {} }
     private final VoiceCredentials credentials;
+    private final Context context;
     private final Listener listener;
     private final OkHttpClient client = new OkHttpClient.Builder().readTimeout(0, TimeUnit.SECONDS)
             .connectTimeout(15, TimeUnit.SECONDS).pingInterval(20, TimeUnit.SECONDS).build();
@@ -25,6 +26,7 @@ final class RealtimeVoice implements AutoCloseable {
     private final java.util.Map<String, Long> responseEpochs = new ConcurrentHashMap<>();
     private final java.util.Map<String, String> cancelEvents = new java.util.HashMap<>();
     private final PcmResampler resampler = new PcmResampler();
+    private final PcmRateConverter bluetoothOutputResampler = new PcmRateConverter(24000, 16000);
     private final Object outputLock = new Object();
     private final java.util.Map<String, String> pendingAudioItems = new java.util.LinkedHashMap<>();
     private final java.util.Set<String> interruptedResponses = new java.util.HashSet<>();
@@ -39,25 +41,42 @@ final class RealtimeVoice implements AutoCloseable {
     private volatile WebSocket socket;
     private volatile long acceptedEndElapsedAt = -1;
     private AudioTrack track;
+    private AudioTrack secondaryTrack;
     private String sessionId, outputItem;
     private String negotiatedProvider, negotiatedModel;
     private volatile java.time.ZoneId homeZone;
     private long lastContextUpdate;
     private final long activatedAt;
+    private int outputSampleRate = 24000;
     private long speechStoppedAt, outputStartedAt;
     private boolean uploaded, firstOutput;
     private AudioDeviceInfo lastRoute;
+    private AudioDeviceInfo lastSecondaryRoute;
     private int generation, toolCalls;
     private long playbackStart;
+    private long secondaryPlaybackStart;
     private long writtenFrames;
+    private long secondaryWrittenFrames;
     private volatile boolean drainAnnounced;
+    private final boolean legacyScoSampleRate;
+    private final boolean duplicateOutput;
 
     RealtimeVoice(Context context, Listener listener) {
-        this(context, listener, android.os.SystemClock.elapsedRealtime());
+        this(context, listener, android.os.SystemClock.elapsedRealtime(), false);
     }
 
     RealtimeVoice(Context context, Listener listener, long activatedAt) {
-        this.credentials = new VoiceCredentials(context); this.listener = listener; this.activatedAt = activatedAt;
+        this(context, listener, activatedAt, false);
+    }
+
+    RealtimeVoice(Context context, Listener listener, long activatedAt, boolean legacyScoSampleRate) {
+        this(context, listener, activatedAt, legacyScoSampleRate, false);
+    }
+
+    RealtimeVoice(Context context, Listener listener, long activatedAt, boolean legacyScoSampleRate, boolean duplicateOutput) {
+        this.context = context; this.credentials = new VoiceCredentials(context); this.listener = listener; this.activatedAt = activatedAt;
+        this.legacyScoSampleRate = legacyScoSampleRate;
+        this.duplicateOutput = duplicateOutput;
         this.toolSession = new VoiceToolSession(activatedAt);
     }
 
@@ -72,14 +91,22 @@ final class RealtimeVoice implements AutoCloseable {
         synchronized (outputLock) {
             if (closed) return;
             sessionId = connection.getString("session_id");
-            int size = Math.max(AudioTrack.getMinBufferSize(24000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT), 9600);
-            track = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                    .setAudioFormat(new AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-                    .setBufferSizeInBytes(size).setTransferMode(AudioTrack.MODE_STREAM).build();
+            outputSampleRate = legacyScoSampleRate ? 16000 : 24000;
+            int size = Math.max(AudioTrack.getMinBufferSize(outputSampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT), 9600);
+            track = createOutputTrack(size);
             if (track.getState() != AudioTrack.STATE_INITIALIZED) throw new IOException("voice_playback_unavailable");
+            if (duplicateOutput) {
+                AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+                AudioDeviceInfo bluetooth = VoiceAudioRoute.bluetoothCommunicationOutput(audioManager);
+                AudioDeviceInfo speaker = VoiceAudioRoute.phoneSpeaker(audioManager);
+                if (bluetooth == null || speaker == null) throw new IOException("voice_duplicate_route_unavailable");
+                secondaryTrack = createOutputTrack(size);
+                if (secondaryTrack.getState() != AudioTrack.STATE_INITIALIZED
+                        || !track.setPreferredDevice(bluetooth) || !secondaryTrack.setPreferredDevice(speaker))
+                    throw new IOException("voice_duplicate_route_unavailable");
+            }
             track.play();
+            if (secondaryTrack != null) secondaryTrack.play();
         }
         String address = connection.getString("websocket_url");
         java.net.URI uri = new java.net.URI(address);
@@ -136,6 +163,14 @@ final class RealtimeVoice implements AutoCloseable {
         }
     }
 
+    private AudioTrack createOutputTrack(int bufferSize) {
+        return new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioFormat(new AudioFormat.Builder().setSampleRate(outputSampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+                .setBufferSizeInBytes(bufferSize).setTransferMode(AudioTrack.MODE_STREAM).build();
+    }
+
     boolean ready() { return ready && socket != null && !closed; }
     boolean finishing() { return ending; }
     boolean audioLimitReached(long now) { return gemini != null && toolSession.audioLimitReached(now); }
@@ -152,10 +187,20 @@ final class RealtimeVoice implements AutoCloseable {
     }
     void timeoutToolGrace() { if (toolGraceExpired(android.os.SystemClock.elapsedRealtime())) fail("voice_timeout"); }
 
-    void finish() {
+    void finish(String trigger) {
         synchronized (history) {
-            if (closed || ending) return;
-            ending = true; listener.phase("finishing");
+            long acceptedAt;
+            synchronized (connectionLock) {
+                if (closed || ending) return;
+                if (acceptedEndElapsedAt < 0) acceptedEndElapsedAt = android.os.SystemClock.elapsedRealtime();
+                acceptedAt = acceptedEndElapsedAt;
+                ending = true;
+            }
+            timing("end_finish_accepted_elapsed_ms", acceptedAt);
+            listener.finishTrigger(trigger);
+            timing("end_upload_blocked_elapsed_ms",
+                    android.os.SystemClock.elapsedRealtime() - acceptedEndElapsedAt);
+            listener.phase("finishing");
             endTiming("end_finish_enter_ms");
             toolSession.end();
             credentials.cancelInteractions();
@@ -219,8 +264,7 @@ final class RealtimeVoice implements AutoCloseable {
 
     static boolean canSend(boolean closed, boolean ending, boolean hasSocket, boolean toolAllowed,
             Long expectedEpoch, long currentEpoch) {
-        return !closed && !ending && hasSocket && toolAllowed
-                && (expectedEpoch == null || expectedEpoch == currentEpoch);
+        return VoiceSendGate.canSend(closed, ending, hasSocket, toolAllowed, expectedEpoch, currentEpoch);
     }
 
     private void event(JSONObject event) throws Exception {
@@ -314,7 +358,7 @@ final class RealtimeVoice implements AutoCloseable {
                 if (eventReceivedAt >= 0)
                     timing("end_tool_dispatch_ms", acceptedEndElapsedAt - eventReceivedAt);
                 timing("end_tool_accepted_elapsed_ms", acceptedEndElapsedAt);
-                finish(); return;
+                finish(VoiceFinishTrigger.TOOL); return;
             }
             if (!name.equals("ask_home_assistant") || ++toolCalls > 8) { fail("invalid_voice_tool"); return; }
             transcripts.canonicalTool(event.getString("response_id"));
@@ -375,7 +419,9 @@ final class RealtimeVoice implements AutoCloseable {
                     synchronized (outputLock) {
                         if (version != generation || track == null || !item.equals(outputItem)) return;
                         long played = Math.max(0, Integer.toUnsignedLong(track.getPlaybackHeadPosition()) - playbackStart);
-                        if (played >= writtenFrames) {
+                        long secondaryPlayed = secondaryTrack == null ? secondaryWrittenFrames
+                                : Math.max(0, Integer.toUnsignedLong(secondaryTrack.getPlaybackHeadPosition()) - secondaryPlaybackStart);
+                        if (played >= writtenFrames && secondaryPlayed >= secondaryWrittenFrames) {
                             pendingAudioItems.remove(item); transcripts.played(responseId, item);
                             completedIn = android.os.SystemClock.elapsedRealtime() - outputStartedAt;
                         }
@@ -418,13 +464,16 @@ final class RealtimeVoice implements AutoCloseable {
             if (closed || track == null || epoch == null || epoch != interruptionEpoch.get() || interruptedResponses.contains(response)) return;
             version = generation;
         }
-        byte[] audio = Base64.decode(event.getString("delta"), Base64.DEFAULT);
-        if ((audio.length & 1) != 0 || queuedAudio.addAndGet(audio.length) > 3 * 1024 * 1024) {
+        byte[] sourceAudio = Base64.decode(event.getString("delta"), Base64.DEFAULT);
+        byte[] audio = legacyScoSampleRate ? bluetoothOutputResampler.convertPcm16Le(sourceAudio) : sourceAudio;
+        long queuedBytes = (long) audio.length * (duplicateOutput ? 2 : 1);
+        if ((audio.length & 1) != 0 || queuedAudio.addAndGet(queuedBytes) > 3 * 1024 * 1024) {
+            queuedAudio.addAndGet(-queuedBytes);
             fail("realtime_playback_backpressure"); return;
         }
         synchronized (outputLock) {
             if (closed || track == null || epoch != interruptionEpoch.get() || version != generation || interruptedResponses.contains(response)) {
-                queuedAudio.addAndGet(-audio.length); return;
+                queuedAudio.addAndGet(-queuedBytes); return;
             }
             pendingAudioItems.put(item, response);
             transcripts.queued(response, item);
@@ -434,37 +483,64 @@ final class RealtimeVoice implements AutoCloseable {
         playback.execute(() -> {
             try {
                 int offset = 0;
+                int secondaryOffset = 0;
                 synchronized (outputLock) {
                     if (closed || version != generation || track == null) return;
                     if (!item.equals(outputItem)) {
                         outputItem = item; outputStartedAt = android.os.SystemClock.elapsedRealtime();
                         playbackStart = Integer.toUnsignedLong(track.getPlaybackHeadPosition()); writtenFrames = 0;
+                        secondaryPlaybackStart = secondaryTrack == null ? 0
+                                : Integer.toUnsignedLong(secondaryTrack.getPlaybackHeadPosition());
+                        secondaryWrittenFrames = 0;
                     }
                 }
                 long stalledAt = android.os.SystemClock.elapsedRealtime();
-                while (!closed && offset < audio.length) {
-                    int count;
+                long secondaryStalledAt = stalledAt;
+                while (!closed && (offset < audio.length || (secondaryTrack != null && secondaryOffset < audio.length))) {
+                    int count = 0, secondaryCount = 0;
                     synchronized (outputLock) {
                         if (closed || version != generation || track == null) break;
                         // Never hold the interruption lock while waiting for the speaker buffer.
-                        count = track.write(audio, offset, Math.min(4096, audio.length - offset), AudioTrack.WRITE_NON_BLOCKING);
+                        if (offset < audio.length)
+                            count = track.write(audio, offset, Math.min(4096, audio.length - offset), AudioTrack.WRITE_NON_BLOCKING);
                         if (count > 0) {
                             offset += count; writtenFrames += count / 2;
-                            AudioDeviceInfo route = track.getRoutedDevice();
-                            if (route != null && (lastRoute == null || route.getId() != lastRoute.getId())) {
-                                lastRoute = route; listener.routed(route.getType());
-                            }
                         }
+                        if (secondaryTrack != null && secondaryOffset < audio.length)
+                            secondaryCount = secondaryTrack.write(audio, secondaryOffset,
+                                    Math.min(4096, audio.length - secondaryOffset), AudioTrack.WRITE_NON_BLOCKING);
+                        if (secondaryCount > 0) { secondaryOffset += secondaryCount; secondaryWrittenFrames += secondaryCount / 2; }
+                        reportOutputRoutesLocked();
                     }
-                    if (count < 0) { fail("voice_playback_failed"); break; }
+                    if (count < 0 || secondaryCount < 0) { fail("voice_playback_failed"); break; }
                     if (count > 0) stalledAt = android.os.SystemClock.elapsedRealtime();
-                    else {
-                        if (android.os.SystemClock.elapsedRealtime() - stalledAt > 10000) { fail("voice_playback_timeout"); break; }
+                    if (secondaryCount > 0) secondaryStalledAt = android.os.SystemClock.elapsedRealtime();
+                    if ((offset < audio.length && android.os.SystemClock.elapsedRealtime() - stalledAt > 10000)
+                            || (secondaryTrack != null && secondaryOffset < audio.length
+                            && android.os.SystemClock.elapsedRealtime() - secondaryStalledAt > 10000)) {
+                        fail("voice_playback_timeout"); break;
+                    }
+                    if (count == 0 && secondaryCount == 0) {
                         try { Thread.sleep(5); } catch (InterruptedException error) { Thread.currentThread().interrupt(); return; }
                     }
                 }
-            } finally { queuedAudio.addAndGet(-audio.length); }
+            } finally { queuedAudio.addAndGet(-queuedBytes); }
         });
+    }
+
+    private void reportOutputRoutesLocked() {
+        AudioDeviceInfo primary = track == null ? null : track.getRoutedDevice();
+        AudioDeviceInfo secondary = secondaryTrack == null ? null : secondaryTrack.getRoutedDevice();
+        int primaryId = primary == null ? -1 : primary.getId();
+        int secondaryId = secondary == null ? -1 : secondary.getId();
+        if (primaryId == (lastRoute == null ? -1 : lastRoute.getId())
+                && secondaryId == (lastSecondaryRoute == null ? -1 : lastSecondaryRoute.getId())) return;
+        lastRoute = primary;
+        lastSecondaryRoute = secondary;
+        String primaryName = primary == null ? "" : VoiceAudioRoute.deviceName(primary);
+        String secondaryName = secondaryTrack == null ? "" : secondary == null ? "не определён" : VoiceAudioRoute.deviceName(secondary);
+        String names = secondaryTrack == null ? primaryName : primaryName + " + " + secondaryName;
+        listener.routed(primary == null ? -1 : primary.getType(), names);
     }
 
     private void interruptOutput() throws Exception {
@@ -483,17 +559,31 @@ final class RealtimeVoice implements AutoCloseable {
                 transcripts.interrupted(item.getValue());
                 long frames = item.getKey().equals(outputItem)
                         ? Math.min(writtenFrames, Math.max(0, Integer.toUnsignedLong(track.getPlaybackHeadPosition()) - playbackStart)) : 0;
+                if (secondaryTrack != null && item.getKey().equals(outputItem))
+                    frames = Math.min(frames, Math.min(secondaryWrittenFrames,
+                            Math.max(0, Integer.toUnsignedLong(secondaryTrack.getPlaybackHeadPosition()) - secondaryPlaybackStart)));
                 truncations.add(new JSONObject().put("type", "conversation.item.truncate").put("item_id", item.getKey())
-                        .put("content_index", 0).put("audio_end_ms", frames * 1000 / 24000));
+                        .put("content_index", 0).put("audio_end_ms", frames * 1000 / outputSampleRate));
             }
-            pendingAudioItems.clear(); outputItem = null; writtenFrames = 0;
+            pendingAudioItems.clear(); outputItem = null; writtenFrames = 0; secondaryWrittenFrames = 0;
             track.pause(); track.flush(); track.play();
+            if (secondaryTrack != null) { secondaryTrack.pause(); secondaryTrack.flush(); secondaryTrack.play(); }
         }
         timing("barge_in_stop_ms", android.os.SystemClock.elapsedRealtime() - started);
         for (JSONObject item : truncations) send(item);
     }
 
-    private void fail(String code) { if (!closed) { listener.failed(code); close(); } }
+    private void fail(String code) {
+        synchronized (connectionLock) {
+            if (closed) return;
+            ending = true;
+        }
+        listener.finishTrigger(VoiceFinishTrigger.fromFailureCode(code));
+        long failureAt = android.os.SystemClock.elapsedRealtime();
+        timing("end_failure_elapsed_ms", failureAt - activatedAt);
+        timing("end_failure_elapsed_realtime_ms", failureAt);
+        listener.failed(code); close();
+    }
 
     private boolean currentTurn(long epoch) { return !closed && !ending && interruptionEpoch.get() == epoch; }
 
@@ -503,11 +593,11 @@ final class RealtimeVoice implements AutoCloseable {
         send(new JSONObject().put("type", "response.cancel").put("response_id", id).put("event_id", eventId));
     }
 
-    private void timing(String name, long duration) {
+    private void timing(String name, long value) {
         if (closed) return;
-        listener.timing(name, duration);
-        // Fixed metric names and durations only: never transcript, audio or credentials.
-        android.util.Log.i("HababVoiceTiming", name + "=" + duration);
+        listener.timing(name, value);
+        // Fixed metric names and monotonic values only: never transcript, audio or credentials.
+        android.util.Log.i("HababVoiceTiming", name + "=" + value);
     }
 
     private void endTiming(String name) {
@@ -554,23 +644,29 @@ final class RealtimeVoice implements AutoCloseable {
     }
 
     @Override public void close() {
-        ending = true;
-        toolSession.end();
         synchronized (connectionLock) {
-            if (closed) return; closed = true; ready = false;
+            if (closed) return;
+            ending = true; closed = true; ready = false;
             WebSocket current = socket; socket = null;
             // Abort queued audio rather than draining it after the closing cue.
             if (current != null) current.cancel();
         }
+        toolSession.end();
         responses.close(); transcripts.close(); cancelledTools.clear(); credentials.close(); client.dispatcher().cancelAll();
         tools.shutdownNow(); playback.shutdownNow(); contextUpdates.shutdownNow(); history.close();
         synchronized (outputLock) {
             generation++;
             AudioTrack current = track; track = null;
+            AudioTrack secondary = secondaryTrack; secondaryTrack = null;
             if (current != null) {
                 try { current.pause(); current.flush(); }
                 catch (IllegalStateException ignored) { /* Release even after a playback failure. */ }
                 finally { current.release(); }
+            }
+            if (secondary != null) {
+                try { secondary.pause(); secondary.flush(); }
+                catch (IllegalStateException ignored) { /* Release both routes after interruption or failure. */ }
+                finally { secondary.release(); }
             }
         }
         client.dispatcher().executorService().shutdown(); client.connectionPool().evictAll();

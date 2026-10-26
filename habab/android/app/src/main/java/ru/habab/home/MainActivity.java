@@ -21,12 +21,17 @@ public final class MainActivity extends Activity {
     private final ExecutorService operations = Executors.newSingleThreadExecutor();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean busy;
+    private boolean launcherStartRequested;
+    private boolean autoStartServerRequested;
+    private boolean autoStartVoiceRequested;
     private TextView state;
     private LinearLayout content;
     private WebView browser;
     private RuntimeStore store;
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
+            if (launcherStartRequested) ensureServerStarted();
+            maybeStartVoiceIfReady();
             if (state != null && !busy) state.setText(getString(R.string.status, phaseText())
                     + "\nHTTPS: " + tunnelText() + "\n" + MaintenanceService.status);
             handler.postDelayed(this, 2000);
@@ -35,6 +40,8 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved); store = new RuntimeStore(this); home(); handler.post(refresh);
+        if (saved == null && beginLauncherStartup(getIntent())) ensureServerStarted();
+        maybeStartVoiceIfReady();
         // ADB provisioning is available only in a debug build, never the release APK.
         if (openAlias(getIntent())) return;
         if (openHomeFromNotification(getIntent())) return;
@@ -45,8 +52,16 @@ public final class MainActivity extends Activity {
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent); setIntent(intent);
+        if (beginLauncherStartup(intent)) ensureServerStarted();
+        maybeStartVoiceIfReady();
         if (openAlias(intent)) return;
         openHomeFromNotification(intent);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (launcherStartRequested) ensureServerStarted();
+        maybeStartVoiceIfReady();
     }
 
     private boolean openHomeFromNotification(Intent intent) {
@@ -61,6 +76,18 @@ public final class MainActivity extends Activity {
         String address = LocalAddress.resolve(intent.getDataString());
         if (address == null) return false;
         openHome(address); return true;
+    }
+
+    private boolean beginLauncherStartup(Intent intent) {
+        if (intent == null || !Intent.ACTION_MAIN.equals(intent.getAction())
+                || !intent.hasCategory(Intent.CATEGORY_LAUNCHER)) return false;
+        getSharedPreferences("server", 0).edit()
+                .putBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false)
+                .putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false).apply();
+        launcherStartRequested = true;
+        autoStartServerRequested = false;
+        autoStartVoiceRequested = false;
+        return true;
     }
 
     private TextView text(String value) {
@@ -85,11 +112,22 @@ public final class MainActivity extends Activity {
         String external = getSharedPreferences("server", 0).getString("public_url", "");
         if (!external.isEmpty()) text(external);
         button(R.string.setup, this::installDialog);
-        button(R.string.start, this::startServer);
+        button(R.string.start, this::startServerManually);
+        CheckBox autoStartOnBoot = new CheckBox(this);
+        autoStartOnBoot.setText(R.string.server_auto_start_on_boot);
+        autoStartOnBoot.setChecked(ServerService.autoStartOnBoot(this));
+        autoStartOnBoot.setOnCheckedChangeListener((button, checked) -> getSharedPreferences("server", 0).edit()
+                .putBoolean(ServerService.PREF_AUTO_START_ON_BOOT, checked).apply());
+        content.addView(autoStartOnBoot);
         button(R.string.open_home, this::openHome);
         button(R.string.voice_title, this::voiceSettings);
         button(R.string.stop, () -> {
-            getSharedPreferences("server", 0).edit().putBoolean("desired", false).apply();
+            getSharedPreferences("server", 0).edit().putBoolean("desired", false)
+                    .putBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, true)
+                    .putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, true).apply();
+            VoiceService.cancelPendingStart();
+            autoStartServerRequested = true;
+            stopService(new Intent(this, VoiceService.class));
             stopService(new Intent(this, ServerService.class));
         });
         button(R.string.battery, () -> startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))));
@@ -117,6 +155,16 @@ public final class MainActivity extends Activity {
         if (!store.installed()) { message(getString(R.string.not_installed)); return; }
         getSharedPreferences("server", 0).edit().putBoolean("desired", true).apply();
         startForegroundService(new Intent(this, ServerService.class));
+    }
+
+    private void startServerManually() {
+        getSharedPreferences("server", 0).edit()
+                .putBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false)
+                .putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false).apply();
+        launcherStartRequested = true;
+        autoStartServerRequested = false;
+        autoStartVoiceRequested = false;
+        ensureServerStarted();
     }
 
     private void installDialog() {
@@ -193,6 +241,20 @@ public final class MainActivity extends Activity {
         LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(28, 8, 28, 8);
         TextView explanation = new TextView(this); explanation.setText(R.string.voice_privacy); form.addView(explanation);
         TextView phase = new TextView(this); phase.setText(VoiceService.label(this, VoiceService.status)); form.addView(phase);
+        TextView routeHelp = new TextView(this); routeHelp.setText(R.string.voice_audio_route_help); form.addView(routeHelp);
+        String routeMode = getSharedPreferences("voice", 0).getString("audio_route_mode",
+                getSharedPreferences("voice", 0).getBoolean("bluetooth_audio", false) ? "bluetooth" : "phone");
+        if (!"bluetooth".equals(routeMode) && !"duplicate".equals(routeMode)) routeMode = "phone";
+        RadioGroup audioRouteGroup = new RadioGroup(this); audioRouteGroup.setOrientation(LinearLayout.VERTICAL);
+        addVoiceRouteOption(audioRouteGroup, "phone", R.string.voice_route_phone);
+        addVoiceRouteOption(audioRouteGroup, "bluetooth", R.string.voice_route_bluetooth);
+        addVoiceRouteOption(audioRouteGroup, "duplicate", R.string.voice_route_duplicate);
+        for (int i = 0; i < audioRouteGroup.getChildCount(); i++) {
+            View child = audioRouteGroup.getChildAt(i);
+            if (routeMode.equals(child.getTag())) audioRouteGroup.check(child.getId());
+        }
+        form.addView(audioRouteGroup);
+        TextView routeStatus = new TextView(this); routeStatus.setText(voiceAudioStatus()); form.addView(routeStatus);
         if (VoiceService.lastError != null) {
             TextView error = new TextView(this); error.setText(VoiceService.failureLabel(this, VoiceService.lastError)); form.addView(error);
         }
@@ -201,14 +263,36 @@ public final class MainActivity extends Activity {
         phrase.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)}); form.addView(phrase);
         CheckBox enabled = new CheckBox(this); enabled.setText(R.string.voice_enable);
         enabled.setChecked(getSharedPreferences("voice", 0).getBoolean("enabled", false)); form.addView(enabled);
-        new AlertDialog.Builder(this).setTitle(R.string.voice_title).setView(form)
+        AlertDialog voiceDialog = new AlertDialog.Builder(this).setTitle(R.string.voice_title).setView(form)
                 .setPositiveButton(R.string.configure, (dialog, which) -> {
                     String value = WakeDetector.normalize(phrase.getText().toString());
                     if (value.isEmpty()) { message(getString(R.string.voice_invalid_phrase)); return; }
-                    getSharedPreferences("voice", 0).edit().putString("phrase", value).putBoolean("enabled", enabled.isChecked()).apply();
-                    stopService(new Intent(this, VoiceService.class));
-                    if (enabled.isChecked()) handler.postDelayed(this::startVoice, 500);
-                }).setNegativeButton(R.string.cancel, null).show();
+                    getSharedPreferences("voice", 0).edit().putString("phrase", value)
+                            .putBoolean("enabled", enabled.isChecked())
+                            .putString("audio_route_mode", audioRouteGroup.findViewById(audioRouteGroup.getCheckedRadioButtonId()).getTag().toString())
+                            .remove("bluetooth_audio").apply();
+                    if (enabled.isChecked()) {
+                        startServerManually();
+                        VoiceService.restartAfterConfiguration(this);
+                        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 20);
+                        }
+                    } else {
+                        VoiceService.cancelPendingStart();
+                        stopService(new Intent(this, VoiceService.class));
+                    }
+                }).setNegativeButton(R.string.cancel, null).create();
+        Runnable updateRouteStatus = new Runnable() {
+            @Override public void run() {
+                if (!voiceDialog.isShowing()) return;
+                routeStatus.setText(voiceAudioStatus());
+                handler.postDelayed(this, 1000);
+            }
+        };
+        voiceDialog.setOnShowListener(ignored -> handler.post(updateRouteStatus));
+        voiceDialog.setOnDismissListener(ignored -> handler.removeCallbacks(updateRouteStatus));
+        voiceDialog.show();
     }
 
     private void authorizeVoice() {
@@ -232,12 +316,93 @@ public final class MainActivity extends Activity {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 20); return;
         }
-        startForegroundService(new Intent(this, VoiceService.class));
+        boolean enabled = getSharedPreferences("voice", 0).getBoolean("enabled", false);
+        boolean authConfigured = getSharedPreferences("voice_auth", 0).contains("sealed");
+        boolean microphoneGranted = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        boolean manuallyStopped = getSharedPreferences("server", 0)
+                .getBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false);
+        if (!ServerService.voiceAutoStartAllowed(enabled, authConfigured, microphoneGranted, manuallyStopped)) return;
+        launcherStartRequested = true;
+        ensureServerStarted();
+        maybeStartVoiceIfReady();
+    }
+
+    private void ensureServerStarted() {
+        SharedPreferences preferences = getSharedPreferences("server", 0);
+        boolean manuallyStopped = preferences.getBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false);
+        boolean runtimeInstalled = store.installed();
+        if (!ServerService.serverStartAllowed(launcherStartRequested, runtimeInstalled, manuallyStopped)) {
+            if (launcherStartRequested && !manuallyStopped && !runtimeInstalled
+                    && !preferences.getBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false)) {
+                autoStartServerRequested = true;
+                preferences.edit().putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, true).apply();
+                message(getString(R.string.not_installed));
+            }
+            return;
+        }
+        if (ServerService.active || ServerService.stopping || MaintenanceService.active
+                || busy || autoStartServerRequested
+                || preferences.getBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false)) return;
+        autoStartServerRequested = true;
+        preferences.edit().putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, true).apply();
+        try { startServer(); }
+        catch (RuntimeException error) {
+            message(getString(R.string.error, error.getMessage() == null
+                    ? error.getClass().getSimpleName() : error.getMessage()));
+        }
+    }
+
+    private void maybeStartVoiceIfReady() {
+        if (autoStartVoiceRequested) return;
+        boolean enabled = getSharedPreferences("voice", 0).getBoolean("enabled", false);
+        boolean authConfigured = getSharedPreferences("voice_auth", 0).contains("sealed");
+        boolean microphoneGranted = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        boolean serverReady = ServerService.active && "running".equals(ServerService.status);
+        boolean manuallyStopped = getSharedPreferences("server", 0)
+                .getBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false);
+        if (VoiceService.active || !ServerService.voiceStartAllowed(enabled, authConfigured,
+                microphoneGranted, serverReady, manuallyStopped)) return;
+        autoStartVoiceRequested = true;
+        ServerService.startVoiceIfReady(this);
+    }
+
+    private String voiceAudioStatus() {
+        String selectedMode = getSharedPreferences("voice", 0).getString("audio_route_mode",
+                getSharedPreferences("voice", 0).getBoolean("bluetooth_audio", false) ? "bluetooth" : "phone");
+        int modeString = "duplicate".equals(selectedMode) ? R.string.voice_route_duplicate
+                : "bluetooth".equals(selectedMode) ? R.string.voice_route_bluetooth : R.string.voice_route_phone;
+        String mode = getString(modeString);
+        try {
+            File file = new File(getFilesDir(), "voice-status.json");
+            if (file.isFile()) {
+                org.json.JSONObject audio = new org.json.JSONObject(new String(
+                        Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8)).optJSONObject("audio");
+                if (audio != null) {
+                    String active = audio.optString("activeRoute", "");
+                    String input = audio.optString("inputDeviceName", "");
+                    String output = audio.optString("outputDeviceName", "");
+                    if ("bluetooth_unavailable".equals(active)) active = getString(R.string.voice_bluetooth_unavailable);
+                    return getString(R.string.voice_audio_active_status, mode,
+                            input.isEmpty() ? getString(R.string.voice_audio_unknown) : input,
+                            output.isEmpty() ? getString(R.string.voice_audio_unknown) : output,
+                            active.isEmpty() ? getString(R.string.voice_audio_unknown) : active);
+                }
+            }
+        } catch (Exception ignored) { /* Keep the saved mode visible if runtime status is unavailable. */ }
+        return getString(R.string.voice_audio_route_status, mode);
+    }
+
+    private void addVoiceRouteOption(RadioGroup group, String route, int label) {
+        RadioButton option = new RadioButton(this); option.setText(label); option.setTag(route);
+        option.setId(View.generateViewId()); group.addView(option);
     }
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
-        if (requestCode == 20 && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) startVoice();
+        if (requestCode == 20 && results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            startVoice();
     }
 
     private void provisionVoice() {
@@ -260,9 +425,46 @@ public final class MainActivity extends Activity {
             input.seek(Math.max(0, input.length() - 64000)); byte[] buffer = new byte[(int)(input.length() - input.getFilePointer())];
             input.readFully(buffer); data = new String(buffer, StandardCharsets.UTF_8);
         } catch (IOException error) { data = error.getMessage(); }
-        TextView view = new TextView(this); view.setText(data); view.setTextIsSelectable(true); view.setTextSize(12);
+        TextView view = new TextView(this);
+        view.setText(voiceLifecycleLog() + "\n\n" + data);
+        view.setTextIsSelectable(true); view.setTextSize(12);
         ScrollView scroll = new ScrollView(this); scroll.addView(view);
         new AlertDialog.Builder(this).setTitle(R.string.logs).setView(scroll).setPositiveButton(android.R.string.ok, null).show();
+    }
+
+    private String voiceLifecycleLog() {
+        String title = getString(R.string.voice_lifecycle_title);
+        File trace = new File(getFilesDir(), "voice-lifecycle.json");
+        if (!trace.isFile() || trace.length() > 16384) return title + "\n" + getString(R.string.voice_lifecycle_unavailable);
+        try {
+            String json = new String(Files.readAllBytes(trace.toPath()), StandardCharsets.UTF_8);
+            org.json.JSONArray events = new org.json.JSONArray(json);
+            StringBuilder lines = new StringBuilder(title);
+            int start = Math.max(0, events.length() - 32);
+            for (int i = start; i < events.length(); i++) {
+                org.json.JSONObject event = events.optJSONObject(i);
+                if (event == null) continue;
+                String name = event.optString("event", "");
+                String reason = event.optString("reason", "");
+                try {
+                    VoiceLifecycleTrace.Event.valueOf(name);
+                    VoiceLifecycleTrace.Reason.valueOf(reason);
+                } catch (IllegalArgumentException invalidCode) { continue; }
+                int route = event.optInt("route", -1);
+                String routeName = route == 0 ? getString(R.string.voice_route_phone)
+                        : route == 1 ? getString(R.string.voice_route_bluetooth)
+                        : route == 2 ? getString(R.string.voice_route_duplicate)
+                        : getString(R.string.voice_audio_unknown);
+                long generation = event.optLong("generation", -1);
+                long at = event.optLong("at", 0);
+                lines.append('\n').append(name).append(" / ").append(reason)
+                        .append(" #").append(Math.max(0, generation)).append(" / ").append(routeName);
+                if (at > 0) lines.append(" / ").append(at);
+            }
+            return lines.toString();
+        } catch (Exception ignored) {
+            return title + "\n" + getString(R.string.voice_lifecycle_unavailable);
+        }
     }
 
     private void tunnelDialog() {
@@ -351,5 +553,8 @@ public final class MainActivity extends Activity {
         return getString(R.string.tunnel_disabled);
     }
     @Override public void onBackPressed() { if (browser != null) home(); else super.onBackPressed(); }
-    @Override protected void onDestroy() { handler.removeCallbacks(refresh); operations.shutdown(); if (browser != null) browser.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        handler.removeCallbacks(refresh);
+        operations.shutdown(); if (browser != null) browser.destroy(); super.onDestroy();
+    }
 }

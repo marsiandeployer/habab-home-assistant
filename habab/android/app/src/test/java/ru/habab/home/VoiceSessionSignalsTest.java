@@ -6,6 +6,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.Assert.*;
 
 public class VoiceSessionSignalsTest {
+    @Test public void failedOpeningKeepsAudioClosedAndNextWakeCanOpenANewSession() {
+        VoiceSessionSignals signals = new VoiceSessionSignals();
+        WakeMatchGate wake = new WakeMatchGate("эй дом");
+        assertTrue(wake.accept("эй дом", WakeMatchGate.ResultKind.ENDPOINT));
+        wake.reset(); // WakeDetector resets immediately after an accepted wake.
+        assertEquals(VoiceSessionSignals.Cue.START, signals.begin(1));
+        assertFalse(signals.startCompleted(1, false));
+        assertFalse(signals.allowsAudio());
+        assertEquals(VoiceSessionSignals.Cue.ERROR, signals.end(VoiceSessionSignals.EndReason.ERROR));
+        wake.reset(); // VoiceService's early-cue-failure cleanup resets the detector again.
+        assertTrue(wake.accept("эй дом", WakeMatchGate.ResultKind.VAD_END));
+        assertEquals(VoiceSessionSignals.Cue.START, signals.begin(3));
+        assertFalse(signals.startCompleted(1, true));
+        assertFalse(signals.allowsAudio());
+        assertTrue(signals.startCompleted(3, true));
+        assertTrue(signals.allowsAudio());
+    }
+
     @Test public void anIdleServiceDoesNotAnnounceAConversationEnding() {
         VoiceSessionSignals signals = new VoiceSessionSignals();
         assertEquals(VoiceSessionSignals.Cue.NONE, signals.end(VoiceSessionSignals.EndReason.STOP));
