@@ -6,26 +6,12 @@ import json
 from pathlib import Path
 import zipfile
 from source_provenance import release_with_source, resolve_source_provenance
+from windows_package_files import collect_windows_package_names, resolve_windows_package_source
 
 root = Path(__file__).resolve().parent
 output = root.parent / 'public/downloads'
 output.mkdir(parents=True, exist_ok=True)
-names = ['Dockerfile', '.dockerignore', 'docker-entrypoint.sh', 'habab-ha.py', 'compose.windows.yaml',
-         'start-windows.bat', 'start-windows.ps1', 'ensure-xiaomi-callback.ps1',
-         'start-xiaomi-home.bat', 'install-xiaomi-home.py', 'xiaomi-home-release.json',
-         'support_tunnel.bat', 'support_tunnel.ps1', 'support-relay.json',
-         'diagnose-assistant.bat', 'diagnose-assistant.ps1', 'diagnose-assistant.py',
-         'install-native-frontend.py', 'native-frontend-release.json',
-         'install-opencode-volume.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
-         'source_provenance.py', 'config/configuration.yaml']
-for directory in ('src/habab_home', 'src/habab_telegram', 'src/habab_yandex_speech',
-                  'src/idigital_sms', 'telegram-agent'):
-    names += [str(p.relative_to(root)).replace('\\', '/') for p in (root / directory).rglob('*')
-              if p.is_file() and p.suffix in {'.py', '.js', '.mjs', '.json', '.svg', '.md'}
-              and not {'__pycache__', 'node_modules', 'test', 'tests'}.intersection(p.parts)]
-# Docker copies this one integration resource; keep it explicit instead of
-# widening the source-file allowlist to every YAML file.
-names.append('src/idigital_sms/services.yaml')
+names = collect_windows_package_names(root)
 buffer = io.BytesIO()
 release_data = json.loads((root / 'release.json').read_text(encoding='utf-8'))
 revision, dirty = resolve_source_provenance(root, release_data)
@@ -38,7 +24,7 @@ with zipfile.ZipFile(buffer, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
         info.compress_type = zipfile.ZIP_DEFLATED
         info.external_attr = 0o644 << 16
         data = (embedded_release.encode('utf-8') if name == 'release.json'
-                else (root / name).read_bytes())
+                else resolve_windows_package_source(root, name).read_bytes())
         if name.endswith('.bat'):
             data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
         bundle.writestr(info, data)

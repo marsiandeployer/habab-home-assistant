@@ -53,7 +53,11 @@ def export_image(path):
     if path.exists():
         return
     subprocess.run(['docker', 'pull', '--platform', 'linux/arm64', IMAGE], check=True)
-    container = subprocess.check_output(['docker', 'create', '--platform', 'linux/arm64', '--entrypoint', '/bin/true', IMAGE], text=True).strip()
+    container = subprocess.check_output([
+        'docker', 'create', '--platform', 'linux/arm64', '--memory', '256m',
+        '--memory-swap', '256m', '--cpus', '1', '--pids-limit', '64',
+        '--label', 'habab.qa.owner=android-runtime-producer', '--entrypoint', '/bin/true', IMAGE,
+    ], text=True).strip()
     temporary = path.with_suffix('.partial')
     try:
         with temporary.open('wb') as output:
@@ -70,7 +74,7 @@ def copy_sources(rootfs):
     for name in ('habab_home', 'habab_telegram', 'habab_yandex_speech', 'idigital_sms'):
         sources.append((DIST / 'src' / name, rootfs / 'usr/src/homeassistant/homeassistant/components' / name))
     sources.append((DIST / 'telegram-agent', rootfs / 'opt/habab-telegram'))
-    allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css'}
+    allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css', '.vtt'}
     for directory, destination in sources:
         if not directory.exists():
             continue
@@ -100,6 +104,62 @@ def copy_sources(rootfs):
         output.chmod(0o755 if name.endswith('.py') else 0o644)
         inventory[name] = hashlib.sha256(data).hexdigest()
     return inventory
+
+
+def install_serialx_unix(rootfs):
+    """Apply the reviewed AF_UNIX transport to the pinned Android serialx package."""
+    payload = ROOT / 'runtime/serialx_unix'
+    source_file = payload / 'serial_unix.py'
+    patch_file = payload / 'platforms-init.patch'
+    if not source_file.is_file() or not patch_file.is_file():
+        raise ValueError('The serialx Unix transport patch payload is incomplete')
+    patch_text = patch_file.read_text()
+    if (patch_text.count('serialx/platforms/__init__.py') != 2
+            or patch_text.count('+    serial_unix,  # noqa: F401') != 1):
+        raise ValueError('The serialx platform registry patch differs from the reviewed overlay')
+
+    site_packages = sorted(rootfs.glob('usr/local/lib/python*/site-packages'))
+    matches = []
+    for site in site_packages:
+        metadata = site / 'serialx-1.11.0.dist-info/METADATA'
+        if not metadata.is_file():
+            continue
+        fields = {}
+        for line in metadata.read_text().splitlines():
+            if ':' in line:
+                key, value = line.split(':', 1)
+                if key in {'Name', 'Version'}:
+                    fields[key] = value.strip()
+        if fields == {'Name': 'serialx', 'Version': '1.11.0'}:
+            matches.append((site, metadata))
+    if len(matches) != 1:
+        raise ValueError('Android runtime must contain exactly one pinned serialx 1.11.0 package')
+
+    site, metadata = matches[0]
+    platform_dir = site / 'serialx/platforms'
+    init_file = platform_dir / '__init__.py'
+    if not init_file.is_file():
+        raise ValueError('Pinned serialx platform registry is missing')
+    init_text = init_file.read_text()
+    import_line = '    serial_unix,  # noqa: F401\n'
+    anchor = '    serial_socket,  # noqa: F401\n'
+    if import_line not in init_text:
+        if init_text.count(anchor) != 1:
+            raise ValueError('Pinned serialx platform registry no longer matches the reviewed patch context')
+        init_file.write_text(init_text.replace(anchor, anchor + import_line, 1))
+    elif init_text.count(import_line) != 1:
+        raise ValueError('Pinned serialx platform registry has a duplicate Unix transport import')
+
+    unix_file = platform_dir / 'serial_unix.py'
+    shutil.copyfile(source_file, unix_file)
+    return {
+        'packageVersion': '1.11.0',
+        'pythonSitePackages': str(site.relative_to(rootfs)),
+        'files': {
+            str(init_file.relative_to(rootfs)): sha256(init_file),
+            str(unix_file.relative_to(rootfs)): sha256(unix_file),
+        },
+    }
 
 
 def install_opencode(rootfs, cache):
@@ -223,25 +283,16 @@ def frontend_payload(rootfs, prefixes):
     return len(inventory), hashlib.sha256(encoded).hexdigest()
 
 
-def install_frontend(rootfs, cache):
-    """Reuse the distribution's verified wheel; install pure Python/data for ARM."""
-    spec = importlib.util.spec_from_file_location('native_frontend_installer', DIST / 'install-native-frontend.py')
-    installer = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(installer)
-    release = json.loads((DIST / 'native-frontend-release.json').read_text())
-    filename, expected_size = installer.validate_release(release)
+def install_frontend(rootfs, candidate_directory, source_revision):
+    """Install this release's freshly compiled wheel, never the published pointer."""
+    spec = importlib.util.spec_from_file_location('native_frontend_candidate', ROOT.parent / 'native-frontend/candidate.py')
+    candidate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(candidate)
+    manifest, wheel, provenance = candidate.load_candidate(candidate_directory, source_revision)
+    release = {'version': manifest['wheel_version'], 'upstream_frontend_version': '20260930.4'}
     required = json.loads((rootfs / 'usr/src/homeassistant/homeassistant/components/frontend/manifest.json').read_text())['requirements']
     if 'home-assistant-frontend==' + release['upstream_frontend_version'] not in required:
         raise ValueError('Native frontend does not match the pinned Core version')
-    wheel_directory = cache / 'native-frontend' / release['sha256']
-    wheel_directory.mkdir(parents=True, exist_ok=True)
-    wheel = wheel_directory / filename
-    if not wheel.exists():
-        with tempfile.TemporaryDirectory(dir=cache) as directory:
-            verified = installer.download_wheel(release, directory)
-            verified.replace(wheel)
-    if wheel.stat().st_size != expected_size or sha256(wheel) != release['sha256']:
-        raise ValueError('Cached native frontend checksum mismatch')
     sites = list((rootfs / 'usr/local/lib').glob('python*/site-packages'))
     if len(sites) != 1:
         raise ValueError('Expected one guest Python installation')
@@ -261,8 +312,8 @@ def install_frontend(rootfs, cache):
     prefixes = [str((site / 'hass_frontend').relative_to(rootfs)),
                 str((site / ('home_assistant_frontend-' + release['version'] + '.dist-info')).relative_to(rootfs))]
     count, digest = frontend_payload(rootfs, prefixes)
-    return {'version': release['version'], 'upstreamVersion': release['upstream_frontend_version'],
-            'wheelSha256': release['sha256'], 'payloadPrefixes': prefixes,
+    return {**provenance, 'upstreamVersion': release['upstream_frontend_version'],
+            'payloadPrefixes': prefixes,
             'payloadFiles': count, 'payloadSha256': digest}
 
 
@@ -293,7 +344,7 @@ def validate_source_revision(source_revision):
                               check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         status = subprocess.run([
             'git', '-C', str(repository), 'status', '--porcelain=v1', '--untracked-files=all',
-            '--', 'habab/android', 'habab/distribution',
+            '--', 'habab/android', 'habab/distribution', 'habab/native-frontend',
         ], check=True, capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise ValueError('Runtime source provenance requires a readable Git checkout') from error
@@ -312,12 +363,21 @@ def require_build_space(cache, rootfs, network_tools=False):
         raise OSError(f'Runtime build needs {minimum // 1024 ** 3} GiB free; only {available // 1024 ** 2} MiB available')
 
 
+def initial_configuration():
+    # The shared source already owns automation and input_boolean. Android adds
+    # its remaining native editor/history defaults without redefining them.
+    return ((DIST / 'config/configuration.yaml').read_text()
+            + '\nscript: !include scripts.yaml\nscene: !include scenes.yaml\nrecorder:\nhistory:\n')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--signing-key', type=Path, required=True, help='Private RSA signing key outside repository')
     parser.add_argument('--public-base', required=True, help='HTTPS directory serving this release')
     parser.add_argument('--source-revision', required=True,
                         help='Full 40-character committed source SHA used to build this runtime')
+    parser.add_argument('--frontend-candidate', type=Path, required=True,
+                        help='Fresh native frontend candidate directory (wheel + manifest.json) from this exact source SHA')
     parser.add_argument('--network-tools', action='store_true',
                         help='Include pinned headless Chromium and Kurigram tools (large download)')
     args = parser.parse_args()
@@ -329,6 +389,11 @@ def main():
         validate_source_revision(args.source_revision)
     except ValueError as error:
         parser.error(str(error))
+    # Reject a stale/missing wheel before exporting or downloading any runtime.
+    spec = importlib.util.spec_from_file_location('native_frontend_candidate', ROOT.parent / 'native-frontend/candidate.py')
+    candidate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(candidate)
+    candidate.load_candidate(args.frontend_candidate, args.source_revision)
     cache = ROOT / 'build/runtime'
     cache.mkdir(parents=True, exist_ok=True)
     lock = (cache / 'package.lock').open('w')
@@ -357,8 +422,9 @@ def main():
                 shutil.rmtree(staging)
         base.unlink()
     inventory = copy_sources(rootfs)
+    serialx_unix = install_serialx_unix(rootfs)
     version, opencode_digest = install_opencode(rootfs, cache)
-    native_frontend = install_frontend(rootfs, cache)
+    native_frontend = install_frontend(rootfs, args.frontend_candidate, args.source_revision)
     network_tools = None
     helper_image = NODE_APK_HELPER
     if args.network_tools:
@@ -382,8 +448,7 @@ def main():
     for directory in ('dev', 'proc', 'sys', 'tmp', 'config', 'root'):
         (rootfs / directory).mkdir(exist_ok=True)
     # Build-time package metadata only; never seed tokens or a pre-owned setup.
-    config = (DIST / 'config/configuration.yaml').read_text()
-    config += '\nautomation: !include automations.yaml\nscript: !include scripts.yaml\nscene: !include scenes.yaml\nrecorder:\nhistory:\n'
+    config = initial_configuration()
     # Core defaults already listen on 8123. A custom HTTP YAML section starts
     # a five-minute confirmation trial on fresh Core and causes a restart.
     # Configure proxy trust through the owner's native HTTP settings later.
@@ -396,6 +461,7 @@ def main():
                'baseImage': IMAGE, 'opencodeVersion': version, 'opencodeSha256': opencode_digest,
                'androidLauncherSha256': sha256(launcher),
                'sourceFiles': inventory, 'nodePackages': node,
+               'serialxUnixTransport': serialx_unix,
                'configurationSha256': sha256(seed), 'nativeFrontend': native_frontend}
     if network_tools is not None:
         release['networkTools'] = network_tools

@@ -24,7 +24,8 @@ read.
   `PermitListen 127.0.0.1:*`, with `MaxSessions 1`. A not-yet-provisioned
   `habab-home-*` user inherits general SSH defaults instead: password auth and
   forwarding enabled, `PermitListen any`, and `MaxSessions 10`. Product accounts
-  need an explicit narrow Match policy and their own enrollment/revoke path.
+  need an explicit per-home key policy and a documented operator provision/revoke
+  path. A small manual pilot does not need automatic billing or lease checks.
 - **The existing public name behavior reaches the edge.** Two different names,
   `home-example.remote.habab.ru` and `home-preflight-check.remote.habab.ru`, both
   resolved to `62.109.14.209`; no IPv6 result was returned. Recursive DNS proves
@@ -54,7 +55,22 @@ read.
   listeners. Port 32000 was unused in this snapshot, but any chosen port must be
   checked again immediately before apply and bound only to `127.0.0.1`.
 
-## Apply gates before a subscription beta
+## Shared live assets to preserve
+
+- Do not reuse or change the current system SSH daemon/port 22, the public
+  support/admin NAT endpoint `95.217.227.164:2222`,
+  `/etc/ssh/sshd_config.d/90-habab-support.conf`, or `/etc/habab-support` keys
+  and expiring-session state for product homes. The support client and product
+  client must keep separate accounts and public keys.
+- Do not replace or edit the edge certificate currently presented for
+  `*.wpmix.net`, or its existing exact-host routes. Product hostnames under
+  `*.remote.habab.ru` need separate certificate coverage and exact-host routing.
+- Do not modify the shared VM104 Nginx configuration or the active
+  `star-websocket-proxy` vhost/map to add one home. Use a separate product vhost
+  and reuse the existing WebSocket map after staging and validating the new
+  route. Reload only the reviewed config owner after its own syntax test.
+
+## Apply gates before a manual beta
 
 1. Choose and document a **dedicated product SSH ingress**. Do not enroll product
    homes on the support/admin endpoint `95.217.227.164:2222` without a separate
@@ -62,10 +78,10 @@ read.
    and ingress port, distinct from its general daemon, and verify its NAT/firewall
    path before creating users. Pick a free loopback forward port only after a
    fresh listener check.
-2. Define the live ownership model: dedicated product SSH config include and
-   root-owned key directory, no-login per-home accounts, product manifest/state
-   location, atomic install/rollback, and revoke behavior. Adapt the sandbox CLI
-   output into that reviewed installer; do not run it against `/`.
+2. Provision one per-home key, account, and restricted SSH policy from reviewed
+   output. An operator may install and revoke these manually for a small beta;
+   automated enrollment, entitlement, and lease services are not prerequisites.
+   Do not run the sandbox generator against `/`.
 3. Provision a TLS certificate that covers `home-<id>.remote.habab.ru`, then add
    the exact-host route at the TLS edge. Add the generated edge-mode HTTP/WebSocket
    vhost on VM104 for the loopback port, reusing the existing shared upgrade
@@ -74,11 +90,10 @@ read.
    verify the scheme/client chain that reaches HA. The generated backend asserts
    HTTPS itself, so it must not be reachable directly by HTTP clients. Do not
    enable HA proxy trust until its actual immediate peer is confirmed.
-4. In a staged copy, check the effective SSH policy for the real product account
-   with `sshd -t` and `sshd -T -C`, and check both edge and VM Nginx configs with
-   `nginx -t`. Then apply/reload only those reviewed config owners. Enroll a
-   per-home public key and verify revoke removes only that home's SSH and route
-   entries; do not reuse support-session keys/accounts.
+4. In a staged copy, check the SSH policy with `sshd -t` and check the edge and
+   VM Nginx route with `nginx -t`. Apply/reload only those reviewed config
+   owners. Confirm the home-specific key and route can be manually revoked and
+   the active SSH session stopped. Do not reuse support-session keys/accounts.
 5. Before beta access, verify from an external network that the exact host reaches
    the HA sign-in page, native HA authentication remains required, the tunnel
    listener is loopback-only, and local HA/automation still works with the tunnel

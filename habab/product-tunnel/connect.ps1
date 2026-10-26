@@ -1,5 +1,6 @@
 param(
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'home.json')
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'home.json'),
+    [string]$StatePath = (Join-Path $env:LOCALAPPDATA 'HababHome\ProductTunnel\state.json')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +16,23 @@ function Get-OpenSsh([string]$Name) {
     return $null
 }
 
+function Set-TunnelState([string]$Status, [string]$Message) {
+    $directory = Split-Path -Parent $StatePath
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    $temporaryPath = "$StatePath.tmp"
+    $state = @{
+        status = $Status
+        message = $Message
+        updated_at = [DateTimeOffset]::UtcNow.ToString('o')
+        process_id = $PID
+    } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($temporaryPath, $state, [Text.Encoding]::UTF8)
+    Move-Item -Force -LiteralPath $temporaryPath -Destination $StatePath
+}
+
 try {
+    $stopPath = "$StatePath.stop"
+    Set-TunnelState 'connecting' 'Проверяю локальный Home Assistant.'
     $config = Get-Content -Raw -LiteralPath $ConfigPath | ConvertFrom-Json
     foreach ($name in @('relay_host', 'relay_port', 'relay_user', 'remote_port', 'local_port', 'identity_file', 'host_key')) {
         if ($null -eq $config.$name -or [string]::IsNullOrWhiteSpace([string]$config.$name)) {
@@ -46,7 +63,7 @@ try {
     }
     if ($response.StatusCode -ne 200) { throw 'Local Home Assistant did not return HTTP 200.' }
 
-    $stateDirectory = Join-Path $env:LOCALAPPDATA 'HababHome\ProductTunnel'
+    $stateDirectory = Split-Path -Parent $StatePath
     New-Item -ItemType Directory -Force -Path $stateDirectory | Out-Null
     $knownHosts = Join-Path $stateDirectory 'known_hosts'
     if ($config.relay_port -eq 22) {
@@ -57,9 +74,9 @@ try {
     [IO.File]::WriteAllText($knownHosts, ("{0} {1}`n" -f $knownHostName, $config.host_key), [Text.Encoding]::ASCII)
 
     Write-Host 'Product tunnel is connecting. Home Assistant native login remains required.'
-    Write-Host 'Keep this window open; press Ctrl+C to disconnect.'
     $delay = 5
     while ($true) {
+        if (Test-Path -LiteralPath $stopPath) { break }
         $sshArguments = @(
             '-F', 'NUL', '-N', '-T', '-a', '-p', [string]$config.relay_port,
             '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'IdentityAgent=none',
@@ -72,12 +89,41 @@ try {
             '-R', ('127.0.0.1:{0}:127.0.0.1:{1}' -f $config.remote_port, $config.local_port),
             ($config.relay_user + '@' + $config.relay_host)
         )
-        & $ssh @sshArguments
-        if ($LASTEXITCODE -eq 0) { $delay = 5 } else { Write-Host "Tunnel disconnected; retrying in $delay seconds." }
-        Start-Sleep -Seconds $delay
+        $quotedArguments = $sshArguments | ForEach-Object {
+            $argument = [string]$_
+            if ($argument -match '[\s"]') { '"' + $argument.Replace('"', '\"') + '"' } else { $argument }
+        }
+        Set-TunnelState 'connecting' 'Подключаюсь к relay.'
+        $sshProcess = Start-Process -FilePath $ssh -ArgumentList ($quotedArguments -join ' ') -NoNewWindow -PassThru
+        $runningAt = [DateTime]::UtcNow.AddSeconds(2)
+        $reportedRunning = $false
+        while (-not $sshProcess.HasExited) {
+            if (Test-Path -LiteralPath $stopPath) {
+                Stop-Process -Id $sshProcess.Id -Force -ErrorAction SilentlyContinue
+                break
+            }
+            if (-not $reportedRunning -and [DateTime]::UtcNow -ge $runningAt) {
+                Set-TunnelState 'running' 'SSH-клиент работает; подтверждения reverse-forward нет.'
+                $reportedRunning = $true
+            }
+            Start-Sleep -Seconds 1
+            $sshProcess.Refresh()
+        }
+        $sshProcess.WaitForExit()
+        if (Test-Path -LiteralPath $stopPath) { break }
+        if ($sshProcess.ExitCode -eq 0) { $delay = 5 }
+        Write-Host "Tunnel disconnected; retrying in $delay seconds."
+        Set-TunnelState 'retrying' "Соединение потеряно; повтор через $delay сек."
+        $waitUntil = [DateTime]::UtcNow.AddSeconds($delay)
+        while ([DateTime]::UtcNow -lt $waitUntil -and -not (Test-Path -LiteralPath $stopPath)) {
+            Start-Sleep -Seconds 1
+        }
         $delay = [Math]::Min($delay * 2, 60)
     }
+    Remove-Item -Force -LiteralPath $stopPath -ErrorAction SilentlyContinue
+    Set-TunnelState 'disconnected' 'Удалённый доступ отключён.'
 } catch {
+    Set-TunnelState 'error' $_.Exception.Message
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
 }

@@ -10,8 +10,10 @@ android {
         // Private Huawei prototype. Target 29+ prohibits exec from app data.
         // Raising this requires a different runtime, not just changing a number.
         targetSdk 28
-        versionCode 18
-        versionName '0.1.10-notification'
+        versionCode project.hasProperty('appVersionCode')
+                ? project.property('appVersionCode').toString().toInteger() : 18
+        versionName project.hasProperty('appVersionName')
+                ? project.property('appVersionName').toString() : '0.1.10-notification'
         ndk { abiFilters 'arm64-v8a' }
     }
     compileOptions {

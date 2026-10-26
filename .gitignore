@@ -75,6 +75,7 @@ test/benchmarks/results/
 **/.env.opencode
 !.env.example
 .venv/
+.secrets/
 
 # Habab build scripts and pinned translation are source, not compiler output.
 !habab/build/

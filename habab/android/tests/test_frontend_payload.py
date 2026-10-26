@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -11,6 +12,32 @@ spec.loader.exec_module(runtime)
 
 
 class FrontendPayloadTest(unittest.TestCase):
+    def test_actual_android_seed_preserves_shared_automation_without_duplicate_keys(self):
+        config = runtime.initial_configuration()
+        keys = re.findall(r'(?m)^([a-z_]+):', config)
+        self.assertEqual(len(keys), len(set(keys)), 'Duplicate top-level keys in actual Android seed')
+        self.assertEqual(keys.count('automation'), 1)
+        self.assertIn('automation: !include automations.yaml', config)
+        self.assertIn('input_boolean', keys)
+        self.assertTrue({'script', 'scene', 'recorder', 'history'}.issubset(keys))
+
+    def test_copy_sources_includes_vtt_captions_in_signed_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            distribution = temporary / 'distribution'
+            caption = distribution / 'src/habab_home/frontend/telegram-guide.vtt'
+            caption.parent.mkdir(parents=True)
+            caption.write_bytes(b'WEBVTT\n\n')
+            for name in ('habab-ha.py', 'install-xiaomi-home.py', 'xiaomi-home-release.json'):
+                (distribution / name).write_text(name)
+            rootfs = temporary / 'rootfs'
+            with patch.object(runtime, 'DIST', distribution):
+                inventory = runtime.copy_sources(rootfs)
+            target = rootfs / 'usr/src/homeassistant/homeassistant/components/habab_home/frontend/telegram-guide.vtt'
+            self.assertEqual(target.read_bytes(), b'WEBVTT\n\n')
+            self.assertIn('src/habab_home/frontend/telegram-guide.vtt', inventory)
+            self.assertEqual(inventory['src/habab_home/frontend/telegram-guide.vtt'], runtime.sha256(target))
+
     def test_cold_build_refuses_space_that_only_suffices_for_a_warm_cache(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)

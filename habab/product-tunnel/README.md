@@ -16,24 +16,47 @@ the private key at `identity_file`; enroll only its public key on the relay.
 Verify the relay host-key fingerprint out of band before pinning it. Do not
 reuse the support-session key or support relay account.
 
-Run `connect.ps1` after local Home Assistant is healthy. It checks the local
+Run `control.ps1` on the Windows host after local Home Assistant is healthy:
+
+```powershell
+.\control.ps1 -Action Enable
+.\control.ps1 -Action Status
+.\control.ps1 -Action Disable
+```
+
+`Enable` starts the existing SSH client in the background. It checks the local
 HTTP endpoint, opens a remote forward bound to `127.0.0.1` on the relay, and
-reconnects with a 5–60 second backoff. Keep the process open; Ctrl+C ends the
-connection. It does not open a listener or firewall port on the home router.
-This starter is manually started/stopped and does not provide the product UI's
-enable/disable control or a confirmed connected-status indicator.
+reconnects with a 5–60 second backoff. `Status` prints JSON with `connecting`,
+`running`, `retrying`, `disconnected`, or `error`. `running` means the SSH
+process is active; it does not confirm that the relay accepted the reverse
+forward. `Disable` stops the client and its SSH connection. The client does not
+open a listener or firewall port on the home router. This is a local PowerShell
+control path; it is not yet wired to a Habab Home UI.
+There is no product-session TTL or server-side lease expiry: the client retries
+indefinitely until stopped or its relay key is revoked.
 
-## Required cloud-side contract
+## Relay setup for a manually provisioned home
 
-For each subscribed home, the cloud side still needs a stable identity and
+For each manually provisioned home, the cloud side needs a stable identity and
 unique loopback port, an exact-host HTTPS route to that port, and an SSH key
 policy restricted to remote forwarding on that exact `127.0.0.1:<port>` only.
 The public hostname needs DNS and a valid certificate. The route must preserve
 Home Assistant WebSocket upgrades and forward the original HTTPS scheme.
 Configure Home Assistant's trusted proxy only for the immediate proxy peer
 actually observed by HA; retain native login and do not enable anonymous or
-trusted-network authentication. Disconnecting this client stops the tunnel;
-subscription cancellation must also revoke the relay key and hostname route.
+trusted-network authentication. Disconnecting this client stops the tunnel.
+For a manual pilot, an operator can revoke the per-home key and route and stop
+the active SSH session; billing and automated entitlement checks can follow
+later.
+
+The generated SSH policy constrains where the relay listens for a remote
+forward. It does not constrain the destination chosen by the home-side SSH
+client: the supplied `connect.ps1` targets the local Home Assistant port, but
+the relay cannot enforce that target if a client using the enrolled key is
+modified. Treat “only the local HA port” as a property of the supplied client,
+not a server-enforced boundary. If the relay must enforce an HA-only destination
+against a modified client, this SSH design needs a destination-aware relay
+instead of relying on `PermitListen`.
 
 The relay-side source examples are [sshd-home.example.conf](sshd-home.example.conf)
 and [nginx-home.example.conf](nginx-home.example.conf). They show the sample
@@ -119,11 +142,14 @@ terminates HTTPS and has the referenced certificate files.
 The tool does not reload either daemon. Confirm DNS and certificate readiness
 separately. Revocation removes snippets and the key file, but the operator
 must reload sshd/nginx to apply the revocation; terminate an already connected
-SSH session separately if immediate disconnection is required.
+SSH session separately if immediate disconnection is required. The current
+generator has no expiry timer or live revocation service, so these steps are
+operator work rather than an automatic subscription or TTL lifecycle.
 
 This is not a subscription service: there is no billing check, account or
 device enrollment API, hostname/DNS/certificate provisioning, relay account
-creation, or cloud Home Assistant deployment. The existing
+creation, or cloud Home Assistant deployment. A small manual pilot can use
+operator-provisioned per-home keys, accounts, and routes. The existing
 `support_tunnel.ps1` / `support/relay.py` is intentionally temporary,
 operator-approved support access and is not the per-home product relay.
 

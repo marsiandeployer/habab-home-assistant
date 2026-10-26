@@ -426,7 +426,7 @@ index 1ebf8535e988a2a773922396d80fd3a1ae7b2914..e6a43f4c6ac0ff1c1c96e8a412042b93
        <ha-authorize></ha-authorize>
      </div>
 diff --git a/src/html/index.html.template b/src/html/index.html.template
-index 93433e83c5385361da686b922babf0b63ced8263..53a1a62713220f278066b70ef5443cc514846b20 100644
+index 93433e83c5385361da686b922babf0b63ced8263..703c396f0070cf628edaa7a22badf0cd1a732d3d 100644
 --- a/src/html/index.html.template
 +++ b/src/html/index.html.template
 @@ -1,21 +1,20 @@
@@ -506,7 +506,7 @@ index 93433e83c5385361da686b922babf0b63ced8263..53a1a62713220f278066b70ef5443cc5
        }
      </style>
    </head>
-@@ -129,16 +111,10 @@
+@@ -129,16 +111,11 @@
      <div id="ha-launch-screen">
        <div class="ha-launch-screen-spacer-top"></div>
        <div class="ha-lockup">
@@ -521,6 +521,7 @@ index 93433e83c5385361da686b922babf0b63ced8263..53a1a62713220f278066b70ef5443cc5
 -          <img src="/static/images/open-home-foundation-on-light.svg" alt="Open Home Foundation" width="237" height="24">
 -        </picture>
 -      </div>
++      <!-- Habab changed the launch-screen attribution and layout. -->
 +      <a class="habab-attribution" href="https://habab.ru">Сделано в habab.ru</a>
      </div>
      <home-assistant></home-assistant>

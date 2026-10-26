@@ -19,28 +19,59 @@ day.
   the candidate step verifies embedded provenance and compares every ZIP
   member with the selected Git tree. The builder's bootstrap BAT files pin the
   candidate filename and digest, and become usable once the candidate is
-  separately promoted to their configured download host.
+  separately promoted to their configured download host. The ZIP includes the
+  local product-tunnel client scripts and non-secret example configuration for
+  manual provisioning. The client requires a completed `home.json`, a per-home
+  private key, pinned relay host key, local Home Assistant HTTP, and an already
+  provisioned relay/DNS/TLS route. The installer does not activate remote access,
+  enroll accounts, or connect to billing.
 - **Linux amd64 and arm64:** separate OCI image builds and artifacts. The
   workflow matrix does not hide one architecture's failure behind the other's
   result. Each image receives `org.opencontainers.image.revision` and
   `io.habab.source.dirty=false` build labels.
-- **Android:** `all` records Android as blocked; it does not run Android or
-  expose signing secrets. Choose `android` explicitly to request the Android
-  target, then provide an HTTPS runtime-manifest URL and configure all four
-  repository Actions secrets below. Missing inputs make that selected job fail
-  and prevent a manifest from being assembled. The signed runtime manifest must
-  attest `sourceRevision` equal to the selected source SHA; the workflow checks
-  `sourceFiles` against that Git tree and verifies its signature, archive hash,
-  and contents with the checked-in trusted key before building the APK. It also
-  checks the signed `nodePackages` inventory against the selected source's
-  Node APK lock, including the builder's `icu-data-en` exclusion when network
-  tools are enabled. The runtime producer accepts `--source-revision` and signs the value into the
-  manifest. Android keystore secrets are exposed only to the signing step after
-  Gradle checks finish. A debug APK or runtime for another commit is never used.
+- **Android:** prerequisites are checked before any frontend build. With all
+  explicitly reviewed Android version code/name, APK signing secrets and
+  `HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64`, the workflow
+  calls the existing native frontend compiler at the selected source SHA,
+  downloads its actual wheel and provenance manifest, packages a fresh ARM64
+  runtime using that local wheel, and signs it with the existing trusted runtime
+  RSA key. The derived public key must equal the checked-in trusted key; no key
+  is generated or rotated. The wheel remains content addressed by SHA-256 in its
+  frontend artifact; the runtime archive and manifest use their existing
+  immutable identity.
 
-`release-candidate.json` is assembled only after every selected build job
+  The runtime's signed `nativeFrontend` binds the wheel SHA, producer-manifest
+  SHA, frontend source SHA, version, and installed-payload SHA. Verification
+  checks both the archive payload and embedded runtime metadata against those
+  signed values. The APK embeds `assets/release/build-provenance.json`; its
+  actual bytes are read back from the signed APK and checked against this runtime
+  and frontend before upload. The embedded `default-url.txt` must equal this
+  runtime's canonical `release-<ID>.json` URL; that URL is also recorded in the
+  APK provenance and the canonical manifest/signature are included in the
+  candidate artifact. A new APK's metadata and URL do not establish that an
+  already installed private runtime has been upgraded; that requires separate
+  installation/update acceptance. Native tools and the offline voice model are
+  prepared through their existing pinned producers before Gradle checks.
+
+  `android_runtime_manifest_url` is optional. If supplied instead of the runtime
+  key, that signed runtime must match the **newly built** wheel and producer
+  manifest exactly, as well as the selected source tree. A same-version wheel or
+  matching backend source alone is insufficient. Old manifests without this
+  frontend provenance fail; there is no published-frontend fallback. The workflow
+  retains its sourceFiles, launcher, configuration and Node APK inventory checks,
+  including `.vtt` captions and the network-tools `icu-data-en` exclusion.
+
+  In `all`, missing prerequisites produce an explicit Android `blocked` record
+  without building frontend; explicit `android` scope fails for missing inputs.
+  Missing Android version code/name follows the same rule; there is no Gradle
+  default-version fallback.
+  Invalid input, a frontend/compiler failure, runtime mismatch, or APK build/sign
+  failure prevents the aggregate manifest. Candidate creation does not publish
+  the runtime's download URL, install the APK, or update a phone.
+
+`release-candidate.json` is assembled only after every required target job
 succeeds. It lists only the requested scope's targets; `all` includes Windows,
-both Linux architectures, and an explicit blocked Android status. The manifest
+both Linux architectures, and Android as built or explicitly blocked. The manifest
 records the common source SHA, `source_dirty=false`, and SHA-256 plus byte
 count for each payload, alongside its original target-artifact name. The final
 artifact contains only this small manifest; platform payloads remain in their
@@ -50,16 +81,23 @@ physical-device acceptance.
 ## Run a candidate
 
 1. Open **Actions → Habab release candidate → Run workflow** and choose the
-   target scope. Use `windows` for a small Windows-only CI proof; `all` builds
-   Windows and both Linux images while recording Android as blocked.
+   target scope. Use `windows` for a small Windows-only CI proof. `all` builds
+   Windows and both Linux images and also builds Android when runtime and APK
+   signing secrets are configured; otherwise Android is blocked.
 2. Enter a full commit SHA, or a tag name that already exists. Branch names and
    ref paths are rejected. The selected commit must also be an ancestor of the
    current `origin/main`, which is the workflow's trusted-source gate.
-3. Select `android` only when a signed runtime from the exact SHA and all
-   Android keystore secrets are ready. Provide the HTTPS URL for
-   the manifest under `habab-demo.wpmix.net/downloads/android/`. Its signature
-   is expected at `<manifest URL>.sig`; its signed `url` field identifies the
-   runtime archive under the same canonical path.
+3. For Android, supply `android_version_code` and `android_version_name` for
+   the reviewed release. Choose a code greater than every distributed/installed
+   build being upgraded; the workflow does not invent or default a version.
+   Code must be a decimal integer from 1 to 2100000000; name must be 1–64 ASCII
+   letters, digits, dots, plus signs, underscores or hyphens, beginning with a
+   letter or digit. Gradle receives `-PappVersionCode` and `-PappVersionName`;
+   `aapt dump badging` reads the signed APK back and both values must match.
+   Configure the existing runtime RSA key and APK signing secrets below. Leave the runtime URL blank for the normal frontend → runtime → APK
+   build. A supplied URL must be canonical HTTPS under
+   `habab-demo.wpmix.net/downloads/android/`, with a signature at `<URL>.sig`,
+   and attest the newly compiled wheel exactly.
 4. Download the final `habab-release-candidate-<SHA>` manifest artifact and
    inspect `release-candidate.json`. Its `artifact` fields name the separate
    per-target artifacts containing the payloads.
@@ -68,14 +106,27 @@ Android repository Actions secrets:
 
 | Secret | Value | Used for |
 | --- | --- | --- |
+| `HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64` | Base64 encoded existing runtime RSA PEM key matching `app/src/main/assets/release/trusted-key.der` | Signs fresh runtime; required when runtime URL is blank |
 | `HABAB_ANDROID_KEYSTORE_BASE64` | Base64 encoded Android release keystore | Signs the release APK |
 | `HABAB_ANDROID_KEYSTORE_PASSWORD` | Keystore password | Opens the keystore |
 | `HABAB_ANDROID_KEY_ALIAS` | Signing key alias | Selects the APK signing key |
 | `HABAB_ANDROID_KEY_PASSWORD` | Signing key password | Signs the APK |
 
 Do not add these values to workflow inputs or repository files. The Android
-job deletes its temporary keystore after signing. The workflow does not create
-or rotate keys and has no runtime publishing credentials.
+job deletes its temporary runtime private key and APK keystore after signing.
+The workflow does not create or rotate keys and has no runtime publishing credentials. Use the existing
+operator-owned keys through repository **Settings → Secrets and variables →
+Actions**; do not create replacement keys for this workflow.
+
+This is a source implementation. At the 2026-10-26 read-only configuration check,
+this repository had no Actions secrets configured. No frontend/runtime/APK build,
+workflow dispatch, publication, or physical Android acceptance was performed for
+this change. Configure the five signing secrets, select explicit release version inputs,
+and review the exact source commit before running an Android candidate. Local proof covers small synthetic
+provenance, gate, archive and packaging tests; `actionlint` was not available and
+was **NOT RUN**. The candidate artifacts still expire after one day; normal
+publication remains a separate operator step with the existing current/previous
+release retention procedure in `habab/android/README.md`.
 
 ## Failure and recovery
 

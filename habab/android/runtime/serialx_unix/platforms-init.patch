@@ -1,0 +1,7 @@
+--- a/serialx/platforms/__init__.py
++++ b/serialx/platforms/__init__.py
+@@ -7,6 +7,7 @@ from . import (
+     serial_rfc2217,  # noqa: F401
+     serial_socket,  # noqa: F401
++    serial_unix,  # noqa: F401
+ )

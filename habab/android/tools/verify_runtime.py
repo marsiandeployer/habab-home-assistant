@@ -4,12 +4,14 @@ import argparse
 import base64
 import binascii
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 
 
 def decode_signature(signature_path):
@@ -43,8 +45,69 @@ def validate_source_revision(release, embedded_release=None, expected=None):
         raise ValueError('Embedded runtime sourceRevision does not match the expected checkout')
 
 
-def verify(manifest, public_key, expected_source_revision=None):
+def validate_frontend_candidate(release, candidate_directory, source_revision):
+    spec = importlib.util.spec_from_file_location(
+        'native_frontend_candidate', Path(__file__).resolve().parents[2] / 'native-frontend/candidate.py')
+    candidate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(candidate)
+    _, _, expected = candidate.load_candidate(candidate_directory, source_revision)
+    frontend = release.get('nativeFrontend')
+    if not isinstance(frontend, dict) or any(frontend.get(key) != value for key, value in expected.items()):
+        raise ValueError('Runtime frontend does not match this source and freshly built wheel')
+
+
+def runtime_manifest_url(release):
+    return release['url'].rsplit('/', 1)[0] + '/release-' + release['id'] + '.json'
+
+
+def apk_provenance(release, manifest):
+    return {
+        'sourceRevision': release['sourceRevision'],
+        'runtimeId': release['id'],
+        'runtimeManifestSha256': hashlib.sha256(Path(manifest).read_bytes()).hexdigest(),
+        'runtimeManifestUrl': runtime_manifest_url(release),
+        'nativeFrontend': release['nativeFrontend'],
+    }
+
+
+def verify_apk_provenance(apk, release, manifest):
+    with zipfile.ZipFile(apk) as archive:
+        embedded = json.loads(archive.read('assets/release/build-provenance.json'))
+        default_url = archive.read('assets/release/default-url.txt').decode().strip()
+    if embedded != apk_provenance(release, manifest):
+        raise ValueError('Signed APK does not embed this runtime and frontend provenance')
+    if default_url != runtime_manifest_url(release):
+        raise ValueError('Signed APK runtime download URL does not match its own release')
+
+
+def verify_apk_version(apk, aapt, version_code, version_name):
+    badging = subprocess.run([str(aapt), 'dump', 'badging', str(apk)], check=True,
+                             capture_output=True, text=True).stdout
+    package = re.search(r"(?m)^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging)
+    if (package is None or package.groups() != ('ru.habab.home', str(version_code), version_name)):
+        raise ValueError('Signed APK version does not match the explicit release inputs')
+    return {'version_code': int(package[2]), 'version_name': package[3]}
+
+
+def verify(manifest, public_key, expected_source_revision=None, require_serialx_unix=False,
+           frontend_candidate=None):
     release = json.loads(manifest.read_text())
+    if frontend_candidate is not None:
+        validate_frontend_candidate(release, frontend_candidate, expected_source_revision)
+    serialx_unix = release.get('serialxUnixTransport')
+    if require_serialx_unix and serialx_unix is None:
+        raise ValueError('This release does not attest the required serialx Unix transport')
+    serialx_metadata_path = None
+    if serialx_unix is not None:
+        if (not isinstance(serialx_unix, dict)
+                or serialx_unix.get('packageVersion') != '1.11.0'
+                or not isinstance(serialx_unix.get('pythonSitePackages'), str)
+                or not isinstance(serialx_unix.get('files'), dict)):
+            raise ValueError('Malformed serialx Unix transport attestation')
+        site = serialx_unix['pythonSitePackages'].rstrip('/')
+        if not re.fullmatch(r'usr/local/lib/python[0-9.]+/site-packages', site):
+            raise ValueError('Unexpected serialx site-packages path')
+        serialx_metadata_path = site + '/serialx-1.11.0.dist-info/METADATA'
     if expected_source_revision is not None:
         validate_source_revision(release, expected=expected_source_revision)
     with tempfile.TemporaryDirectory() as directory:
@@ -69,9 +132,13 @@ def verify(manifest, public_key, expected_source_revision=None):
         'opt/habab-opencode/opencode', 'etc/habab-android-release.json',
         'usr/local/share/habab-android/launch.py',
     }
+    if serialx_unix is not None:
+        required.add(serialx_metadata_path)
     files, symlinks, total = 0, 0, 0
     inventory = {}
     embedded_release = None
+    serialx_metadata_version = None
+    serialx_metadata_name = None
     with tarfile.open(archive, 'r|gz') as bundle:
         for member in bundle:
             if member.name.startswith('/') or '..' in Path(member.name).parts:
@@ -96,13 +163,41 @@ def verify(manifest, public_key, expected_source_revision=None):
                             raise ValueError('Truncated embedded runtime manifest')
                         hash_file.update(content)
                         embedded_release = json.loads(content)
+                    elif member.name == serialx_metadata_path:
+                        content = source.read(1024 * 1024 + 1)
+                        if len(content) != member.size:
+                            raise ValueError('Truncated serialx package metadata')
+                        hash_file.update(content)
+                        for line in content.decode('utf-8').splitlines():
+                            if line.startswith('Name: '):
+                                serialx_metadata_name = line.split(':', 1)[1].strip()
+                            if line.startswith('Version: '):
+                                serialx_metadata_version = line.split(':', 1)[1].strip()
                     else:
                         for block in iter(lambda: source.read(1024 * 1024), b''):
                             hash_file.update(block)
                 inventory[member.name] = hash_file.hexdigest()
     validate_source_revision(release, embedded_release, expected_source_revision)
+    if serialx_unix is not None:
+        if not isinstance(embedded_release, dict) or embedded_release.get('serialxUnixTransport') != serialx_unix:
+            raise ValueError('Embedded serialx Unix transport attestation does not match the signed manifest')
     if required:
         raise ValueError('Missing runtime files: ' + ', '.join(sorted(required)))
+    if serialx_unix is not None:
+        if serialx_metadata_name != 'serialx' or serialx_metadata_version != serialx_unix['packageVersion']:
+            raise ValueError('Pinned serialx package version mismatch')
+        expected_serialx_files = serialx_unix['files']
+        expected_paths = {
+            serialx_unix['pythonSitePackages'] + '/serialx/platforms/__init__.py',
+            serialx_unix['pythonSitePackages'] + '/serialx/platforms/serial_unix.py',
+        }
+        if set(expected_serialx_files) != expected_paths:
+            raise ValueError('Serialx Unix transport file attestation has unexpected paths')
+        for path in expected_paths:
+            digest = expected_serialx_files[path]
+            if (not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)
+                    or inventory.get(path) != digest):
+                raise ValueError('Serialx Unix transport payload mismatch: ' + path)
     if total > release['unpackedBytes']:
         raise ValueError('Archive exceeds declared unpacked size')
     if inventory['opt/habab-opencode/opencode'] != release['opencodeSha256']:
@@ -112,6 +207,8 @@ def verify(manifest, public_key, expected_source_revision=None):
     if 'configurationSha256' in release and inventory.get('usr/local/share/habab-home/configuration.yaml') != release['configurationSha256']:
         raise ValueError('Initial configuration digest mismatch')
     if frontend := release.get('nativeFrontend'):
+        if not isinstance(embedded_release, dict) or embedded_release.get('nativeFrontend') != frontend:
+            raise ValueError('Embedded native frontend does not match the signed manifest')
         prefixes = tuple(prefix.rstrip('/') + '/' for prefix in frontend['payloadPrefixes'])
         frontend_files = {name: digest for name, digest in inventory.items() if name.startswith(prefixes)}
         digest = hashlib.sha256(json.dumps(frontend_files, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -138,5 +235,10 @@ if __name__ == '__main__':
     parser.add_argument('manifest', type=Path)
     parser.add_argument('--public-key', type=Path, required=True)
     parser.add_argument('--source-revision', help='Expected full frozen source commit SHA')
+    parser.add_argument('--frontend-candidate', type=Path,
+                        help='Require the exact wheel and producer identity from this fresh candidate')
+    parser.add_argument('--require-serialx-unix', action='store_true',
+                        help='Require the Android USB bridge unix:// transport and its signed file hashes')
     args = parser.parse_args()
-    verify(args.manifest, args.public_key, args.source_revision)
+    verify(args.manifest, args.public_key, args.source_revision, args.require_serialx_unix,
+           args.frontend_candidate)

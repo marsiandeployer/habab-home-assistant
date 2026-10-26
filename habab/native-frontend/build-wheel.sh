@@ -10,6 +10,7 @@ patch_sha="${HABAB_NATIVE_FRONTEND_PATCH_SHA:-d483686b341c34705a62ca98f735802359
 catalog_sha="154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce"
 wheel_version="${HABAB_NATIVE_FRONTEND_WHEEL_VERSION:-20260930.4+habab.9}"
 artifact_root="${HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT:-$repo_root/habab/public/downloads/native-frontend}"
+font_report="${HABAB_NATIVE_FONT_REPORT:-$repo_root/habab/qa/native-font-assets/font-assets-report.json}"
 retention_tool="${RELEASE_RETENTION_TOOL:-/root/tools/release-retention/retention.py}"
 retention_state="${HABAB_NATIVE_FRONTEND_RETENTION_STATE:-/root/tools/release-retention/states/habab-native-frontend.json}"
 wheel_name="home_assistant_frontend-${wheel_version}-py3-none-any.whl"
@@ -28,10 +29,33 @@ cleanup() {
 }
 trap cleanup EXIT
 
+[[ "$(git -C "$worktree" rev-parse HEAD)" == "$source_commit" ]] || {
+  echo "Worktree must be at pinned frontend commit $source_commit" >&2
+  exit 1
+}
+[[ -f "$patch_file" && "$(sha256sum "$patch_file" | cut -d' ' -f1)" == "$patch_sha" ]] || {
+  echo "Bridge patch digest mismatch" >&2
+  exit 1
+}
 [[ "$wheel_version" =~ ^20260930\.4\+habab\.[0-9]+$ ]] || {
   echo "Wheel version must match the pinned Core version and Habab release suffix" >&2
   exit 1
 }
+legacy_bridge_sha="d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092"
+legacy_wheel_version="20260930.4+habab.9"
+if [[ "$patch_sha" == "$legacy_bridge_sha" ]]; then
+  [[ "$wheel_version" == "$legacy_wheel_version" ]] || {
+    echo "The bridge-only patch is reserved for the legacy .9 wheel profile" >&2
+    exit 1
+  }
+  [[ "${HABAB_NATIVE_FRONTEND_ALLOW_LEGACY_9:-}" == "1" ]] || {
+    echo "Refusing the legacy, unbranded .9 build; set HABAB_NATIVE_FRONTEND_ALLOW_LEGACY_9=1 to opt in" >&2
+    exit 1
+  }
+elif [[ "$wheel_version" == "$legacy_wheel_version" ]]; then
+  echo "The legacy .9 wheel version requires its pinned bridge-only patch profile" >&2
+  exit 1
+fi
 [[ "$artifact_root" == /* && "$retention_tool" == /* && "$retention_state" == /* ]] || {
   echo "Artifact root and retention paths must be absolute" >&2
   exit 1
@@ -79,15 +103,6 @@ PY
     :
   fi
 fi
-
-[[ "$(git -C "$worktree" rev-parse HEAD)" == "$source_commit" ]] || {
-  echo "Worktree must be at pinned frontend commit $source_commit" >&2
-  exit 1
-}
-[[ -f "$patch_file" && "$(sha256sum "$patch_file" | cut -d' ' -f1)" == "$patch_sha" ]] || {
-  echo "Bridge patch digest mismatch" >&2
-  exit 1
-}
 translation_catalog_sha() {
   find "$1" -type f -name 'ru-*.json' -print0 | LC_ALL=C sort -z |
     while IFS= read -r -d '' file; do
@@ -204,6 +219,32 @@ pnpm exec vitest run --config test/vitest.config.ts \
   test/mixins/dirty-state-provider-mixin.test.ts \
   test/util/register-service-worker.test.ts \
   test/data/recorder-info.test.ts
+if [[ -f src/common/map/yandex-map.ts ]]; then
+  map_paths=(
+    src/common/map/base-layer.ts
+    src/common/map/engines/leaflet-map-engine.ts
+    src/common/map/engines/maplibre-map-engine.ts
+    src/common/map/map-engine.ts
+    src/common/map/yandex-map.ts
+    src/components/map/ha-map.ts
+    src/data/frontend.ts
+    src/panels/map/dialog-yandex-map-settings.ts
+    src/panels/map/ha-panel-map.ts
+    test/common/map/base-layer.test.ts
+    test/common/map/maplibre-map-engine.test.ts
+    test/common/map/yandex-map.test.ts
+    test/components/map/ha-map-engine.test.ts
+    test/data/frontend.test.ts
+    test/panels/map/dialog-yandex-map-settings.test.ts
+  )
+  pnpm exec eslint "${map_paths[@]}" --max-warnings=0
+  pnpm exec prettier --check "${map_paths[@]}"
+  pnpm exec gulp gen-icons-json
+  pnpm exec vitest run --config test/vitest.config.ts \
+    --maxWorkers=1 \
+    --no-file-parallelism \
+    test/common/map test/components/map test/panels/map
+fi
 pnpm exec gulp gather-gallery-pages
 pnpm exec gulp clean
 pnpm exec gulp \
@@ -299,10 +340,9 @@ rm "$pyproject_backup"
 python3 "$repo_root/habab/qa/native-font-assets/check-font-assets.py" \
   --static-dir "$worktree/hass_frontend/static" \
   --wheel "$staging/wheel/$wheel_name" \
-  --report "$repo_root/habab/qa/native-font-assets/font-assets-report.json"
+  --report "$font_report"
 artifact_sha="$(sha256sum "$staging/wheel/$wheel_name" | cut -d' ' -f1)"
 artifact_dir="$artifact_root/$artifact_sha"
-mkdir -p "$artifact_dir"
 mkdir -p "$artifact_root"
 [[ ! -L "$artifact_dir" ]] || {
   echo "Artifact hash directory must not be a symlink" >&2

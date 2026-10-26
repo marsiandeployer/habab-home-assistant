@@ -136,16 +136,17 @@ and voice acceptance remain **NOT RUN**.
 ## Manual CI candidate
 
 `.github/workflows/habab-native-frontend-candidate.yaml` builds an unpublished
-candidate artifact from the selected Habab source. It is manual-only and uses
+candidate artifact from the selected Habab source. It accepts manual dispatch and
+reusable `workflow_call` from the Android release candidate, and uses
 the public `ubuntu-24.04` runner (4 vCPUs and 16 GiB RAM). Choose `main` or a
 full commit SHA that is an ancestor of the current `origin/main`; the workflow
 resolves and records the exact source SHA. The wheel version defaults to
-`20260930.4+habab.13` and accepts only the `20260930.4+habab.N` form.
+`20260930.4+habab.14` and accepts only the `20260930.4+habab.N` form.
 
 The job checks out only the native frontend producer and font QA files, fetches
 upstream frontend commit `26690e06b0bf64a1487929245c32842ef92c62b5`, and
-verifies the ordered bridge, test-fix, and branding patches against their
-recorded hashes. It downloads the official
+verifies the ordered bridge, test-fix, branding, and Dev Inspector patches
+against their recorded hashes. It downloads the official
 [Home Assistant frontend 20260930.4 wheel from PyPI](https://pypi.org/project/home-assistant-frontend/20260930.4/),
 checks SHA-256 `05c207fb6ce6720d1782766b54a67acdf4bab83f133a562204b972d062862fc8`,
 and extracts only its translation tree. The builder checks the extracted
@@ -193,7 +194,7 @@ docker cp "$cid:/usr/local/lib/python3.14/site-packages/hass_frontend/static/tra
   /root/.local/share/habab-native-frontend-translations-stock/
 docker rm "$cid"
 
-bash habab/native-frontend/build-wheel.sh
+HABAB_NATIVE_FRONTEND_ALLOW_LEGACY_9=1 bash habab/native-frontend/build-wheel.sh
 ```
 
 The script requires the exact pinned source commit, an unmodified worktree, a
@@ -287,3 +288,48 @@ remain pending.
 
 The browser integration and wheel installation checks are performed by the
 parent release workflow.
+
+## `.14` source candidate: opt-in Dev Inspector
+
+The candidate overlay adds `dev-inspector.patch` after the `.13` bridge,
+test-fix, and branding patches. It loads the pinned `https://op.wpmix.net/embed.js`
+only when the user presses Ctrl+Shift+D or opens the page with
+`?dev_inspect=1`. The script element is async, uses SRI and anonymous CORS, and
+sets `data-app="habab-home"`; Home Assistant pages receive no Dev Inspector
+network request during ordinary page loads. The current public embed exits
+before initialization on mobile devices, including Android WebViews, so the
+query parameter does not activate the inspector there yet. An upstream
+mobile-policy change and a new SRI pin are required before Android acceptance.
+
+The selected `habab-home` embed mode sends a reduced report only after the user
+clicks **Fix it**. It omits the page URL, visible text, DOM path/ID, comment,
+hostname, working directory, and screenshot. This is still third-party
+page-context JavaScript when explicitly loaded; `data-app` does not sandbox it.
+The local candidate `embed.js` source bytes are pinned by
+`sha256-HICOTHvVU35lGtBA+jMBomP8mgvMi3ZdwpmHYF8YKbw=`. Any script change requires
+updating that SRI pin and reviewing the privacy branch.
+
+Core 2026.10.2 source does not emit an HTTP Content-Security-Policy header, and
+the current distribution does not add a proxy/header layer for the loopback
+Core page. The anonymous public demo has separate Nginx and static-host CSP
+policies that must be updated independently.
+
+This is **source wiring only**. No `.14` wheel, Docker/Windows image, Android
+runtime/APK, or live Core header was built or accepted by this change. The
+native candidate workflow builds the pinned wheel both on manual dispatch and
+as a required reusable Android release job. The Android job consumes the actual
+wheel and manifest from that run, packages a new signed runtime, and checks the
+frontend identity inside the signed APK; it does not reuse the published pointer. When that workflow is run, it records a fourth `dev_inspector_sha256`
+along with the exact combined patch hash.
+
+Candidate patch hashes:
+
+- `bridge.patch`: `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`
+- `native-test-fixes.patch`:
+  `95c2f19010624cf5d9b53157bf5e06e74bedf905bbac79ae417177baa80898f3`
+- `native-branding.patch`:
+  `a4512cfa0f49677838c3b862d43169efe3d8eb3f8112338ea3de3774e812b6c5`
+- `dev-inspector.patch`:
+  `05accce46eb2aeafbdfdb64157a07a7ce89af9b01224fa0ae4249a1e4df047b1`
+- combined patch bundle:
+  `66ed3fdfe8fd6fed6494837bbc6777b1c36bc33e021684be41a493d510b88a99`

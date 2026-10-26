@@ -6,4 +6,6 @@ homeassistant:
 api:
 config:
 frontend:
+input_boolean:
+automation: !include automations.yaml
 habab_home:

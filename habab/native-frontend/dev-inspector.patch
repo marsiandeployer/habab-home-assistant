@@ -1,0 +1,65 @@
+diff --git a/src/html/index.html.template b/src/html/index.html.template
+index 703c396f0070cf628edaa7a22badf0cd1a732d3d..a83d3aea72904504a919a278c972a5751521234e 100644
+--- a/src/html/index.html.template
++++ b/src/html/index.html.template
+@@ -157,5 +157,60 @@
+         }
+       </script>
+     <% } %>
++    <script>
++      (() => {
++        const params = new URLSearchParams(window.location.search);
++        const shouldEnable = params.get("dev_inspect") === "1";
++        let loading = false;
++
++        const loadInspector = (enableAfterLoad) => {
++          if (window.DevInspect) {
++            if (enableAfterLoad) window.DevInspect.enable();
++            return;
++          }
++          if (loading) return;
++          loading = true;
++
++          const script = document.createElement("script");
++          script.async = true;
++          script.src = "https://op.wpmix.net/embed.js";
++          script.integrity = "sha256-HICOTHvVU35lGtBA+jMBomP8mgvMi3ZdwpmHYF8YKbw=";
++          script.crossOrigin = "anonymous";
++          script.dataset.app = "habab-home";
++          script.addEventListener("load", () => {
++            if (enableAfterLoad) window.DevInspect?.enable();
++          }, { once: true });
++          script.addEventListener("error", () => {
++            loading = false;
++          }, { once: true });
++          document.head.append(script);
++        };
++
++        if (shouldEnable) {
++          loadInspector(false);
++        }
++
++        document.addEventListener("keydown", (event) => {
++          if (
++            !event.ctrlKey ||
++            !event.shiftKey ||
++            event.key.toLowerCase() !== "d" ||
++            (event.target instanceof HTMLElement &&
++              (event.target.isContentEditable ||
++                event.target.closest("input, textarea, select, [contenteditable]")))
++          ) {
++            return;
++          }
++
++          event.preventDefault();
++          event.stopImmediatePropagation();
++          if (window.DevInspect) {
++            window.DevInspect.toggle();
++          } else {
++            loadInspector(true);
++          }
++        });
++      })();
++    </script>
+   </body>
+ </html>

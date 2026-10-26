@@ -14,7 +14,7 @@ Telegram-компонент из текущего Docker-пакета. Данн�
 
 Опубликованный preview — [APK 0.1.13-preview, versionCode 21](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.13-preview-code21-release-dcbde1d79e94.apk),
 SHA-256 `dcbde1d79e94994e382d0cdf854990afaa8fd36ab5ac4cff09dfcd83db891805`,
-размер 51,421,007 байт. Он использует runtime `28a72a31da972bf0` из source
+размер 51,421,007 байт. Для новой установки он указывает runtime `28a72a31da972bf0` из source
 commit `90445c71ab5ca6a6dbc91433046de54cea955e4f`; публичная загрузка runtime и
 APK прошла проверку SHA-256. Подпись runtime и извлечённое из APK
 Java-содержимое также проверены.
@@ -24,7 +24,10 @@ APK собран release-вариантом с внешним Gradle version/sig
 исходников по-прежнему задают versionCode 18 и `0.1.10-notification` как
 developer baseline. Содержимое приватного override в репозитории не хранится.
 APK подписан тем же сертификатом, что code20; `debuggable` выключен. Preview
-не переводили в stable и не устанавливали на P30; физическая приёмка **NOT RUN**.
+не переводили в stable. На тестовом P30 APK code21 был установлен, затем обновлён
+до приватного QA code23. Проверка запуска сервера прошла; голосовая приёмка
+ещё не завершена. Обновление APK сохранило существующий runtime
+`2f94e2e4d62bf401`: версия APK сама по себе не подтверждает обновление frontend.
 Перед preview-обновлением сохраните резервную копию данных.
 
 Runtime работает в PRoot от имени приложения. UID 0 внутри гостя не даёт root
@@ -59,6 +62,7 @@ fi
 python3 habab/android/tools/package_runtime.py \
   --signing-key "$HOME/.local/share/habab-android/release-signing.pem" \
   --source-revision "$(git rev-parse HEAD)" \
+  --frontend-candidate /path/to/fresh-native-frontend-candidate \
   --public-base https://habab-demo.wpmix.net/downloads/android
 
 ANDROID_HOME=/opt/android-sdk gradle --no-daemon -p habab/android \
@@ -68,7 +72,19 @@ python3 -m unittest discover -s habab/android/tests -v
 
 При сборке runtime используйте полный SHA исходного Git-коммита. Он попадает
 в подписанный manifest как `sourceRevision`; release candidate сверяет
-`sourceFiles` с деревом этого коммита.
+`sourceFiles` с деревом этого коммита. Перед упаковкой обязательно заново
+скомпилируйте native frontend из того же SHA через **Habab native frontend
+candidate** и скачайте его wheel вместе с `manifest.json` в каталог
+`--frontend-candidate`. Упаковщик проверяет SHA/размер wheel и чистый source SHA;
+без этого каталога он отказывается от сборки, не скачивая старый опубликованный
+frontend. Подписанный runtime хранит SHA wheel, producer manifest и установленного
+payload. Обычный [Android candidate workflow](../docs/RELEASE-CANDIDATE.md)
+выполняет эту цепочку автоматически. В workflow явно указываются новые
+`android_version_code` и `android_version_name`; они передаются в Gradle и
+сверяются с подписанным APK через `aapt`. Новый код выбирает оператор выше
+уже выпущенных/установленных сборок; значения Gradle по умолчанию для релиза
+не используются. URL внутри APK указывает на manifest именно нового runtime.
+Это не является проверкой обновления уже установленного на телефоне runtime.
 
 Ключ создаётся один раз: при повторной сборке используйте существующий файл.
 `package_runtime.py` создаёт архив, JSON-манифест и подпись `.json.sig` в
@@ -151,7 +167,7 @@ PRoot также оставляет пустые каталоги bind mount с 
 ключами вместо него запрещено. Наши исходники копируются из
 `habab/distribution/`; манифест фиксирует хеши каждого включённого файла.
 Для Habab 0.3 также устанавливается закреплённый frontend wheel из
-`native-frontend-release.json`: сборщик проверяет версию для Core, SHA-256 и
+`--frontend-candidate`: сборщик проверяет тот же чистый source SHA, версию для Core, SHA-256 и
 размер загрузки, затем устанавливает универсальный пакет для гостевого
 Python. Подписанный выпуск содержит хеш установленного frontend вместе с
 метаданными; `verify_runtime.py` проверяет его по полному архиву.
@@ -190,8 +206,9 @@ OpenAI сохраняет пары реплик с идентификатора�
 `record_voice_event`; без него сервер отклоняет запуск Gemini до запроса токена.
 
 Выключенный экран поддерживается отдельной foreground-службой; полностью
-выключенный телефон слушать не может. Опубликованный Android preview code21
-ещё не устанавливали на P30; голосовые и физические проверки **NOT RUN**.
+выключенный телефон слушать не может. На тестовом P30 сейчас проверяется
+приватный QA code23 с сохранённым прежним runtime; эта установка не подтверждает
+свежую frontend-сборку или успешный голосовой разговор.
 Отдельно нужно проверить фразу, громкий динамик, эхо, перебивание, завершение
 и работу с выключенным экраном. Серверные тесты с синтетической речью этого
 не подтверждают. Последнее подтверждённое подключение, провайдер и голосовая
@@ -232,7 +249,8 @@ Habab в Android launcher нет. [Сервер Habab и хранение клю
 ```sh
 python3 habab/android/tools/verify_runtime.py \
   habab/android/dist/release-RELEASE_ID.json \
-  --public-key habab/android/app/src/main/assets/release/trusted-key.der
+  --public-key habab/android/app/src/main/assets/release/trusted-key.der \
+  --require-serialx-unix
 
 # Распаковка полного архива тем же Java-кодом, который используется в APK.
 HABAB_RUNTIME_ARCHIVE="$PWD/habab/android/dist/habab-runtime-RELEASE_ID-arm64.tgz" \
@@ -242,8 +260,9 @@ HABAB_RUNTIME_ARCHIVE="$PWD/habab/android/dist/habab-runtime-RELEASE_ID-arm64.tg
 
 Ожидается `result: PASS` у проверяющего скрипта и успешное выполнение Java
 тестов. Проверяются подпись, размер и SHA-256 архива, наличие Core, Node и
-OpenCode, снимок исходников Habab и отсутствие приватных каталогов. Java-тесты
-проверяют пути, ссылки, права файлов и распаковку реального окружения.
+OpenCode, снимок исходников Habab, хэши обработчика `unix://` для serialx 1.11.0
+и отсутствие приватных каталогов. Java-тесты проверяют пути, ссылки, права
+файлов и распаковку реального окружения.
 
 На HTTPS-хостинг загрузите только проверенные `.tgz`, `.json`, `.json.sig`
 и APK. SDK, `build/`, конфигурацию домашнего сервера, ключи подписи и резервные

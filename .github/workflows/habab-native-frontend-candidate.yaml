@@ -11,14 +11,28 @@ on:
       wheel_version:
         description: "Habab wheel version for Core 2026.10.2"
         required: true
-        default: 20260930.4+habab.13
+        default: 20260930.4+habab.14
         type: string
+
+  workflow_call:
+    inputs:
+      source_ref:
+        required: true
+        type: string
+      wheel_version:
+        required: false
+        default: 20260930.4+habab.14
+        type: string
+    outputs:
+      artifact_name:
+        description: Verified wheel and provenance manifest
+        value: ${{ jobs.build-candidate.outputs.artifact_name }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: habab-native-frontend-candidate
+  group: habab-native-frontend-candidate-${{ github.workflow }}
   queue: max
 
 jobs:
@@ -81,6 +95,8 @@ jobs:
     needs: resolve-source
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      artifact_name: ${{ steps.artifact.outputs.name }}
     env:
       NODE_OPTIONS: --max-old-space-size=4096
       SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
@@ -138,7 +154,7 @@ jobs:
       - name: Prepare pinned upstream source and ordered patch bundle
         env:
           UPSTREAM_REVISION: 26690e06b0bf64a1487929245c32842ef92c62b5
-          PATCH_BUNDLE_SHA256: cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a
+          PATCH_BUNDLE_SHA256: 66ed3fdfe8fd6fed6494837bbc6777b1c36bc33e021684be41a493d510b88a99
         shell: bash
         run: |
           set -euo pipefail
@@ -148,9 +164,12 @@ jobs:
           [[ "$(sha256sum "$producer/native-test-fixes.patch" | cut -d' ' -f1)" == \
             95c2f19010624cf5d9b53157bf5e06e74bedf905bbac79ae417177baa80898f3 ]]
           [[ "$(sha256sum "$producer/native-branding.patch" | cut -d' ' -f1)" == \
-            b2c03dc54b90747c6e29f23448f95e115d096bfb93137ca1548f4f7538695a54 ]]
+            a4512cfa0f49677838c3b862d43169efe3d8eb3f8112338ea3de3774e812b6c5 ]]
+          [[ "$(sha256sum "$producer/dev-inspector.patch" | cut -d' ' -f1)" == \
+            05accce46eb2aeafbdfdb64157a07a7ce89af9b01224fa0ae4249a1e4df047b1 ]]
           cat "$producer/bridge.patch" "$producer/native-test-fixes.patch" \
-            "$producer/native-branding.patch" > "$RUNNER_TEMP/native-frontend-candidate.patch"
+            "$producer/native-branding.patch" "$producer/dev-inspector.patch" \
+            > "$RUNNER_TEMP/native-frontend-candidate.patch"
           [[ "$(sha256sum "$RUNNER_TEMP/native-frontend-candidate.patch" | cut -d' ' -f1)" == \
             "$PATCH_BUNDLE_SHA256" ]]
 
@@ -214,7 +233,7 @@ jobs:
           HABAB_NATIVE_FRONTEND_WORKTREE: ${{ runner.temp }}/native-frontend-upstream
           HABAB_NATIVE_FRONTEND_TRANSLATIONS: ${{ runner.temp }}/native-frontend-translations
           HABAB_NATIVE_FRONTEND_PATCH_FILE: ${{ runner.temp }}/native-frontend-candidate.patch
-          HABAB_NATIVE_FRONTEND_PATCH_SHA: cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a
+          HABAB_NATIVE_FRONTEND_PATCH_SHA: 66ed3fdfe8fd6fed6494837bbc6777b1c36bc33e021684be41a493d510b88a99
           HABAB_NATIVE_FRONTEND_WHEEL_VERSION: ${{ needs.resolve-source.outputs.wheel_version }}
           HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT: ${{ runner.temp }}/native-frontend-artifacts
           HABAB_NATIVE_FRONTEND_RETENTION_STATE: ${{ runner.temp }}/retention-not-initialized.json
@@ -235,11 +254,12 @@ jobs:
       - name: Verify wheel and write candidate manifest
         env:
           UPSTREAM_REVISION: 26690e06b0bf64a1487929245c32842ef92c62b5
-          PATCH_BUNDLE_SHA256: cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a
+          PATCH_BUNDLE_SHA256: 66ed3fdfe8fd6fed6494837bbc6777b1c36bc33e021684be41a493d510b88a99
           CATALOG_SHA256: 154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce
           BRIDGE_PATCH_SHA256: d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092
           TEST_PATCH_SHA256: 95c2f19010624cf5d9b53157bf5e06e74bedf905bbac79ae417177baa80898f3
-          BRANDING_PATCH_SHA256: b2c03dc54b90747c6e29f23448f95e115d096bfb93137ca1548f4f7538695a54
+          BRANDING_PATCH_SHA256: a4512cfa0f49677838c3b862d43169efe3d8eb3f8112338ea3de3774e812b6c5
+          INSPECTOR_PATCH_SHA256: 05accce46eb2aeafbdfdb64157a07a7ce89af9b01224fa0ae4249a1e4df047b1
           HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT: ${{ runner.temp }}/native-frontend-artifacts
         shell: bash
         run: |
@@ -258,14 +278,15 @@ jobs:
           python - "$candidate/manifest.json" "$wheel_name" "$wheel_sha" \
             "$wheel_bytes" "$SOURCE_REVISION" "$WHEEL_VERSION" \
             "$UPSTREAM_REVISION" "$PATCH_BUNDLE_SHA256" "$CATALOG_SHA256" \
-            "$BRIDGE_PATCH_SHA256" "$TEST_PATCH_SHA256" "$BRANDING_PATCH_SHA256" <<'PY'
+            "$BRIDGE_PATCH_SHA256" "$TEST_PATCH_SHA256" \
+            "$BRANDING_PATCH_SHA256" "$INSPECTOR_PATCH_SHA256" <<'PY'
           import json
           import sys
           from pathlib import Path
 
           (path, wheel_name, wheel_sha, wheel_bytes, source_revision, wheel_version,
            upstream_revision, patch_sha, catalog_sha, bridge_sha, test_sha,
-           branding_sha) = sys.argv[1:]
+           branding_sha, inspector_sha) = sys.argv[1:]
           manifest = {
               "artifact": wheel_name,
               "artifact_bytes": int(wheel_bytes),
@@ -279,6 +300,7 @@ jobs:
                   "bridge_sha256": bridge_sha,
                   "test_fixes_sha256": test_sha,
                   "branding_sha256": branding_sha,
+                  "dev_inspector_sha256": inspector_sha,
                   "bundle_sha256": patch_sha,
               },
               "translation_catalog_sha256": catalog_sha,
@@ -292,6 +314,11 @@ jobs:
           }
           Path(path).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
           PY
+
+      - name: Record artifact name
+        id: artifact
+        shell: bash
+        run: echo "name=habab-native-frontend-${WHEEL_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Upload candidate artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
