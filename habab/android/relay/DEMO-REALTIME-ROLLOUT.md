@@ -62,6 +62,15 @@ process, directory, socket, or Nginx file has been changed by preparing them.
    confirm that the public route reaches the new relay; it should be rejected
    before any upstream connection.
 
+## Boot persistence candidate
+
+The prepared `systemd/habab-demo-realtime-relay.service` is scoped to this one
+PM2 process and is not installed or enabled yet. It uses the owner-only,
+immutable `/root/.local/share/habab-demo-realtime-relay/pm2/realtime-d411.config.cjs`
+outside the checkout. For a later relay release, verify the new private config
+path, ownership, permissions and digest, then update the unit and its static
+test together. Do not use global `pm2 save` to persist this service.
+
 ## Cleanup and rollback
 
 To disable the candidate, first remove the exact Nginx location and reload
