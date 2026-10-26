@@ -4,6 +4,8 @@ import { fireEvent } from "../../src/common/dom/fire_event";
 
 const VOICE_AUTH_TYPE = "habab.demo.openai.auth.v1";
 const SAMPLE_RATE = 24000;
+const VOICE_PRIVACY_NOTICE =
+  "Микрофон включится после нажатия. Звук проходит через сервер Habab в OpenAI.";
 const LIGHTS = new Set([
   "light.living_room_floor_lamp",
   "light.living_room_spotlights",
@@ -69,7 +71,7 @@ class HaDemoRealtimeVoice extends LitElement {
       z-index: 999;
       left: max(16px, env(safe-area-inset-left));
       inset-block-end: max(16px, env(safe-area-inset-bottom));
-      width: min(360px, calc(100vw - 32px));
+      width: auto;
       color: var(--primary-text-color, #212121);
       font: 14px Roboto, Arial, sans-serif;
     }
@@ -80,44 +82,132 @@ class HaDemoRealtimeVoice extends LitElement {
       }
     }
     section {
+      position: relative;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: var(--ha-space-2, 8px);
+    }
+    button,
+    summary {
       box-sizing: border-box;
-      padding: 16px;
-      border-radius: 14px;
+      min-width: 48px;
+      min-height: 48px;
+      border: 0;
+      border-radius: 12px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--ha-space-2, 8px);
+      padding: 0 var(--ha-space-3, 12px);
+      color: var(--text-primary-color, #fff);
+      background: var(--primary-color, #03a9f4);
+      font-weight: 600;
+    }
+    button svg,
+    summary svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    button[disabled] { opacity: 0.55; cursor: default; }
+    button:focus-visible,
+    summary:focus-visible {
+      outline: 3px solid var(--primary-color, #007a9e);
+      outline-offset: 2px;
+    }
+    details { position: relative; }
+    summary {
+      display: grid;
+      place-items: center;
+      list-style: none;
+      background: var(--secondary-background-color, #eee);
+      color: var(--primary-text-color, #212121);
+    }
+    summary::-webkit-details-marker { display: none; }
+    .details-panel {
+      position: absolute;
+      z-index: 1;
+      left: 0;
+      inset-block-end: calc(100% + var(--ha-space-2, 8px));
+      box-sizing: border-box;
+      width: min(320px, calc(100vw - 32px));
+      max-height: min(60dvh, 320px);
+      overflow: auto;
+      padding: var(--ha-space-4, 16px);
+      border-radius: 12px;
+      color: var(--primary-text-color, #212121);
       background: var(--card-background-color, #fff);
       box-shadow: 0 4px 24px #0003;
     }
-    p { margin: 8px 0; line-height: 1.45; }
+    .details-panel p { margin: 8px 0; line-height: 1.45; }
     .privacy { color: var(--secondary-text-color, #5f6368); font-size: 12px; }
     .transcript { max-height: 120px; overflow: auto; white-space: pre-wrap; }
-    .actions { display: flex; gap: 8px; margin-top: 12px; }
-    button {
-      min-height: 44px;
-      padding: 0 16px;
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
       border: 0;
-      border-radius: 8px;
-      color: var(--text-primary-color, #fff);
-      background: var(--primary-color, #03a9f4);
-      font: inherit;
-      font-weight: 600;
-      cursor: pointer;
     }
-    button[disabled] { opacity: 0.55; cursor: default; }
-    button.secondary { color: var(--primary-text-color, #212121); background: var(--secondary-background-color, #eee); }
+    @media (max-width: 720px) {
+      .details-panel {
+        inset-block-start: calc(100% + var(--ha-space-2, 8px));
+        inset-block-end: auto;
+      }
+    }
   `;
 
   render() {
-    return html`<section aria-label="Голосовой помощник демо-квартиры">
-      <strong>${this._status}</strong>
-      <p class="privacy">Микрофон включится после нажатия. Звук проходит через сервер Habab в OpenAI.</p>
-      ${this._transcript ? html`<p class="transcript" aria-live="polite">${this._transcript}</p>` : ""}
-      <div class="actions">
-        ${this._running
-          ? html`<button class="secondary" @click=${this._stopFromClick}>Остановить</button>`
-          : html`<button ?disabled=${this._starting} @click=${this._start}>
-              ${this._starting ? "Подключаемся…" : "Начать разговор"}
-            </button>`}
-      </div>
-    </section>`;
+    const actionLabel = this._running
+      ? "Остановить"
+      : this._starting
+        ? "Подключаемся…"
+        : "Начать разговор";
+    return html`
+      <section aria-label="Голосовой помощник демо-квартиры">
+        <div class="controls">
+          <button
+            aria-describedby=${this._running ? "" : "voice-privacy"}
+            title=${actionLabel}
+            aria-label=${actionLabel}
+            ?disabled=${this._starting}
+            @click=${this._running ? this._stopFromClick : this._start}
+          >
+            ${this._running
+              ? html`<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>`
+              : html`<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"></path></svg>`}
+            ${actionLabel}
+          </button>
+          <details>
+            <summary aria-label="Голосовой помощник демо-квартиры" title="Голосовой помощник демо-квартиры">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5m0-8h.01"></path></svg>
+            </summary>
+            <div class="details-panel">
+              <strong>${this._status}</strong>
+              <p class="privacy">${VOICE_PRIVACY_NOTICE}</p>
+              ${this._transcript ? html`<p class="transcript" aria-live="polite">${this._transcript}</p>` : ""}
+            </div>
+          </details>
+        </div>
+        <span class="visually-hidden" id="voice-privacy">${VOICE_PRIVACY_NOTICE}</span>
+        <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">${this._status}</span>
+      </section>
+    `;
   }
 
   disconnectedCallback() {

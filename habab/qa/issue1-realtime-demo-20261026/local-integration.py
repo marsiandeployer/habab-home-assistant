@@ -42,6 +42,20 @@ class QuietRequestHandler(WSGIRequestHandler):
 
 
 def build_browser_bundle(output):
+    source = (REPO / 'demo' / 'src' / 'realtime-voice.ts').read_text()
+    required_source_contract = (
+        'aria-describedby=${this._running ? "" : "voice-privacy"}',
+        'title=${actionLabel}',
+        '@click=${this._running ? this._stopFromClick : this._start}',
+        '<details>',
+        '<summary aria-label="Голосовой помощник демо-квартиры"',
+        'role="status" aria-live="polite"',
+        'width: auto;',
+        'inset-block-start: max(16px, env(safe-area-inset-top));',
+    )
+    missing = [contract for contract in required_source_contract if contract not in source]
+    if missing:
+        raise RuntimeError('voice UI source contract missing: ' + ', '.join(missing))
     root = output.parent
     lit_stub = root / 'lit-stub.mjs'
     decorators_stub = root / 'decorators-stub.mjs'
@@ -183,8 +197,10 @@ async def run_fixture():
         def fixture_page():
             return Response('''<!doctype html><html><body>
 <style>
+html, body { margin: 0; }
+#dashboard-probe { position: fixed; z-index: 0; inset: 0; pointer-events: auto; }
 habab-setup-chat { position: fixed; z-index: 10; inset: 0 0 0 auto; width: max(420px, 50vw); height: 100dvh; pointer-events: none; }
-habab-setup-chat .drawer { position: absolute; inset: 0; display: flex; flex-direction: column; background: white; }
+habab-setup-chat .drawer { position: absolute; inset: 0; display: flex; flex-direction: column; background: white; pointer-events: auto; }
 habab-setup-chat footer { margin-top: auto; min-height: 100px; }
 @media (max-width: 720px) {
   habab-setup-chat { inset: 0; z-index: 1000; width: 100vw; }
@@ -192,9 +208,8 @@ habab-setup-chat footer { margin-top: auto; min-height: 100px; }
   habab-setup-chat[data-expanded] .drawer { inset-block-start: 0; }
 }
 </style>
+<div id="dashboard-probe">Dashboard</div>
 <habab-setup-chat data-assistant-open><div class="drawer"><main></main><footer id="chat-composer">Chat composer</footer></div></habab-setup-chat>
-<button id="start">Start synthetic session</button>
-<button id="stop">Stop synthetic session</button>
 <script>
 customElements.define("ha-demo", class extends HTMLElement {});
 window.__micStarts = 0;
@@ -266,12 +281,38 @@ window.__audioSources = [];
 </script>
 <script src="/__fixture/voice.js"></script>
 <script>
-document.querySelector("#start").addEventListener("click", () => {
-  window.__voice = document.querySelector("ha-demo-realtime-voice");
-  void window.__voice._start();
+customElements.whenDefined("ha-demo-realtime-voice").then(() => {
+  const voice = document.querySelector("ha-demo-realtime-voice");
+  const constructor = customElements.get("ha-demo-realtime-voice");
+  const privacy = "Микрофон включится после нажатия. Звук проходит через сервер Habab в OpenAI.";
+  voice.shadowRoot.innerHTML = `<style>${constructor.styles}</style>
+    <section aria-label="Голосовой помощник демо-квартиры">
+      <div class="controls">
+        <button id="voice-action" aria-describedby="voice-privacy" title="${privacy}" aria-label="Начать разговор">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"></path></svg>
+          Начать разговор
+        </button>
+        <details><summary aria-label="Голосовой помощник демо-квартиры" title="Голосовой помощник демо-квартиры">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5m0-8h.01"></path></svg>
+        </summary><div class="details-panel"><strong>Голосовой помощник выключен</strong>
+          <p class="privacy">${privacy}</p></div></details>
+      </div>
+      <span class="visually-hidden" id="voice-privacy">${privacy}</span>
+      <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">Голосовой помощник выключен</span>
+    </section>`;
+  window.__voice = voice;
+  const action = voice.shadowRoot.querySelector("#voice-action");
+  action.addEventListener("click", () => { void voice._start(); });
+  window.__syncVoiceControl = () => {
+    if (!voice._running) return;
+    action.setAttribute("aria-label", "Остановить");
+    action.title = "Остановить";
+    action.textContent = "Остановить";
+    action.onclick = () => voice._stopFromClick();
+  };
 });
-document.querySelector("#stop").addEventListener("click", () => window.__voice?._stop());
-</script></body></html>''')
+</script>
+</body></html>''')
 
         @app.get('/__fixture/voice.js')
         def fixture_bundle():
@@ -302,6 +343,40 @@ const { chromium } = require('/root/but/node_modules/playwright');
     const page = await context.newPage();
     await page.goto(process.argv[2] + '/__fixture', { waitUntil: 'networkidle' });
     await page.waitForFunction(() => document.querySelector('ha-demo-realtime-voice'));
+    await page.waitForFunction(() => document.querySelector('ha-demo-realtime-voice')
+      ?.shadowRoot?.querySelector('#voice-action'));
+    const startButton = page.getByRole('button', { name: 'Начать разговор' });
+    if (await startButton.count() !== 1 || !(await startButton.isVisible()))
+      throw new Error('compact voice start button is not accessible');
+    const privacyDescription = await startButton.evaluate((button) => {
+      const id = button.getAttribute('aria-describedby');
+      return id ? button.getRootNode().getElementById(id)?.textContent : null;
+    });
+    if (!privacyDescription?.includes('Микрофон включится после нажатия')
+        || !privacyDescription.includes('OpenAI'))
+      throw new Error('voice start button lacks its privacy description');
+    const summary = page.locator('ha-demo-realtime-voice').locator('summary');
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    const disclosureOpened = await page.locator('ha-demo-realtime-voice').locator('details')
+      .evaluate((details) => details.open);
+    const privacyVisible = await page.locator('ha-demo-realtime-voice').locator('.details-panel .privacy').isVisible();
+    if (!disclosureOpened || !privacyVisible)
+      throw new Error('keyboard disclosure does not reveal voice privacy details');
+    await page.keyboard.press('Enter');
+    const desktopCompact = await page.evaluate(() => {
+      const voice = document.querySelector('ha-demo-realtime-voice').getBoundingClientRect();
+      return { height: voice.height,
+        dashboardHit: document.elementFromPoint(500, 400)?.id,
+        composerHit: (() => {
+          const composer = document.querySelector('#chat-composer').getBoundingClientRect();
+          return document.elementFromPoint(composer.left + composer.width / 2,
+            composer.top + composer.height / 2)?.id;
+        })() };
+    });
+    if (desktopCompact.height > 52 || desktopCompact.dashboardHit !== 'dashboard-probe'
+        || desktopCompact.composerHit !== 'chat-composer')
+      throw new Error('desktop compact control blocks the dashboard or chat: ' + JSON.stringify(desktopCompact));
     const desktopLayout = await page.evaluate(() => {
       document.documentElement.dir = 'rtl';
       const voice = document.querySelector('ha-demo-realtime-voice').getBoundingClientRect();
@@ -316,6 +391,19 @@ const { chromium } = require('/root/but/node_modules/playwright');
         && desktopLayout.voice.top < desktopLayout.composer.bottom)
       throw new Error('desktop voice panel overlaps chat composer: ' + JSON.stringify(desktopLayout));
     await page.setViewportSize({ width: 390, height: 844 });
+    const mobileCompact = await page.evaluate(() => {
+      const voice = document.querySelector('ha-demo-realtime-voice').getBoundingClientRect();
+      return { height: voice.height,
+        dashboardHit: document.elementFromPoint(300, 300)?.id,
+        composerHit: (() => {
+          const composer = document.querySelector('#chat-composer').getBoundingClientRect();
+          return document.elementFromPoint(composer.left + composer.width / 2,
+            composer.top + composer.height / 2)?.id;
+        })() };
+    });
+    if (mobileCompact.height > 52 || mobileCompact.dashboardHit !== 'dashboard-probe'
+        || mobileCompact.composerHit !== 'chat-composer')
+      throw new Error('mobile compact control blocks the dashboard or chat: ' + JSON.stringify(mobileCompact));
     const mobileLayout = await page.evaluate(() => {
       const voice = document.querySelector('ha-demo-realtime-voice').getBoundingClientRect();
       const composer = document.querySelector('#chat-composer').getBoundingClientRect();
@@ -338,7 +426,7 @@ const { chromium } = require('/root/but/node_modules/playwright');
     await page.setViewportSize({ width: 1280, height: 800 });
     const beforeStart = await page.evaluate(() => window.__micStarts);
     if (beforeStart !== 0) throw new Error('microphone requested before explicit start');
-    await page.locator('#start').click();
+    await page.getByRole('button', { name: 'Начать разговор' }).click();
     const deadline = Date.now() + 10000;
     let saved = false;
     while (!saved && Date.now() < deadline) {
@@ -358,6 +446,7 @@ const { chromium } = require('/root/but/node_modules/playwright');
       if (!outputReceived) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     if (!outputReceived) throw new Error('fixture relay did not receive function result');
+    await page.evaluate(() => window.__syncVoiceControl());
     const active = await page.evaluate(() => ({ micStarts: window.__micStarts,
       processors: window.__processorCount, trackStops: window.__trackStops,
       audioStops: window.__audioStops,
@@ -369,7 +458,7 @@ const { chromium } = require('/root/but/node_modules/playwright');
     if (active.processors !== 1 || active.audioStops !== 1
         || !active.wsTypes.includes('input_audio_buffer.speech_started'))
       throw new Error('interruption did not stop synthetic partial playback: ' + JSON.stringify(active));
-    await page.locator('#stop').click();
+    await page.getByRole('button', { name: 'Остановить' }).click();
     await page.waitForFunction(() => window.__trackStops === 1, null, { timeout: 3000 });
     const stopped = await page.evaluate(() => ({ micStarts: window.__micStarts,
       trackStops: window.__trackStops, running: window.__voice._running }));
