@@ -6,6 +6,10 @@ if [ -n "$(git status --porcelain)" ]; then
   echo 'Commit or stash local changes before updating upstream.' >&2
   exit 1
 fi
+if [ "$(git branch --show-current)" != 'main' ]; then
+  echo 'Switch to main before preparing an upstream update branch.' >&2
+  exit 1
+fi
 if [ "$(git remote get-url upstream)" != 'https://github.com/home-assistant/frontend.git' ]; then
   echo 'Unexpected upstream remote; inspect it before updating.' >&2
   exit 1
