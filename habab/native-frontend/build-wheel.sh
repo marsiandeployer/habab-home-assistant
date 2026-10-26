@@ -13,7 +13,7 @@ artifact_root="${HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT:-$repo_root/habab/public/do
 retention_tool="${RELEASE_RETENTION_TOOL:-/root/tools/release-retention/retention.py}"
 retention_state="${HABAB_NATIVE_FRONTEND_RETENTION_STATE:-/root/tools/release-retention/states/habab-native-frontend.json}"
 wheel_name="home_assistant_frontend-${wheel_version}-py3-none-any.whl"
-staging="$(mktemp -d /root/.local/share/habab-native-frontend-wheel.XXXXXX)"
+staging="$(mktemp -d "${TMPDIR:-/tmp}/habab-native-frontend-wheel.XXXXXX")"
 pyproject_backup="$staging/pyproject.toml"
 wheel_tmp=""
 
@@ -106,9 +106,20 @@ translation_catalog_sha() {
 git -C "$worktree" apply --check "$patch_file"
 git -C "$worktree" apply "$patch_file"
 
-export NVM_DIR="${NVM_DIR:-/root/.nvm}"
-source "$NVM_DIR/nvm.sh"
-nvm use 24.21.0 >/dev/null
+if [[ -f "${NVM_DIR:-/root/.nvm}/nvm.sh" ]]; then
+  export NVM_DIR="${NVM_DIR:-/root/.nvm}"
+  source "$NVM_DIR/nvm.sh"
+  nvm use 24.21.0 >/dev/null
+else
+  installed_node_version="$(node --version 2>/dev/null)" || {
+    echo "Node.js 24.21.0 is required; node is unavailable" >&2
+    exit 1
+  }
+  [[ "$installed_node_version" == "v24.21.0" ]] || {
+    echo "Expected Node.js v24.21.0, found $installed_node_version" >&2
+    exit 1
+  }
+fi
 export COREPACK_HOME="${COREPACK_HOME:-/root/.local/share/habab-native-frontend-tooling/corepack}"
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 export SOURCE_DATE_EPOCH="$(git -C "$worktree" show -s --format=%ct HEAD)"

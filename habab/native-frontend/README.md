@@ -133,6 +133,43 @@ bash habab/native-frontend/build-wheel.sh
 This recipe is documentation only; build, release, and runtime acceptance were
 not run for `.13`.
 
+## Manual CI candidate
+
+`.github/workflows/habab-native-frontend-candidate.yaml` builds an unpublished
+candidate artifact from the selected Habab source. It is manual-only and uses
+the public `ubuntu-24.04` runner (4 vCPUs and 16 GiB RAM). Choose `main` or a
+full commit SHA that is an ancestor of the current `origin/main`; the workflow
+resolves and records the exact source SHA. The wheel version defaults to
+`20260930.4+habab.13` and accepts only the `20260930.4+habab.N` form.
+
+The job checks out only the native frontend producer and font QA files, fetches
+upstream frontend commit `26690e06b0bf64a1487929245c32842ef92c62b5`, and
+verifies the ordered bridge, test-fix, and branding patches against their
+recorded hashes. It downloads the official
+[Home Assistant frontend 20260930.4 wheel from PyPI](https://pypi.org/project/home-assistant-frontend/20260930.4/),
+checks SHA-256 `05c207fb6ce6720d1782766b54a67acdf4bab83f133a562204b972d062862fc8`,
+and extracts only its translation tree. The builder checks the extracted
+Russian catalog against the pinned catalog fingerprint above.
+
+The build uses Node `24.21.0`, pnpm `11.28.0`, Python `3.14`, and the upstream
+`pyproject.toml` build backend requirement `setuptools~=77.0` in an isolated
+Python build environment. The existing `build-wheel.sh` runs lint, formatting,
+focused tests, type checks, font checks, and the wheel build. Node heap is
+limited to 4 GiB; the workflow has a 60-minute timeout and queues candidate
+runs without cancelling an active run.
+
+On success, the workflow uploads the full wheel and a small provenance manifest
+as a GitHub Actions artifact retained for one day. Repository readers can
+download this artifact. The manifest records the exact Habab and upstream
+revisions, each patch and bundle hash, translation catalog fingerprint, wheel
+digest and size, and successful builder checks. It records that the selected
+source checkout was clean before the build. Producer inputs are copied to an
+isolated `RUNNER_TEMP` snapshot, so generated QA output cannot dirty the
+selected checkout. The worktree, translations, font report, and builder
+artifact root live under `RUNNER_TEMP`; the retention state is intentionally
+absent. This workflow does not publish to the public download directory or
+update release pointers.
+
 ## Rebuild
 
 Use a fresh detached worktree, pinned Node and pnpm versions, and the matching

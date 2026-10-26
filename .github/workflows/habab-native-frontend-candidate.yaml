@@ -1,0 +1,303 @@
+name: Habab native frontend candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "main or a full commit SHA that is an ancestor of origin/main"
+        required: true
+        default: main
+        type: string
+      wheel_version:
+        description: "Habab wheel version for Core 2026.10.2"
+        required: true
+        default: 20260930.4+habab.13
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: habab-native-frontend-candidate
+  queue: max
+
+jobs:
+  resolve-source:
+    name: Validate candidate inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      source_revision: ${{ steps.resolve.outputs.source_revision }}
+      wheel_version: ${{ steps.resolve.outputs.wheel_version }}
+    steps:
+      - name: Resolve exact source and validate wheel version
+        id: resolve
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          WHEEL_VERSION: ${{ inputs.wheel_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$WHEEL_VERSION" =~ ^20260930\.4\+habab\.[0-9]+$ ]] || {
+            echo '::error::Wheel version must use 20260930.4+habab.N'
+            exit 1
+          }
+
+          git init --quiet "$RUNNER_TEMP/source-resolution"
+          git -C "$RUNNER_TEMP/source-resolution" remote add origin \
+            "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -C "$RUNNER_TEMP/source-resolution" config extensions.partialClone origin
+          git -C "$RUNNER_TEMP/source-resolution" config remote.origin.promisor true
+          git -C "$RUNNER_TEMP/source-resolution" config remote.origin.partialclonefilter blob:none
+          git -C "$RUNNER_TEMP/source-resolution" fetch --filter=blob:none --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+
+          if [[ "$SOURCE_REF" == main ]]; then
+            resolved="$(git -C "$RUNNER_TEMP/source-resolution" rev-parse refs/remotes/origin/main^{commit})"
+          elif [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            resolved="$(git -C "$RUNNER_TEMP/source-resolution" rev-parse --verify "$SOURCE_REF^{commit}")" || {
+              echo '::error::The requested SHA is not present in origin/main history'
+              exit 1
+            }
+            [[ "$resolved" == "$SOURCE_REF" ]] || {
+              echo '::error::The requested SHA did not resolve exactly'
+              exit 1
+            }
+          else
+            echo '::error::source_ref must be main or a full lowercase 40-character SHA'
+            exit 1
+          fi
+
+          if ! git -C "$RUNNER_TEMP/source-resolution" merge-base --is-ancestor \
+            "$resolved" refs/remotes/origin/main; then
+            echo '::error::Selected source is not an ancestor of current origin/main'
+            exit 1
+          fi
+          printf 'source_revision=%s\n' "$resolved" >> "$GITHUB_OUTPUT"
+          printf 'wheel_version=%s\n' "$WHEEL_VERSION" >> "$GITHUB_OUTPUT"
+
+  build-candidate:
+    name: Build unpublished wheel candidate
+    needs: resolve-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NODE_OPTIONS: --max-old-space-size=4096
+      SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+      WHEEL_VERSION: ${{ needs.resolve-source.outputs.wheel_version }}
+    steps:
+      - name: Check out selected Habab producer files
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-source.outputs.source_revision }}
+          path: producer
+          persist-credentials: false
+          sparse-checkout: |
+            habab/native-frontend
+            habab/qa/native-font-assets
+          sparse-checkout-cone-mode: true
+
+      - name: Verify exact clean producer checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git -C producer rev-parse HEAD)" == "$SOURCE_REVISION" ]]
+          git -C producer diff --quiet
+          git -C producer diff --cached --quiet
+          [[ -z "$(git -C producer status --porcelain --untracked-files=all)" ]]
+
+      - name: Copy producer inputs into an isolated runner temp directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          snapshot="$RUNNER_TEMP/habab-producer"
+          test ! -e "$snapshot"
+          mkdir -p "$snapshot/habab/qa"
+          cp -a producer/habab/native-frontend "$snapshot/habab/"
+          cp -a producer/habab/qa/native-font-assets "$snapshot/habab/qa/"
+
+      - name: Set up Node 24.21.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+          check-latest: false
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Prepare isolated Python wheel builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/native-wheel-venv"
+          "$RUNNER_TEMP/native-wheel-venv/bin/python" -m pip install \
+            --only-binary=:all: --disable-pip-version-check 'build==1.6.1'
+
+      - name: Prepare pinned upstream source and ordered patch bundle
+        env:
+          UPSTREAM_REVISION: 26690e06b0bf64a1487929245c32842ef92c62b5
+          PATCH_BUNDLE_SHA256: cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer="$RUNNER_TEMP/habab-producer/habab/native-frontend"
+          [[ "$(sha256sum "$producer/bridge.patch" | cut -d' ' -f1)" == \
+            d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092 ]]
+          [[ "$(sha256sum "$producer/native-test-fixes.patch" | cut -d' ' -f1)" == \
+            95c2f19010624cf5d9b53157bf5e06e74bedf905bbac79ae417177baa80898f3 ]]
+          [[ "$(sha256sum "$producer/native-branding.patch" | cut -d' ' -f1)" == \
+            b2c03dc54b90747c6e29f23448f95e115d096bfb93137ca1548f4f7538695a54 ]]
+          cat "$producer/bridge.patch" "$producer/native-test-fixes.patch" \
+            "$producer/native-branding.patch" > "$RUNNER_TEMP/native-frontend-candidate.patch"
+          [[ "$(sha256sum "$RUNNER_TEMP/native-frontend-candidate.patch" | cut -d' ' -f1)" == \
+            "$PATCH_BUNDLE_SHA256" ]]
+
+          upstream="$RUNNER_TEMP/native-frontend-upstream"
+          git init --quiet "$upstream"
+          git -C "$upstream" remote add origin https://github.com/home-assistant/frontend.git
+          git -C "$upstream" fetch --filter=blob:none --no-tags --depth=1 origin "$UPSTREAM_REVISION"
+          git -C "$upstream" checkout --quiet --detach FETCH_HEAD
+          [[ "$(git -C "$upstream" rev-parse HEAD)" == "$UPSTREAM_REVISION" ]]
+          [[ -z "$(git -C "$upstream" status --porcelain --untracked-files=all)" ]]
+
+      - name: Fetch and safely extract the pinned stock translation catalog
+        env:
+          WHEEL_SHA256: 05c207fb6ce6720d1782766b54a67acdf4bab83f133a562204b972d062862fc8
+          WHEEL_URL: https://files.pythonhosted.org/packages/b4/ea/2074829fb00d53061804eae66303e2900319c348b4a92f239de7a537d6dc/home_assistant_frontend-20260930.4-py3-none-any.whl
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$RUNNER_TEMP/home_assistant_frontend-20260930.4-py3-none-any.whl"
+          curl --fail --location --silent --show-error --max-time 300 "$WHEEL_URL" --output "$wheel"
+          printf '%s  %s\n' "$WHEEL_SHA256" "$wheel" | sha256sum --check --status
+          "$RUNNER_TEMP/native-wheel-venv/bin/python" - "$wheel" \
+            "$RUNNER_TEMP/native-frontend-translations" <<'PY'
+          from pathlib import Path, PurePosixPath
+          import stat
+          import sys
+          import zipfile
+
+          wheel = Path(sys.argv[1])
+          destination = Path(sys.argv[2])
+          prefix = "hass_frontend/static/translations/"
+          destination.mkdir(parents=True, exist_ok=False)
+          with zipfile.ZipFile(wheel) as archive:
+              for item in archive.infolist():
+                  if not item.filename.startswith(prefix):
+                      continue
+                  relative = PurePosixPath(item.filename[len(prefix):])
+                  if (relative.is_absolute() or not relative.parts
+                          or any(part in ("", ".", "..") for part in relative.parts)):
+                      raise SystemExit("Unsafe translation path in pinned wheel")
+                  mode = item.external_attr >> 16
+                  if stat.S_ISLNK(mode):
+                      raise SystemExit("Symlink in pinned wheel translation tree")
+                  target = destination.joinpath(*relative.parts)
+                  if item.is_dir():
+                      target.mkdir(parents=True, exist_ok=True)
+                      continue
+                  if mode and not stat.S_ISREG(mode):
+                      raise SystemExit("Special file in pinned wheel translation tree")
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(archive.read(item))
+          if not (destination / "app").is_dir():
+              raise SystemExit("Pinned wheel does not contain the expected app translations")
+          PY
+
+      - name: Run the existing frozen native frontend builder
+        env:
+          NVM_DIR: ${{ runner.temp }}/no-nvm
+          COREPACK_HOME: ${{ runner.temp }}/corepack
+          TMPDIR: ${{ runner.temp }}
+          HABAB_NATIVE_FRONTEND_WORKTREE: ${{ runner.temp }}/native-frontend-upstream
+          HABAB_NATIVE_FRONTEND_TRANSLATIONS: ${{ runner.temp }}/native-frontend-translations
+          HABAB_NATIVE_FRONTEND_PATCH_FILE: ${{ runner.temp }}/native-frontend-candidate.patch
+          HABAB_NATIVE_FRONTEND_PATCH_SHA: cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a
+          HABAB_NATIVE_FRONTEND_WHEEL_VERSION: ${{ needs.resolve-source.outputs.wheel_version }}
+          HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT: ${{ runner.temp }}/native-frontend-artifacts
+          HABAB_NATIVE_FRONTEND_RETENTION_STATE: ${{ runner.temp }}/retention-not-initialized.json
+          HABAB_NATIVE_FONT_REPORT: ${{ runner.temp }}/native-font-assets-report.json
+          RELEASE_RETENTION_TOOL: ${{ runner.temp }}/retention-tool-not-installed.py
+          HABAB_TERSER_WORKERS: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/native-wheel-venv/bin:$PATH"
+          test ! -e "$HABAB_NATIVE_FRONTEND_RETENTION_STATE"
+          mkdir -p "$HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT"
+          corepack enable pnpm
+          corepack prepare pnpm@11.28.0 --activate
+          [[ "$(pnpm --version)" == 11.28.0 ]]
+          bash "$RUNNER_TEMP/habab-producer/habab/native-frontend/build-wheel.sh"
+
+      - name: Verify wheel and write candidate manifest
+        env:
+          UPSTREAM_REVISION: 26690e06b0bf64a1487929245c32842ef92c62b5
+          PATCH_BUNDLE_SHA256: cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a
+          CATALOG_SHA256: 154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce
+          BRIDGE_PATCH_SHA256: d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092
+          TEST_PATCH_SHA256: 95c2f19010624cf5d9b53157bf5e06e74bedf905bbac79ae417177baa80898f3
+          BRANDING_PATCH_SHA256: b2c03dc54b90747c6e29f23448f95e115d096bfb93137ca1548f4f7538695a54
+          HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT: ${{ runner.temp }}/native-frontend-artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/native-frontend-candidate"
+          mkdir -p "$candidate"
+          shopt -s nullglob
+          wheel_name="home_assistant_frontend-${WHEEL_VERSION}-py3-none-any.whl"
+          wheels=("$HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT"/*/"$wheel_name")
+          [[ "${#wheels[@]}" -eq 1 ]]
+          wheel="${wheels[0]}"
+          wheel_sha="$(sha256sum "$wheel" | cut -d' ' -f1)"
+          [[ "$(basename "$(dirname "$wheel")")" == "$wheel_sha" ]]
+          wheel_bytes="$(wc -c < "$wheel" | tr -d '[:space:]')"
+          cp "$wheel" "$candidate/$wheel_name"
+          python - "$candidate/manifest.json" "$wheel_name" "$wheel_sha" \
+            "$wheel_bytes" "$SOURCE_REVISION" "$WHEEL_VERSION" \
+            "$UPSTREAM_REVISION" "$PATCH_BUNDLE_SHA256" "$CATALOG_SHA256" \
+            "$BRIDGE_PATCH_SHA256" "$TEST_PATCH_SHA256" "$BRANDING_PATCH_SHA256" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          (path, wheel_name, wheel_sha, wheel_bytes, source_revision, wheel_version,
+           upstream_revision, patch_sha, catalog_sha, bridge_sha, test_sha,
+           branding_sha) = sys.argv[1:]
+          manifest = {
+              "artifact": wheel_name,
+              "artifact_bytes": int(wheel_bytes),
+              "artifact_sha256": wheel_sha,
+              "builder_checks": "passed",
+              "source_clean_before_build": True,
+              "source_revision": source_revision,
+              "upstream_revision": upstream_revision,
+              "wheel_version": wheel_version,
+              "patches": {
+                  "bridge_sha256": bridge_sha,
+                  "test_fixes_sha256": test_sha,
+                  "branding_sha256": branding_sha,
+                  "bundle_sha256": patch_sha,
+              },
+              "translation_catalog_sha256": catalog_sha,
+              "checks": {
+                  "lint": "passed",
+                  "format": "passed",
+                  "focused_tests": "passed",
+                  "type_check": "passed",
+                  "font_assets": "passed",
+              },
+          }
+          Path(path).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload candidate artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: habab-native-frontend-${{ needs.resolve-source.outputs.wheel_version }}
+          path: ${{ runner.temp }}/native-frontend-candidate/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
