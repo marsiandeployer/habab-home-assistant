@@ -16,14 +16,36 @@ from publish_build import (
     attribution_text,
     copy_public_release,
     replace_public_index,
+    scope_demo_inspector_headers,
     scope_demo_realtime_headers,
+    scope_html,
     stage_published_frontend,
     validate_source_options,
     write_provenance,
 )
+from assistant_bundle import LEGACY_TAG, render_entrypoint
 
 
 class PublishedFrontendSelectionTests(unittest.TestCase):
+    def test_demo_publish_keeps_opt_in_inspector_and_realtime_csp(self):
+        template = (Path(__file__).resolve().parents[2] / 'demo/src/html/index.html.template').read_text(encoding='utf-8')
+        bootstrap = next(
+            script for script in re.findall(r'<script\b[^>]*>([\s\S]*?)</script>', template)
+            if 'const shouldEnable = params.get("dev_inspect")' in script
+        )
+        source = f'<html><head><title>Home Assistant Demo</title></head><body>{bootstrap}</body></html>'
+        published = render_entrypoint(scope_html(source), '/assistant/releases/test/setup-chat.js')
+        self.assertIn(bootstrap, published)
+        self.assertIn('/assistant/releases/test/setup-chat.js', published)
+        self.assertNotIn(LEGACY_TAG, published)
+
+        fallback = "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; manifest-src 'self'; object-src 'none';\n"
+        headers = scope_demo_inspector_headers(scope_demo_realtime_headers(fallback))
+        for directive in ('script-src', 'connect-src', 'frame-src'):
+            policy = headers.split(directive, 1)[1].split(';', 1)[0]
+            self.assertIn('https://op.wpmix.net', policy)
+        self.assertIn('wss://habab-voice.wpmix.net', headers)
+
     def test_demo_fallback_csp_allows_realtime_websocket(self):
         headers = scope_demo_realtime_headers(
             "Content-Security-Policy: default-src 'self'; connect-src 'self';\n"

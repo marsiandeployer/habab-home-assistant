@@ -37,6 +37,24 @@ def scope_demo_realtime_headers(headers_text):
     )
 
 
+def scope_demo_inspector_headers(headers_text):
+    """Allow the opt-in Dev Inspector in the demo CSP."""
+    return (
+        headers_text.replace(
+            "script-src 'self' 'unsafe-inline';",
+            "script-src 'self' 'unsafe-inline' https://op.wpmix.net;",
+        )
+        .replace(
+            "connect-src 'self' wss://habab-voice.wpmix.net;",
+            "connect-src 'self' https://op.wpmix.net wss://habab-voice.wpmix.net;",
+        )
+        .replace(
+            "manifest-src 'self'; object-src 'none';",
+            "manifest-src 'self'; frame-src 'self' https://op.wpmix.net; object-src 'none';",
+        )
+    )
+
+
 def stage_published_frontend(source_root, stage, entrypoint, *, license_source=None):
     """Copy only the retained flat frontend inputs, excluding adjacent public artifacts."""
     for name in PUBLISHED_ASSET_DIRS:
@@ -322,6 +340,7 @@ def main():
         "frame-ancestors 'self' https://habab.ru https://www.habab.ru",
     )
     headers_text = scope_demo_realtime_headers(headers_text)
+    headers_text = scope_demo_inspector_headers(headers_text)
     headers_file.write_text(headers_text, encoding='utf-8')
 
     # Upstream source maps embed raw.githubusercontent.com sources. They are
