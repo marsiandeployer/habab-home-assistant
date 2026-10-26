@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import zipfile
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -521,6 +522,96 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
                            "short-escaped-unicode-secret"):
                 self.assertNotIn(secret, history_text)
             self.assertTrue(archive.read("opencode/availability.json"))
+
+    async def test_selected_export_can_append_redacted_shared_runtime_logs(self):
+        owner, hass, _assistant, runtime = runtime_fixture(tool_messages())
+        ha_timestamp = datetime(2026, 10, 25, 13, tzinfo=timezone.utc).astimezone().strftime(
+            "%Y-%m-%d %H:%M:%S.%f")[:-3]
+        with tempfile.TemporaryDirectory() as directory:
+            config_root, opencode_log_dir = self.configure_instance_log_paths(
+                hass, runtime, directory)
+            opencode_log_dir.mkdir(parents=True)
+            (opencode_log_dir / "2026-10-25T130000.log").write_text(
+                "INFO   2026-10-25T13:00:00 +10ms request completed\n"
+                "Authorization: Bearer short-runtime-token\n"
+                "ERROR  2026-10-25T12:00:00 +0ms outside period\n"
+                "WARN  timestamp format not confirmed\n",
+                encoding="utf-8")
+            (config_root / "home-assistant.log").write_text(
+                f"{ha_timestamp} ERROR password=short-ha-password\n",
+                encoding="utf-8")
+            hass.async_add_executor_job = AsyncMock(
+                side_effect=lambda function, *args: function(*args))
+            runtime.process = SimpleNamespace(returncode=None)
+            runtime.request.side_effect = [tool_messages(), {"version": "1.14.21"}]
+
+            response = await diagnostics.DiagnosticsExportView().post(Request(
+                owner, hass, data={
+                    "session_id": "web-alice",
+                    "from": "2026-10-25T12:30:00Z",
+                    "to": "2026-10-25T13:30:00Z",
+                    "include_runtime_logs": True,
+                }))
+
+        self.assertEqual(response.status, 200)
+        hass.async_add_executor_job.assert_awaited_once_with(
+            diagnostics._collect_instance_log_tails, config_root, runtime.root)
+        runtime.request.assert_awaited_with("GET", "global/health", timeout=1)
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            self.assertEqual(set(archive.namelist()), {
+                "manifest.json", "history.json", "history.txt", "opencode/availability.json",
+                "logs/manifest.json", "opencode/logs/2026-10-25T130000.log",
+                "homeassistant/home-assistant.log",
+            })
+            manifest = json.loads(archive.read("manifest.json"))
+            logs_manifest = json.loads(archive.read("logs/manifest.json"))
+            opencode_availability = json.loads(archive.read("opencode/availability.json"))
+            opencode_log = archive.read("opencode/logs/2026-10-25T130000.log").decode()
+            ha_log = archive.read("homeassistant/home-assistant.log").decode()
+        self.assertEqual(manifest["versions"]["opencode"], "1.14.21")
+        self.assertIsInstance(manifest["versions"]["frontend"], str)
+        self.assertEqual(manifest["versions_scope"], "environment_at_export")
+        self.assertEqual(manifest["environment_at_export"]["frontend"]["source"],
+                         "installed_distribution_metadata")
+        self.assertEqual(manifest["historical_session_versions"]["frontend"],
+                         {"version": None, "reason": "not_recorded"})
+        self.assertEqual(logs_manifest["period"]["filter_status"], "applied")
+        self.assertIsNone(logs_manifest["period"]["reason"])
+        self.assertEqual(logs_manifest["home_assistant_log_clock"]["kind"], "process_local")
+        self.assertEqual(logs_manifest["home_assistant_log_clock"]["historical_binding"],
+                         "unverified")
+        self.assertEqual(logs_manifest["home_assistant_log_clock"]["fresh_file_per_boot"],
+                         "not_verified")
+        self.assertEqual(
+            logs_manifest["sources"]["home_assistant_logs"]["period_timezone_binding"],
+            "current_process_assumption")
+        self.assertEqual(logs_manifest["scope"]["kind"], "home_assistant_instance")
+        self.assertTrue(logs_manifest["scope"]["shared_across_conversations"])
+        self.assertTrue(logs_manifest["scope"]["shared_across_users"])
+        self.assertIsNone(logs_manifest["scope"]["session_id"])
+        self.assertTrue(logs_manifest["sources"]["opencode_logs"]["available"])
+        self.assertTrue(logs_manifest["sources"]["home_assistant_logs"]["available"])
+        self.assertTrue(manifest["sources"]["opencode_files"]["available"])
+        self.assertTrue(manifest["sources"]["home_assistant_logs"]["available"])
+        self.assertEqual(opencode_availability["available"],
+                         manifest["sources"]["opencode_files"]["available"])
+        self.assertNotEqual(manifest["sources"]["opencode_files"]["reason"],
+                            "not_exposed_by_runtime")
+        self.assertEqual(logs_manifest["sources"]["opencode_logs"]["period_matched_records"], 1)
+        self.assertEqual(logs_manifest["sources"]["opencode_logs"]["period_excluded_records"], 1)
+        self.assertEqual(logs_manifest["sources"]["opencode_logs"]["period_unverified_records"], 1)
+        self.assertNotIn("outside period", opencode_log)
+        self.assertNotIn("timestamp format not confirmed", opencode_log)
+        self.assertNotIn("short-runtime-token", opencode_log)
+        self.assertNotIn("short-ha-password", ha_log)
+
+    async def test_foreign_selected_export_with_runtime_logs_denies_before_collection(self):
+        owner, hass, _assistant, _runtime = runtime_fixture(tool_messages())
+        hass.async_add_executor_job = AsyncMock()
+        response = await diagnostics.DiagnosticsExportView().post(Request(
+            owner, hass, data={"session_id": "web-bob", "include_runtime_logs": True}))
+        self.assertEqual(response.status, 404)
+        hass.async_add_executor_job.assert_not_awaited()
 
     async def test_export_marks_projection_truncation_and_keeps_newest_payload(self):
         messages = [

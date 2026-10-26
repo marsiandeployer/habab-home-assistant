@@ -10,7 +10,9 @@ import os
 import re
 import stat
 from datetime import datetime, timedelta, timezone
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
+import time
 from urllib.parse import quote
 import zipfile
 
@@ -83,6 +85,17 @@ _TELEGRAM_TOKEN = re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{20,}\b")
 _LONG_OPAQUE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9_./+=-]{48,}(?![A-Za-z0-9])")
 _OPENCODE_LOG_NAME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{6}\.log\Z")
 _HA_LOG_NAME = re.compile(r"home-assistant\.log(?:\.\d{1,3})?\Z")
+_OPENCODE_LOG_RECORD = re.compile(
+    r"^(?:DEBUG|INFO|WARN|ERROR)\s{1,3}"
+    r"(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})"
+    r"\s+\+\d+ms(?:\s|$)"
+)
+_OPENCODE_LOG_PREFIX = re.compile(r"^(?:DEBUG|INFO|WARN|ERROR)\s")
+_HA_LOG_RECORD = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
+    r"\.(?P<millis>\d{3})\s"
+)
+_HA_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}\s")
 
 
 def _sources(history_available: bool, reason: str | None = None,
@@ -502,6 +515,244 @@ def _redact_instance_log_tails(
         if truncated:
             source["truncated_files"] += 1
     return archive_files
+
+
+def _local_log_timestamp(value: str, millis: str) -> tuple[datetime | None, str | None]:
+    """Convert HA's naive process-local log time; reject DST-ambiguous wall times."""
+    try:
+        local = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(
+            microsecond=int(millis) * 1000)
+        fields = local.timetuple()
+        candidates = set()
+        for is_dst in (0, 1):
+            timestamp = time.mktime((
+                fields.tm_year, fields.tm_mon, fields.tm_mday,
+                fields.tm_hour, fields.tm_min, fields.tm_sec,
+                fields.tm_wday, fields.tm_yday, is_dst,
+            ))
+            roundtrip = time.localtime(timestamp)
+            if (roundtrip.tm_year, roundtrip.tm_mon, roundtrip.tm_mday,
+                    roundtrip.tm_hour, roundtrip.tm_min, roundtrip.tm_sec) == (
+                    local.year, local.month, local.day, local.hour, local.minute, local.second):
+                candidates.add(timestamp)
+    except (OverflowError, OSError, ValueError):
+        return None, "invalid_timestamp"
+    if not candidates:
+        return None, "invalid_timestamp"
+    if len(candidates) > 1:
+        return None, "ambiguous_local_timestamp"
+    return datetime.fromtimestamp(candidates.pop(), timezone.utc).replace(
+        microsecond=local.microsecond), None
+
+
+def _frontend_version_at_export() -> tuple[str | None, str | None]:
+    """Read the installed frontend distribution version for this export environment."""
+    try:
+        value = package_version("home-assistant-frontend")
+    except PackageNotFoundError:
+        return None, "frontend_package_not_installed"
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,100}", value):
+        return None, "invalid_frontend_package_version"
+    return value, None
+
+
+def _filter_instance_log_period(
+    sources: dict, raw_files: list[tuple[str, bytes, int, bool]], start: datetime, end: datetime
+) -> tuple[list[tuple[str, bytes, int, bool]], dict]:
+    """Keep only complete records with source-confirmed timestamps inside the UTC window."""
+    clock = time.localtime()
+    clock_metadata = {
+        "kind": "process_local",
+        "label": getattr(clock, "tm_zone", None),
+        "utc_offset_seconds": getattr(clock, "tm_gmtoff", None),
+        "captured_at": _iso(datetime.now(timezone.utc)),
+        "historical_binding": "unverified",
+        "fresh_file_per_boot": "not_verified",
+        "historical_binding_reason": (
+            "HA log lines contain no timezone; rotated files may predate a process timezone change"
+        ),
+    }
+    for source in sources.values():
+        source["period_filter_status"] = "applied"
+        source["period_matched_records"] = 0
+        source["period_excluded_records"] = 0
+        source["period_unverified_records"] = 0
+    sources["opencode_logs"]["period_timezone_binding"] = "utc_timestamp_in_record"
+    sources["home_assistant_logs"]["period_timezone_binding"] = "current_process_assumption"
+    sources["home_assistant_logs"]["period_timezone_binding_reason"] = (
+        "Historical process timezone is not stored in log records or proven stable across rotations"
+    )
+
+    selected_by_name = {}
+    selected_sources = set()
+    source_by_prefix = {
+        "opencode/logs/": "opencode_logs",
+        "homeassistant/": "home_assistant_logs",
+    }
+    for archive_name, raw, original_bytes, truncated in raw_files:
+        source_name = next((name for prefix, name in source_by_prefix.items()
+                            if archive_name.startswith(prefix)), None)
+        if source_name is None:
+            continue
+        source = sources[source_name]
+        is_opencode = source_name == "opencode_logs"
+        record_pattern = _OPENCODE_LOG_RECORD if is_opencode else _HA_LOG_RECORD
+        prefix_pattern = _OPENCODE_LOG_PREFIX if is_opencode else _HA_LOG_PREFIX
+        current_lines = []
+        current_in_period = False
+
+        def flush_record():
+            if current_lines and current_in_period:
+                selected_by_name.setdefault(archive_name, []).append("".join(current_lines))
+                selected_sources.add(source_name)
+
+        for line in raw.decode("utf-8", errors="replace").splitlines(keepends=True):
+            match = record_pattern.match(line)
+            starts_record = bool(match) or bool(prefix_pattern.match(line))
+            if starts_record:
+                flush_record()
+                current_lines = [line]
+                current_in_period = False
+                if match:
+                    try:
+                        if is_opencode:
+                            stamp = datetime.strptime(
+                                match.group("timestamp"), "%Y-%m-%dT%H:%M:%S").replace(
+                                    tzinfo=timezone.utc)
+                            timestamp_error = None
+                        else:
+                            stamp, timestamp_error = _local_log_timestamp(
+                                match.group("timestamp"), match.group("millis"))
+                    except ValueError:
+                        stamp, timestamp_error = None, "invalid_timestamp"
+                    if stamp is not None:
+                        current_in_period = start <= stamp <= end
+                        source["period_matched_records"] += int(current_in_period)
+                        source["period_excluded_records"] += int(not current_in_period)
+                    else:
+                        source["period_unverified_records"] += 1
+                else:
+                    source["period_unverified_records"] += 1
+            elif current_lines:
+                current_lines.append(line)
+        flush_record()
+
+    raw_by_name = {name: (size, truncated) for name, _raw, size, truncated in raw_files}
+    selected = []
+    for archive_name, records in selected_by_name.items():
+        original_bytes, truncated = raw_by_name[archive_name]
+        selected.append((archive_name, "".join(records).encode("utf-8"),
+                         original_bytes, truncated))
+    for source_name, source in sources.items():
+        source["available"] = source_name in selected_sources
+        if source["available"]:
+            if source["period_unverified_records"]:
+                source["reason"] = "unverified_records_excluded"
+            else:
+                source["reason"] = None
+        elif source["period_unverified_records"]:
+            source["reason"] = "timestamp_unverified"
+        elif source["period_excluded_records"]:
+            source["reason"] = "no_records_in_period"
+        elif source.get("reason") is None:
+            source["reason"] = "no_timestamped_records"
+    return selected, clock_metadata
+
+
+async def _runtime_health_version(runtime) -> tuple[str | None, str | None]:
+    """Read a running runtime's reported version without starting it."""
+    process = getattr(runtime, "process", None)
+    if process is None or getattr(process, "returncode", 0) is not None:
+        return None, "runtime_not_running"
+    try:
+        health = await runtime.request("GET", "global/health", timeout=1)
+    except (AgentError, TimeoutError):
+        return None, "runtime_health_unavailable"
+    version = health.get("version") if isinstance(health, dict) else None
+    if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9._+-]{1,100}", version):
+        return None, "runtime_version_not_reported"
+    return version, None
+
+
+async def _export_runtime_logs(
+    hass, assistant, start, end
+) -> tuple[dict, dict[str, bytes], str | None, str | None]:
+    """Collect the same bounded, redacted instance tails used by the raw-log export."""
+    runtime = getattr(assistant, "runtime", None)
+    base_manifest = {
+        "requested": True,
+        "available": False,
+        "reason": None,
+        "scope": {
+            "kind": "home_assistant_instance",
+            "shared_across_conversations": True,
+            "shared_across_users": True,
+            "session_id": None,
+            "warning": "Runtime logs are shared by this instance and are not tied to the selected conversation.",
+        },
+        "period": {
+            "from": _iso(start), "to": _iso(end), "timezone": "UTC",
+            "filter_status": "applied" if start is not None else "not_requested",
+            "reason": None,
+        },
+        "home_assistant_log_clock": None,
+        "sources": {},
+        "limits": {
+            "opencode_files": MAX_OPENCODE_LOG_FILES,
+            "home_assistant_files": MAX_HA_LOG_FILES,
+            "bytes_per_file_tail": MAX_INSTANCE_LOG_FILE_BYTES,
+            "total_redacted_log_bytes": MAX_INSTANCE_LOG_BYTES,
+            "text_scan_chars_per_file": MAX_TEXT_SCAN_CHARS,
+            "archive_bytes": MAX_EXPORT_BYTES,
+        },
+        "redactions_applied": [
+            "configured provider and runtime secrets",
+            "secret-named assignments and credential-like strings",
+            "oversized text tails truncated before export",
+        ],
+        "excluded": [
+            "conversation history and tool payloads",
+            "provider configuration and Home Assistant config files",
+            "audio and native Assist history",
+            "files outside the fixed OpenCode and Home Assistant log allowlists",
+        ],
+        "truncated": False,
+    }
+    if runtime is None or not isinstance(getattr(runtime, "root", None), (str, Path)):
+        base_manifest["reason"] = "runtime_logs_unavailable"
+        base_manifest["sources"] = {
+            "opencode_logs": {"available": False, "reason": "runtime_unavailable"},
+            "home_assistant_logs": {"available": False, "reason": "runtime_unavailable"},
+        }
+        version, version_reason = await _runtime_health_version(runtime) if runtime else (
+            None, "runtime_unavailable")
+        return base_manifest, {}, version, version_reason
+
+    config_root = Path(hass.config.path()).absolute()
+    opencode_root = Path(hass.config.path(".habab-opencode")).absolute()
+    if Path(runtime.root).absolute() != opencode_root:
+        base_manifest["reason"] = "runtime_logs_unavailable"
+        base_manifest["sources"] = {
+            "opencode_logs": {"available": False, "reason": "unsafe_runtime_root"},
+            "home_assistant_logs": {"available": False, "reason": "unsafe_runtime_root"},
+        }
+        version, version_reason = await _runtime_health_version(runtime)
+        return base_manifest, {}, version, version_reason
+
+    sources, raw_files = await hass.async_add_executor_job(
+        _collect_instance_log_tails, config_root, opencode_root)
+    if start is not None:
+        raw_files, clock_metadata = _filter_instance_log_period(sources, raw_files, start, end)
+        base_manifest["home_assistant_log_clock"] = clock_metadata
+    files = _redact_instance_log_tails(runtime, sources, raw_files)
+    base_manifest["sources"] = sources
+    base_manifest["available"] = any(source.get("available") is True for source in sources.values())
+    if not base_manifest["available"]:
+        base_manifest["reason"] = "no_runtime_logs_available"
+    base_manifest["truncated"] = any(
+        source["truncated_files"] or source["omitted_files"] for source in sources.values())
+    version, version_reason = await _runtime_health_version(runtime)
+    return base_manifest, files, version, version_reason
 
 
 def _clean_value(runtime, value, *, depth=0, budget: ProjectionBudget | None = None):
@@ -1153,6 +1404,9 @@ class DiagnosticsExportView(HomeAssistantView):
                 raise ValueError("invalid_time_window")
             channel = _valid_channel(data.get("channel"))
             session_id = data.get("session_id")
+            include_runtime_logs = data.get("include_runtime_logs", False)
+            if type(include_runtime_logs) is not bool:
+                raise ValueError("invalid_runtime_logs_selection")
             if session_id is not None and (not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id)):
                 raise ValueError("invalid_session")
             if session_id is None and start is None:
@@ -1248,13 +1502,55 @@ class DiagnosticsExportView(HomeAssistantView):
         exported = [item[2] for item in exported_with_recency]
         if session_id is not None and not exported:
             return self.json_message("not_found", status_code=404)
+        runtime_log_manifest = None
+        runtime_log_files = {}
+        opencode_version = None
+        opencode_version_reason = "not_requested"
+        if include_runtime_logs:
+            runtime_log_manifest, runtime_log_files, opencode_version, opencode_version_reason = (
+                await _export_runtime_logs(hass, assistant, start, end))
+        else:
+            opencode_version, opencode_version_reason = await _runtime_health_version(
+                getattr(assistant, "runtime", None))
+        frontend_version, frontend_version_reason = _frontend_version_at_export()
+
         manifest = {
             "product": "Habab Home", "versions": {
                 "habab": VERSION, "home_assistant_core": HA_VERSION,
-                "frontend": None, "opencode": None,
+                "frontend": frontend_version, "opencode": opencode_version,
+            },
+            "versions_scope": "environment_at_export",
+            "environment_at_export": {
+                "frontend": {
+                    "version": frontend_version,
+                    "source": "installed_distribution_metadata" if frontend_version else None,
+                    "available": frontend_version is not None,
+                    "reason": frontend_version_reason,
+                },
+                "opencode": {
+                    "version": opencode_version,
+                    "source": "running_runtime_health" if opencode_version else None,
+                    "available": opencode_version is not None,
+                    "reason": opencode_version_reason,
+                },
+            },
+            "historical_session_versions": {
+                "frontend": {"version": None, "reason": "not_recorded"},
+                "opencode": {"version": None, "reason": "not_recorded"},
             },
             "build_identity": None,
-            "unavailable_build_fields": ["frontend_version", "opencode_version", "build_identity"],
+            "version_sources": {
+                "frontend": {"available": frontend_version is not None,
+                             "reason": frontend_version_reason},
+                "opencode": {"available": opencode_version is not None,
+                             "reason": opencode_version_reason},
+            },
+            "build_identity_reason": "not_recorded",
+            "unavailable_build_fields": [
+                *( ["frontend_version"] if frontend_version is None else []),
+                *(["opencode_version"] if opencode_version is None else []),
+                "build_identity",
+            ],
             "period": {"from": _iso(start), "to": _iso(end), "timezone": "UTC"},
             "sources": _sources(history_available,
                                  None if history_available else "runtime_unavailable",
@@ -1276,8 +1572,19 @@ class DiagnosticsExportView(HomeAssistantView):
             "message_limit_reached": any(item["session"].get("at_message_limit") for item in exported),
             "projection_truncated": projection_budget.truncation_count > 0,
             "truncated": (projection_budget.truncation_count > 0 or
-                          any(item["session"].get("at_message_limit") for item in exported)),
+                          any(item["session"].get("at_message_limit") for item in exported) or
+                          bool(runtime_log_manifest and runtime_log_manifest["truncated"])),
         }
+        if runtime_log_manifest is not None:
+            manifest["runtime_logs"] = runtime_log_manifest
+            runtime_sources = runtime_log_manifest["sources"]
+            manifest["sources"]["opencode_files"] = runtime_sources["opencode_logs"]
+            manifest["sources"]["home_assistant_logs"] = runtime_sources[
+                "home_assistant_logs"]
+            manifest["excluded"] = [
+                "audio", "provider configuration", "Home Assistant config and secret files",
+                "native Assist history",
+            ]
         history = {"sessions": exported}
         text_lines = ["Habab Home assistant diagnostics", "UTC timestamps; model text is not proof of actions."]
         for item in exported:
@@ -1289,12 +1596,20 @@ class DiagnosticsExportView(HomeAssistantView):
                 if event.get("output") is not None:
                     text += " output=" + json.dumps(event["output"], ensure_ascii=False)
                 text_lines.append(f"{event.get('at') or 'time unavailable'} {event['stage']}: {text}")
+        opencode_availability = (runtime_log_manifest["sources"]["opencode_logs"]
+                                 if runtime_log_manifest is not None
+                                 else _sources(True)["opencode_files"])
         files = {
             "manifest.json": json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
             "history.json": json.dumps(history, ensure_ascii=False, indent=2).encode("utf-8"),
             "history.txt": ("\n".join(text_lines) + "\n").encode("utf-8"),
-            "opencode/availability.json": json.dumps(_sources(True)["opencode_files"], indent=2).encode("utf-8"),
+            "opencode/availability.json": json.dumps(
+                opencode_availability, ensure_ascii=False, indent=2).encode("utf-8"),
         }
+        if runtime_log_manifest is not None:
+            files["logs/manifest.json"] = json.dumps(
+                runtime_log_manifest, ensure_ascii=False, indent=2).encode("utf-8")
+            files.update(runtime_log_files)
         if sum(map(len, files.values())) > MAX_EXPORT_BYTES:
             return self.json_message("export_too_large", status_code=413)
         buffer = io.BytesIO()

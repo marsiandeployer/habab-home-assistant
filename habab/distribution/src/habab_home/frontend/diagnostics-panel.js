@@ -334,6 +334,10 @@ export function runtimeLogsExportRequest(isAdmin, confirmationAccepted) {
   };
 }
 
+export function selectedSessionExportScope(sessionId, channel, includeRuntimeLogs = false) {
+  return {session_id: sessionId, channel, include_runtime_logs: includeRuntimeLogs === true};
+}
+
 function feedbackUuid(value) {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -487,6 +491,7 @@ class HababDiagnosticsPanel extends HTMLElement {
       .event-list{list-style:none;margin:0;padding:0;border-inline-start:2px solid var(--divider-color)}.event{position:relative;padding:4px 0 18px 18px}.event:before{content:"";position:absolute;inset-block-start:10px;inset-inline-start:-6px;width:10px;height:10px;border-radius:50%;background:var(--primary-color);border:1px solid var(--card-background-color)}.event h3{font-size:15px;font-weight:500;margin:0 0 2px}.event time{font-size:12px;color:var(--secondary-text-color)}.event-text{white-space:pre-wrap;overflow-wrap:anywhere;margin-block:8px}.event details{margin-block:8px}.event summary{cursor:pointer;min-height:40px;display:flex;align-items:center;text-decoration:underline;text-underline-offset:3px}.code{font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--secondary-background-color);padding:10px;border-radius:6px;margin:0;max-height:360px;overflow:auto}
       .sources{margin-block:16px;border-block-start:1px solid var(--divider-color);padding-block-start:12px}.sources h3{font-size:15px;font-weight:500;margin:0 0 8px}.source-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 16px;margin:0;padding:0;list-style:none}.source-list li{display:flex;justify-content:space-between;gap:10px;padding-block:4px;border-block-end:1px solid var(--divider-color)}.source-state{flex:none;color:var(--secondary-text-color)}.source-name{display:grid;gap:2px}.source-reason{font-size:12px;color:var(--secondary-text-color)}.warning{color:var(--warning-color,var(--primary-text-color))}
       .runtime-logs{margin-block:20px;padding-block-start:16px;border-block-start:1px solid var(--divider-color)}.runtime-logs h2{font-size:16px;font-weight:500;margin:0 0 6px}
+      .runtime-log-option{display:flex;align-items:flex-start;gap:10px;font-weight:400;margin-block:10px}.runtime-log-option input{width:22px;min-height:22px;flex:none;margin:1px 0 0;accent-color:var(--primary-color)}
       .feedback{margin-block:18px;padding-block:14px;border-block-start:1px solid var(--divider-color)}.feedback h3{font-size:16px;font-weight:500;margin:0 0 6px}.feedback label{display:grid;gap:6px;margin-block:10px}.feedback textarea{width:100%;min-height:88px;padding:10px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--secondary-text-color);border-radius:6px;resize:vertical}.feedback .consent{display:flex;align-items:flex-start;gap:10px;font-weight:400}.feedback input[type=checkbox]{width:22px;height:22px;min-height:22px;flex:none;margin:1px 0 0;accent-color:var(--primary-color)}.feedback button{margin-block:4px}.feedback-status{margin-block:8px}.feedback-status[data-error=true]{color:var(--error-color)}
       [hidden]{display:none!important}a{color:var(--primary-color)}
       @media(max-width:900px){main{padding:16px}#filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filters-actions{grid-column:span 2}.workspace{grid-template-columns:minmax(0,1fr)}.source-list{grid-template-columns:minmax(0,1fr)}}
@@ -507,6 +512,8 @@ class HababDiagnosticsPanel extends HTMLElement {
       </form>
       <p id="status" class="status" role="status" aria-live="polite"></p>
       <div class="actions"><button type="button" id="download-session" disabled>${t("selectedDownload")}</button><button type="button" id="download-period" disabled title="${t("periodHelp")}">${t("periodDownload")}</button></div>
+      <label class="runtime-log-option"><input id="include-runtime-logs" type="checkbox" disabled>${t("diagnosticsSelectedRuntimeLogsLabel")}</label>
+      <p class="help">${t("diagnosticsSelectedRuntimeLogsHelp")}</p>
       <p class="help" id="period-help">${t("periodHelp")}</p>
       <section class="runtime-logs" aria-labelledby="runtime-logs-heading">
         <h2 id="runtime-logs-heading">${t("diagnosticsRuntimeLogsTitle")}</h2>
@@ -680,6 +687,8 @@ class HababDiagnosticsPanel extends HTMLElement {
 
   async openSession(session) {
     if (!this.selectedSession || diagnosticSessionKey(this.selectedSession) !== diagnosticSessionKey(session)) {
+      const includeRuntimeLogs = this.q("#include-runtime-logs");
+      if (includeRuntimeLogs) includeRuntimeLogs.checked = false;
       this.feedbackDraft = "";
       this.feedbackConsent = false;
       if (!this.feedbackSubmitting) this.feedbackAttempt = undefined;
@@ -977,19 +986,26 @@ class HababDiagnosticsPanel extends HTMLElement {
     const selected = this.q("#download-session");
     const period = this.q("#download-period");
     const runtimeLogs = this.q("#download-runtime-logs");
+    const includeRuntimeLogs = this.q("#include-runtime-logs");
     const loadMore = this.q("#load-more");
-    if (!selected || !period || !runtimeLogs || !loadMore) return;
-    selected.disabled = !this.selectedSession || this.exporting || this._hass?.user?.is_admin !== true;
-    period.disabled = !this.canExportPeriod() || this.exporting || this._hass?.user?.is_admin !== true;
-    runtimeLogs.disabled = this.exporting || this._hass?.user?.is_admin !== true;
+    if (!selected || !period || !runtimeLogs || !includeRuntimeLogs || !loadMore) return;
+    const isAdmin = this._hass?.user?.is_admin === true;
+    selected.disabled = !this.selectedSession || this.exporting || !isAdmin;
+    period.disabled = !this.canExportPeriod() || this.exporting || !isAdmin;
+    runtimeLogs.disabled = this.exporting || !isAdmin;
+    includeRuntimeLogs.disabled = !this.selectedSession || this.exporting || !isAdmin;
     loadMore.hidden = !this.cursor;
     loadMore.disabled = this.loading;
   }
 
   async downloadSelectedSession() {
-    if (!this.selectedSession) return;
+    if (!this.selectedSession || this._hass?.user?.is_admin !== true || this.exporting) return;
     const channel = this.filters.channel === "voice" ? "voice" : this.selectedSession.channel;
-    await this.downloadArchive({session_id: this.selectedSession.session_id, channel});
+    const includeRuntimeLogs = this.q("#include-runtime-logs").checked === true;
+    this.q("#include-runtime-logs").checked = false;
+    await this.downloadArchive(selectedSessionExportScope(
+      this.selectedSession.session_id, channel, includeRuntimeLogs,
+    ));
   }
 
   async downloadPeriod() {

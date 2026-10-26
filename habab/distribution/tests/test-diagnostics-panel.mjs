@@ -2,10 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const originalHTMLElement = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
+const originalCustomElements = Object.getOwnPropertyDescriptor(globalThis, "customElements");
+const definitions = new Map();
 Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: class HTMLElementStub {} });
+Object.defineProperty(globalThis, "customElements", {
+  configurable: true,
+  value: {get: (name) => definitions.get(name), define: (name, value) => definitions.set(name, value)},
+});
 const diagnostics = await import("../src/habab_home/frontend/diagnostics-panel.js?diagnostics-test");
+const DiagnosticsPanel = definitions.get("habab-diagnostics-panel");
 if (originalHTMLElement) Object.defineProperty(globalThis, "HTMLElement", originalHTMLElement);
 else delete globalThis.HTMLElement;
+if (originalCustomElements) Object.defineProperty(globalThis, "customElements", originalCustomElements);
+else delete globalThis.customElements;
 
 test("diagnostics filters serialize local time as explicit UTC and reject invalid scopes", () => {
   const localFrom = "2026-10-24T12:30";
@@ -53,6 +62,58 @@ test("shared runtime logs require admin confirmation and use the instance export
     endpoint: "/api/habab_home/diagnostics/runtime-logs/export",
     body: {},
   });
+});
+
+test("selected-conversation export includes shared logs only after explicit opt-in", async () => {
+  assert.deepEqual(diagnostics.selectedSessionExportScope("session_123", "web"), {
+    session_id: "session_123", channel: "web", include_runtime_logs: false,
+  });
+  assert.deepEqual(diagnostics.selectedSessionExportScope("session_123", "web", true), {
+    session_id: "session_123", channel: "web", include_runtime_logs: true,
+  });
+
+  const panel = Object.create(DiagnosticsPanel.prototype);
+  const nodes = new Map([
+    ["#download-session", {disabled: false}],
+    ["#download-period", {disabled: false}],
+    ["#download-runtime-logs", {disabled: false}],
+    ["#include-runtime-logs", {disabled: true, checked: false}],
+    ["#load-more", {hidden: false, disabled: false}],
+  ]);
+  Object.assign(panel, {
+    _hass: {user: {is_admin: true}},
+    selectedSession: {session_id: "session_123"},
+    filters: {channel: "all"},
+    exporting: false,
+    cursor: undefined,
+    loading: false,
+    q: (selector) => nodes.get(selector),
+    canExportPeriod: () => false,
+  });
+
+  panel.updateControls();
+  assert.equal(nodes.get("#include-runtime-logs").disabled, false);
+  panel._hass.user.is_admin = false;
+  panel.updateControls();
+  assert.equal(nodes.get("#include-runtime-logs").disabled, true);
+  panel._hass.user.is_admin = true;
+  panel.selectedSession = undefined;
+  panel.updateControls();
+  assert.equal(nodes.get("#include-runtime-logs").disabled, true);
+
+  panel.selectedSession = {session_id: "session_123", channel: "web"};
+  const requests = [];
+  panel.downloadArchive = async (scope) => requests.push(scope);
+  await panel.downloadSelectedSession();
+  assert.deepEqual(requests.at(-1), {
+    session_id: "session_123", channel: "web", include_runtime_logs: false,
+  });
+  nodes.get("#include-runtime-logs").checked = true;
+  await panel.downloadSelectedSession();
+  assert.deepEqual(requests.at(-1), {
+    session_id: "session_123", channel: "web", include_runtime_logs: true,
+  });
+  assert.equal(nodes.get("#include-runtime-logs").checked, false);
 });
 
 test("feedback retries reuse one idempotency UUID until its payload changes", () => {
