@@ -10,26 +10,18 @@ const providers = {
 
 const modelCopy = {
   ru: {
-    compatibilityLabel: "Сохранённое значение для совместимости",
-    managed: "Habab выбирает внешнюю модель. Псевдоним маршрута: {alias} ({protocol}). Фактическая модель внешнего провайдера не сообщается.",
-    managedNotReady: "Habab выбирает внешнюю модель через маршрут {alias} ({protocol}), но подключение пока не готово. Фактическая модель не сообщается.",
+    managedPlaceholder: "Выбирает Habab",
+    managed: "Модель выбирает сервис Habab. Текущий маршрут показан в сводке ниже.",
+    managedNotReady: "Модель выбирает сервис Habab, но подключение пока не готово.",
     pending: "Модель определит сервис при проверке подключения.",
-    unavailable: "Не удалось подтвердить фактическую модель Habab. Сохранённое значение оставлено для совместимости.",
-    legacy: "Текущий маршрут: {protocol}, модель {model}.",
-    protocolGoogle: "Google Gemini",
-    protocolOpenAI: "OpenAI-совместимый API",
-    protocolUnavailable: "не подтверждён",
+    unavailable: "Не удалось подтвердить маршрут Habab. Проверьте подключение.",
   },
   en: {
-    compatibilityLabel: "Saved compatibility value",
-    managed: "Habab selects the upstream model. Gateway alias: {alias} ({protocol}). The upstream model is not reported.",
-    managedNotReady: "Habab selects the upstream model through {alias} ({protocol}), but the connection is not ready. The upstream model is not reported.",
+    managedPlaceholder: "Selected by Habab",
+    managed: "Habab selects the model. The current route is shown in the summary below.",
+    managedNotReady: "Habab selects the model, but the connection is not ready yet.",
     pending: "The service will choose the model when you check the connection.",
-    unavailable: "The effective Habab model could not be confirmed. The saved value is kept for compatibility.",
-    legacy: "Current route: {protocol}, model {model}.",
-    protocolGoogle: "Google Gemini",
-    protocolOpenAI: "OpenAI-compatible API",
-    protocolUnavailable: "unconfirmed",
+    unavailable: "Could not confirm the Habab route. Check the connection.",
   },
 };
 
@@ -90,33 +82,16 @@ export function assistantRoutingSummary(entry, pipelines, language) {
 export function providerModelPresentation(provider, entry, language) {
   if (provider !== "habab") return { readOnly: false, label: null, help: null };
   const copy = modelCopy[language === "ru" ? "ru" : "en"];
-  const compatibility = { readOnly: true, label: copy.compatibilityLabel };
-  if (!entry) return { readOnly: true, label: null, help: copy.pending };
-
-  const managedModel = typeof entry.managed_model === "string" && entry.managed_model
-    ? entry.managed_model : null;
-  if (managedModel) {
-    const protocol = entry.protocol === "google" ? copy.protocolGoogle
-      : entry.protocol === "openai_compatible" ? copy.protocolOpenAI : copy.protocolUnavailable;
-    const template = entry.text_ready === false ? copy.managedNotReady : copy.managed;
-    return {
-      ...compatibility,
-      help: template.replace("{alias}", managedModel).replace("{protocol}", protocol),
-    };
-  }
-
-  if (typeof entry.effective_model === "string" && entry.effective_model &&
-      typeof entry.protocol === "string" && entry.protocol !== "unavailable") {
-    const protocol = entry.protocol === "google" ? copy.protocolGoogle
-      : entry.protocol === "openai_compatible" ? copy.protocolOpenAI : copy.protocolUnavailable;
-    return {
-      readOnly: false,
-      label: null,
-      help: copy.legacy.replace("{protocol}", protocol).replace("{model}", entry.effective_model),
-    };
-  }
-
-  return { ...compatibility, help: copy.unavailable };
+  return {
+    readOnly: true,
+    required: false,
+    placeholder: copy.managedPlaceholder,
+    label: null,
+    help: !entry ? copy.pending
+      : entry.managed_model
+        ? entry.text_ready === false ? copy.managedNotReady : copy.managed
+        : copy.unavailable,
+  };
 }
 
 class HababAIPanel extends HTMLElement {
@@ -292,12 +267,18 @@ class HababAIPanel extends HTMLElement {
     this.q("#provider-title").textContent = provider.name;
     this.q("#key-link").href = provider.keyUrl;
     this.q("#key-link").textContent = this.t(this.provider === "habab" ? "hababOpen" : "getKey");
-    if (!preserveDraft || !this.modelEdited) {
+    const modelPresentation = providerModelPresentation(this.provider, this.entry(), this.language);
+    if (this.provider === "habab") {
+      // This saved field is only a compatibility value; never present it as Habab's current model.
+      this.q("#model").value = "";
+      this.modelEdited = false;
+    } else if (!preserveDraft || !this.modelEdited) {
       this.q("#model").value = this.entry()?.model || provider.model;
       this.modelEdited = false;
     }
-    const modelPresentation = providerModelPresentation(this.provider, this.entry(), this.language);
     this.q("#model").readOnly = modelPresentation.readOnly;
+    this.q("#model").required = modelPresentation.required ?? true;
+    this.q("#model").placeholder = modelPresentation.placeholder || "";
     this.q("#model-label").textContent = modelPresentation.label || this.t("model");
     this.q("#model-help").textContent = modelPresentation.help || this.t("modelHelp");
     if (!preserveDraft || !this.keyEdited) {
@@ -514,7 +495,9 @@ class HababAIPanel extends HTMLElement {
   async save() {
     if (!this.q("form").reportValidity()) return;
     await this.action(async () => {
-      const model = this.q("#model").value.trim();
+      const model = this.provider === "habab"
+        ? this.entry()?.model || providers.habab.model
+        : this.q("#model").value.trim();
       await this._hass.callWS({ type: "habab_home/providers/save", provider: this.provider,
         model, api_key: this.q("#key").value.trim() });
       this.q("#key").value = "";

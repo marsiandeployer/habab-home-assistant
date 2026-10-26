@@ -183,7 +183,7 @@ test("a clean first load selects the saved provider once", async () => {
   assert.equal(panel.provider, "habab");
 });
 
-test("managed Habab presentation keeps the saved compatibility value and gateway alias distinct", () => {
+test("managed Habab presentation never presents a saved model as the current model", () => {
   const managed = providerModelPresentation("habab", {
     model: "gemini-3.1-flash-lite",
     managed_model: "habab-chat",
@@ -192,10 +192,12 @@ test("managed Habab presentation keeps the saved compatibility value and gateway
     text_ready: true,
   }, "en");
   assert.equal(managed.readOnly, true);
-  assert.equal(managed.label, "Saved compatibility value");
-  assert.match(managed.help, /Gateway alias: habab-chat/);
-  assert.match(managed.help, /OpenAI-compatible API/);
-  assert.match(managed.help, /upstream model is not reported/i);
+  assert.equal(managed.label, null);
+  assert.equal(managed.required, false);
+  assert.equal(managed.placeholder, "Selected by Habab");
+  assert.match(managed.help, /Habab selects the model/i);
+  assert.match(managed.help, /current route is shown/i);
+  assert.doesNotMatch(managed.help, /Gateway alias|OpenAI-compatible API/i);
   assert.doesNotMatch(managed.help, /gemini-3\.1-flash-lite/i);
   assert.doesNotMatch(managed.help, /current model is habab-chat/i);
 
@@ -221,9 +223,10 @@ test("managed Habab presentation keeps the saved compatibility value and gateway
     protocol: "google",
     text_ready: true,
   }, "en");
-  assert.equal(legacy.readOnly, false);
-  assert.match(legacy.help, /Google Gemini/);
-  assert.match(legacy.help, /gemini-3.1-flash-lite/);
+  assert.equal(legacy.readOnly, true);
+  assert.equal(legacy.placeholder, "Selected by Habab");
+  assert.match(legacy.help, /Could not confirm the Habab route/i);
+  assert.doesNotMatch(legacy.help, /gemini-3\.1-flash-lite/i);
 
   assert.deepEqual(assistantProviderPresentation({
     provider: "openai", managed_model: null, effective_model: "gpt-4.1-mini",
@@ -233,6 +236,50 @@ test("managed Habab presentation keeps the saved compatibility value and gateway
     label: null,
     help: null,
   });
+});
+
+test("Habab model input hides the saved value while save preserves it internally", async () => {
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { createElement: () => ({ textContent: "" }) },
+  });
+  try {
+    const entry = {
+      provider: "habab",
+      entry_id: "fixture-entry",
+      model: "gemini-3.1-flash-lite",
+      managed_model: "habab-chat",
+      effective_model: null,
+      text_ready: true,
+      api_check_status: "verified",
+    };
+    const keyRequest = deferred();
+    const { panel, nodes } = panelForKeyFetch("habab", entry, [keyRequest]);
+    panel.language = "en";
+    panel.connectionsLoaded = true;
+    panel.selectProvider();
+
+    const modelInput = nodes.get("#model");
+    assert.equal(modelInput.value, "");
+    assert.equal(modelInput.readOnly, true);
+    assert.equal(modelInput.required, false);
+    assert.equal(modelInput.placeholder, "Selected by Habab");
+    assert.doesNotMatch(nodes.get("#model-help").textContent, /gemini-3\.1-flash-lite/i);
+
+    panel.q("form").reportValidity = () => true;
+    nodes.get("#key").value = "fixture-key";
+    let saved;
+    panel._hass.callWS = async (request) => { saved = request; };
+    panel.action = async (callback) => callback();
+    panel.refresh = async () => undefined;
+    panel.feedback = () => undefined;
+    await panel.save();
+    assert.equal(saved.model, "gemini-3.1-flash-lite");
+  } finally {
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else delete globalThis.document;
+  }
 });
 
 test("routing summary separates managed text, default voice, Android wake detection, and configured TTS", () => {
