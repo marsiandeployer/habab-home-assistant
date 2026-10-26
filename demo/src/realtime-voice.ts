@@ -66,12 +66,18 @@ class HaDemoRealtimeVoice extends LitElement {
   static styles = css`
     :host {
       position: fixed;
-      z-index: 1200;
-      right: 16px;
-      bottom: 16px;
+      z-index: 999;
+      left: max(16px, env(safe-area-inset-left));
+      inset-block-end: max(16px, env(safe-area-inset-bottom));
       width: min(360px, calc(100vw - 32px));
       color: var(--primary-text-color, #212121);
       font: 14px Roboto, Arial, sans-serif;
+    }
+    @media (max-width: 720px) {
+      :host {
+        inset-block-start: max(16px, env(safe-area-inset-top));
+        inset-block-end: auto;
+      }
     }
     section {
       box-sizing: border-box;

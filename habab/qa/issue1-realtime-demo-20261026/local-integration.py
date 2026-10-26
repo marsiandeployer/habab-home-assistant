@@ -182,6 +182,17 @@ async def run_fixture():
         @app.get('/__fixture')
         def fixture_page():
             return Response('''<!doctype html><html><body>
+<style>
+habab-setup-chat { position: fixed; z-index: 10; inset: 0 0 0 auto; width: max(420px, 50vw); height: 100dvh; pointer-events: none; }
+habab-setup-chat .drawer { position: absolute; inset: 0; display: flex; flex-direction: column; background: white; }
+habab-setup-chat footer { margin-top: auto; min-height: 100px; }
+@media (max-width: 720px) {
+  habab-setup-chat { inset: 0; z-index: 1000; width: 100vw; }
+  habab-setup-chat .drawer { inset: 50dvh 0 0; }
+  habab-setup-chat[data-expanded] .drawer { inset-block-start: 0; }
+}
+</style>
+<habab-setup-chat data-assistant-open><div class="drawer"><main></main><footer id="chat-composer">Chat composer</footer></div></habab-setup-chat>
 <button id="start">Start synthetic session</button>
 <button id="stop">Stop synthetic session</button>
 <script>
@@ -291,6 +302,40 @@ const { chromium } = require('/root/but/node_modules/playwright');
     const page = await context.newPage();
     await page.goto(process.argv[2] + '/__fixture', { waitUntil: 'networkidle' });
     await page.waitForFunction(() => document.querySelector('ha-demo-realtime-voice'));
+    const desktopLayout = await page.evaluate(() => {
+      document.documentElement.dir = 'rtl';
+      const voice = document.querySelector('ha-demo-realtime-voice').getBoundingClientRect();
+      const composer = document.querySelector('#chat-composer').getBoundingClientRect();
+      document.documentElement.dir = 'ltr';
+      return { voice: { left: voice.left, right: voice.right, top: voice.top, bottom: voice.bottom },
+        composer: { left: composer.left, right: composer.right, top: composer.top, bottom: composer.bottom } };
+    });
+    if (desktopLayout.voice.right > desktopLayout.composer.left
+        && desktopLayout.voice.left < desktopLayout.composer.right
+        && desktopLayout.voice.bottom > desktopLayout.composer.top
+        && desktopLayout.voice.top < desktopLayout.composer.bottom)
+      throw new Error('desktop voice panel overlaps chat composer: ' + JSON.stringify(desktopLayout));
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileLayout = await page.evaluate(() => {
+      const voice = document.querySelector('ha-demo-realtime-voice').getBoundingClientRect();
+      const composer = document.querySelector('#chat-composer').getBoundingClientRect();
+      return { voice: { left: voice.left, right: voice.right, top: voice.top, bottom: voice.bottom },
+        composer: { left: composer.left, right: composer.right, top: composer.top, bottom: composer.bottom } };
+    });
+    if (mobileLayout.voice.right > mobileLayout.composer.left
+        && mobileLayout.voice.left < mobileLayout.composer.right
+        && mobileLayout.voice.bottom > mobileLayout.composer.top
+        && mobileLayout.voice.top < mobileLayout.composer.bottom)
+      throw new Error('mobile voice panel overlaps chat composer: ' + JSON.stringify(mobileLayout));
+    const expandedMobile = await page.evaluate(() => {
+      const voice = document.querySelector('ha-demo-realtime-voice');
+      const chat = document.querySelector('habab-setup-chat');
+      chat.setAttribute('data-expanded', '');
+      return { voiceZ: Number(getComputedStyle(voice).zIndex), chatZ: Number(getComputedStyle(chat).zIndex) };
+    });
+    if (expandedMobile.voiceZ >= expandedMobile.chatZ)
+      throw new Error('expanded mobile chat does not stack above voice panel: ' + JSON.stringify(expandedMobile));
+    await page.setViewportSize({ width: 1280, height: 800 });
     const beforeStart = await page.evaluate(() => window.__micStarts);
     if (beforeStart !== 0) throw new Error('microphone requested before explicit start');
     await page.locator('#start').click();
