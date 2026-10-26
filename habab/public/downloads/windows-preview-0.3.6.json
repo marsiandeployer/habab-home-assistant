@@ -1,23 +1,18 @@
 {
-  "version": "0.3.6",
+  "bootstrap": "start-home-assistant-preview-0.3.6-1a844fb6f7a3.bat",
+  "bytes": 290827,
   "channel": "preview",
-  "source_commit": "9c04db9699454f94c404c8eaa346fa53129ae5c6",
-  "zip": "habab-home-windows-45203ea388bf.zip",
-  "sha256": "45203ea388bfd0af33d866aa196e9f8534444eb2a5171d13260d5f4b8e67c08f",
-  "bytes": 275988,
-  "bootstrap": "start-home-assistant-preview-0.3.6-45203ea388bf.bat",
   "native_frontend": "20260930.4+habab.9",
+  "sha256": "1a844fb6f7a30e16925fd3aa05ff20c0653cf45caf55def36530cdd3a2e746f7",
+  "source_commit": "3bdc03b6d13f41d142550703e698591bf032563d",
   "verified": {
-    "archive_integrity": true,
-    "docker_copy_sources_present": true,
-    "native_form_keyboard_and_cancel_on_owner": true,
-    "clean_image_build": true,
-    "clean_linux_boot": true,
-    "physical_windows_run": false
+    "candidate_manifest_sha256_and_size": true,
+    "canonical_windows_package_metadata": true,
+    "embedded_source_revision": true,
+    "launcher_sha_pins": true,
+    "physical_windows_run": false,
+    "zip_crc_and_members": true
   },
-  "upstream_503_last_observed": "2026-10-25",
-  "known_limits": [
-    "Habab text model returned upstream 503 UNAVAILABLE, last observed 2026-10-25; it was not rechecked for this candidate.",
-    "Physical Windows run: NOT RUN. Clean Linux image boot does not establish Windows acceptance."
-  ]
+  "version": "0.3.6",
+  "zip": "habab-home-windows-1a844fb6f7a3.zip"
 }
