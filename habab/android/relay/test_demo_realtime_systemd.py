@@ -8,16 +8,24 @@ import unittest
 ROOT = Path(__file__).resolve().parent
 UNIT = ROOT / 'systemd/habab-demo-realtime-relay.service'
 TARGET = 'habab-demo-realtime-relay'
-PRIVATE_CONFIG = '/root/.local/share/habab-demo-realtime-relay/pm2/realtime-d411.config.cjs'
+PRIVATE_CONFIG = '/root/.local/share/habab-demo-realtime-relay/pm2/realtime-2ca4e031.config.cjs'
+RELEASE = '/root/.local/share/habab-voice-relay/releases/2ca4e03167a87b98d66f24e34df233285c825923'
 PM2 = '/root/.nvm/versions/node/v22.23.4/lib/node_modules/pm2/bin/pm2'
 
 
 class DemoRealtimeSystemdUnitTests(unittest.TestCase):
-    def test_boot_uses_the_immutable_private_d411_config(self):
+    def test_boot_uses_the_immutable_private_2ca4_config(self):
         unit = UNIT.read_text()
         self.assertIn(f'{PM2} start {PRIVATE_CONFIG} --only {TARGET}', unit)
         self.assertNotIn('/root/homeassistent/habab/android/relay/ecosystem.demo-realtime.config.cjs', unit)
         self.assertNotIn('2bd37656ab1af10584abd5eb20231dac29b2ab21', unit)
+        self.assertNotIn('d411e21e146106b8d1f8dd6074100ac18d3ff3b0', unit)
+
+    def test_pm2_candidate_pins_the_reviewed_gateway_and_windowed_config(self):
+        candidate = (ROOT / 'ecosystem.demo-realtime.config.cjs').read_text()
+        self.assertIn(f"cwd: '{RELEASE}'", candidate)
+        self.assertIn(f"script: '{RELEASE}/openai_gateway.py'", candidate)
+        self.assertIn("--config /root/.local/share/habab-demo-realtime-relay/config-2ca4e031.json", candidate)
 
     def test_boot_unit_is_ordered_after_pm2_and_scoped_to_one_process(self):
         unit = UNIT.read_text()

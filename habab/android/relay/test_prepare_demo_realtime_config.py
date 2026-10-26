@@ -33,6 +33,7 @@ class DemoRealtimeConfigTests(unittest.TestCase):
             'browser_origins': ['https://habab-demo.wpmix.net'],
             'demo_openai_session_limit': 5,
             'demo_openai_sessions_per_session': 2,
+            'demo_openai_session_window_seconds': 86400,
         })
 
     def test_write_creates_new_private_directory_and_config(self):
@@ -45,6 +46,20 @@ class DemoRealtimeConfigTests(unittest.TestCase):
                          build_config(self.source))
         with self.assertRaises(FileExistsError):
             write_config(self.source, destination)
+        self.assertEqual(json.loads(destination.read_text(encoding='utf-8')),
+                         build_config(self.source))
+
+    def test_write_allows_new_versioned_config_in_existing_private_directory(self):
+        destination_dir = self.root / 'dedicated'
+        destination_dir.mkdir(mode=0o700)
+        destination = destination_dir / 'config-2ca4.json'
+        write_config(self.source, destination)
+        self.assertEqual(stat.S_IMODE(destination_dir.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o600)
+        with self.assertRaises(FileExistsError):
+            write_config(self.source, destination)
+        self.assertEqual(json.loads(destination.read_text(encoding='utf-8')),
+                         build_config(self.source))
 
     def test_rejects_non_private_source_config(self):
         os.chmod(self.source, 0o644)

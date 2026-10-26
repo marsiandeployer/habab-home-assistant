@@ -9,11 +9,12 @@ from pathlib import Path
 
 
 SOURCE_CONFIG = Path('/root/.local/share/habab-voice-relay/config.json')
-DESTINATION = Path('/root/.local/share/habab-demo-realtime-relay/config.json')
+DESTINATION = Path('/root/.local/share/habab-demo-realtime-relay/config-2ca4e031.json')
 DEMO_ORIGIN = 'https://habab-demo.wpmix.net'
 DEMO_PORT = 18329
 DEMO_SESSION_LIMIT = 5
 DEMO_SESSIONS_PER_SESSION = 2
+DEMO_SESSION_WINDOW_SECONDS = 86400
 
 
 def build_config(source_path):
@@ -36,6 +37,7 @@ def build_config(source_path):
         'browser_origins': [DEMO_ORIGIN],
         'demo_openai_session_limit': DEMO_SESSION_LIMIT,
         'demo_openai_sessions_per_session': DEMO_SESSIONS_PER_SESSION,
+        'demo_openai_session_window_seconds': DEMO_SESSION_WINDOW_SECONDS,
     }
 
 
@@ -43,11 +45,19 @@ def write_config(source_path, destination=DESTINATION):
     destination = Path(destination)
     parent = destination.parent
     config = build_config(source_path)
+    created_parent = False
     if parent.exists() or parent.is_symlink():
-        raise FileExistsError('Dedicated demo relay directory already exists')
-    parent.mkdir(mode=0o700, parents=False)
+        metadata = parent.stat()
+        if (parent.is_symlink() or not parent.is_dir() or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) & 0o077):
+            raise PermissionError('Dedicated demo relay directory must be private and owned by this user')
+    else:
+        parent.mkdir(mode=0o700, parents=False)
+        created_parent = True
+    created_file = False
     try:
         fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created_file = True
         with os.fdopen(fd, 'w', encoding='utf-8') as output:
             json.dump(config, output, separators=(',', ':'))
             output.write('\n')
@@ -55,8 +65,10 @@ def write_config(source_path, destination=DESTINATION):
             os.fsync(output.fileno())
     except Exception:
         try:
-            destination.unlink(missing_ok=True)
-            parent.rmdir()
+            if created_file:
+                destination.unlink(missing_ok=True)
+            if created_parent:
+                parent.rmdir()
         except OSError:
             pass
         raise
@@ -72,7 +84,8 @@ def main():
     print(json.dumps({'created': True, 'config_path': str(path), 'port': DEMO_PORT,
                       'browser_origin': DEMO_ORIGIN,
                       'sessions_per_process': DEMO_SESSION_LIMIT,
-                      'sessions_per_anonymous_session': DEMO_SESSIONS_PER_SESSION}))
+                      'sessions_per_anonymous_session': DEMO_SESSIONS_PER_SESSION,
+                      'session_window_seconds': DEMO_SESSION_WINDOW_SECONDS}))
 
 
 if __name__ == '__main__':

@@ -1,87 +1,54 @@
-# Public demo Realtime relay instance
+# Public demo Realtime relay rollout
 
-This candidate runs the verified `openai_gateway.py` program as a separate
-PM2 process on loopback port `18329`. It does not replace the Gemini relay on
-`8326`; all existing Gemini paths continue through the current generic Nginx
-location. The new process has its own config and Unix control socket at
-`/root/.local/share/habab-demo-realtime-relay/control.sock`.
+The isolated public demo relay runs the same gateway application as the Gemini
+relay, on loopback port `18329` under a separate PM2 entry. The Gemini relay on
+`8326`, demo backend, Nginx, and frontend are independent and must remain
+untouched during a relay-only update.
 
-## Request path
+## Current and candidate versions
 
-1. The browser posts same-origin to `/api/ha-demo/realtime/bootstrap`.
-2. `habab-home-demo` reads the upstream key from its existing private `.env`
-   and sends it with a session hash through the dedicated Unix socket.
-3. The demo relay returns a one-use grant. The browser sends that grant as the
-   first WebSocket frame to `wss://habab-voice.wpmix.net/openai/demo/ws`.
-4. The exact Nginx location in
-   `habab/deploy/nginx-voice-demo-realtime-location.conf` proxies only that
-   path to `127.0.0.1:18329`. Other voice paths keep using `8326`.
+The read-only preflight on 2026-10-27 found PM2 entry
+`habab-demo-realtime-relay` online at PID `1825602` (PM2 id `68`), running
+`/root/.local/share/habab-voice-relay/releases/d411e21e146106b8d1f8dd6074100ac18d3ff3b0/openai_gateway.py`.
+The enabled systemd unit is currently inactive and its installed copy still
+references the private `realtime-d411.config.cjs`.
 
-The demo process accepts only the exact demo Origin, limits concurrent voice
-connections to two, allows five starts per process and two starts per
-anonymous session, and expires each grant after one minute. The process-wide
-start budget is in memory and resets when this demo process restarts; it is
-not a daily quota. The dedicated process receives no Gemini key. Its OpenAI
-key is provided per bootstrap and held only in memory.
+The reviewed candidate source is commit
+`2ca4e03167a87b98d66f24e34df233285c825923`. Its immutable gateway release is
+`/root/.local/share/habab-voice-relay/releases/2ca4e03167a87b98d66f24e34df233285c825923/openai_gateway.py`.
+The candidate keeps port `18329`, the exact configured demo Origin, the same
+private control socket, and limits of five paid starts and two starts per
+anonymous session in a rolling 24-hour window. The config hash remains private;
+the upstream OpenAI key is still provided at bootstrap and held only in RAM.
 
-## Candidate apply sequence
+Staged candidate config paths are:
 
-This document and its config files are review artifacts. No production
-process, directory, socket, or Nginx file has been changed by preparing them.
+- `/root/.local/share/habab-demo-realtime-relay/config-2ca4e031.json`
+- `/root/.local/share/habab-demo-realtime-relay/pm2/realtime-2ca4e031.config.cjs`
 
-1. Install the verified source artifact from commit
-   `2bd37656ab1af10584abd5eb20231dac29b2ab21` into the immutable release
-   directory named in `ecosystem.demo-realtime.config.cjs`. Keep the active
-   `9c174aacc` release intact.
-2. Run `python3 habab/android/relay/prepare_demo_realtime_config.py` once. It reads only the existing
-   relay `key_sha256` and exact demo Origin, and creates the new private
-   directory/config with modes `0700`/`0600`, port `18329`, and explicit
-   quotas. It refuses to overwrite an existing destination.
-3. Run `pm2 start habab/android/relay/ecosystem.demo-realtime.config.cjs`.
-   This starts only `habab-demo-realtime-relay` using the same checked gateway
-   code with the new config; it does not bind or unlink the Gemini relay's
-   `8326` listener or control socket. Run `pm2 save` after confirming the new
-   process is online.
-4. Run `pm2 startOrRestart habab/ecosystem.config.cjs`. That file declares
-   only `habab-home-demo`; its new environment value selects the unique demo
-   relay socket. The route reads
-   `HA_DEMO_REALTIME_CONTROL_SOCKET` from the process environment; changing
-   the PM2 ecosystem does not update a running Gunicorn process. The required
-   restart is scoped to the demo backend and leaves both voice relay
-   processes untouched.
-5. Add the location snippet to the active `habab-voice.wpmix.net` server and
-   add `wss://habab-voice.wpmix.net` to the active demo CSP. Run `nginx -t`
-   and reload Nginx. The existing voice vhost already forwards WebSocket
-   upgrades to `8326`; the exact location sends only `/openai/demo/ws` to
-   `18329`. After the location is active, a request with a deliberately
-   disallowed Origin can confirm routing without creating an upstream session;
-   the relay should return `403` before checking for an OpenAI key.
-6. Publish the verified demo frontend artifact last, after backend, relay,
-   and Nginx are ready. Do not use a real OpenAI request as a deployment
-   smoke test. A later HTTP request with a deliberately disallowed Origin may
-   confirm that the public route reaches the new relay; it should be rejected
-   before any upstream connection.
+The source systemd unit points to that PM2 config. These candidate files do not
+replace the currently installed unit or restart the live relay.
 
-## Boot persistence candidate
+## Validation and rollout boundary
 
-The prepared `systemd/habab-demo-realtime-relay.service` is scoped to this one
-PM2 process and is not installed or enabled yet. It uses the owner-only,
-immutable `/root/.local/share/habab-demo-realtime-relay/pm2/realtime-d411.config.cjs`
-outside the checkout. For a later relay release, verify the new private config
-path, ownership, permissions and digest, then update the unit and its static
-test together. Do not use global `pm2 save` to persist this service.
+The source commit is pinned by the PM2 candidate config and its gateway file
+hash is checked against the committed Git blob. The private JSON keeps the
+current port, origin and service-key hash while explicitly adding the
+five/2/86400 rolling quotas. File and directory modes remain `0600` and
+`0700`; the candidate process uses the same venv and control socket path.
 
-## Cleanup and rollback
+Before any live action, re-read the PM2 PID, source path and unit files. A
+scoped delete/start of only `habab-demo-realtime-relay` will reset its in-memory
+global and per-session rolling history once. The existing usage count is not
+exported by the process and is not read or changed by staging. Reserve at most
+one live model session for a later authorized check; this staging step makes no
+model request. Do not run `pm2 save`, since the dedicated systemd unit owns boot
+startup and PM2's saved process list includes unrelated applications.
 
-To disable the candidate, first remove the exact Nginx location and reload
-after `nginx -t`, then delete only `habab-demo-realtime-relay` from PM2 and
-run `pm2 save`. Remove only
-`/root/.local/share/habab-demo-realtime-relay/` after confirming the process
-has stopped. Do not stop `habab-voice-relay`, remove its `control.sock`, or
-delete its active/previous releases. The source release directory remains
-available for review and rollback.
-
-The local synthetic contract fixture is
+The loopback synthetic fixture is
 `habab/qa/issue1-realtime-demo-20261026/dedicated-relay-contract.py`. It uses
-the actual Flask route, the candidate Gateway, a temporary Unix socket, and a
-loopback-only fake upstream. It sends no audio and makes no model request.
+the real Flask bootstrap route and gateway with a temporary Unix socket and a
+loopback-only fake upstream. It sends no audio and makes no OpenAI request.
+
+No live process, systemd unit, backend, Nginx config, or frontend is changed as
+part of staging and synthetic validation.

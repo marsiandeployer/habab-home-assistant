@@ -10,7 +10,7 @@ Environment=PM2_HOME=/root/.pm2
 ExecCondition=/bin/sh -c '/root/.nvm/versions/node/v22.23.4/lib/node_modules/pm2/bin/pm2 ping >/dev/null 2>&1'
 # A stopped PM2 entry reports PID 0; only a positive PID skips startup.
 ExecCondition=/bin/sh -c '! /root/.nvm/versions/node/v22.23.4/lib/node_modules/pm2/bin/pm2 pid habab-demo-realtime-relay 2>/dev/null | /usr/bin/grep -E -q "^[1-9][0-9]*"'
-ExecStart=/root/.nvm/versions/node/v22.23.4/lib/node_modules/pm2/bin/pm2 start /root/.local/share/habab-demo-realtime-relay/pm2/realtime-d411.config.cjs --only habab-demo-realtime-relay
+ExecStart=/root/.nvm/versions/node/v22.23.4/lib/node_modules/pm2/bin/pm2 start /root/.local/share/habab-demo-realtime-relay/pm2/realtime-2ca4e031.config.cjs --only habab-demo-realtime-relay
 
 [Install]
 WantedBy=multi-user.target

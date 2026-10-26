@@ -33,16 +33,19 @@ Habab OpenAI Realtime маршруты отключены.
 Отдельный public demo OpenAI Realtime использует `/openai/demo/ws`, а не
 legacy endpoint выше. Он выдаёт только одноразовые grants через приватный
 control socket relay и держит OpenAI key на сервере. Приватный relay config
-управляет общим числом запусков за время жизни процесса и числом запусков на
-одну анонимную demo-сессию:
+управляет числом запусков в скользящем окне и числом запусков на одну
+анонимную demo-сессию:
 
 ```json
-{"demo_openai_session_limit": 5, "demo_openai_sessions_per_session": 2}
+{"demo_openai_session_limit": 5, "demo_openai_sessions_per_session": 2,
+ "demo_openai_session_window_seconds": 86400}
 ```
 
-По умолчанию разрешено не более пяти запусков на процесс и двух запусков на
-один session hash. Ноль отключает запуск. Учёт ведётся в RAM и сбрасывается
-при рестарте relay; это ограниченный QA/demo бюджет, не суточная квота.
+По умолчанию разрешено не более пяти запусков за последние 24 часа и двух
+запусков на один session hash за те же 24 часа. Ноль отключает запуск.
+Истёкшие запуски автоматически освобождают лимит; учёт ведётся в RAM и
+сбрасывается при рестарте relay. Это ограниченный QA/demo бюджет, не точная
+денежная квота.
 
 Для браузера capabilities добавляют `realtime.browser_auth` с режимом
 `first_text_frame` и type `habab.voice.auth.v1`. По умолчанию этот режим
