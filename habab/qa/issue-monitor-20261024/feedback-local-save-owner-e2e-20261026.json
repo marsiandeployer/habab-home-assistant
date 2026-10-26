@@ -1,0 +1,70 @@
+{
+  "schema": "habab.issue18.feedback_local_save_e2e.v1",
+  "captured_at_utc": "2026-10-26T00:03:00Z",
+  "runtime": {
+    "container": "habab-owner-test",
+    "container_id_prefix": "ee11572891b0",
+    "home_assistant": "2026.10.2",
+    "product": "0.3.6",
+    "source_sha": "3bdc03b6d13f41d142550703e698591bf032563d",
+    "image_sha256": "fc6062a20172affd5a7218d0586e29580ccbb0e876596ae10ba13360059bc928"
+  },
+  "preflight": {
+    "owner_admin": true,
+    "assistant_idle": true,
+    "opencode_status_map": {
+      "total": 0,
+      "busy": 0,
+      "retry": 0,
+      "idle": 0
+    },
+    "automation_count": 0,
+    "vacuum_count": 1,
+    "vacuum_docked": true,
+    "feedback_delivery": {
+      "enabled": false,
+      "credential_configured": false,
+      "ready": false
+    },
+    "own_feedback_records": 1
+  },
+  "test": {
+    "route": "/habab-ai",
+    "prompt_kind": "explicit_local_only_feedback",
+    "prompt_submitted_once": true,
+    "session_terminal": "completed",
+    "diagnostics_action_calls": 1,
+    "action": "save_feedback",
+    "consent_true": true,
+    "send_to_habab": false,
+    "feedback_matches_requested_test_phrase": true,
+    "action_result": {
+      "state": "saved_locally",
+      "issue_state": "not_configured"
+    }
+  },
+  "persistence": {
+    "own_feedback_records_after": 2,
+    "new_own_records": 1,
+    "new_record_matches_action_payload": true,
+    "previous_records_unchanged": true,
+    "new_record_delivery_fields_absent": true,
+    "feedback_delivery_after": {
+      "enabled": false,
+      "credential_configured": false,
+      "ready": false
+    }
+  },
+  "safety": {
+    "external_feedback_delivery": false,
+    "home_mutation": false,
+    "raw_prompt_or_reply_persisted_in_receipt": false,
+    "session_or_receipt_ids_in_receipt": false,
+    "keys_or_secrets_in_receipt": false,
+    "own_browser_processes_remaining": 0,
+    "own_temp_profiles_remaining": 0
+  },
+  "limits": [
+    "One cloud owner text-chat turn only; not voice, Telegram, Android, Windows, or external receiver delivery."
+  ]
+}

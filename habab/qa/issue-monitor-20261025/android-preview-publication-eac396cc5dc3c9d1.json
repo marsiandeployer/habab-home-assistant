@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "release": "Android preview eac396cc5dc3c9d1 / native20-08f975af45fe",
+  "source_revision": "3bdc03b6d13f41d142550703e698591bf032563d",
+  "public_base": "https://habab-demo.wpmix.net/downloads/android/",
+  "runtime": {
+    "runtime_id": "eac396cc5dc3c9d1",
+    "source_inventory_files": 86,
+    "archive": {
+      "file": "habab-runtime-eac396cc5dc3c9d1-arm64.tgz",
+      "bytes": 1145590190,
+      "sha256": "40f3a20ed4dcfef2a631f6ddfef530809324a31d01581c69bd25f0ac00934ff9"
+    },
+    "manifest": {
+      "file": "release-eac396cc5dc3c9d1.json",
+      "bytes": 38593,
+      "sha256": "266f2aa0e25924397a9f1fe50f6e11f2bdd990b7ba6760fbd48856cfd9e89c01"
+    },
+    "signature": {
+      "file": "release-eac396cc5dc3c9d1.json.sig",
+      "bytes": 513,
+      "sha256": "f4303da5ad3301365128e56bbf8bbc0d026d36dca7c1dcec6d3dd8ca58a31425"
+    },
+    "verification": {
+      "publisher_signature_and_archive_inventory": "PASS",
+      "archive_same_inode_source_and_public": "PASS",
+      "public_manifest_get": "PASS",
+      "public_signature_get": "PASS",
+      "archive_head_200_content_length": 1145590190,
+      "archive_range_0_65535_http_206": "PASS",
+      "full_archive_public_get": "NOT_RUN"
+    }
+  },
+  "apk": {
+    "file": "habab-home-0.1.12-preview-code20-release-08f975af45fe.apk",
+    "bytes": 51421095,
+    "sha256": "08f975af45fe3f9f4314202902338e529f8aab4a13eb026f507bf2fd78d15267",
+    "receipt": {
+      "file": "habab-home-0.1.12-preview-code20-release-08f975af45fe.json",
+      "bytes": 4321,
+      "sha256": "0725e239cea9b791fd7ef54809fac7087358a6d75c27b339e4c79458096d8738"
+    },
+    "identity": {
+      "version_code": 20,
+      "version_name": "0.1.12-preview",
+      "variant": "release",
+      "debuggable": false,
+      "signer_certificate_sha256": "d5847538e56e57c1b17ea394a8130cd593277033af7421e251babad6c25cf704",
+      "trusted_key_der_sha256": "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069",
+      "default_runtime_manifest_url": "https://habab-demo.wpmix.net/downloads/android/release-eac396cc5dc3c9d1.json"
+    },
+    "verification": {
+      "public_full_get_sha_size": "PASS",
+      "receipt_public_full_get_sha_size": "PASS",
+      "aapt_identity": "PASS",
+      "apksigner_certificate": "PASS",
+      "trusted_der_and_default_url": "PASS"
+    }
+  },
+  "retention": {
+    "runtime": {
+      "current": "eac396cc5dc3c9d1",
+      "previous": "3149ea67a5e9691e",
+      "deleted_registered_release": "2f94e2e4d62bf401",
+      "deleted_paths": 6,
+      "current_previous_files_present": true,
+      "removed_release_public_head": 404
+    },
+    "apk": {
+      "current": "native20-08f975af45fe",
+      "previous": "native19-5b3946fadbda",
+      "deleted_registered_release": "native18",
+      "deleted_paths": [
+        "homeassistent/habab/android/dist/habab-home-0.1.10-notification-ee98ca116.apk"
+      ],
+      "current_previous_files_present": true,
+      "removed_release_public_head": 404
+    }
+  },
+  "acceptance_boundaries": {
+    "preview_only": true,
+    "stable_promotion": "NOT_DONE",
+    "physical_install": "NOT_RUN",
+    "device_or_voice_acceptance": "NOT_RUN",
+    "android_available_flag_changed": false
+  }
+}

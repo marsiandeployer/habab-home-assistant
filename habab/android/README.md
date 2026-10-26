@@ -12,17 +12,21 @@ Telegram-компонент из текущего Docker-пакета. Данн�
 
 ## Текущий preview
 
-Опубликованный preview — [APK 0.1.11-preview, versionCode 19](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.11-preview-code19-5b3946fadbda.apk).
-Его [отчёт сборки](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.11-preview-code19-5b3946fadbda.json)
-связывает APK с runtime `3149ea67a5e9691e` и исходным commit
-`3485669f466d7c5337fb3b7866fac737f9d871c3`.
+Опубликованный preview — [APK 0.1.12-preview, versionCode 20](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.12-preview-code20-release-08f975af45fe.apk).
+Его [отчёт сборки](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.12-preview-code20-release-08f975af45fe.json)
+связывает APK с runtime `eac396cc5dc3c9d1` и исходным commit
+`3bdc03b6d13f41d142550703e698591bf032563d`. В отдельном
+[отчёте публикации](../qa/issue-monitor-20261025/android-preview-publication-eac396cc5dc3c9d1.json)
+зафиксированы публичные хеши, проверка подписи, APK-сертификат и состояние
+retention.
 
-VersionCode 19 был задан внешним скриптом инициализации Gradle; настройки
-исходников по-прежнему задают versionCode 18 и `0.1.10-notification`. В отчёте
-нет SHA-256 этого скрипта, поэтому исходников недостаточно для точного
-повторения preview-сборки. Подпись APK проверена; сканирование не обнаружило
-встроенных учётных данных. APK не устанавливали и в stable не переводили.
-Перед preview-обновлением сохраните резервную копию данных.
+Сборка использовала release-вариант с внешним Gradle init script. Его SHA-256
+`2ef871c4b32405b9c818bbf7a7b1d8e5397b2ccfef3aba0e9deedc94bdbc07ee` указан
+в отчёте; настройки исходников по-прежнему задают versionCode 18 и
+`0.1.10-notification`. Preview подписан тем же сертификатом, что и предыдущие
+APK; `debuggable` выключен. Этот выпуск не переводили в stable и не
+устанавливали на устройство. Перед preview-обновлением сохраните резервную
+копию данных.
 
 Runtime работает в PRoot от имени приложения. UID 0 внутри гостя не даёт root
 на Android; эта установка не предоставляет HAOS/Supervisor и доступ к системным
