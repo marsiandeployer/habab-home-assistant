@@ -404,5 +404,108 @@ class ReleaseCandidateTests(unittest.TestCase):
                     self.assertEqual(status["source_revision"], self.revision)
 
 
+class ReleasePreflightWorkflowTests(unittest.TestCase):
+    @staticmethod
+    def workflow_text():
+        repository = Path(__file__).resolve().parents[2]
+        return (repository / ".github/workflows/habab-release-candidate.yaml").read_text()
+
+    def test_preflight_blocks_every_target_and_final_manifest(self):
+        workflow = self.workflow_text()
+        self.assertIn("  release-preflight:\n", workflow)
+        self.assertIn("  release-preflight:\n    name: Run fast source checks\n    needs: resolve-source", workflow)
+        for job in ("windows-source", "linux-image", "android-inputs"):
+            with self.subTest(job=job):
+                self.assertRegex(
+                    workflow,
+                    rf"(?ms)^  {job}:\n    needs: \[resolve-source, release-preflight\]$",
+                )
+        assemble = workflow[workflow.index("  assemble-candidate:\n"):]
+        self.assertIn("needs: [resolve-source, release-preflight, windows-source, linux-image, android]", assemble)
+        self.assertIn("needs.release-preflight.result == 'success'", assemble)
+        self.assertNotRegex(assemble, r"(?m)^\s*continue-on-error:")
+
+    def test_fastchecks_use_a_pinned_offline_container_and_builtin_node_tests(self):
+        workflow = self.workflow_text()
+        preflight = workflow[workflow.index("  release-preflight:\n"):workflow.index("  windows-source:\n")]
+        self.assertIn(
+            "ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:"
+            "33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4",
+            preflight,
+        )
+        for value in (
+            "--network none", "--memory=1g", "--memory-swap=1g", "--cpus=1",
+            "--pids-limit=64", "--entrypoint python3", ":ro",
+            "tests/run_release_candidate_backend_tests.py",
+        ):
+            with self.subTest(value=value):
+                self.assertIn(value, preflight)
+        self.assertIn(
+            "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1",
+            preflight,
+        )
+        js_step = preflight[preflight.index("      - name: Run focused native JavaScript tests"):]
+        for test in (
+            "test-automation-setup.mjs", "test-chat-lifecycle.mjs",
+            "test-integration-setup.mjs", "test-provider-selection.mjs",
+        ):
+            self.assertIn(test, js_step)
+        self.assertNotRegex(preflight, r"(?m)^\s*continue-on-error:")
+
+    def test_preflight_requires_runner_and_approved_tracked_public_trust_anchor(self):
+        repository = Path(__file__).resolve().parents[2]
+        workflow = self.workflow_text()
+        preflight = workflow[workflow.index("  release-preflight:\n"):workflow.index("  windows-source:\n")]
+        runner = "habab/distribution/tests/run_release_candidate_backend_tests.py"
+        self.assertIn("habab/android/app/src/main/assets/release", preflight)
+        self.assertIn(f"[[ -f {runner} ]]", preflight)
+        self.assertIn("grep -Fq 'class ReleasePreflightWorkflowTests'", preflight)
+        self.assertIn("choose a revision with release fast checks", preflight)
+        self.assertIn("git ls-files --error-unmatch \"$trust_anchor\"", preflight)
+        self.assertIn(
+            "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069",
+            preflight,
+        )
+        self.assertIn("openssl pkey -pubin -inform DER", preflight)
+
+        anchor_relative = "habab/android/app/src/main/assets/release/trusted-key.der"
+        anchor = repository / anchor_relative
+        self.assertTrue(anchor.is_file(), "Approved public runtime trust anchor is absent")
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", anchor_relative],
+            cwd=repository, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(tracked.returncode, 0, "Public runtime trust anchor is not tracked")
+        self.assertEqual(
+            hashlib.sha256(anchor.read_bytes()).hexdigest(),
+            "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069",
+        )
+
+    def test_android_unit_gate_runs_after_signed_inputs_and_before_assembly(self):
+        workflow = self.workflow_text()
+        runtime_check = workflow.index("      - name: Verify same-source signed runtime input")
+        native_inputs = workflow.index("      - name: Prepare pinned APK native tools and voice model")
+        unit_tests = workflow.index("      - name: Run Android unit tests before APK packaging")
+        assembly = workflow.index("      - name: Lint and assemble Android APK")
+        self.assertLess(runtime_check, native_inputs)
+        self.assertLess(native_inputs, unit_tests)
+        self.assertLess(unit_tests, assembly)
+        before_unit_tests = workflow[:unit_tests]
+        for invariant in (
+            "openssl dgst -sha256 -verify", "release.get('sourceRevision')",
+            "release.get('sourceFiles') != expected", "release.get('nodePackages')",
+            "androidLauncherSha256", "--frontend-candidate frontend-input",
+            "configurationSha256", "trusted-key.der", "default-url.txt",
+        ):
+            self.assertIn(invariant, before_unit_tests)
+        unit_step = workflow[unit_tests:assembly]
+        self.assertIn(":app:testDebugUnitTest", unit_step)
+        self.assertNotIn(":app:assembleRelease", unit_step)
+        sign_step = workflow.index("      - name: Sign APK with release keystore")
+        self.assertGreater(sign_step, assembly)
+        self.assertIn("verify_apk_provenance", workflow[sign_step:])
+        self.assertIn("verify_apk_version", workflow[sign_step:])
+
+
 if __name__ == "__main__":
     unittest.main()

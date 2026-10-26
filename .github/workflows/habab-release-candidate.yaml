@@ -64,8 +64,74 @@ jobs:
           fi
           echo "source_revision=$resolved" >> "$GITHUB_OUTPUT"
 
-  windows-source:
+  release-preflight:
+    name: Run fast source checks
     needs: resolve-source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+      HA_TEST_IMAGE: ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4
+    steps:
+      - name: Check out exact preflight source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve-source.outputs.source_revision }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+            habab/android/app/src/main/assets/release
+            habab/distribution
+            habab/scripts
+          sparse-checkout-cone-mode: true
+      - name: Verify exact clean source
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Preflight checkout does not match the selected source'; exit 1; }
+          git diff --quiet && git diff --cached --quiet || { echo '::error::Preflight checkout is dirty'; exit 1; }
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]] || { echo '::error::Preflight checkout has untracked files'; exit 1; }
+          [[ -f habab/distribution/tests/run_release_candidate_backend_tests.py ]] || {
+            echo '::error::Selected source does not contain the release preflight runner; choose a revision with release fast checks'; exit 1;
+          }
+          grep -Fq 'class ReleasePreflightWorkflowTests' habab/scripts/test_release_candidate.py || {
+            echo '::error::Selected source does not contain the release preflight workflow tests; choose a revision with release fast checks'; exit 1;
+          }
+          trust_anchor=habab/android/app/src/main/assets/release/trusted-key.der
+          [[ -f "$trust_anchor" ]] || { echo '::error::Selected source lacks the approved public runtime trust anchor'; exit 1; }
+          git ls-files --error-unmatch "$trust_anchor" >/dev/null || {
+            echo '::error::Approved public runtime trust anchor is not tracked in selected source'; exit 1;
+          }
+          trust_sha256=$(sha256sum "$trust_anchor" | cut -d' ' -f1)
+          [[ "$trust_sha256" == ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069 ]] || {
+            echo '::error::Public runtime trust anchor differs from the approved key; review key rotation explicitly'; exit 1;
+          }
+          openssl pkey -pubin -inform DER -in "$trust_anchor" -noout
+      - name: Test release preflight workflow gates
+        run: PYTHONPATH=habab/scripts python3 -m unittest -v test_release_candidate.ReleasePreflightWorkflowTests
+      - name: Set up Node 24.21.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.21.0
+          check-latest: false
+      - name: Run focused native JavaScript tests
+        run: >-
+          node --test
+          habab/distribution/tests/test-automation-setup.mjs
+          habab/distribution/tests/test-chat-lifecycle.mjs
+          habab/distribution/tests/test-integration-setup.mjs
+          habab/distribution/tests/test-provider-selection.mjs
+      - name: Run focused backend tests in isolated Home Assistant image
+        run: |
+          set -euo pipefail
+          docker run --rm --pull=missing \
+            --network none --memory=1g --memory-swap=1g --cpus=1 --pids-limit=64 \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --volume "$GITHUB_WORKSPACE/habab/distribution:/workspace/habab/distribution:ro" \
+            --workdir /tmp --entrypoint python3 "$HA_TEST_IMAGE" \
+            /workspace/habab/distribution/tests/run_release_candidate_backend_tests.py
+
+  windows-source:
+    needs: [resolve-source, release-preflight]
     if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'windows' }}
     runs-on: ubuntu-latest
     steps:
@@ -130,7 +196,7 @@ jobs:
           retention-days: 1
 
   linux-image:
-    needs: resolve-source
+    needs: [resolve-source, release-preflight]
     if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'linux' }}
     runs-on: ubuntu-latest
     strategy:
@@ -200,7 +266,7 @@ jobs:
           retention-days: 1
 
   android-inputs:
-    needs: resolve-source
+    needs: [resolve-source, release-preflight]
     if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'android' }}
     runs-on: ubuntu-latest
     outputs:
@@ -484,13 +550,20 @@ jobs:
           gradle-version: '8.5'
           cache-disabled: true
           dependency-graph: disabled
-      - name: Build and test Android APK inputs
+      - name: Run Android unit tests before APK packaging
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         run: |
           set -euo pipefail
           gradle --no-daemon -p habab/android \
             "-PappVersionCode=$ANDROID_VERSION_CODE" "-PappVersionName=$ANDROID_VERSION_NAME" \
-            :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+            :app:testDebugUnitTest
+      - name: Lint and assemble Android APK
+        if: ${{ needs.android-inputs.outputs.state == 'built' }}
+        run: |
+          set -euo pipefail
+          gradle --no-daemon -p habab/android \
+            "-PappVersionCode=$ANDROID_VERSION_CODE" "-PappVersionName=$ANDROID_VERSION_NAME" \
+            :app:lintDebug :app:assembleRelease
       - name: Sign APK with release keystore
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         env:
@@ -553,10 +626,11 @@ jobs:
           retention-days: 1
 
   assemble-candidate:
-    needs: [resolve-source, windows-source, linux-image, android]
+    needs: [resolve-source, release-preflight, windows-source, linux-image, android]
     if: >-
       ${{
         always() && needs.resolve-source.result == 'success' &&
+        needs.release-preflight.result == 'success' &&
         ((inputs.target_scope == 'all' || inputs.target_scope == 'windows') && needs.windows-source.result == 'success' ||
          (inputs.target_scope == 'linux' || inputs.target_scope == 'android') && needs.windows-source.result == 'skipped') &&
         ((inputs.target_scope == 'all' || inputs.target_scope == 'linux') && needs.linux-image.result == 'success' ||
