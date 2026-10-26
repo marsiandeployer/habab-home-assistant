@@ -12,6 +12,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .assistant_status import voice_route_metadata
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
 from .feedback import FeedbackError
@@ -222,6 +223,8 @@ async def list_connections(hass, connection, msg):
                 "effective_model": None,
                 "protocol": None,
                 "text_ready": None,
+                "configured_upstream_provider": None,
+                "configured_upstream_model": None,
                 "text_error": "not_selected",
             }
         else:
@@ -232,9 +235,12 @@ async def list_connections(hass, connection, msg):
                 )
                 text_metadata = {
                     "managed_model": contract.managed_model,
-                    "effective_model": contract.model,
+                    # A managed gateway alias is not the actual upstream model.
+                    "effective_model": contract.model if contract.managed_model is None else None,
                     "protocol": contract.protocol,
                     "text_ready": contract.text_ready,
+                    "configured_upstream_provider": contract.configured_upstream_provider,
+                    "configured_upstream_model": contract.configured_upstream_model,
                 }
             except ProviderError as error:
                 text_metadata = {
@@ -242,13 +248,30 @@ async def list_connections(hass, connection, msg):
                     "effective_model": None,
                     "protocol": "unavailable",
                     "text_ready": False,
+                    "configured_upstream_provider": None,
+                    "configured_upstream_model": None,
                     "text_error": error.code,
                 }
+        if entry is selected_entry:
+            voice_route = voice_route_metadata(entry.data)
+            voice_metadata = {
+                "voice_provider": voice_route["voice_provider"],
+                "voice_protocol": voice_route["voice_protocol"],
+                "default_voice_model": voice_route["default_voice_model"],
+                "voice_ready": voice_route["voice_ready"],
+            }
+        else:
+            voice_metadata = {
+                "voice_provider": None,
+                "voice_protocol": None,
+                "default_voice_model": None,
+                "voice_ready": None,
+            }
         entries.append({
             "entry_id": entry.entry_id, "provider": entry.data["provider"],
             "model": entry.data["model"], "state": entry.state.value,
             "assistant_selected": entry is selected_entry,
-            "entities": entities, **_api_check_readback(entry), **text_metadata,
+            "entities": entities, **_api_check_readback(entry), **text_metadata, **voice_metadata,
         })
     connection.send_result(msg["id"], {"connections": entries})
 

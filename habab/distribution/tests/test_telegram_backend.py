@@ -71,6 +71,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.pending_message_ids = {}
         manager.cancelled_through = {}
         manager.cancel_epochs = {}
+        manager.pending_group_cancels = {}
         manager.pending_sends = {}
         manager.provider_config_epoch = 0
         manager.provider_entry_unsubscribers = {}
@@ -322,6 +323,62 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.bindings[entry.entry_id] = {"chat_id": "10", "user_id": "20", "bot_id": 99}
         manager.entries[entry.entry_id].update(chat_id="10", user_id="20", ready=True, username="testbot")
 
+    def bind_group(self, manager, entry):
+        binding = {
+            "chat_id": "-200", "title": "Home", "bot_id": 99, "owner_user_id": 20,
+        }
+        manager.group_bindings[entry.entry_id] = binding
+        return binding
+
+    async def dispatch_queued_message(self, manager, entry, queue, message):
+        reader = await self.dispatch_worker_update(manager, entry, message)
+        try:
+            await asyncio.wait_for(queue.join(), timeout=1)
+            turn = manager.turn_tasks.get(manager._turn_key(entry.entry_id, message["chat_id"]))
+            if turn:
+                await asyncio.wait_for(asyncio.gather(turn, return_exceptions=True), timeout=1)
+        finally:
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
+
+    async def dispatch_worker_update(self, manager, entry, message):
+        manager.queues.setdefault(entry.entry_id, asyncio.Queue(maxsize=3))
+        line = (json.dumps({"type": "message", **message}) + "\n").encode()
+        received = asyncio.Event()
+
+        class Stdout:
+            def __init__(self):
+                self.pending = line
+
+            async def readline(self):
+                if self.pending is not None:
+                    pending, self.pending = self.pending, None
+                    return pending
+                received.set()
+                await asyncio.Event().wait()
+
+        state = manager.entries[entry.entry_id]
+        state["process"] = SimpleNamespace(
+            stdout=Stdout(), wait=AsyncMock(return_value=0), pid=123)
+        reader = asyncio.create_task(manager._reader(entry, state))
+        try:
+            await asyncio.wait_for(received.wait(), timeout=1)
+        except Exception:
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
+            raise
+        return reader
+
+    async def dispatch_group_control(self, manager, entry, message):
+        reader = await self.dispatch_worker_update(manager, entry, message)
+        try:
+            tasks = tuple(manager.control_tasks.get(entry.entry_id, ()))
+            self.assertTrue(tasks)
+            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=1)
+        finally:
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
+
     async def test_unpaired_private_message_gets_safe_onboarding_without_runtime(self):
         manager = self.manager()
         manager.entries["entry"].update(chat_id=None, user_id=None)
@@ -469,9 +526,15 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         class Stdout:
             def __init__(self, lines):
                 self.lines = list(lines)
+                self.waiting = asyncio.Event()
+                self.release = asyncio.Event()
 
             async def readline(self):
-                return self.lines.pop(0) if self.lines else b""
+                if self.lines:
+                    return self.lines.pop(0)
+                self.waiting.set()
+                await self.release.wait()
+                return b""
 
         class Process:
             def __init__(self, lines):
@@ -497,8 +560,16 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.entries["entry"]["process"] = Process([
             b'{"type":"bot_member_update","chat_id":-200,"status":"administrator"}\n',
         ])
-        await manager._reader(entry, manager.entries["entry"])
-        await manager.group_candidate_tasks["entry"]
+        reader = asyncio.create_task(manager._reader(entry, manager.entries["entry"]))
+        try:
+            await asyncio.wait_for(manager.entries["entry"]["process"].stdout.waiting.wait(), timeout=1)
+            candidate_task = manager.group_candidate_tasks.get("entry")
+            if candidate_task:
+                await candidate_task
+        finally:
+            manager.entries["entry"]["process"].stdout.release.set()
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
         self.assertEqual(manager.group_bindings["entry"], {
             "chat_id": "-200", "title": "Home", "bot_id": 99, "owner_user_id": 20,
         })
@@ -706,6 +777,76 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.send.await_args_list[-1].args,
                          ("entry", "50", "Остановлено."))
 
+    async def test_queued_failure_sends_generic_error_for_current_owner_epoch(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        manager.queues["entry"] = asyncio.Queue(maxsize=2)
+        manager.pending_message_ids["entry"] = {"10": {100}}
+        manager.queues["entry"].put_nowait({
+            "chat_type": "private", "chat_id": 10, "user_id": 20,
+            "message_id": 100, "text": "queued task", "_habab_cancel_epoch": 0,
+        })
+        manager.handle_one = AsyncMock(side_effect=RuntimeError("fixture failure"))
+
+        consumer = asyncio.create_task(manager._consume(entry))
+        try:
+            await asyncio.wait_for(manager.queues["entry"].join(), timeout=1)
+        finally:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+
+        manager.hass.auth.async_get_user.assert_awaited_once_with("alice")
+        manager.send.assert_awaited_once_with(
+            "entry", "10", "Не удалось обработать сообщение.")
+
+    async def test_queued_failure_does_not_send_fallback_after_cancel_epoch_changes(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        manager.queues["entry"] = asyncio.Queue(maxsize=2)
+        manager.pending_message_ids["entry"] = {"10": {100}}
+        manager.queues["entry"].put_nowait({
+            "chat_type": "private", "chat_id": 10, "user_id": 20,
+            "message_id": 100, "text": "queued task", "_habab_cancel_epoch": 0,
+        })
+        started = asyncio.Event()
+        release = asyncio.Event()
+        handle_one = TelegramManager.handle_one.__get__(manager, TelegramManager)
+
+        async def fail_queued_but_handle_control(entry_arg, message):
+            if message.get("text") == "queued task":
+                started.set()
+                await release.wait()
+                raise RuntimeError("fixture failure")
+            await handle_one(entry_arg, message)
+
+        manager.handle_one = fail_queued_but_handle_control
+        consumer = asyncio.create_task(manager._consume(entry))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            cancel = {
+                "chat_type": "private", "chat_id": 10, "user_id": 20,
+                "message_id": 101, "text": "/cancel",
+            }
+            manager._advance_cancel_epoch(entry, cancel)
+            manager._schedule_control(entry, cancel)
+            controls = manager.control_tasks["entry"]
+            await asyncio.wait_for(asyncio.gather(*tuple(controls)), timeout=1)
+            release.set()
+            await asyncio.wait_for(manager.queues["entry"].join(), timeout=1)
+        finally:
+            release.set()
+            controls = tuple(manager.control_tasks.get("entry", ()))
+            for control in controls:
+                if not control.done():
+                    control.cancel()
+            consumer.cancel()
+            await asyncio.gather(consumer, *controls, return_exceptions=True)
+
+        self.assertEqual(manager.hass.auth.async_get_user.await_count, 3)
+        manager.send.assert_awaited_once_with("entry", "10", "Остановлено.")
+
     async def test_member_origin_rechecks_current_group_membership_on_every_lookup(self):
         manager = self.manager()
         entry = self.group_entry()
@@ -892,6 +1033,384 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({call.args[2] for call in assistant.run.await_args_list},
                          {"member-50", "member-51"})
         self.assertEqual({call.args[-1] for call in assistant.run.await_args_list}, {"50", "51"})
+
+    async def test_owner_and_member_group_messages_share_bound_group_session_and_reply_there(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        self.bind_group(manager, entry)
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        manager.queues[entry.entry_id] = asyncio.Queue(maxsize=3)
+        queue = manager.queues[entry.entry_id]
+        manager.typing = AsyncMock(return_value=True)
+        manager.get_chat_member.side_effect = lambda _entry, _group, user: (
+            {"status": "administrator", "is_member": True} if user == 99 else
+            {"status": "creator", "is_member": True} if user == 20 else
+            {"status": "member", "is_member": True})
+
+        async def get_group_session(owner, entry_id, chat_id):
+            session_id = "shared-group-session"
+            assistant.telegram_sessions[f"{owner}:{entry_id}:{chat_id}"] = session_id
+            return {"session_id": session_id}
+
+        assistant.telegram_session.side_effect = get_group_session
+        assistant.run.return_value = {"messages": [{"role": "assistant", "text": "read-only answer"}]}
+        consumer = asyncio.create_task(manager._consume(entry))
+        try:
+            await self.dispatch_queued_message(manager, entry, queue, {
+                "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+                "message_id": 1, "text": "Owner read-only question",
+            })
+            await self.dispatch_queued_message(manager, entry, queue, {
+                "chat_type": "supergroup", "chat_id": -200, "user_id": 50,
+                "message_id": 2, "text": "Member read-only question",
+            })
+        finally:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+
+        self.assertEqual(assistant.telegram_session.await_args_list[0].args,
+                         ("alice", "entry", "-200"))
+        self.assertEqual(assistant.telegram_session.await_args_list[1].args,
+                         ("alice", "entry", "-200"))
+        self.assertEqual({call.args[2] for call in assistant.run.await_args_list},
+                         {"shared-group-session"})
+        self.assertEqual({call.args[-1] for call in assistant.run.await_args_list}, {"-200"})
+        self.assertEqual(manager.send.await_args_list[0].args,
+                         ("entry", "-200", "read-only answer"))
+        self.assertEqual(manager.send.await_args_list[1].args,
+                         ("entry", "-200", "read-only answer"))
+
+    async def test_group_messages_reject_wrong_group_departed_member_and_unknown_command(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        self.bind_group(manager, entry)
+        manager.queues[entry.entry_id] = asyncio.Queue(maxsize=3)
+        queue = manager.queues[entry.entry_id]
+        manager.get_chat_member.side_effect = lambda _entry, _group, user: (
+            {"status": "administrator", "is_member": True} if user == 99 else
+            {"status": "left", "is_member": False})
+        consumer = asyncio.create_task(manager._consume(entry))
+        try:
+            for message in (
+                {"chat_type": "supergroup", "chat_id": -201, "user_id": 20,
+                 "message_id": 1, "text": "Wrong group"},
+                {"chat_type": "supergroup", "chat_id": -201, "user_id": 20,
+                 "message_id": 4, "text": "/cancel"},
+                {"chat_type": "supergroup", "chat_id": -200, "user_id": 52,
+                 "message_id": 2, "text": "Departed member"},
+                {"chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+                 "message_id": 3, "text": "/unsupported"},
+            ):
+                await self.dispatch_queued_message(manager, entry, queue, message)
+        finally:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+
+        manager.send.assert_not_awaited()
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        assistant.telegram_session.assert_not_awaited()
+        assistant.run.assert_not_awaited()
+        self.assertNotIn("-201", manager.cancel_epochs.get(entry.entry_id, {}))
+        self.assertFalse(manager._should_route_control(entry, manager.entries[entry.entry_id], {
+            "chat_type": "supergroup", "chat_id": -201, "user_id": 20,
+            "message_id": 4, "text": "/help",
+        }))
+
+    async def test_group_help_and_new_controls_reply_and_reset_only_bound_group_session(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        self.bind_group(manager, entry)
+        manager.get_chat_member.side_effect = lambda _entry, _group, user: {
+            "status": "administrator" if user == 99 else "creator",
+            "is_member": True,
+        }
+
+        await self.dispatch_group_control(manager, entry, {
+            "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+            "message_id": 1, "text": "/help",
+        })
+        self.assertEqual(manager.send.await_args.args[:2], ("entry", "-200"))
+        self.assertIn("/new", manager.send.await_args.args[2])
+        self.assertIn("группе", manager.send.await_args.args[2])
+
+        await self.dispatch_group_control(manager, entry, {
+            "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+            "message_id": 2, "text": "/new",
+        })
+        manager.hass.data["habab_home"]["assistant"].telegram_reset.assert_awaited_once_with(
+            "alice", "entry", "-200")
+        self.assertEqual(manager.send.await_args.args,
+                         ("entry", "-200", "Начат новый диалог."))
+
+    async def test_group_cancel_cancels_active_shared_turn_and_acknowledges_in_group(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        self.bind_group(manager, entry)
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        manager.queues[entry.entry_id] = asyncio.Queue(maxsize=2)
+        queue = manager.queues[entry.entry_id]
+        manager.typing = AsyncMock(return_value=True)
+        manager.get_chat_member.side_effect = lambda _entry, _group, user: {
+            "status": "administrator" if user == 99 else "creator",
+            "is_member": True,
+        }
+        run_started = asyncio.Event()
+
+        async def run(*_args):
+            run_started.set()
+            await asyncio.Event().wait()
+            return {"messages": [{"role": "assistant", "text": "must not be sent"}]}
+
+        async def get_group_session(owner, entry_id, chat_id):
+            assistant.telegram_sessions[f"{owner}:{entry_id}:{chat_id}"] = "shared-group-session"
+            return {"session_id": "shared-group-session"}
+
+        assistant.telegram_session.side_effect = get_group_session
+        assistant.run.side_effect = run
+        consumer = asyncio.create_task(manager._consume(entry))
+        try:
+            queue.put_nowait({
+                "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+                "message_id": 1, "text": "Start shared turn",
+            })
+            await asyncio.wait_for(run_started.wait(), timeout=1)
+            await self.dispatch_group_control(manager, entry, {
+                "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+                "message_id": 2, "text": "/cancel",
+            })
+            await asyncio.wait_for(queue.join(), timeout=1)
+        finally:
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+
+        manager.send.assert_awaited_once_with("entry", "-200", "Остановлено.")
+        assistant.run.assert_awaited_once()
+        assistant.abort.assert_not_awaited()
+
+    async def test_group_cancel_registers_before_member_api_wait_and_suppresses_completion(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        self.bind_group(manager, entry)
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        manager.queues[entry.entry_id] = asyncio.Queue(maxsize=2)
+        manager.typing = AsyncMock(return_value=True)
+        runtime_started = asyncio.Event()
+        runtime_release = asyncio.Event()
+        cancel_auth_started = asyncio.Event()
+        cancel_auth_release = asyncio.Event()
+
+        async def get_member(_entry_id, _group_id, user):
+            if user == 99:
+                return {"status": "administrator", "is_member": True}
+            control = manager.control_lanes.get(entry.entry_id, {}).get("-200")
+            if asyncio.current_task() is control:
+                cancel_auth_started.set()
+                await cancel_auth_release.wait()
+            return {"status": "creator", "is_member": True}
+
+        async def get_group_session(owner, entry_id, chat_id):
+            assistant.telegram_sessions[f"{owner}:{entry_id}:{chat_id}"] = "shared-group-session"
+            return {"session_id": "shared-group-session"}
+
+        async def run(*_args):
+            runtime_started.set()
+            await runtime_release.wait()
+            return {"messages": [{"role": "assistant", "text": "must not be sent"}]}
+
+        manager.get_chat_member.side_effect = get_member
+        assistant.telegram_session.side_effect = get_group_session
+        assistant.run.side_effect = run
+        assistant.abort.return_value = True
+        consumer = asyncio.create_task(manager._consume(entry))
+        readers = []
+        try:
+            readers.append(await self.dispatch_worker_update(manager, entry, {
+                "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+                "message_id": 1, "text": "Start shared turn",
+            }))
+            await asyncio.wait_for(runtime_started.wait(), timeout=1)
+            readers.append(await self.dispatch_worker_update(manager, entry, {
+                "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+                "message_id": 2, "text": "/cancel",
+            }))
+            await asyncio.wait_for(cancel_auth_started.wait(), timeout=1)
+            self.assertNotIn("-200", manager.cancel_epochs.get(entry.entry_id, {}))
+            cancel_auth_release.set()
+            control = manager.control_lanes[entry.entry_id]["-200"]
+            await asyncio.wait_for(asyncio.gather(control, return_exceptions=True), timeout=1)
+            self.assertEqual(manager.cancel_epochs[entry.entry_id]["-200"], 1)
+            runtime_release.set()
+            turn = manager.turn_tasks["entry:-200"]
+            await asyncio.wait_for(asyncio.gather(turn, return_exceptions=True), timeout=1)
+            await asyncio.wait_for(manager.queues[entry.entry_id].join(), timeout=1)
+            manager.send.assert_awaited_once_with("entry", "-200", "Остановлено.")
+            cancel_auth_release.set()
+        finally:
+            runtime_release.set()
+            cancel_auth_release.set()
+            for reader in readers:
+                reader.cancel()
+            for task in tuple(manager.control_tasks.get(entry.entry_id, ())):
+                if not task.done():
+                    task.cancel()
+            consumer.cancel()
+            await asyncio.gather(
+                *readers, *tuple(manager.control_tasks.get(entry.entry_id, ())),
+                consumer, return_exceptions=True)
+
+        manager.send.assert_awaited_once_with("entry", "-200", "Остановлено.")
+        assistant.run.assert_awaited_once()
+
+    async def test_departed_group_sender_cannot_cancel_another_members_turn(self):
+        for member_status, is_member in (("left", False), ("restricted", False)):
+            with self.subTest(member_status=member_status):
+                manager = self.manager()
+                entry = self.group_entry()
+                self.bind_owner(manager, entry)
+                self.bind_group(manager, entry)
+                assistant = manager.hass.data["habab_home"]["assistant"]
+                manager.queues[entry.entry_id] = asyncio.Queue(maxsize=2)
+                manager.typing = AsyncMock(return_value=True)
+                runtime_started = asyncio.Event()
+                runtime_release = asyncio.Event()
+
+                async def get_member(_entry_id, _group_id, user):
+                    if user == 99:
+                        return {"status": "administrator", "is_member": True}
+                    if user == 52:
+                        return {"status": member_status, "is_member": is_member}
+                    return {"status": "creator", "is_member": True}
+
+                async def get_group_session(owner, entry_id, chat_id):
+                    assistant.telegram_sessions[f"{owner}:{entry_id}:{chat_id}"] = "shared-group-session"
+                    return {"session_id": "shared-group-session"}
+
+                async def run(*_args):
+                    runtime_started.set()
+                    await runtime_release.wait()
+                    return {"messages": [{"role": "assistant", "text": "authorized answer"}]}
+
+                manager.get_chat_member.side_effect = get_member
+                assistant.telegram_session.side_effect = get_group_session
+                assistant.run.side_effect = run
+                consumer = asyncio.create_task(manager._consume(entry))
+                readers = []
+                try:
+                    readers.append(await self.dispatch_worker_update(manager, entry, {
+                        "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
+                        "message_id": 1, "text": "Start shared turn",
+                    }))
+                    await asyncio.wait_for(runtime_started.wait(), timeout=1)
+                    readers.append(await self.dispatch_worker_update(manager, entry, {
+                        "chat_type": "supergroup", "chat_id": -200, "user_id": 52,
+                        "message_id": 2, "text": "/cancel",
+                    }))
+                    await asyncio.wait_for(asyncio.gather(
+                        *tuple(manager.control_tasks[entry.entry_id]), return_exceptions=True),
+                        timeout=1,
+                    )
+                    runtime_release.set()
+                    await asyncio.wait_for(manager.queues[entry.entry_id].join(), timeout=1)
+                finally:
+                    runtime_release.set()
+                    for reader in readers:
+                        reader.cancel()
+                    consumer.cancel()
+                    await asyncio.gather(*readers, consumer, return_exceptions=True)
+
+                self.assertNotIn("-200", manager.cancel_epochs.get(entry.entry_id, {}))
+                manager.send.assert_awaited_once_with("entry", "-200", "authorized answer")
+
+    async def test_pending_group_cancel_auth_check_is_released_after_failure_or_cancel(self):
+        for outcome in ("failure", "cancel"):
+            with self.subTest(outcome=outcome):
+                manager = self.manager()
+                entry = self.group_entry()
+                self.bind_owner(manager, entry)
+                self.bind_group(manager, entry)
+                started = asyncio.Event()
+                release = asyncio.Event()
+
+                async def control(_entry, _msg):
+                    started.set()
+                    await release.wait()
+                    if outcome == "failure":
+                        raise RuntimeError("synthetic group control failure")
+
+                manager._handle_control = control
+                manager._schedule_control(entry, {
+                    "chat_type": "supergroup", "chat_id": -200,
+                    "user_id": 20, "message_id": 1, "text": "/cancel",
+                })
+                check = next(iter(manager.pending_group_cancels[entry.entry_id]["-200"]))
+                waiter = asyncio.create_task(
+                    manager._wait_for_group_cancel_checks(entry.entry_id, "-200", True))
+                task = manager.control_lanes[entry.entry_id]["-200"]
+                await asyncio.wait_for(started.wait(), timeout=1)
+                if outcome == "cancel":
+                    task.cancel()
+                else:
+                    release.set()
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1)
+                await asyncio.wait_for(waiter, timeout=1)
+
+                self.assertTrue(check.done())
+                self.assertNotIn("-200", manager.pending_group_cancels.get(entry.entry_id, {}))
+
+    async def test_group_member_revocation_suppresses_inflight_shared_reply_without_forgetting_history(self):
+        manager = self.manager()
+        entry = self.group_entry()
+        self.bind_owner(manager, entry)
+        binding = self.bind_group(manager, entry)
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        manager.typing = AsyncMock(return_value=True)
+        membership_checks = 0
+        run_started = asyncio.Event()
+
+        async def get_member(_entry, _group, user):
+            nonlocal membership_checks
+            if user == 99:
+                return {"status": "administrator", "is_member": True}
+            membership_checks += 1
+            if membership_checks <= 3:
+                return {"status": "member", "is_member": True}
+            return {"status": "left", "is_member": False}
+
+        async def get_group_session(owner, entry_id, chat_id):
+            assistant.telegram_sessions[f"{owner}:{entry_id}:{chat_id}"] = "shared-group-session"
+            return {"session_id": "shared-group-session"}
+
+        async def run(*_args):
+            run_started.set()
+            await asyncio.Event().wait()
+            return {"messages": [{"role": "assistant", "text": "must not be sent"}]}
+
+        manager.get_chat_member.side_effect = get_member
+        assistant.telegram_session.side_effect = get_group_session
+        assistant.run.side_effect = run
+        import homeassistant.components.habab_telegram as telegram_component
+        original_sleep = asyncio.sleep
+
+        async def fast_sleep(_delay):
+            await original_sleep(0)
+
+        with patch.object(telegram_component.asyncio, "sleep", new=fast_sleep):
+            turn = asyncio.create_task(manager._run_message(
+                entry, "-200", 50, "member request", binding, 0, group_chat=True))
+            manager.turn_tasks[manager._turn_key(entry.entry_id, "-200")] = turn
+            await asyncio.wait_for(run_started.wait(), timeout=1)
+            await asyncio.wait_for(asyncio.gather(turn, return_exceptions=True), timeout=1)
+
+        self.assertGreaterEqual(membership_checks, 4)
+        manager.send.assert_not_awaited()
+        assistant.telegram_forget.assert_not_awaited()
+        self.assertEqual(assistant.telegram_sessions[
+            "alice:entry:-200"], "shared-group-session")
 
     async def test_setup_completion_from_member_dm_never_broadcasts_to_group(self):
         manager = self.manager()
@@ -1163,13 +1682,15 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
                 return self.lines.pop(0) if self.lines else b""
 
         class Process:
-            def __init__(self, lines, control_gate):
+            def __init__(self, lines, control_gate, finish_gate):
                 self.stdout = Stdout(lines, control_gate)
                 self.returncode = None
                 self.pid = 1
+                self.finish_gate = finish_gate
                 self.wait = AsyncMock(side_effect=self.finish)
 
             async def finish(self):
+                await self.finish_gate.wait()
                 self.returncode = 0
                 return 0
 
@@ -1177,11 +1698,12 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         entry = self.group_entry()
         self.bind_owner(manager, entry)
         control_gate = asyncio.Event()
+        finish_gate = asyncio.Event()
         manager.entries["entry"]["process"] = Process([
             b'{"type":"message","chat_id":10,"user_id":20,"message_id":8,"chat_type":"private","text":"do work"}\n',
             b'{"type":"message","chat_id":10,"user_id":20,"message_id":9,"chat_type":"private","text":"/cancel"}\n',
             b'{"type":"message","chat_id":10,"user_id":20,"message_id":10,"chat_type":"private","text":"next work"}\n',
-        ], control_gate)
+        ], control_gate, finish_gate)
         manager.queues["entry"] = asyncio.Queue(maxsize=5)
         agent = Agent()
         assistant = manager.hass.data["habab_home"]["assistant"]
@@ -1194,11 +1716,12 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         reader = asyncio.create_task(manager._reader(entry, manager.entries["entry"]))
         await asyncio.wait_for(started.wait(), timeout=1)
         control_gate.set()
+        await manager.queues["entry"].join()
+        await asyncio.wait_for(agent.next_done.wait(), timeout=1)
+        finish_gate.set()
         await reader
         tasks = manager.control_tasks.get("entry", set())
         await asyncio.gather(*list(tasks))
-        await manager.queues["entry"].join()
-        await asyncio.wait_for(agent.next_done.wait(), timeout=1)
         self.assertTrue(agent.abort.awaited)
         self.assertEqual(agent.calls, ["do work", "next work"])
         self.assertEqual(len(manager.dedupe), 3)

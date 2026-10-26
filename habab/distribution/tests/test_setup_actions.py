@@ -38,6 +38,25 @@ from homeassistant.components.habab_home.voice_context import build_voice_contex
 
 
 class ActionBridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_automation_bridge_uses_only_active_scope_and_draft_status_actions(self):
+        controller = SimpleNamespace(draft=AsyncMock(return_value={"phase": "draft"}),
+                                     status=AsyncMock(return_value={"drafts": []}))
+        hass = SimpleNamespace(data={DOMAIN: {"automation_setup": controller}})
+        runtime = SimpleNamespace(active=("alice", "web-one"))
+        body = {"action": "automation_draft", "config": {"alias": "QA"}, "summary": "QA"}
+        result = await execute(hass, runtime, "alice", body)
+        controller.draft.assert_awaited_once_with("alice", "web-one", body, helper=False)
+        self.assertEqual(result["draft"]["phase"], "draft")
+        await execute(hass, runtime, "alice", {"action": "automation_status"})
+        controller.status.assert_awaited_once_with("alice", "web-one")
+        for action in ("automation_confirm", "automation_save", "automation_delete"):
+            with self.assertRaisesRegex(ValueError, "unknown_action"):
+                await execute(hass, runtime, "alice", {"action": action, "confirm": True})
+        for active in (None, ("bob", "web-two")):
+            runtime.active = active
+            with self.assertRaisesRegex(ValueError, "stale_session"):
+                await execute(hass, runtime, "alice", body)
+
     def test_catalog_language_rejects_path_fragments(self):
         self.assertEqual(
             _catalog_language(SimpleNamespace(config=SimpleNamespace(language="../../private"))),

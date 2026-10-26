@@ -70,6 +70,22 @@ class XiaomiSetupTests(unittest.IsolatedAsyncioTestCase):
             start.assert_not_called()
         self.assertEqual(manager.records['alice']['phase'],'install_required')
 
+    async def test_setup_id_is_private_to_status_and_changes_on_explicit_setup_request(self):
+        manager = self.manager()
+        first = await manager.request("alice")
+        first_id = manager.records["alice"]["setup_id"]
+        self.assertNotIn("setup_id", first, "the opaque UI identity is not returned to the model")
+
+        second = await manager.request("alice")
+        second_id = manager.records["alice"]["setup_id"]
+        self.assertNotEqual(second_id, first_id, "an explicit setup request gets a new conversation identity")
+        self.assertNotIn("setup_id", second)
+
+        status = await manager.refresh("alice")
+        self.assertEqual(status["setup_id"], second_id, "read-only status exposes the stable UI identity")
+        status = await manager.refresh("alice")
+        self.assertEqual(status["setup_id"], second_id, "polling status does not rotate the setup identity")
+
     async def test_verified_install_requires_restart_and_retains_request(self):
         manager=self.manager();await manager.request('alice')
         process=SimpleNamespace(communicate=AsyncMock(return_value=(b'{"installed":true}',None)),returncode=0)
@@ -86,7 +102,23 @@ class XiaomiSetupTests(unittest.IsolatedAsyncioTestCase):
         await manager.setup()
         self.assertEqual(manager.records['alice']['phase'],'ready')
         self.assertEqual(manager.records['bob']['phase'],'ready')
+        self.assertTrue(manager.records['bob']['setup_id'])
         self.assertNotIn('flow_id',manager.records['bob'])
+
+    async def test_setup_id_survives_reload_and_flow_phase_advance(self):
+        manager = self.manager()
+        manager.store = MemoryStore({"alice": {
+            "phase": "oauth", "setup_id": "stable-fixture-setup-id", "boot_id": "previous-boot",
+        }})
+        await manager.setup()
+        self.assertEqual(manager.records["alice"]["setup_id"], "stable-fixture-setup-id")
+
+        manager.records["alice"].update(phase="oauth", flow_id="fixture-flow")
+        await manager._advance("alice", {
+            "type": "create_entry", "result": SimpleNamespace(entry_id="fixture-entry"),
+        })
+        self.assertEqual(manager.records["alice"]["phase"], "configuring")
+        self.assertEqual(manager.records["alice"]["setup_id"], "stable-fixture-setup-id")
 
     async def test_model_summary_excludes_authorization_url_and_callback_codes(self):
         manager=self.manager();manager._loaded_at_start=True

@@ -94,6 +94,7 @@ export class HababIntegrationSetup extends HTMLElement {
     this._hass = undefined;
     this._active = false;
     this.interactions = [];
+    this.suppressedInteractionIds = new Set();
     this.cards = new Map();
     this.busy = new Set();
     this.loading = false;
@@ -282,6 +283,7 @@ export class HababIntegrationSetup extends HTMLElement {
     card.phase = interaction.phase;
     card.kind = interaction.kind;
     card.schemaKey = nextSchemaKey;
+    card.element.hidden = this.suppressedInteractionIds.has(id);
     card.title.textContent = interaction.title || this._integrationTitle(interaction.domain);
     if (renderChanged) this._renderPhase(card);
     else this._updateForm(card);
@@ -305,6 +307,15 @@ export class HababIntegrationSetup extends HTMLElement {
     const ordered = this.interactions.map(({id}) => this.cards.get(id)?.element).filter(Boolean);
     for (const element of ordered) {
       if (element.parentNode !== this._cardsRoot) this._cardsRoot.append(element);
+    }
+  }
+
+  setSuppressedInteractionIds(ids) {
+    this.suppressedInteractionIds = new Set(
+      Array.from(ids || []).filter((id) => typeof id === "string" && id.length > 0)
+    );
+    for (const [id, card] of this.cards) {
+      card.element.hidden = this.suppressedInteractionIds.has(id);
     }
   }
 

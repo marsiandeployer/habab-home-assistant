@@ -1,5 +1,10 @@
 import { strings } from "./strings.js";
 
+const TELEGRAM_GUIDE_VIDEO_URL = "https://habab-demo.wpmix.net/downloads/telegram-guide/fb3ae06bee59a03ae531be670e68d46d1faea0cbeccae9229439bf01dac87903/telegram-guide-fb3ae06bee59a03ae531be670e68d46d1faea0cbeccae9229439bf01dac87903.mp4";
+const TELEGRAM_GUIDE_CAPTIONS_URL = new URL(
+  "./telegram-guide-7de8462799aca7de.vtt", import.meta.url,
+).href;
+
 const OWNER_PHASES = ["not_configured", "pairing", "connected", "error"];
 const GROUP_PHASES = [
   "not_configured",
@@ -41,6 +46,7 @@ class HababTelegramPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearTimeout(this.statusTimer);
+    this.q("video")?.pause();
     const token = this.q("#token");
     if (token) token.value = "";
     const proxy = this.q("#proxy");
@@ -71,6 +77,7 @@ class HababTelegramPanel extends HTMLElement {
       .primary{background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color));border-color:transparent;color:var(--ha-color-on-primary-loud,var(--text-primary-color))}.danger{color:var(--error-color)}
       .actions{display:flex;flex-wrap:wrap;gap:8px;margin-block:12px}.status{padding:8px 0;overflow-wrap:anywhere}.status[data-error=true]{color:var(--error-color,var(--primary-text-color))}.status[data-success=true]{color:var(--success-color,var(--primary-color))}
       a{color:var(--primary-color);text-underline-offset:3px}.pairing-link{display:inline-block;margin-block:4px 8px}
+      .video-guide video{display:block;width:100%;height:auto;aspect-ratio:16/9;border:0;border-radius:var(--ha-border-radius-lg,12px);background:var(--secondary-background-color)}.video-guide p:last-child{margin-block:10px 0}
       details{margin-block:10px}summary{cursor:pointer;min-height:36px;display:flex;align-items:center;color:var(--primary-text-color);text-underline-offset:3px}details p{margin-block:8px}.proxy-field label{margin-block-start:8px}
       .confirmation{padding:12px 0}.confirmation p{font-weight:500}.confirmation .actions{margin-block:8px}[hidden]{display:none!important}
       @media(max-width:600px){header{min-height:52px}main{padding:12px 16px calc(50vh + 24px)}.intro{font-size:13px;margin-block-end:8px}section{padding-block:12px}h2{font-size:17px}label{margin-block-start:8px}.actions{display:grid;grid-template-columns:1fr}.actions button{width:100%}.status{padding-block:6px}.pairing-link{min-height:44px;display:flex;align-items:center}}
@@ -78,6 +85,16 @@ class HababTelegramPanel extends HTMLElement {
     <header><ha-menu-button></ha-menu-button><h1>${this.t("telegramTitle")}</h1></header>
     <main>
       <p class="intro">${this.t("telegramIntro")}</p>
+      <section class="video-guide" aria-labelledby="telegram-video-title">
+        <h2 id="telegram-video-title">${this.t("telegramVideoTitle")}</h2>
+        <p class="help" id="telegram-video-description">${this.t("telegramVideoDescription")}</p>
+        <video controls playsinline preload="none" aria-label="${this.t("telegramVideoTitle")}" aria-describedby="telegram-video-description">
+          <source src="${TELEGRAM_GUIDE_VIDEO_URL}" type="video/mp4">
+          <track kind="captions" src="${TELEGRAM_GUIDE_CAPTIONS_URL}" srclang="ru" label="${this.t("telegramVideoCaptions")}" default>
+          ${this.t("telegramVideoUnsupported")}
+        </video>
+        <p><a href="${TELEGRAM_GUIDE_VIDEO_URL}" target="_blank" rel="noopener noreferrer">${this.t("telegramVideoOpen")}</a></p>
+      </section>
       <section aria-labelledby="bot-step-title" id="bot-step">
         <p class="step-label">${this.t("telegramStepOne")}</p>
         <h2 id="bot-step-title">${this.t("telegramBotStepTitle")}</h2>
@@ -253,10 +270,23 @@ class HababTelegramPanel extends HTMLElement {
       invalid_proxy: "telegramInvalidProxy",
       cannot_validate: "telegramCannotValidate",
       setup_failed: "telegramWorkerFailed",
+      relay_auth_failed: "telegramHababAuthFailed",
+      relay_auth_unavailable: "telegramHababAuthUnavailable",
+      selected_provider_unavailable: "telegramProviderSettings",
+      selected_provider_invalid: "telegramProviderSettings",
+      selected_provider_changed: "telegramProviderChanged",
+      relay_capabilities_unavailable: "telegramHababRouteError",
+      relay_capabilities_invalid: "telegramHababRouteError",
+      relay_capabilities_incompatible: "telegramHababRouteError",
+      relay_origin_invalid: "telegramHababRouteError",
+      telegram_transport_invalid: "telegramHababRouteError",
+      unsupported_legacy_relay: "telegramHababRouteError",
+      worker_not_ready: "telegramWorkerFailed",
       worker_error: "telegramWorkerFailed",
       worker_stopped: "telegramWorkerFailed",
       worker_protocol_error: "telegramWorkerFailed",
       not_configured: "telegramNotConfiguredError",
+      not_allowed: "telegramGroupNotAllowed",
       pairing_url: "telegramPairUnavailable",
     }[error] || "telegramUnknownError";
     return this.t(key);
@@ -304,8 +334,8 @@ class HababTelegramPanel extends HTMLElement {
         : { phase: "unsupported" };
       if (this.group.phase === "connected") this.groupPairingUrl = "";
       this.applyState();
-    } catch (_) {
-      this.state = { phase: "error", error: "unknown" };
+    } catch (error) {
+      this.state = { phase: "error", error: error?.code || "unknown" };
       this.group = { phase: "unsupported" };
       this.applyState();
     } finally {

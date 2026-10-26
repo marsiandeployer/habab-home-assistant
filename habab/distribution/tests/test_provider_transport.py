@@ -21,15 +21,20 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(provider_api_base('openai'), 'https://api.openai.com/v1')
             self.assertEqual(transport.get_me_request('synthetic-token'), ('https://api.telegram.org/botsynthetic-token/getMe', {}))
 
-    def test_relay_moves_bot_credential_out_of_url(self):
+    def test_legacy_relay_environment_does_not_redirect_or_add_auth(self):
         with patch.dict(os.environ, {'HABAB_TELEGRAM_RELAY': 'https://relay.test/'}):
-            self.assertEqual(transport.get_me_request('synthetic-token'), ('https://relay.test/telegram/getMe', {'Authorization': 'Bearer synthetic-token'}))
+            self.assertEqual(
+                transport.get_me_request('synthetic-token'),
+                ('https://api.telegram.org/botsynthetic-token/getMe', {}),
+            )
 
-    def test_unsafe_relay_bases_are_rejected(self):
+    def test_unsafe_legacy_relay_urls_are_ignored_for_direct_requests(self):
         for value in ['http://relay.test', 'https://user:pass@relay.test', 'https://relay.test?key=x', 'https://relay.test/path']:
             with self.subTest(value=value), patch.dict(os.environ, {'HABAB_TELEGRAM_RELAY': value}):
-                with self.assertRaises(ValueError):
-                    transport.relay_base()
+                self.assertEqual(
+                    transport.get_me_request('synthetic-token'),
+                    ('https://api.telegram.org/botsynthetic-token/getMe', {}),
+                )
 
     def test_provider_base_has_no_environment_redirect(self):
         with patch.dict(os.environ, {'HABAB_OPENAI_BASE_URL': 'https://relay.test/v1'}):
@@ -95,6 +100,8 @@ class HababTextContractTests(unittest.IsolatedAsyncioTestCase):
         capability = json.dumps({
             "protocol": "openai_compatible", "model": "habab-chat", "api_path": "/v1",
             "managed": True, "configured": True, "ready": True,
+            "configured_upstream_provider": "deepseek",
+            "configured_upstream_model": "deepseek-flash",
         }).encode()
         completion = json.dumps({"choices": [{"finish_reason": "stop", "message": {
             "role": "assistant", "content": "ok",
@@ -103,10 +110,25 @@ class HababTextContractTests(unittest.IsolatedAsyncioTestCase):
         client = ProviderClient(session, self.settings())
         result = await client.complete([{"role": "user", "content": "hello"}], [])
         self.assertEqual(result["content"], "ok")
+        self.assertEqual(client.contract.model, "habab-chat")
+        self.assertEqual(client.contract.configured_upstream_provider, "deepseek")
+        self.assertEqual(client.contract.configured_upstream_model, "deepseek-flash")
         (url,), kwargs = session.post_calls[0]
         self.assertEqual(url, "https://habab-voice.wpmix.net/v1/chat/completions")
         self.assertEqual(kwargs["json"]["model"], "habab-chat")
         self.assertEqual(kwargs["headers"], {"Authorization": "Bearer fixture-project-key"})
+
+    async def test_invalid_optional_upstream_metadata_is_ignored_without_changing_managed_alias(self):
+        capability = json.dumps({
+            "protocol": "openai_compatible", "model": "habab-chat", "api_path": "/v1",
+            "managed": True, "configured": True, "ready": True,
+            "configured_upstream_provider": ["deepseek"],
+            "configured_upstream_model": "not a model",
+        }).encode()
+        contract = await resolve_provider_contract(_Session([_Response(200, capability)]), self.settings())
+        self.assertEqual(contract.model, "habab-chat")
+        self.assertIsNone(contract.configured_upstream_provider)
+        self.assertIsNone(contract.configured_upstream_model)
 
     async def test_invalid_and_unready_capabilities_fail_without_provider_fallback(self):
         malformed = json.dumps({

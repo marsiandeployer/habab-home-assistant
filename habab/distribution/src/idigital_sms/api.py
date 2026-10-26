@@ -1,7 +1,6 @@
 """Small, single-recipient I-Digital Direct API client."""
 
 import asyncio
-import base64
 import hashlib
 import json
 import time
@@ -15,91 +14,17 @@ except ImportError:  # The Home Assistant runtime provides aiohttp.
         """Fallback type for standalone protocol tests."""
 
 from .const import API_BASE, MAX_RESPONSE_BYTES, REQUEST_TIMEOUT
-
-
-class IDigitalError(Exception):
-    """Safe provider error code; never retains provider text or credentials."""
-
-    def __init__(self, code: str) -> None:
-        super().__init__(code)
-        self.code = code
-
-
-def validate_api_key(value: object) -> str:
-    """Accept the Direct API's existing Base64 Basic token without re-encoding."""
-    if not isinstance(value, str) or not value or len(value) > 1024:
-        raise IDigitalError("invalid_api_key")
-    try:
-        decoded = base64.b64decode(value, validate=True).decode("utf-8")
-    except (ValueError, UnicodeError):
-        raise IDigitalError("invalid_api_key") from None
-    node_id, separator, password = decoded.partition(":")
-    if not separator or not node_id.isdigit() or not password:
-        raise IDigitalError("invalid_api_key")
-    if base64.b64encode(decoded.encode("utf-8")).decode("ascii") != value:
-        raise IDigitalError("invalid_api_key")
-    return value
-
-
-def validate_recipient(value: object) -> str:
-    """Check E.164 syntax locally; it does not determine whether the number is mobile."""
-    if not isinstance(value, str) or not value.startswith("+"):
-        raise IDigitalError("invalid_recipient")
-    digits = value[1:]
-    if not 7 <= len(digits) <= 15 or not digits.isascii() or not digits.isdigit():
-        raise IDigitalError("invalid_recipient")
-    if digits.startswith("0"):
-        raise IDigitalError("invalid_recipient")
-    return value
-
-
-def validate_sender(value: object) -> str:
-    """Reject empty or control-character sender names; provider approval is checked on send."""
-    if not isinstance(value, str) or not value.strip():
-        raise IDigitalError("invalid_sender")
-    sender = value.strip()
-    if any(not character.isprintable() for character in sender):
-        raise IDigitalError("invalid_sender")
-    return sender
-
-
-_GSM7_BASIC = set(
-    "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ ÆæßÉ"
-    " !\"#¤%&'()*+,-./0123456789:;<=>?"
-    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§"
-    "¿abcdefghijklmnopqrstuvwxyzäöñüà"
+from .direct_protocol import (
+    IDigitalError,
+    build_sms_payload,
+    message_status as _message_status,
+    parse_send_response,
+    parse_status_response,
+    validate_api_key,
+    validate_message,
+    validate_recipient,
+    validate_sender,
 )
-_GSM7_EXT = set("\f^{}\\[~]|€")
-
-
-def validate_message(value: object) -> str:
-    """Require one SMS part, using Direct's published 160/70-character boundaries."""
-    if not isinstance(value, str) or not value.strip():
-        raise IDigitalError("invalid_message")
-    if all(character in _GSM7_BASIC or character in _GSM7_EXT for character in value):
-        encoded_length = sum(2 if character in _GSM7_EXT else 1 for character in value)
-        if encoded_length > 160:
-            raise IDigitalError("message_too_long")
-    else:
-        # UTF-16 code units conservatively count supplementary Unicode characters.
-        encoded_length = len(value.encode("utf-16-be")) // 2
-        if encoded_length > 70:
-            raise IDigitalError("message_too_long")
-    return value
-
-
-def _message_status(provider_status: object) -> str:
-    """Map only provider states documented by Direct; preserve no raw response."""
-    if not isinstance(provider_status, str):
-        return "unknown"
-    status = provider_status.lower()
-    if status == "delivered":
-        return "delivered"
-    if status == "undelivered":
-        return "error"
-    if status == "sent":
-        return "accepted"
-    return "unknown"
 
 
 class SendGuard:
@@ -182,34 +107,9 @@ class DirectClient:
     async def send_message(self, message: str) -> str:
         """Send exactly one SMS; network ambiguity is returned without retry."""
         content = validate_message(message)
-        payload = [{
-            "channelType": "SMS",
-            "senderName": self._sender,
-            "destination": self._recipient[1:],
-            "content": content,
-        }]
+        payload = build_sms_payload(self._sender, self._recipient, content)
         http_status, body = await self._request("POST", "/message", payload=payload)
-        if http_status in (401, 403):
-            raise IDigitalError("authentication_error")
-        if 400 <= http_status < 500:
-            raise IDigitalError("provider_rejected")
-        if http_status >= 500:
-            raise IDigitalError("unknown_outcome")
-        if http_status != 200 or not isinstance(body, dict):
-            raise IDigitalError("unknown_outcome")
-        if body.get("errors") is True:
-            raise IDigitalError("provider_rejected")
-        items = body.get("items")
-        if (body.get("errors") is not False or not isinstance(items, list)
-                or len(items) != 1 or not isinstance(items[0], dict)):
-            raise IDigitalError("unknown_outcome")
-        message_uuid = items[0].get("messageUuid")
-        if not isinstance(message_uuid, str):
-            raise IDigitalError("unknown_outcome")
-        try:
-            return str(UUID(message_uuid))
-        except ValueError:
-            raise IDigitalError("unknown_outcome") from None
+        return parse_send_response(http_status, body)
 
     async def get_status(self, message_uuid: str) -> dict[str, object]:
         """Make one explicit GET; never poll or retry in the background."""
@@ -220,22 +120,4 @@ class DirectClient:
         http_status, body = await self._request(
             "GET", f"/message/{quote(normalized_uuid, safe='')}"
         )
-        if http_status == 404:
-            return {"status": "unknown", "provider_status": "not_found"}
-        if http_status in (401, 403):
-            raise IDigitalError("authentication_error")
-        if 400 <= http_status < 500:
-            raise IDigitalError("status_unavailable")
-        if http_status >= 500 or http_status != 200 or not isinstance(body, dict):
-            raise IDigitalError("status_unavailable")
-        provider_status = body.get("status")
-        normalized_provider_status = (
-            provider_status.lower()
-            if isinstance(provider_status, str)
-            and provider_status.lower() in {"sent", "delivered", "undelivered"}
-            else "unknown"
-        )
-        return {
-            "status": _message_status(provider_status),
-            "provider_status": normalized_provider_status,
-        }
+        return parse_status_response(http_status, body)

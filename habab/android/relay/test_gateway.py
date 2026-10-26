@@ -566,7 +566,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 404)
         self.assertEqual(self.calls, [])
 
-    async def test_managed_text_capabilities_and_models_are_authenticated_and_hide_upstream(self):
+    async def test_managed_text_capabilities_report_configured_upstream_without_key_material(self):
         headers = {'Authorization': 'Bearer synthetic-owner'}
         response = await self.client.get('/text/capabilities', headers={'Authorization': 'Bearer wrong'})
         self.assertEqual(response.status, 401)
@@ -575,6 +575,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await response.json(), {
             'protocol': 'openai_compatible', 'model': 'habab-chat', 'api_path': '/v1',
             'managed': True, 'configured': True, 'ready': True,
+            'configured_upstream_provider': 'deepseek',
+            'configured_upstream_model': 'deepseek-flash',
         })
         self.assertEqual(response.headers['Cache-Control'], 'no-store')
         response = await self.client.get('/v1/models', headers=headers)
@@ -589,7 +591,10 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 401)
         self.gateway.text_upstream_key = None
         response = await self.client.get('/text/capabilities', headers=headers)
-        self.assertEqual((await response.json())['ready'], False)
+        unavailable = await response.json()
+        self.assertEqual(unavailable['ready'], False)
+        self.assertNotIn('configured_upstream_provider', unavailable)
+        self.assertNotIn('configured_upstream_model', unavailable)
         response = await self.client.post('/v1/chat/completions', headers=headers,
             json={'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}]})
         self.assertEqual(response.status, 503)
@@ -625,6 +630,46 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(b'synthetic-deepseek-vendor', payload)
         self.assertEqual(response.headers['Content-Type'], 'text/event-stream')
         self.assertEqual(self.gateway.inflight, 0)
+
+    async def test_managed_text_forced_tool_choices_disable_upstream_thinking(self):
+        headers = {'Authorization': 'Bearer synthetic-owner'}
+        tool = {'type': 'function', 'function': {
+            'name': 'StructuredOutput',
+            'parameters': {'type': 'object', 'additionalProperties': False,
+                           'properties': {'kind': {'type': 'string', 'enum': ['answer']}},
+                           'required': ['kind']},
+        }}
+        for choice in ('required', {'type': 'function', 'function': {'name': 'StructuredOutput'}}):
+            for conflict in ({}, {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'}):
+                with self.subTest(choice=choice, conflict=conflict):
+                    request = {'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}],
+                               'tools': [tool], 'tool_choice': choice, 'temperature': 0.2, **conflict}
+                    original = json.loads(json.dumps(request))
+                    response = await self.client.post('/v1/chat/completions', headers=headers, json=request)
+                    self.assertEqual(response.status, 200)
+                    await response.read()
+                    expected = {**original, 'model': 'deepseek-flash', 'thinking': {'type': 'disabled'}}
+                    if 'reasoning_effort' in original:
+                        expected['reasoning_effort'] = 'none'
+                    self.assertEqual(json.loads(self.deepseek_calls[-1][5]), expected)
+                    self.assertEqual(request, original)
+        self.assertEqual(self.calls, [])
+
+    async def test_managed_text_nonforced_and_toolless_options_remain_unchanged(self):
+        headers = {'Authorization': 'Bearer synthetic-owner'}
+        tool = {'type': 'function', 'function': {'name': 'fixture', 'parameters': {'type': 'object'}}}
+        for extra in ({}, {'tools': [tool], 'tool_choice': 'auto'},
+                      {'tools': [tool], 'tool_choice': 'none'}, {'tool_choice': 'required'}):
+            with self.subTest(extra=extra):
+                request = {'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}],
+                           'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high', **extra}
+                original = json.loads(json.dumps(request))
+                response = await self.client.post('/v1/chat/completions', headers=headers, json=request)
+                self.assertEqual(response.status, 200)
+                await response.read()
+                self.assertEqual(json.loads(self.deepseek_calls[-1][5]), {**original, 'model': 'deepseek-flash'})
+                self.assertEqual(request, original)
+        self.assertEqual(self.calls, [])
 
     async def test_managed_text_upstream_error_is_forwarded_without_google_fallback(self):
         self.deepseek_status = 503

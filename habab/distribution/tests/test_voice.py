@@ -236,10 +236,16 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["effective_model"], "gpt-4.1-mini")
         self.assertEqual(result["protocol"], "openai_compatible")
         self.assertIsNone(result["text_ready"])
+        self.assertEqual(result["voice_provider"], "openai")
+        self.assertEqual(result["voice_protocol"], "openai_realtime")
+        self.assertEqual(result["default_voice_model"], "gpt-realtime-mini")
+        self.assertTrue(result["voice_ready"])
+        self.assertIsNone(result["configured_upstream_provider"])
+        self.assertIsNone(result["configured_upstream_model"])
         self.assertNotIn("fixture-saved-key", str(result))
         self.assertNotIn("fingerprint", result)
 
-    async def test_provider_list_reports_managed_habab_effective_model_and_readiness(self):
+    async def test_provider_list_separates_managed_habab_alias_from_effective_upstream_model(self):
         from homeassistant.components.habab_home.const import DOMAIN
         from homeassistant.components.habab_home.providers import ProviderContract
 
@@ -257,7 +263,8 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         connection = Mock()
         contract = ProviderContract(
             "habab", "openai_compatible", "habab-chat", "https://habab-voice.wpmix.net/v1",
-            managed_model="habab-chat", text_ready=False,
+            managed_model="habab-chat", text_ready=True,
+            configured_upstream_provider="deepseek", configured_upstream_model="deepseek-flash",
         )
         with patch.object(websocket.er, "async_get", return_value=Mock()), \
              patch.object(websocket.er, "async_entries_for_config_entry", return_value=[]), \
@@ -269,12 +276,24 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         result, inactive_result = connection.send_result.call_args.args[1]["connections"]
         self.assertEqual(result["model"], "gemini-3.1-flash-lite")
         self.assertEqual(result["managed_model"], "habab-chat")
-        self.assertEqual(result["effective_model"], "habab-chat")
+        self.assertIsNone(result["effective_model"])
         self.assertEqual(result["protocol"], "openai_compatible")
-        self.assertFalse(result["text_ready"])
+        self.assertTrue(result["text_ready"])
+        self.assertEqual(result["configured_upstream_provider"], "deepseek")
+        self.assertEqual(result["configured_upstream_model"], "deepseek-flash")
+        self.assertEqual(result["voice_provider"], "habab")
+        self.assertEqual(result["voice_protocol"], "gemini_live")
+        self.assertEqual(result["default_voice_model"], "gemini-3.8-live")
+        self.assertTrue(result["voice_ready"])
         self.assertIsNone(inactive_result["effective_model"])
+        self.assertIsNone(inactive_result["voice_provider"])
+        self.assertIsNone(inactive_result["voice_protocol"])
+        self.assertIsNone(inactive_result["default_voice_model"])
+        self.assertIsNone(inactive_result["voice_ready"])
         self.assertIsNone(inactive_result["protocol"])
         self.assertIsNone(inactive_result["text_ready"])
+        self.assertIsNone(inactive_result["configured_upstream_provider"])
+        self.assertIsNone(inactive_result["configured_upstream_model"])
         self.assertEqual(inactive_result["text_error"], "not_selected")
 
     async def test_provider_list_marks_effective_provider_for_legacy_and_explicit_entries(self):

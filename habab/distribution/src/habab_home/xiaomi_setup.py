@@ -147,6 +147,8 @@ class XiaomiSetup:
         self.records = await self.store.async_load() or {}
         self._loaded_at_start = await self.hass.async_add_executor_job(self._component_present)
         for owner, record in self.records.items():
+            if not isinstance(record.get("setup_id"), str) or not record["setup_id"]:
+                record["setup_id"] = secrets.token_urlsafe(18)
             origin = self._safe_origin(record.get("trusted_origin"), owner)
             if origin is None:
                 record.pop("trusted_origin", None)
@@ -185,9 +187,11 @@ class XiaomiSetup:
     def _existing_entry(self):
         return next(iter(self.hass.config_entries.async_entries("xiaomi_home")), None)
 
-    def _summary(self, owner):
+    def _summary(self, owner, include_setup_id=False):
         record = self._record(owner)
         result = {key: record[key] for key in ("phase", "region", "error") if key in record}
+        if include_setup_id and isinstance(record.get("setup_id"), str):
+            result["setup_id"] = record["setup_id"]
         if record.get("entry_id"):
             entry = self.hass.config_entries.async_get_entry(record["entry_id"])
             result["entry_state"] = entry.state.value if entry else "missing"
@@ -206,6 +210,7 @@ class XiaomiSetup:
                 entry = self._existing_entry()
                 self.records[owner] = {"phase": ("completed" if entry.state.value == "loaded" else "configuring") if entry else
                     ("ready" if self._loaded_at_start else "install_required"),
+                    "setup_id": secrets.token_urlsafe(18),
                     "region": "ru", "boot_id": self.boot_id}
                 if entry:
                     self.records[owner]["entry_id"] = entry.entry_id
@@ -214,13 +219,17 @@ class XiaomiSetup:
                     if origin:
                         self.records[owner]["trusted_origin"] = origin
                 await self._save()
-            elif (trusted_origin and owner in self.records
-                  and self.records[owner].get("phase") in ORIGIN_ATTACHABLE_PHASES
-                  and not self.records[owner].get("trusted_origin")):
-                origin = self._safe_origin(trusted_origin, owner)
-                if origin:
-                    self.records[owner]["trusted_origin"] = origin
-                    await self._save()
+            else:
+                # A model action requesting Xiaomi setup is an explicit request
+                # from its current conversation. Give its setup presentation a
+                # new identity; read-only status refreshes never call request().
+                self.records[owner]["setup_id"] = secrets.token_urlsafe(18)
+                if (trusted_origin and self.records[owner].get("phase") in ORIGIN_ATTACHABLE_PHASES
+                        and not self.records[owner].get("trusted_origin")):
+                    origin = self._safe_origin(trusted_origin, owner)
+                    if origin:
+                        self.records[owner]["trusted_origin"] = origin
+                await self._save()
             return self._summary(owner)
 
     async def entry_loaded(self, entry):
@@ -304,7 +313,7 @@ class XiaomiSetup:
                 raise SetupError("installation_failed") from None
             record.update(phase="restart_required", boot_id=self.boot_id)
             await self._save()
-            return self._summary(owner)
+            return self._summary(owner, include_setup_id=True)
 
     async def restart(self, owner):
         async with self._lock:
@@ -321,7 +330,7 @@ class XiaomiSetup:
                     record.update(phase="restart_required", error="restart_failed")
                     await self._save()
             self.hass.async_create_task(restart_later())
-            return self._summary(owner)
+            return self._summary(owner, include_setup_id=True)
 
     async def begin(self, owner, region, accept_license, language):
         async with self._lock:
@@ -336,6 +345,7 @@ class XiaomiSetup:
                     entry_id=entry.entry_id, error=None)
                 await self._save()
                 return await self._ui_state(owner)
+            record["setup_id"] = secrets.token_urlsafe(18)
             if record.get("flow_id"):
                 try:
                     self.hass.config_entries.flow.async_abort(record["flow_id"])
@@ -446,7 +456,7 @@ class XiaomiSetup:
         return await self.refresh(owner)
 
     async def _ui_state(self, owner):
-        state = self._summary(owner)
+        state = self._summary(owner, include_setup_id=True)
         record = self._record(owner)
         if record["phase"] == "oauth":
             state["authorization_url"] = authorization_link(self._flows[owner])

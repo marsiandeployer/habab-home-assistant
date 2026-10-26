@@ -22,6 +22,7 @@ from aiohttp import ClientSession, ClientTimeout, ClientWSTimeout, WSMsgType, we
 
 GEMINI_TEXT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 DEEPSEEK_CHAT_COMPLETIONS = 'https://api.deepseek.com/chat/completions'
+DEEPSEEK_TEXT_PROVIDER = 'deepseek'
 GEMINI_TOKEN_URL = 'https://generativelanguage.googleapis.com/v1beta/auth_tokens'
 GEMINI_CONSTRAINED_UPSTREAM = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained'
 GEMINI_MODEL = 'gemini-3.8-live'
@@ -207,10 +208,16 @@ class Gateway:
         if request.query:
             return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
         ready = self.text_upstream_key is not None
-        return web.json_response({
+        payload = {
             'protocol': 'openai_compatible', 'model': HABAB_TEXT_MODEL, 'api_path': '/v1',
             'managed': True, 'configured': ready, 'ready': ready,
-        }, headers={'Cache-Control': 'no-store'})
+        }
+        if ready:
+            payload.update({
+                'configured_upstream_provider': DEEPSEEK_TEXT_PROVIDER,
+                'configured_upstream_model': DEEPSEEK_TEXT_MODEL,
+            })
+        return web.json_response(payload, headers={'Cache-Control': 'no-store'})
 
     async def text_models(self, request):
         _, digest = self.authorization(request)
@@ -257,6 +264,18 @@ class Gateway:
             return web.json_response({'error': {'code': 'relay_invalid_request'}}, status=400)
         if self.inflight >= 6:
             return web.json_response({'error': {'code': 'relay_busy'}}, status=429)
+        tool_choice = payload.get('tool_choice')
+        named_tool = (isinstance(tool_choice, dict) and tool_choice.get('type') == 'function'
+                      and isinstance(tool_choice.get('function'), dict)
+                      and isinstance(tool_choice['function'].get('name'), str)
+                      and bool(tool_choice['function']['name']))
+        if (isinstance(payload.get('tools'), list) and payload['tools']
+                and (tool_choice == 'required' or named_tool)):
+            # This fixed DeepSeek upstream rejects forced tools in thinking mode.
+            # Keep its compatibility policy behind the managed alias.
+            payload['thinking'] = {'type': 'disabled'}
+            if 'reasoning_effort' in payload:
+                payload['reasoning_effort'] = 'none'
         payload['model'] = DEEPSEEK_TEXT_MODEL
         upstream_body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.inflight += 1

@@ -14,7 +14,12 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
-from .feedback_transport import TOKEN_PATTERN, send_feedback
+from .feedback_transport import (
+    TOKEN_PATTERN,
+    get_feedback_status,
+    send_feedback,
+    valid_issue_reference,
+)
 from .diagnostics import (
     MAX_MESSAGES,
     ProjectionBudget,
@@ -233,9 +238,11 @@ class FeedbackManager:
             current = self.records.get(receipt_id) if isinstance(receipt_id, str) else None
             if current is None:
                 return {"delivery_status": "pending", "delivery_error": "local_receipt_unavailable"}
-            if current.get("delivery_status") == "saved_on_server":
-                return self._public_delivery(current)
             token = self._delivery_token if self.delivery_enabled else None
+            if current.get("delivery_status") == "saved_on_server":
+                if not token:
+                    return self._public_delivery(current)
+                return await self._async_refresh_server_record(current, token)
             if not token:
                 return {"delivery_status": "not_configured"}
             package = {
@@ -261,6 +268,11 @@ class FeedbackManager:
                     "server_issue_state": result.issue_state,
                     "server_duplicate": result.duplicate,
                 }
+                if result.issue_state == "created":
+                    delivery["server_issue_number"] = result.issue_number
+                    delivery["server_issue_url"] = result.issue_url
+                if result.error_code:
+                    delivery["delivery_error"] = result.error_code
             elif result.status == "rejected":
                 delivery = {
                     "delivery_status": "rejected",
@@ -275,15 +287,76 @@ class FeedbackManager:
             except Exception:
                 return {"delivery_status": "pending", "delivery_error": "local_status_unavailable"}
             self.records = updated
+            if result.status == "saved_on_server" and result.issue_state == "created":
+                return await self._async_refresh_server_record(updated_record, token)
             return self._public_delivery(updated_record)
+
+    async def _async_refresh_server_record(self, record: dict, token: str) -> dict:
+        """Refresh issue metadata for this already accepted server receipt."""
+        server_receipt_id = record.get("server_receipt_id")
+        try:
+            result = await self.hass.async_add_executor_job(
+                partial(get_feedback_status, server_receipt_id, token)
+            )
+        except Exception:
+            result = None
+        if result is None or result.status != "saved_on_server":
+            error = result.error_code if result else "receiver_unavailable"
+            return {
+                "delivery_status": "pending",
+                "delivery_error": error or "receiver_unavailable",
+                "server_receipt_id": server_receipt_id,
+            }
+
+        refreshed = {
+            key: value for key, value in record.items()
+            if key not in {
+                "server_issue_state", "server_issue_number", "server_issue_url", "delivery_error",
+            }
+        }
+        refreshed.update({
+            "delivery_status": "saved_on_server",
+            "server_receipt_id": result.receipt_id,
+            "server_issue_state": result.issue_state,
+            "server_duplicate": result.duplicate,
+        })
+        if result.issue_state == "created":
+            refreshed["server_issue_number"] = result.issue_number
+            refreshed["server_issue_url"] = result.issue_url
+        if result.error_code:
+            refreshed["delivery_error"] = result.error_code
+        updated = {**self.records, record["receipt_id"]: refreshed}
+        try:
+            await self._save_store(updated)
+        except Exception:
+            return {
+                "delivery_status": "pending",
+                "delivery_error": "local_status_unavailable",
+                "server_receipt_id": server_receipt_id,
+            }
+        self.records = updated
+        return self._public_delivery(refreshed)
 
     @staticmethod
     def _public_delivery(record: dict) -> dict:
         fields = (
             "delivery_status", "delivery_error", "server_receipt_id",
-            "server_issue_state", "server_duplicate",
+            "server_issue_state", "server_issue_number", "server_issue_url", "server_duplicate",
         )
-        return {key: record[key] for key in fields if key in record and record[key] is not None}
+        public = {key: record[key] for key in fields if key in record and record[key] is not None}
+        if public.get("server_issue_state") == "created" and not valid_issue_reference(
+            public.get("server_issue_number"), public.get("server_issue_url"),
+        ):
+            public["server_issue_state"] = "unknown"
+            public["delivery_error"] = "issue_reference_unavailable"
+        if public.get("server_issue_state") != "created":
+            public.pop("server_issue_number", None)
+            public.pop("server_issue_url", None)
+        if public.get("delivery_status") != "saved_on_server":
+            public.pop("server_issue_state", None)
+            public.pop("server_issue_number", None)
+            public.pop("server_issue_url", None)
+        return public
 
     def _prune(self) -> bool:
         cutoff = _now() - RETENTION

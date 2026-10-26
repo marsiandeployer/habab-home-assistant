@@ -356,8 +356,13 @@ def validate_source_revision(source_revision):
         raise ValueError('Runtime inputs in habab/android or habab/distribution are dirty')
 
 
-def require_build_space(cache, rootfs, network_tools=False):
-    minimum = ((2 if rootfs.exists() else 8) + (2 if network_tools else 0)) * 1024 ** 3
+def require_build_space(cache, rootfs, network_tools=False, factory_release=None):
+    if factory_release is None:
+        minimum = ((2 if rootfs.exists() else 8) + (2 if network_tools else 0)) * 1024 ** 3
+    else:
+        # Existing compressed input is already allocated. Reserve the extracted
+        # factory tree, a new archive, and 1 GiB for wheel installation/headroom.
+        minimum = factory_release['unpackedBytes'] + factory_release['bytes'] + 1024 ** 3
     available = shutil.disk_usage(cache).free
     if available < minimum:
         raise OSError(f'Runtime build needs {minimum // 1024 ** 3} GiB free; only {available // 1024 ** 2} MiB available')
@@ -370,7 +375,44 @@ def initial_configuration():
             + '\nscript: !include scripts.yaml\nscene: !include scenes.yaml\nrecorder:\nhistory:\n')
 
 
+def validate_factory_dependencies(release, network_tools):
+    if (release.get('architecture') != 'aarch64' or release.get('coreVersion') != '2026.10.2'
+            or release.get('baseImage') != IMAGE):
+        raise ValueError('Factory runtime is incompatible with the pinned ARM64 Core base')
+    opencode = json.loads((DIST / 'opencode-release.json').read_text())['arm64']
+    if release.get('opencodeVersion') != opencode['version']:
+        raise ValueError('Factory runtime OpenCode version differs from source')
+    lock = json.loads((ROOT / 'tools/network_tools/node-apks.lock.json').read_text())
+    expected_node = {name: record['sha256'] for name, record in lock['packages'].items()
+                     if not (network_tools and name.startswith('icu-data-en-'))}
+    if release.get('nodePackages') != expected_node:
+        raise ValueError('Factory runtime Node packages differ from source')
+    tools = release.get('networkTools')
+    if bool(tools) != network_tools:
+        raise ValueError('Factory runtime network-tools selection must be preserved explicitly')
+    if tools:
+        for field, name in (
+            ('lockSha256', 'network-tools.lock.json'),
+            ('browserLauncherSha256', 'habab-browser'),
+            ('pythonLauncherSha256', 'habab-python-network'),
+        ):
+            if tools.get(field) != sha256(ROOT / 'tools/network_tools' / name):
+                raise ValueError('Factory runtime network-tools input differs from source: ' + name)
+
+
+def reusable_factory_release(manifest, network_tools):
+    """Accept only a signed factory archive with these exact dependency pins."""
+    release = json.loads(manifest.read_text())
+    validate_factory_dependencies(release, network_tools)
+    spec = importlib.util.spec_from_file_location('factory_runtime_verifier', ROOT / 'tools/verify_runtime.py')
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    verifier.verify(manifest, ROOT / 'app/src/main/assets/release/trusted-key.der')
+    return release
+
+
 def main():
+    global ROOT, DIST
     parser = argparse.ArgumentParser()
     parser.add_argument('--signing-key', type=Path, required=True, help='Private RSA signing key outside repository')
     parser.add_argument('--public-base', required=True, help='HTTPS directory serving this release')
@@ -378,9 +420,16 @@ def main():
                         help='Full 40-character committed source SHA used to build this runtime')
     parser.add_argument('--frontend-candidate', type=Path, required=True,
                         help='Fresh native frontend candidate directory (wheel + manifest.json) from this exact source SHA')
+    parser.add_argument('--source-root', type=Path,
+                        help='Clean committed source checkout supplying runtime inputs; actual producer digest is recorded separately')
+    parser.add_argument('--base-runtime-manifest', type=Path,
+                        help='Reuse a local signed factory archive with compatible pinned dependencies; no Docker or downloads')
     parser.add_argument('--network-tools', action='store_true',
                         help='Include pinned headless Chromium and Kurigram tools (large download)')
     args = parser.parse_args()
+    if args.source_root is not None:
+        ROOT = args.source_root.resolve() / 'habab/android'
+        DIST = ROOT.parent / 'distribution'
     if not re.fullmatch(r'[0-9a-f]{40}', args.source_revision):
         parser.error('source-revision must be a full 40-character lowercase hexadecimal commit SHA')
     if not args.public_base.startswith('https://'):
@@ -399,15 +448,23 @@ def main():
     lock = (cache / 'package.lock').open('w')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     rootfs = cache / 'rootfs'
+    reused = None
+    if args.base_runtime_manifest is not None:
+        if rootfs.exists():
+            raise ValueError('Factory reuse requires an empty owned rootfs cache')
+        reused = reusable_factory_release(args.base_runtime_manifest.resolve(), args.network_tools)
     if not args.network_tools:
         network_state = rootfs / 'etc/habab-android-network-tools.json'
         network_pending = rootfs / 'etc/habab-android-network-tools.installing'
         if network_state.exists() or network_pending.exists():
             raise ValueError('This cached rootfs contains an opt-in network-tools install; rebuild its rootfs to omit it')
     base = cache / 'rootfs.tar'
-    require_build_space(cache, rootfs, args.network_tools)
+    if reused is not None:
+        base = args.base_runtime_manifest.resolve().parent / reused['url'].rsplit('/', 1)[1]
+    require_build_space(cache, rootfs, args.network_tools, reused)
     if not rootfs.exists():
-        export_image(base)
+        if reused is None:
+            export_image(base)
         # Validate names before GNU tar extracts; it protects against writing
         # through an earlier symlink. Absolute symlink targets are guest paths.
         with tarfile.open(base) as bundle:
@@ -420,18 +477,26 @@ def main():
         finally:
             if staging.exists():
                 shutil.rmtree(staging)
-        base.unlink()
+        if reused is None:
+            base.unlink()
     inventory = copy_sources(rootfs)
     serialx_unix = install_serialx_unix(rootfs)
-    version, opencode_digest = install_opencode(rootfs, cache)
+    if reused is None:
+        version, opencode_digest = install_opencode(rootfs, cache)
+    else:
+        version, opencode_digest = reused['opencodeVersion'], reused['opencodeSha256']
     native_frontend = install_frontend(rootfs, args.frontend_candidate, args.source_revision)
     network_tools = None
     helper_image = NODE_APK_HELPER
-    if args.network_tools:
+    if reused is not None:
+        network_tools = reused.get('networkTools')
+        node = reused['nodePackages']
+    elif args.network_tools:
         network_tools = install_network_tools(rootfs, cache, helper_image)
-    node = install_node(rootfs, cache, helper_image, network_tools=args.network_tools)
-    if network_tools is not None:
-        network_tools = finalize_network_tools_package_database(rootfs, network_tools, node)
+    if reused is None:
+        node = install_node(rootfs, cache, helper_image, network_tools=args.network_tools)
+        if network_tools is not None:
+            network_tools = finalize_network_tools_package_database(rootfs, network_tools, node)
     launcher = rootfs / 'usr/local/share/habab-android/launch.py'
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_bytes((ROOT / 'runtime/launch.py').read_bytes())
@@ -463,6 +528,10 @@ def main():
                'sourceFiles': inventory, 'nodePackages': node,
                'serialxUnixTransport': serialx_unix,
                'configurationSha256': sha256(seed), 'nativeFrontend': native_frontend}
+    release['producerSha256'] = sha256(Path(__file__).resolve())
+    if reused is not None:
+        release['baseRuntime'] = {'id': reused['id'], 'archiveSha256': reused['sha256'],
+                                  'sourceRevision': reused['sourceRevision']}
     if network_tools is not None:
         release['networkTools'] = network_tools
     identity = hashlib.sha256(json.dumps(release, sort_keys=True).encode()).hexdigest()[:16]

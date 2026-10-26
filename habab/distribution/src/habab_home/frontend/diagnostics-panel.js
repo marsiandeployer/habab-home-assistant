@@ -74,7 +74,7 @@ const copy = {
     available: "Available",
     selectedDownload: "Export selected conversation",
     periodDownload: "Export period and channel",
-    periodHelp: "Choose both start and end times. Status and session ID filters do not narrow the exported archive.",
+    periodHelp: "Choose a start and end time within 31 days. Status and session ID filters do not narrow the exported archive.",
     downloading: "Preparing the archive…",
     downloadStarted: "Download started on this device.",
     sessionMissing: "This conversation is no longer available. Refresh the list.",
@@ -87,6 +87,7 @@ const copy = {
     expired: "This conversation is no longer available.",
     truncated: "The current runtime may limit the conversation history available here.",
     atMessageLimit: "This conversation reached the current message limit; older messages may be omitted.",
+    archiveLimitReached: "An archive retention limit was reached; some older conversations may no longer be listed.",
     redacted: "Sensitive fields are masked.",
     noAudio: "Audio is not included.",
     stageLimits: "Backend and model acknowledgements, voice transport details, and some cancellation outcomes are not recorded. Cancellation is shown only when the runtime records a recognized abort; missing events do not prove an action did not occur.",
@@ -176,7 +177,7 @@ const copy = {
     available: "Доступен",
     selectedDownload: "Экспортировать выбранный разговор",
     periodDownload: "Экспортировать период и канал",
-    periodHelp: "Укажите начало и конец. Фильтры результата и ID сессии не ограничивают архив.",
+    periodHelp: "Укажите начало и конец периода не длиннее 31 дня. Фильтры результата и ID сессии не ограничивают архив.",
     downloading: "Готовим архив…",
     downloadStarted: "Скачивание архива началось на этом устройстве.",
     sessionMissing: "Разговор больше недоступен. Обновите список.",
@@ -189,6 +190,7 @@ const copy = {
     expired: "Разговор больше недоступен.",
     truncated: "Текущий runtime может ограничивать доступную здесь историю разговора.",
     atMessageLimit: "Разговор достиг текущего лимита сообщений; более ранние записи могут отсутствовать.",
+    archiveLimitReached: "Достигнут один из лимитов архива; некоторые старые разговоры могут отсутствовать в списке.",
     redacted: "Конфиденциальные поля скрыты.",
     noAudio: "Аудиозаписи не включаются.",
     stageLimits: "Подтверждения backend и модели, детали голосового транспорта и часть сведений об отмене не записываются. Отмена отображается только при распознанной записи runtime; отсутствие события не доказывает, что действие не выполнялось.",
@@ -962,6 +964,12 @@ class HababDiagnosticsPanel extends HTMLElement {
       const name = el("span", "source-name");
       name.append(el("span", "", labels[key] || sanitizeDiagnosticText(key)));
       const available = source?.available === true;
+      const archiveRetention = source?.archive_retention;
+      if (key === "history" && archiveRetention &&
+          Object.values(archiveRetention).some((channel) =>
+            channel?.limit_reached === true || channel?.owner_index_limit_reached === true)) {
+        name.append(el("small", "source-reason", this.t("archiveLimitReached")));
+      }
       const reasonLabels = {
         not_recorded: this.t("reasonNotRecorded"),
         not_collected: this.t("reasonNotCollected"),

@@ -4,11 +4,18 @@ import asyncio
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 
 from homeassistant.helpers.storage import Store
 
 from .agent_diagnostics import AgentDiagnostics
 from .assist_adapter import AssistAdapter
+from .diagnostics_sessions import (
+    normalize_telegram_session_index,
+    normalize_web_session_index,
+    remember_telegram_session,
+    remember_web_session,
+)
 from .setup_agent import (
     AgentError, VOICE_TURN_EVENT_ID_KEY, VOICE_TURN_HASH_KEY,
     VOICE_TURN_METADATA_KEY, VOICE_TURN_METADATA_VALUE,
@@ -37,10 +44,16 @@ class AssistantService:
         self.telegram_store = Store(hass, 1, "habab_home.telegram_sessions", private=True)
         self.web_context_store = Store(
             hass, 1, "habab_home.web_history_contexts", private=True)
+        self.web_diagnostics_store = Store(
+            hass, 1, "habab_home.web_diagnostics_sessions", private=True)
+        self.telegram_diagnostics_store = Store(
+            hass, 1, "habab_home.telegram_diagnostics_sessions", private=True)
         self.voice_receipt_store = Store(
             hass, 1, "habab_home.voice_turn_receipts", private=True)
         self.web_sessions = {}
         self.web_contexts = {}
+        self.web_diagnostics_sessions = {}
+        self.telegram_diagnostics_sessions = {}
         self.telegram_sessions = {}
         self.voice_receipts = {}
         self.web_history_cache = {}
@@ -51,6 +64,10 @@ class AssistantService:
     async def setup(self):
         self.web_sessions = await self.web_store.async_load() or {}
         self.web_contexts = await self.web_context_store.async_load() or {}
+        self.web_diagnostics_sessions = normalize_web_session_index(
+            await self.web_diagnostics_store.async_load())
+        self.telegram_diagnostics_sessions = normalize_telegram_session_index(
+            await self.telegram_diagnostics_store.async_load())
         self.telegram_sessions = await self.telegram_store.async_load() or {}
         self.voice_receipts = await self.voice_receipt_store.async_load() or {}
         changed = False
@@ -92,6 +109,34 @@ class AssistantService:
         await self.web_context_store.async_save(updated)
         self.web_contexts = updated
 
+    async def _archive_web_session(self, owner, session_id):
+        """Persist only bounded session IDs and archive times, never transcript text."""
+        updated = remember_web_session(
+            self.web_diagnostics_sessions, owner, session_id,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        if updated is self.web_diagnostics_sessions:
+            return
+        await self.web_diagnostics_store.async_save(updated)
+        self.web_diagnostics_sessions = updated
+
+    @staticmethod
+    def _telegram_scope_id(owner, entry_id, chat_id):
+        key = f"{owner}:{entry_id}:{chat_id}"
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    async def _archive_telegram_session(self, owner, session_id, scope_id):
+        """Persist only bounded Telegram session IDs and archive times."""
+        updated = remember_telegram_session(
+            self.telegram_diagnostics_sessions, owner, session_id,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            scope_id,
+        )
+        if updated is self.telegram_diagnostics_sessions:
+            return
+        await self.telegram_diagnostics_store.async_save(updated)
+        self.telegram_diagnostics_sessions = updated
+
     async def _require_active_admin(self, owner):
         user = await self.hass.auth.async_get_user(owner)
         if not user or not user.is_active or not user.is_admin:
@@ -125,6 +170,8 @@ class AssistantService:
                     await self._save_web_context(
                         owner, old_context["session_id"], old_context["epoch"])
                 old_epoch = old_context["epoch"]
+            if new and old_session:
+                await self._archive_web_session(owner, old_session)
             if new and old_session:
                 await self._materialize_pending_voice(owner, old_session, old_epoch)
             result = await self._session(self.web_sessions, self.web_store, owner,
@@ -167,6 +214,10 @@ class AssistantService:
     async def telegram_session(self, owner, entry_id, chat_id, new=False):
         await self._require_active_admin(owner)
         key = self._telegram_key(owner, entry_id, chat_id)
+        old_session = self.telegram_sessions.get(key)
+        if new and old_session:
+            await self._archive_telegram_session(
+                owner, old_session, self._telegram_scope_id(owner, entry_id, chat_id))
         return await self._session(self.telegram_sessions, self.telegram_store, key,
                                    "Telegram Home Assistant", new)
 
@@ -175,17 +226,29 @@ class AssistantService:
         key = self._telegram_key(owner, entry_id, chat_id)
         if self.runtime.active == (owner, self.telegram_sessions.get(key)):
             raise AgentError("busy")
-        return await self._session(self.telegram_sessions, self.telegram_store, key,
-                                   "Telegram Home Assistant", new=True)
+        return await self.telegram_session(owner, entry_id, chat_id, new=True)
 
     async def telegram_forget(self, owner, entry_id, chat_id):
         key = self._telegram_key(owner, entry_id, chat_id)
         session_id = self.telegram_sessions.pop(key, None)
         # Revocation is cleanup, so it must still work after the HA account was
         # disabled. The exact owner+bot+chat mapping scopes any active abort.
+        await self.telegram_store.async_save(self.telegram_sessions)
+        scope_id = self._telegram_scope_id(owner, entry_id, chat_id)
+        records = self.telegram_diagnostics_sessions.get(owner, [])
+        # Older entries without a scope cannot be safely attributed to this chat.
+        kept = [record for record in records
+                if record.get("scope_id") not in {None, scope_id}]
+        if len(kept) != len(records):
+            updated = dict(self.telegram_diagnostics_sessions)
+            if kept:
+                updated[owner] = kept
+            else:
+                updated.pop(owner, None)
+            await self.telegram_diagnostics_store.async_save(updated)
+            self.telegram_diagnostics_sessions = updated
         if session_id and self.runtime.active == (owner, session_id):
             await self.runtime.abort(owner, session_id)
-        await self.telegram_store.async_save(self.telegram_sessions)
         return session_id
 
     def _mapped_session(self, owner, channel, session_id, entry_id=None, chat_id=None):

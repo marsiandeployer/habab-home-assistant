@@ -122,6 +122,7 @@ function installChat() {
       title: "Помощник", open: "Открыть чат с помощником", close: "Закрыть", fresh: "Новый чат",
       intro: "Что подключим к дому? Какое оборудование у вас уже есть?",
       quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Другое",
+      recoverSetup: "Показать активную настройку",
       collapseChat: "Показать панель дома",
       placeholder: "Например: хочу подключить пылесос Xiaomi", send: "Отправить", stop: "Остановить",
       working: "Проверяю и выполняю…", loading: "Подключаю помощника…", you: "Вы", assistant: "Помощник",
@@ -131,6 +132,7 @@ function installChat() {
       reopenXiaomiSetup: "Показать подключение Xiaomi",
       deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
       provider_required: "Сначала подключите провайдера ИИ в разделе AI.",
+      provider_not_ready: "Текстовый сервис Habab не готов к запросам. Повторите подключение позже.",
       not_installed: "OpenCode ещё не подключён к контейнеру. Добавьте compose.opencode.yaml по инструкции установки.",
       binary_changed: "Файл OpenCode изменился. Повторите prepare-opencode.py и пересоздайте контейнер.",
       busy: "Помощник уже выполняет задачу. Дождитесь завершения и повторите подключение.",
@@ -176,6 +178,7 @@ function installChat() {
       title: "Assistant", open: "Open assistant chat", close: "Close", fresh: "New chat",
       intro: "What should we connect to your home? What equipment do you already have?",
       quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Other",
+      recoverSetup: "Show active setup",
       collapseChat: "Show home dashboard",
       placeholder: "For example: I want to connect a Xiaomi vacuum", send: "Send", stop: "Stop",
       working: "Checking and working…", loading: "Connecting…", you: "You", assistant: "Assistant",
@@ -185,6 +188,7 @@ function installChat() {
       reopenXiaomiSetup: "Show Xiaomi setup",
       deepseek_required: "Connect DeepSeek in AI settings first.",
       provider_required: "Connect an AI provider in AI settings first.",
+      provider_not_ready: "Habab is not ready for text requests. Try connecting again later.",
       not_installed: "OpenCode is not mounted. Follow the installation guide to add compose.opencode.yaml.",
       binary_changed: "The OpenCode executable changed. Run prepare-opencode.py again and recreate the container.",
       busy: "The assistant is already working. Wait for it to finish, then reconnect.",
@@ -295,6 +299,8 @@ function installChat() {
       this.markdownUpgradeLifecycle = 0;
       this.drawGeneration = 0;
       this.followSetupForms = true;
+      this.suppressedSetupInteractionIds = new Set();
+      this.suppressedXiaomiSetupId = undefined;
       this.xiaomiSetupDismissedInstance = false;
       this.xiaomiSetupDismissalIdentity = undefined;
       this.xiaomiSetupDismissalStorageFailed = false;
@@ -311,6 +317,7 @@ function installChat() {
       }
       if (this.setupCard) this.setupCard.hass = value;
       if (this.integrationCard) this.integrationCard.hass = value;
+      if (this.automationCard) this.automationCard.hass = value;
       this.subscribeVoiceHistory();
     }
 
@@ -371,7 +378,7 @@ function installChat() {
       const presentation = getXiaomiSetupPresentation(phase, this.getXiaomiSetupDismissed());
       if (presentation.clearDismissal) this.setXiaomiSetupDismissed(false);
       const reopenButton = this.q(".xiaomi-reopen");
-      if (reopenButton) reopenButton.hidden = !presentation.showReopen;
+      if (reopenButton) reopenButton.hidden = this.isXiaomiSetupSuppressed() || !presentation.showReopen;
       const container = this.q("#setup-cards");
       if (presentation.showCard) {
         if (this.integrationCard?.parentNode === container) {
@@ -382,6 +389,124 @@ function installChat() {
           mountStableElement(container, this.setupCard);
         }
       } else this.setupCard.remove();
+      this.setupCard.hidden = this.isXiaomiSetupSuppressed();
+      this.updateSetupRecoveryButton();
+    }
+
+    isXiaomiSetupSuppressed() {
+      const setupId = this.setupCard?.state?.setup_id;
+      return typeof setupId === "string" && setupId.length > 0 && setupId === this.suppressedXiaomiSetupId;
+    }
+
+    setupScopeStorageKey() {
+      const user = this.hass?.user;
+      const origin = typeof window === "undefined" ? undefined : window.location?.origin;
+      if (user?.is_admin !== true || typeof user.id !== "string" || !user.id ||
+          typeof origin !== "string" || !origin) return undefined;
+      return `habab-home-setup-scope:${encodeURIComponent(origin)}:${encodeURIComponent(user.id)}`;
+    }
+
+    setupScopeStorages() {
+      if (typeof window === "undefined") return [];
+      const storages = [];
+      try { if (window.sessionStorage) storages.push(window.sessionStorage); } catch (_) {}
+      try {
+        if (window.localStorage && !storages.includes(window.localStorage)) storages.push(window.localStorage);
+      } catch (_) {}
+      return storages;
+    }
+
+    persistSetupBaseline() {
+      const key = this.setupScopeStorageKey();
+      if (!key || typeof this.sessionId !== "string" || !this.sessionId || this.sessionId.length > 128) return false;
+      const value = JSON.stringify({
+        version: 1,
+        session_id: this.sessionId,
+        interaction_ids: [...this.suppressedSetupInteractionIds]
+          .filter((id) => typeof id === "string" && id.length > 0 && id.length <= 128).slice(0, 256),
+        xiaomi_setup_id: typeof this.suppressedXiaomiSetupId === "string" && this.suppressedXiaomiSetupId.length <= 128
+          ? this.suppressedXiaomiSetupId : null,
+      });
+      let stored = false;
+      for (const storage of this.setupScopeStorages()) {
+        try {
+          storage.setItem(key, value);
+          stored = true;
+        } catch (_) {}
+      }
+      return stored;
+    }
+
+    restoreSetupBaseline(sessionId) {
+      this.suppressedSetupInteractionIds = new Set();
+      this.suppressedXiaomiSetupId = undefined;
+      const key = this.setupScopeStorageKey();
+      if (!key || typeof sessionId !== "string" || !sessionId) return false;
+      for (const storage of this.setupScopeStorages()) {
+        let raw;
+        try { raw = storage.getItem(key); } catch (_) { continue; }
+        if (typeof raw !== "string") continue;
+        if (raw.length > 65536) {
+          try { storage.removeItem(key); } catch (_) {}
+          continue;
+        }
+        try {
+          const saved = JSON.parse(raw);
+          if (saved?.version !== 1 || saved.session_id !== sessionId ||
+              !Array.isArray(saved.interaction_ids) || saved.interaction_ids.length > 256 ||
+              (saved.xiaomi_setup_id !== null && saved.xiaomi_setup_id !== undefined &&
+                (typeof saved.xiaomi_setup_id !== "string" || saved.xiaomi_setup_id.length > 128))) continue;
+          this.suppressedSetupInteractionIds = new Set(saved.interaction_ids.filter((id) =>
+            typeof id === "string" && id.length > 0 && id.length <= 128
+          ));
+          this.suppressedXiaomiSetupId = saved.xiaomi_setup_id || undefined;
+          this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+          if (this.setupCard) this.setupCard.hidden = this.isXiaomiSetupSuppressed();
+          this.updateSetupRecoveryButton();
+          return true;
+        } catch (_) {
+          try { storage.removeItem(key); } catch (_) {}
+        }
+      }
+      this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+      this.updateSetupRecoveryButton();
+      return false;
+    }
+
+    captureSetupBaseline() {
+      this.suppressedSetupInteractionIds = new Set(
+        (this.integrationCard?.interactions || []).map(({id}) => id).filter((id) => typeof id === "string")
+      );
+      this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+      this.suppressedXiaomiSetupId = this.setupCard?.state?.setup_id;
+      if (this.setupCard) this.setupCard.hidden = this.isXiaomiSetupSuppressed();
+      this.pendingSetupInteraction = undefined;
+      const jump = this.q(".setup-jump");
+      if (jump) jump.hidden = true;
+      this.updateSetupRecoveryButton();
+      this.persistSetupBaseline();
+    }
+
+    resumePreviousSetup() {
+      this.suppressedSetupInteractionIds.clear();
+      this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+      this.suppressedXiaomiSetupId = undefined;
+      if (this.setupCard) this.setupCard.hidden = false;
+      const recoverButton = this.q(".setup-recover");
+      if (recoverButton) recoverButton.hidden = true;
+      this.persistSetupBaseline();
+    }
+
+    updateSetupRecoveryButton() {
+      const recoverButton = this.q(".setup-recover");
+      if (!recoverButton) return;
+      const xiaomiPhase = this.setupCard?.state?.phase;
+      const xiaomiHidden = this.isXiaomiSetupSuppressed() && xiaomiPhase !== "idle";
+      const integrationHidden = (this.integrationCard?.interactions || []).some(({id}) =>
+        this.suppressedSetupInteractionIds?.has(id)
+      );
+      recoverButton.hidden = !xiaomiHidden && !integrationHidden;
+      recoverButton.textContent = this.t.recoverSetup;
     }
 
     setContextAvailable(available) {
@@ -447,6 +572,7 @@ function installChat() {
 
     setupFormReady(detail) {
       if (typeof detail?.interaction_id !== "string") return;
+      if (this.suppressedSetupInteractionIds?.has(detail.interaction_id)) return;
       this.pendingSetupInteraction = detail.interaction_id;
       if (this.followSetupForms !== false && this.revealSetupForm()) return;
       const jump = this.q(".setup-jump");
@@ -487,6 +613,7 @@ function installChat() {
       try {
         await import("/habab-home/xiaomi-setup.js?v=3");
         await import("/habab-home/integration-setup.js?v=1");
+        await import("/habab-home/automation-setup.js?v=1");
         if (!this.setupCard) {
           this.setupCard = document.createElement("habab-xiaomi-setup");
           this.setupCard.addEventListener("habab-setup-dismiss", () => {
@@ -537,13 +664,25 @@ function installChat() {
         }
         this.setupCard.hass = this.hass;
         if (!this.getXiaomiSetupDismissed()) mountStableElement(this.q("#setup-cards"), this.setupCard);
+        this.setupCard.hidden = this.isXiaomiSetupSuppressed();
         await this.setupCard.load();
         this.updateXiaomiSetupPresentation(this.setupCard.state?.phase || "idle");
+        this.updateSetupRecoveryButton();
         this.integrationCard.hass = this.hass;
         this.integrationCard.active = this.q("dialog").open;
         mountStableElement(this.q("#setup-cards"), this.integrationCard);
+        this.integrationCard.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
         if (afterTurn && typeof this.integrationCard.refresh === "function") await this.integrationCard.refresh();
         else await this.integrationCard.load();
+        if (!this.automationCard) {
+          this.automationCard = document.createElement("habab-automation-setup");
+          this.automationCard.isCurrentContext = () => this.isCurrentOwnerContext() && this.sessionId === this.automationCard.sessionId;
+        }
+        this.automationCard.hass = this.hass;
+        this.automationCard.sessionId = this.sessionId;
+        mountStableElement(this.q("#setup-cards"), this.automationCard);
+        await this.automationCard.refresh();
+        this.updateSetupRecoveryButton();
       } catch (_) { this.status(this.t.setup_ui_unavailable, true); }
     }
 
@@ -585,13 +724,18 @@ function installChat() {
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
         <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><select class="voice-mode" aria-label="${t.voiceModeLabel}" title="${t.nativeAssistTitle}"><option value="habab">${t.voiceModeHabab}</option><option value="assist">${t.voiceModeAssist}</option></select><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"><button class="xiaomi-reopen" type="button" hidden>${t.reopenXiaomiSetup}</button></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
+      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"><button class="xiaomi-reopen" type="button" hidden>${t.reopenXiaomiSetup}</button><button class="setup-recover" type="button" hidden>${t.recoverSetup}</button></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
       this.q(".xiaomi-reopen").onclick = () => {
         if (!this.isCurrentOwnerContext()) return;
         this.setXiaomiSetupDismissed(false);
+        void this.loadSetup();
+      };
+      this.q(".setup-recover").onclick = () => {
+        if (!this.isCurrentOwnerContext()) return;
+        this.resumePreviousSetup();
         void this.loadSetup();
       };
       this.q("dialog").addEventListener("close", () => {
@@ -758,6 +902,9 @@ function installChat() {
     chooseQuickReply(prompt, setupKind) {
       if (typeof prompt !== "string" || this.busy || !this.sessionId) return;
       if (setupKind === "xiaomi") {
+        this.suppressedXiaomiSetupId = undefined;
+        if (this.setupCard) this.setupCard.hidden = false;
+        this.updateSetupRecoveryButton();
         this.setXiaomiSetupDismissed(false);
         void this.loadSetup();
       }
@@ -802,6 +949,7 @@ function installChat() {
       this.q(".recovery a").textContent = t.settings;
       this.q(".retry").textContent = t.retry;
       this.q(".xiaomi-reopen").textContent = t.reopenXiaomiSetup;
+      this.q(".setup-recover").textContent = t.recoverSetup;
       if (this.q(".setup-jump")) this.q(".setup-jump").textContent = t.showSetupForm;
       this.q(".send").title = t.send;
       this.q(".send").setAttribute("aria-label", t.send);
@@ -946,6 +1094,9 @@ function installChat() {
           ? await this.demoRequest(fresh ? "/reset" : "", fresh ? "POST" : "GET")
           : await this.hass.callWS({type: "habab_home/agent/session", new: fresh});
         this.sessionId = result.session_id;
+        if (this.automationCard) this.automationCard.sessionId = this.sessionId;
+        if (fresh) this.captureSetupBaseline();
+        else this.restoreSetupBaseline(this.sessionId);
         this.messages = result.messages;
         this.draw();
         this.status("");

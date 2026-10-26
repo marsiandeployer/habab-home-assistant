@@ -2,12 +2,16 @@
 
 import asyncio
 import base64
+import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import time
 import types
 import unittest
+from unittest.mock import patch
 
 
 _SRC = Path(__file__).parents[1] / "src" / "idigital_sms"
@@ -21,6 +25,56 @@ _spec = importlib.util.spec_from_file_location(
 _api = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = _api
 _spec.loader.exec_module(_api)
+
+
+class _FakeNotifyEntity:
+    def async_write_ha_state(self):
+        pass
+
+
+class _FakeHomeAssistantError(Exception):
+    def __init__(self, *args, translation_key=None, **_kwargs):
+        super().__init__(*args or (translation_key,))
+
+
+class _FakeStore:
+    def __class_getitem__(cls, _item):
+        return cls
+
+
+def _load_notify_module():
+    homeassistant = types.ModuleType("homeassistant")
+    homeassistant.__path__ = []
+    components = types.ModuleType("homeassistant.components")
+    components.__path__ = []
+    notify = types.ModuleType("homeassistant.components.notify")
+    notify.NotifyEntity = _FakeNotifyEntity
+    exceptions = types.ModuleType("homeassistant.exceptions")
+    exceptions.HomeAssistantError = _FakeHomeAssistantError
+    helpers = types.ModuleType("homeassistant.helpers")
+    helpers.__path__ = []
+    storage = types.ModuleType("homeassistant.helpers.storage")
+    storage.Store = _FakeStore
+    with patch.dict(sys.modules, {
+        "homeassistant": homeassistant,
+        "homeassistant.components": components,
+        "homeassistant.components.notify": notify,
+        "homeassistant.exceptions": exceptions,
+        "homeassistant.helpers": helpers,
+        "homeassistant.helpers.storage": storage,
+    }):
+        spec = importlib.util.spec_from_file_location(
+            f"{_PACKAGE}.notify", _SRC / "notify.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+_notify = _load_notify_module()
+PersistentSendGuard = _notify.PersistentSendGuard
+IDigitalSmsNotifyEntity = _notify.IDigitalSmsNotifyEntity
 
 DirectClient = _api.DirectClient
 IDigitalError = _api.IDigitalError
@@ -63,6 +117,30 @@ class FakeSession:
         if self.error:
             raise self.error
         return self.response
+
+
+class FakeHass:
+    async def async_add_executor_job(self, function, *args):
+        return function(*args)
+
+
+class MemoryStore:
+    def __init__(self, state, *, fail_saves=()):
+        self.state = state
+        self.fail_saves = set(fail_saves)
+        self.save_count = 0
+        self.path = "/nonexistent/test/store"
+        self.hass = FakeHass()
+
+    async def async_load(self):
+        return copy.deepcopy(self.state)
+
+    async def async_save(self, state):
+        self.save_count += 1
+        if self.save_count in self.fail_saves:
+            raise OSError("synthetic store failure")
+        self.state.clear()
+        self.state.update(copy.deepcopy(state))
 
 
 def make_client(session):
@@ -229,6 +307,100 @@ class IDigitalSmsProtocolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.code, "unknown_outcome")
         self.assertEqual(session.calls, 1)
+
+    async def test_acknowledged_uuid_is_saved_and_restored_after_restart(self):
+        initial = {"attempts": []}
+        writer = MemoryStore(initial)
+        reader = MemoryStore(initial)
+        guard = PersistentSendGuard(writer, reader)
+        await guard.async_load()
+
+        attempt_id = await guard.async_reserve("Test body")
+        await guard.async_finish(
+            attempt_id,
+            "accepted",
+            message_uuid="063474ec-a34f-4558-90c5-984395000004",
+        )
+
+        self.assertEqual(writer.state["attempts"][0]["phase"], "accepted")
+        self.assertEqual(
+            writer.state["attempts"][0]["message_uuid"],
+            "063474ec-a34f-4558-90c5-984395000004",
+        )
+        restarted_guard = PersistentSendGuard(writer, reader)
+        await restarted_guard.async_load()
+        entity = IDigitalSmsNotifyEntity(object(), "entry", restarted_guard)
+        self.assertEqual(
+            entity.extra_state_attributes,
+            {"message_uuid": "063474ec-a34f-4558-90c5-984395000004"},
+        )
+
+    async def test_old_guard_records_without_uuid_still_load(self):
+        old_record = {
+            "attempt_id": "old-attempt",
+            "timestamp": time.time(),
+            "digest": hashlib.sha256(b"old message").hexdigest(),
+            "phase": "accepted",
+        }
+        store = MemoryStore({"attempts": [old_record]})
+        guard = PersistentSendGuard(store, store)
+
+        await guard.async_load()
+
+        self.assertIsNone(guard.latest_message_uuid)
+        self.assertEqual(guard._attempts, [old_record])
+
+    async def test_uuid_stays_available_in_memory_if_receipt_write_fails(self):
+        class SendingClient:
+            async def send_message(self, _message):
+                return "063474ec-a34f-4558-90c5-984395000004"
+
+        initial = {"attempts": []}
+        writer = MemoryStore(initial, fail_saves={2})
+        reader = MemoryStore(initial)
+        guard = PersistentSendGuard(writer, reader)
+        await guard.async_load()
+        entity = IDigitalSmsNotifyEntity(SendingClient(), "entry", guard)
+
+        with self.assertRaises(_FakeHomeAssistantError):
+            await entity.async_send_message("Test body")
+
+        self.assertEqual(
+            entity.extra_state_attributes,
+            {"message_uuid": "063474ec-a34f-4558-90c5-984395000004"},
+        )
+        self.assertEqual(writer.state["attempts"][0]["phase"], "reserved")
+        with self.assertRaises(IDigitalError) as raised:
+            await guard.async_reserve("Another message")
+        self.assertEqual(raised.exception.code, "storage_error")
+
+    async def test_ambiguous_send_stays_unknown_after_restart_without_retry(self):
+        class AmbiguousClient:
+            def __init__(self):
+                self.calls = 0
+
+            async def send_message(self, _message):
+                self.calls += 1
+                raise IDigitalError("unknown_outcome")
+
+        initial = {"attempts": []}
+        writer = MemoryStore(initial)
+        reader = MemoryStore(initial)
+        guard = PersistentSendGuard(writer, reader)
+        await guard.async_load()
+        client = AmbiguousClient()
+        entity = IDigitalSmsNotifyEntity(client, "entry", guard)
+
+        with self.assertRaises(_FakeHomeAssistantError):
+            await entity.async_send_message("Test body")
+
+        self.assertEqual(writer.state["attempts"][0]["phase"], "unknown")
+        restarted_guard = PersistentSendGuard(writer, reader)
+        await restarted_guard.async_load()
+        with self.assertRaises(IDigitalError) as raised:
+            await restarted_guard.async_reserve("Test body")
+        self.assertEqual(raised.exception.code, "unknown_outcome")
+        self.assertEqual(client.calls, 1)
 
 
 if __name__ == "__main__":

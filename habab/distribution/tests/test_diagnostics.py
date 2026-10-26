@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -576,6 +577,7 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manifest["historical_session_versions"]["frontend"],
                          {"version": None, "reason": "not_recorded"})
         self.assertEqual(logs_manifest["period"]["filter_status"], "applied")
+        self.assertEqual(logs_manifest["period"]["source"], "requested_period")
         self.assertIsNone(logs_manifest["period"]["reason"])
         self.assertEqual(logs_manifest["home_assistant_log_clock"]["kind"], "process_local")
         self.assertEqual(logs_manifest["home_assistant_log_clock"]["historical_binding"],
@@ -604,6 +606,136 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("timestamp format not confirmed", opencode_log)
         self.assertNotIn("short-runtime-token", opencode_log)
         self.assertNotIn("short-ha-password", ha_log)
+
+    async def test_selected_export_derives_runtime_log_window_from_conversation(self):
+        owner, hass, _assistant, runtime = runtime_fixture(tool_messages())
+        with tempfile.TemporaryDirectory() as directory:
+            _config_root, opencode_log_dir = self.configure_instance_log_paths(
+                hass, runtime, directory)
+            opencode_log_dir.mkdir(parents=True)
+            (opencode_log_dir / "2026-10-25T130000.log").write_text(
+                "INFO   2026-10-25T13:00:00 +10ms inside conversation\n"
+                "ERROR  2026-10-25T13:00:02 +0ms outside conversation\n",
+                encoding="utf-8")
+            hass.async_add_executor_job = AsyncMock(
+                side_effect=lambda function, *args: function(*args))
+            runtime.process = SimpleNamespace(returncode=None)
+            runtime.request.side_effect = [tool_messages(), {"version": "1.14.21"}]
+
+            response = await diagnostics.DiagnosticsExportView().post(Request(
+                owner, hass, data={
+                    "session_id": "web-alice",
+                    "include_runtime_logs": True,
+                }))
+
+        self.assertEqual(response.status, 200)
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            manifest = json.loads(archive.read("logs/manifest.json"))
+            content = archive.read("opencode/logs/2026-10-25T130000.log").decode()
+        self.assertEqual(manifest["period"]["source"], "selected_session_messages")
+        self.assertIn("inside conversation", content)
+        self.assertNotIn("outside conversation", content)
+
+    async def test_selected_export_without_timestamps_does_not_include_shared_logs(self):
+        owner, hass, _assistant, runtime = runtime_fixture([])
+        with tempfile.TemporaryDirectory() as directory:
+            _config_root, _opencode_log_dir = self.configure_instance_log_paths(
+                hass, runtime, directory)
+            hass.async_add_executor_job = AsyncMock()
+            runtime.request.side_effect = [[], {"version": "1.14.21"}]
+
+            response = await diagnostics.DiagnosticsExportView().post(Request(
+                owner, hass, data={
+                    "session_id": "web-alice",
+                    "include_runtime_logs": True,
+                }))
+
+        self.assertEqual(response.status, 200)
+        hass.async_add_executor_job.assert_not_awaited()
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            names = set(archive.namelist())
+            self.assertIn("logs/manifest.json", names)
+            self.assertFalse(any(name.startswith(("opencode/logs/", "homeassistant/"))
+                                 for name in names))
+            manifest = json.loads(archive.read("manifest.json"))
+            logs_manifest = json.loads(archive.read("logs/manifest.json"))
+        self.assertEqual(manifest["runtime_logs"]["reason"],
+                         "selected_session_timestamps_unavailable")
+        self.assertEqual(manifest["runtime_logs"]["period"]["filter_status"], "unavailable")
+        self.assertEqual(logs_manifest["sources"]["opencode_logs"]["reason"],
+                         "selected_session_timestamps_unavailable")
+
+    async def test_selected_export_with_too_wide_session_omits_shared_logs(self):
+        owner, hass, _assistant, runtime = runtime_fixture()
+        messages = tool_messages()
+        messages[0]["info"]["time"]["created"] = int(datetime(
+            2026, 9, 1, 13, tzinfo=timezone.utc).timestamp() * 1000)
+        with tempfile.TemporaryDirectory() as directory:
+            self.configure_instance_log_paths(hass, runtime, directory)
+            hass.async_add_executor_job = AsyncMock()
+            runtime.process = SimpleNamespace(returncode=None)
+            runtime.request.side_effect = [messages, {"version": "1.14.21"}]
+
+            response = await diagnostics.DiagnosticsExportView().post(Request(
+                owner, hass, data={
+                    "session_id": "web-alice",
+                    "include_runtime_logs": True,
+                }))
+
+        self.assertEqual(response.status, 200)
+        hass.async_add_executor_job.assert_not_awaited()
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            names = set(archive.namelist())
+            self.assertIn("logs/manifest.json", names)
+            self.assertFalse(any(name.startswith(("opencode/logs/", "homeassistant/"))
+                                 for name in names))
+            manifest = json.loads(archive.read("manifest.json"))
+            logs_manifest = json.loads(archive.read("logs/manifest.json"))
+        self.assertEqual(manifest["runtime_logs"]["reason"],
+                         "selected_session_window_too_wide")
+        self.assertEqual(logs_manifest["period"]["filter_status"], "unavailable")
+
+    async def test_export_includes_validated_build_identity(self):
+        owner, hass, _assistant, _runtime = runtime_fixture(tool_messages())
+        revision = "a" * 40
+        with patch.dict(os.environ, {
+            "HABAB_SOURCE_REVISION": revision,
+            "HABAB_SOURCE_DIRTY": "false",
+        }):
+            response = await diagnostics.DiagnosticsExportView().post(
+                Request(owner, hass, data={"session_id": "web-alice"}))
+
+        self.assertEqual(response.status, 200)
+        with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+        self.assertEqual(manifest["build_identity"], {
+            "habab_version": diagnostics.VERSION,
+            "source_revision": revision,
+            "source_dirty": "false",
+        })
+        self.assertIsNone(manifest["build_identity_reason"])
+        self.assertNotIn("build_identity", manifest["unavailable_build_fields"])
+
+    def test_build_identity_rejects_unvalidated_revision_and_dirty_values(self):
+        with patch.dict(os.environ, {
+            "HABAB_SOURCE_REVISION": "HEAD",
+            "HABAB_SOURCE_DIRTY": "false",
+        }):
+            identity, reason = diagnostics._build_identity_at_export()
+        self.assertIsNone(identity)
+        self.assertEqual(reason, "source_revision_not_recorded")
+
+        with patch.dict(os.environ, {
+            "HABAB_SOURCE_REVISION": "b" * 64,
+            "HABAB_SOURCE_DIRTY": "dirty?",
+        }):
+            identity, reason = diagnostics._build_identity_at_export()
+        self.assertEqual(identity, {
+            "habab_version": diagnostics.VERSION,
+            "source_revision": "b" * 64,
+            "source_dirty": "unknown",
+        })
+        self.assertIsNone(reason)
 
     async def test_foreign_selected_export_with_runtime_logs_denies_before_collection(self):
         owner, hass, _assistant, _runtime = runtime_fixture(tool_messages())

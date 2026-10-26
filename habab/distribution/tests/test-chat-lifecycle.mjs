@@ -594,6 +594,166 @@ test("completed Xiaomi card dismissal stays hidden across loads and resets for r
   }, "starting another setup restores its card");
 });
 
+test("a new chat suppresses its prior setup identities, reveals new setup IDs, and can resume old flows", async () => {
+  const setupCard = {hidden: false, state: {phase: "oauth", setup_id: "xiaomi-old"}};
+  const integrationCard = {
+    hidden: false,
+    interactions: [{id: "active-setup"}],
+    setSuppressedInteractionIds(ids) {
+      this.suppressedInteractionIds = new Set(ids);
+      this.hiddenIds = new Set(ids);
+    },
+  };
+  const recoverButton = {hidden: true, textContent: ""};
+  const pipelineControl = {value: "pipeline-old"};
+  const dialog = {open: false};
+  const requests = [];
+  const chat = Object.create(setupChatElementClass.prototype);
+  Object.assign(chat, {
+    language: "en",
+    demo: false,
+    busy: false,
+    sessionId: "old-session",
+    messages: [{role: "assistant", text: "Old chat"}],
+    setupCard,
+    integrationCard,
+    suppressedSetupInteractionIds: new Set(),
+    suppressedXiaomiSetupId: undefined,
+    hass: {callWS: async (request) => {
+      requests.push(request);
+      return {session_id: "new-session", messages: []};
+    }},
+    isCurrentOwnerContext: () => true,
+    status() {},
+    controls() {},
+    draw() {},
+    loadSetup: async () => {},
+    startPendingAssist() {},
+    q: (selector) => ({
+      ".setup-recover": recoverButton,
+      ".assist-pipeline": pipelineControl,
+      "dialog": dialog,
+    })[selector],
+  });
+
+  await setupChatElementClass.prototype.connect.call(chat, true);
+  assert.deepEqual(requests, [{type: "habab_home/agent/session", new: true}]);
+  assert.equal(chat.sessionId, "new-session");
+  assert.equal(chat.messages.length, 0);
+  assert.equal(setupCard.hidden, true);
+  assert.equal(setupCard.state.setup_id, "xiaomi-old");
+  assert.deepEqual([...chat.suppressedSetupInteractionIds], ["active-setup"]);
+  assert.deepEqual([...integrationCard.suppressedInteractionIds], ["active-setup"]);
+  assert.equal(recoverButton.hidden, false);
+  assert.equal(recoverButton.textContent, "Show active setup");
+  assert.equal(chat.setupCard, setupCard, "the active Xiaomi setup component is retained");
+  assert.equal(chat.integrationCard, integrationCard, "the native config flow component is retained");
+
+  assert.equal(chat.isXiaomiSetupSuppressed(), true, "the unchanged Xiaomi attempt remains scoped to the old chat");
+  setupCard.state = {...setupCard.state, phase: "homes"};
+  assert.equal(chat.isXiaomiSetupSuppressed(), true, "advancing the old attempt does not change its identity");
+  setupCard.state = {...setupCard.state, setup_id: "xiaomi-new", phase: "oauth"};
+  assert.equal(chat.isXiaomiSetupSuppressed(), false, "a new Xiaomi attempt in this chat appears automatically");
+
+  chat.resumePreviousSetup();
+  assert.equal(setupCard.hidden, false);
+  assert.equal(recoverButton.hidden, true);
+  assert.deepEqual([...integrationCard.suppressedInteractionIds], []);
+  assert.equal(chat.setupCard, setupCard);
+  assert.equal(chat.integrationCard, integrationCard);
+});
+
+test("setup suppression survives reconnect only for its owner and current conversation", async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const values = new Map();
+  const storage = {
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {location: {origin: "https://ha.example"}, sessionStorage: storage},
+  });
+  try {
+    const makeChat = () => {
+      const setupCard = {hidden: false, state: {phase: "oauth", setup_id: "xiaomi-old"}};
+      const integrationCard = {
+        interactions: [{id: "active-flow"}],
+        setSuppressedInteractionIds(ids) { this.suppressed = new Set(ids); },
+      };
+      const recoverButton = {hidden: true, textContent: ""};
+      const dialog = {open: false};
+      const chat = Object.create(setupChatElementClass.prototype);
+      Object.assign(chat, {
+        language: "en",
+        demo: false,
+        busy: false,
+        hass: {
+          user: {id: "owner-one", is_admin: true},
+          callWS: async () => ({session_id: "new-session", messages: []}),
+        },
+        sessionId: "new-session",
+        setupCard,
+        integrationCard,
+        suppressedSetupInteractionIds: new Set(),
+        suppressedXiaomiSetupId: undefined,
+        isCurrentOwnerContext: () => true,
+        status() {},
+        controls() {},
+        draw() {},
+        loadSetup: async () => {},
+        startPendingAssist() {},
+        q: (selector) => ({".setup-recover": recoverButton, dialog})[selector],
+      });
+      return {chat, setupCard, integrationCard, recoverButton};
+    };
+
+    const first = makeChat();
+    first.chat.captureSetupBaseline();
+    assert.equal(first.setupCard.hidden, true);
+    assert.deepEqual([...first.integrationCard.suppressed], ["active-flow"]);
+    assert.equal(first.recoverButton.hidden, false);
+
+    const reloaded = makeChat();
+    await setupChatElementClass.prototype.connect.call(reloaded.chat, false);
+    assert.equal(reloaded.chat.sessionId, "new-session");
+    assert.deepEqual(reloaded.chat.messages, []);
+    assert.equal(reloaded.chat.suppressedXiaomiSetupId, "xiaomi-old");
+    assert.equal(reloaded.setupCard.hidden, true);
+    assert.deepEqual([...reloaded.integrationCard.suppressed], ["active-flow"]);
+    assert.equal(reloaded.recoverButton.hidden, false);
+
+    reloaded.chat.resumePreviousSetup();
+    const afterResumeReload = makeChat();
+    await setupChatElementClass.prototype.connect.call(afterResumeReload.chat, false);
+    assert.equal(afterResumeReload.chat.sessionId, "new-session");
+    assert.deepEqual([...afterResumeReload.chat.suppressedSetupInteractionIds], []);
+    assert.equal(afterResumeReload.setupCard.hidden, false);
+    assert.deepEqual([...afterResumeReload.integrationCard.suppressed], []);
+
+    const otherSession = makeChat();
+    assert.equal(otherSession.chat.restoreSetupBaseline("different-session"), false);
+    assert.deepEqual([...otherSession.chat.suppressedSetupInteractionIds], []);
+
+    const key = otherSession.chat.setupScopeStorageKey();
+    storage.setItem(key, "{invalid json");
+    const corruptStorageRecord = makeChat();
+    assert.equal(corruptStorageRecord.chat.restoreSetupBaseline("new-session"), false);
+    assert.deepEqual([...corruptStorageRecord.chat.suppressedSetupInteractionIds], []);
+
+    const getItem = storage.getItem;
+    storage.getItem = () => { throw new Error("storage unavailable"); };
+    const unavailableStorage = makeChat();
+    assert.equal(unavailableStorage.chat.restoreSetupBaseline("new-session"), false);
+    assert.deepEqual([...unavailableStorage.chat.suppressedSetupInteractionIds], []);
+    storage.getItem = getItem;
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
+});
+
 test("reopened Xiaomi setup returns before the integration card without repeated moves", () => {
   const order = [];
   let insertions = 0;

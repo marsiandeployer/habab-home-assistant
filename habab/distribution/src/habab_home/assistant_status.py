@@ -1,14 +1,39 @@
 """Secret-free backend facts; client microphone/network observations stay unknown."""
+from collections.abc import Mapping
 import os
 
 from .const import DOMAIN, VERSION
+from .gemini_live import DEFAULT_MODEL
 from .runtime_context import DOCKER_RUNTIME_KIND, RUNTIME_KIND_ENV
 from .voice_context import build_voice_context
 
 
+def voice_route_metadata(settings):
+    """Return the saved provider's default Realtime route without probing it."""
+    provider = settings.get("provider") if isinstance(settings, Mapping) else None
+    api_key = settings.get("api_key") if isinstance(settings, Mapping) else None
+    gemini_live_provider = provider in {"habab", "gemini"}
+    has_key = isinstance(api_key, str) and bool(api_key.strip())
+    supported = provider == "openai" or (gemini_live_provider and has_key)
+    if gemini_live_provider:
+        protocol = "gemini_live"
+        default_model = DEFAULT_MODEL
+    elif provider == "openai":
+        protocol = "openai_realtime"
+        default_model = "gpt-realtime-mini"
+    else:
+        protocol = None
+        default_model = None
+    return {
+        "voice_provider": provider if provider in {"habab", "gemini", "openai"} else None,
+        "voice_protocol": protocol,
+        "default_voice_model": default_model,
+        "voice_supported": supported,
+        "voice_ready": supported and has_key,
+    }
+
+
 async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=True):
-    from .realtime import realtime_base
-    from .gemini_live import DEFAULT_MODEL
     from .setup_agent import AgentError
 
     if settings is None:
@@ -16,17 +41,9 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
             settings = hass.data[DOMAIN]["setup_agent"].settings()
         except AgentError:
             settings = {}
+    voice_route = voice_route_metadata(settings)
     gemini_live_provider = settings.get("provider") in {"habab", "gemini"}
-    try:
-        if gemini_live_provider:
-            api_key = settings.get("api_key")
-            if not isinstance(api_key, str) or not api_key.strip():
-                raise ValueError("realtime_provider_required")
-        else:
-            realtime_base(settings)
-        realtime_supported = True
-    except ValueError:
-        realtime_supported = False
+    realtime_supported = voice_route["voice_supported"]
     telegram = hass.data.get("habab_telegram")
     if telegram and verify_telegram:
         telegram_state = await telegram.status(owner)
@@ -45,9 +62,9 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
         "voice": {
             "realtime_api_registered": True,
             "selected_provider_supports_realtime": realtime_supported,
-            "selected_provider_protocol": "gemini_live" if gemini_live_provider else "openai_realtime" if realtime_supported else None,
+            "selected_provider_protocol": voice_route["voice_protocol"],
             "required_client_kind": "native_v2" if gemini_live_provider else None,
-            "default_voice_model": DEFAULT_MODEL if gemini_live_provider else "gpt-realtime-mini" if realtime_supported else None,
+            "default_voice_model": voice_route["default_voice_model"],
             "supported_clients": {
                 "android_with_native_voice": {
                     "wake_detection": "local_vosk", "transport": "native_realtime",

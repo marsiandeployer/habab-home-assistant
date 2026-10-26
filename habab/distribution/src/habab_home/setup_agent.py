@@ -21,6 +21,16 @@ from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .agent_diagnostics import AgentDiagnostics
+from .action_outcome import (
+    OUTCOME_FORMAT,
+    OUTCOME_PROMPT,
+    OUTCOME_PROTOCOL,
+    OutcomeError,
+    UNVERIFIED_TODO_TEXT,
+    parse_outcome,
+    requests_outcome,
+    todo_claims_verified,
+)
 from .assistant_identity import ASSISTANT_IDENTITY
 from .assistant_status import get_assistant_status
 from .const import DOMAIN
@@ -66,6 +76,41 @@ def resolved_runtime_fingerprint(settings, contract, runtime_kind):
         "resolved_base_url": contract.base_url,
     }
     return runtime_fingerprint(resolved_settings, runtime_kind)
+
+
+def _current_turn_websearch_failed(messages, prior_message_ids):
+    """Fail closed when every web-search call in this turn errored."""
+    found_search = False
+    all_searches_errored = True
+    for message in messages if isinstance(messages, list) else []:
+        info = message.get("info") if isinstance(message, dict) else None
+        message_id = info.get("id") if isinstance(info, dict) else None
+        if isinstance(message_id, str) and message_id in prior_message_ids:
+            continue
+        for part in message.get("parts", []):
+            if not isinstance(part, dict) or part.get("type") != "tool":
+                continue
+            tool_name = part.get("tool")
+            if not isinstance(tool_name, str) or tool_name.rsplit(".", 1)[-1] not in {
+                    "websearch", "web_search_exa", "exa_web_search_exa"}:
+                continue
+            found_search = True
+            state = part.get("state")
+            all_searches_errored = (all_searches_errored and isinstance(state, dict)
+                                    and state.get("status") == "error")
+    return found_search and all_searches_errored
+
+
+def _latest_user_message_index(messages):
+    """Locate the turn's user message so failed claims can be removed after it."""
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        info = message.get("info") if isinstance(message, dict) else None
+        if isinstance(info, dict) and info.get("role") == "user":
+            return index
+    return None
+
+
 VOICE_TURN_METADATA_KEY = "habab_voice_turn"
 VOICE_TURN_METADATA_VALUE = "native_realtime.v1"
 VOICE_TURN_EVENT_ID_KEY = "habab_voice_event_id"
@@ -126,6 +171,9 @@ Bluetooth override с BlueZ применим только к Linux-хосту. �
 {"action":"assist_exposure","operation":"get","entity_id":"..."} — текущая экспозиция одной сущности для Home Assistant Conversation;
 {"action":"assist_exposure","operation":"set","entity_id":"...","should_expose":true} — явно включить или выключить экспозицию одной сущности для Home Assistant Conversation (should_expose строго true или false);
 {"action":"todo_items","entity_id":"todo...."} — реальные пункты конкретного списка;
+{"action":"automation_helper_draft","name":"...","summary":"..."} — черновик виртуального переключателя input_boolean;
+{"action":"automation_draft","config":{...},"summary":"..."} — черновик автоматизации: config — полная нативная конфигурация Home Assistant с alias, без id;
+{"action":"automation_status"} — фазы черновиков текущего веб-чата, без дополнительных аргументов;
 {"action":"services"} — доступные сервисы;
 {"action":"call_service","domain":"light","service":"turn_on","target":{"entity_id":"..."},"data":{}};
 {"action":"save_feedback","feedback":"...","consent":true,"idempotency_key":"UUID","send_to_habab":false} — сохранить отзыв и ограниченный очищенный от чувствительных данных контекст в Home Assistant; send_to_habab=true допустимо только при явной просьбе владельца отправить этот отзыв разработчикам Habab;
@@ -135,12 +183,13 @@ Bluetooth override с BlueZ применим только к Linux-хосту. �
 {"action":"start_integration","domain":"..."} — начать нативное подключение;
 {"action":"continue_integration","flow_id":"...","input":{...}} — заполнить следующий шаг;
 {"action":"options_start","entry_id":"..."} и {"action":"options_continue","flow_id":"...","input":{...}} — настройки интеграции.
-На вопрос о текущих подключённых устройствах, интеграциях, их количестве или наличии сначала прочитай соответствующий реестр действием devices или integrations в этом же ходе разговора. При перечислении devices выведи таблицу с понятными заголовками «Название», «Тип записи», «Модель». Тип записи передавай по фактическим entry_type и entry_type_description: service — «служебная запись», null — «тип не подтверждён», иной тип — точное значение без догадок. Сохраняй тип каждой строки и не превращай реестровые записи в подсчёт физических приборов. Строку с entry_type=service называй служебной записью, не аппаратурой и не купленным устройством. При необходимости текущих состояний дополнительно прочитай states. Не подменяй свежее чтение сведениями из прежних сообщений или старых результатов инструментов. Если чтение не удалось, сообщи, что актуальный состав не проверен, а не выдавай прежние данные за текущие.
+На вопрос о текущих устройствах, их количестве или наличии сначала прочитай реестр действием devices в этом же ходе разговора; на вопрос об интеграциях — integrations. Описывай результат devices именно как записи реестра: наличие записи не доказывает, что устройство сейчас онлайн или доступно, и не доказывает, что его сущности доступны для Assist/Conversation. Не утверждай онлайн-доступность или Assist exposure без отдельного точного readback; если его нет, сообщи эту границу и перечисли только подтверждённые данные. При перечислении devices выведи таблицу с понятными заголовками «Название», «Тип записи», «Модель». Тип записи передавай по фактическим entry_type и entry_type_description: service — «служебная запись», null — «тип не подтверждён», иной тип — точное значение без догадок. Сохраняй тип каждой строки и не превращай реестровые записи в подсчёт физических приборов. Строку с entry_type=service называй служебной записью, не аппаратурой и не купленным устройством. При необходимости текущих состояний дополнительно прочитай states. Не подменяй свежее чтение сведениями из прежних сообщений или старых результатов инструментов. Если чтение не удалось, сообщи, что актуальный состав не проверен, а не выдавай прежние данные за текущие.
 В assistant_status значение android_local_voice_settings_control_from_chat=false относится только к локальным настройкам голоса Android, например фразе пробуждения и звуку; оно не запрещает управлять экспозицией сущностей HA Conversation. Отдельная возможность home_assistant_conversation_entity_exposure.registered относится только к настройке одной точной сущности, а runtime_status=not_checked означает, что настройка ещё не проверялась. Не делай вывод об успешной работе из регистрации возможности и не объявляй её недоступной из-за ограничения Android: проверяй только результат assist_exposure get/set, включая явную ошибку helper.
 Для запросов найти устройства или подключения по LAN, Wi-Fi или Bluetooth сначала вызови discover_devices, затем изучи devices и ожидающие discovered_flows. Это наблюдение ограничено тем, что видит сам Home Assistant: результат может быть неполным; оно не сканирует список Wi-Fi сетей (SSID), не предполагает наличие Windows-адаптера и не меняет сеть или настройки хоста. Не обещай найти SSID через это действие. При явном запросе владельца выбери только flow, чей домен и описание соответствуют нужному устройству, и явно прими его через adopt_discovered_flow. Продолжай только flow ID из результата принятия. Не принимай flow наугад и не используй занятые или пользовательские подключения. Продолжай только показанные варианты меню или пустое подтверждение. Непустую форму владелец заполняет в защищённой карточке; значения полей не придумывай.
 Выбирай только реальные ID из результатов. Явно указанная владельцем цель — обязательное условие действия: не заменяй названное устройство, комнату, список или другой объект похожим либо найденным ранее. Перед изменением состояния существующей сущности перечитай актуальные states и сверь entity_id и friendly_name с указанной целью; сведения из прежних сообщений не заменяют эту проверку. Если точная цель не найдена или выбор неоднозначен, ничего не меняй и уточни цель у владельца. После завершения проверь integrations, devices и доступные states.
 Не меняй экспозицию Assist ради ответа на обычный запрос о погоде или устройстве. Отсутствие данных в сводке или ответ о том, что Home Assistant не предоставил погоду, не является просьбой менять настройки: сообщи ограничение без изменений. Меняй экспозицию только по явной просьбе владельца изменить доступ конкретной сущности для Assist. Сначала проверь её точный entity_id командой states, затем прочитай текущее значение через assist_exposure get; при подтверждённой точной цели выполни assist_exposure set с явно запрошенным true или false и проверь effective в ответе. Если цель не найдена или неоднозначна, уточни её. Не включай новые сущности по умолчанию, не делай массовые изменения и не меняй настройки Alexa, Google или другого assistant. Считай действие подтверждённым только после readback, сообщай фактически применённое значение в Home Assistant; не утверждай, что запись физически сброшена на диск, если это отдельно не подтверждено.
 Перед изменением списка дел прочитай точный список через todo_items. Если запрошенный пункт уже есть и владелец не просил явно добавить повтор или несколько экземпляров, сообщи, что он уже в списке, и не создавай дубль. Явный запрос на повтор или количество экземпляров разрешает соответствующее количество новых пунктов. После неопределённого результата прежней попытки сначала перечитай список; не повторяй изменение вслепую. Для todo.add_item укажи точный entity_id в target. Считай добавление подтверждённым только если в этом ходе ты вызвал действие и его результат сообщает verification=persisted: это означает, что после вызова сервиса в том же списке появился новый пункт с запрошенным текстом. Если действия не было, результат отсутствует, сообщает ошибку или проверка не пройдена, не говори, что пункт добавлен; объясни, что изменение не подтверждено. Не делай вывод о содержимом списка по его state.
+Для создания виртуального переключателя или автоматизации используй только automation_helper_draft или automation_draft в текущем веб-чате владельца. Это подготовка черновика: сохранение выполняет владелец после проверки и явного подтверждения в защищённой карточке этого веб-чата. Модель не подтверждает, не сохраняет, не отменяет и не удаляет черновик; не обходи карточку через файлы, команды или native API. В Telegram объясни, что нужно открыть веб-чат Home Assistant. Автоматизация принудительно создаётся с initial_state=false, виртуальный переключатель — выключенным; не включай и не запускай их для этого шага. После подтверждения перечитай automation_status: только phase=saved вместе с verification=native_config_and_off_state подтверждает сохранённую нативную конфигурацию и выключенное состояние. Другую фазу не называй сохранением, не обещай срабатывание автоматизации без отдельной проверки.
 Сохраняй отзыв через save_feedback только когда смысл сообщения владельца явно разрешает сохранить его отзыв вместе с ограниченным, очищенным от чувствительных данных контекстом текущего server-mapped веб-чата или Telegram-чата этого владельца в этой установке Home Assistant. Если разрешение на такой объём локального сохранения неясно, сначала спроси согласие. send_to_habab по умолчанию false: обычная жалоба и просьба только сохранить локально не разрешают отправку. Ставь send_to_habab=true только когда владелец явно просит отправить этот отзыв Habab/разработчикам; такая явная просьба разрешает передачу самого отзыва и ограниченного очищенного контекста, без второго вопроса. Если смысл просьбы об отправке или объём контекста неясен, сначала уточни. Это решение принимай по смыслу текста, не по списку ключевых слов. Передай только сам отзыв владельца, consent=true, send_to_habab и UUID в idempotency_key; при явном повторе отправки того же отзыва в той же сессии используй прежний UUID и не создавай новый. owner, session_id и channel не передавай — их разрешает сервер по активной mapping. state=saved_locally подтверждает только локальную запись. delivery_status=saved_on_server вместе с server_issue_state=pending_issue подтверждает принятие сервером в ожидание обработки, но не создание GitHub issue. delivery_status=pending означает, что серверное сохранение не подтверждено. Если после явной просьбы отправить действие вернуло только issue_state=not_configured без delivery_status, сообщи, что запись сохранена локально, а отправка не настроена/выключена; receiver token владелец настраивает только в защищённых настройках Habab AI, никогда не запрашивай его в чате. При delivery_status=rejected сообщи, что отправка отклонена. Не утверждай отправку, issue или завершение обработки без соответствующего результата.
 Если шаг требует пароль/API-ключ/OAuth/нажатие кнопки на устройстве, объясни, что
 владелец должен продолжить его в защищённой карточке этого веб-чата Home Assistant. Карточки и
@@ -160,7 +209,7 @@ Bluetooth override с BlueZ применим только к Linux-хосту. �
 успешным или источник проверенным по одной конфигурации.
 Пиши, что именно проверил/изменил, с опорой на результат команды. Ошибка команды
 не является успешным подключением. Не обещай физическую работу без проверки.
-"""
+""" + OUTCOME_PROMPT
 
 
 class AgentError(Exception):
@@ -449,9 +498,34 @@ class SetupAgent:
 
     def visible(self, messages):
         result = []
+        protocol_turns = {
+            message.get("info", {}).get("id") for message in messages
+            if message.get("info", {}).get("role") == "user"
+            and isinstance(message.get("info", {}).get("id"), str)
+            and requests_outcome(message["info"])
+        }
+        protocol_turns.update(
+            message["info"]["parentID"] for message in messages
+            if isinstance(message.get("info", {}).get("parentID"), str)
+            and isinstance(message["info"].get("structured"), dict)
+            and message["info"]["structured"].get("protocol") == OUTCOME_PROTOCOL
+        )
         for message in messages:
-            role = message.get("info", {}).get("role")
+            info = message.get("info", {})
+            role = info.get("role")
             if role not in ("user", "assistant"):
+                continue
+            if role == "assistant" and "structured" in info:
+                try:
+                    outcome = parse_outcome(info["structured"])
+                except OutcomeError:
+                    result.append({"role": role, "text": "Не удалось проверить формат ответа помощника."})
+                else:
+                    text = outcome["text"] if todo_claims_verified(outcome, message, messages) else UNVERIFIED_TODO_TEXT
+                    result.append({"role": role, "text": self.clean(text)})
+                continue
+            if role == "assistant" and info.get("parentID") in protocol_turns:
+                # Intermediate prose is not the final StructuredOutput response.
                 continue
             visible_parts = []
             for part in message.get("parts", []):
@@ -510,12 +584,22 @@ class SetupAgent:
             try:
                 status = await get_assistant_status(self.hass, owner, settings, verify_telegram=False)
                 status["external_search"] = dict(self.external_search_status)
+                prior_messages = await self.request(
+                    "GET", f"session/{session_id}/message?limit=60")
+                if not isinstance(prior_messages, list):
+                    raise AgentError("runtime_error")
+                prior_message_ids = set()
+                for message in prior_messages:
+                    info = message.get("info") if isinstance(message, dict) else None
+                    if isinstance(info, dict) and isinstance(info.get("id"), str):
+                        prior_message_ids.add(info["id"])
                 response = await self.request("POST", f"session/{session_id}/message", {
                     "agent": "build", "model": {
                         "providerID": "habab-" + settings["provider"],
                         "modelID": contract.model if isinstance(contract, ProviderContract) else settings["model"],
                     },
                     "system": runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT),
+                    "format": OUTCOME_FORMAT,
                     "parts": [
                         {"type": "text", "synthetic": True,
                          "text": "HABAB_RUNTIME_STATUS\n" + json.dumps(status, ensure_ascii=False)},
@@ -526,11 +610,62 @@ class SetupAgent:
                     self.diagnostics.record(
                         owner, session_id, response.get("info", {}).get("error"))
                     raise AgentError("model_error")
+                try:
+                    outcome = parse_outcome(response.get("info", {}).get("structured"))
+                except OutcomeError as error:
+                    self.diagnostics.record(owner, session_id, {"message": str(error)})
+                    raise AgentError("model_error") from error
                 messages = await self.request("GET", f"session/{session_id}/message?limit=60")
-                visible = self.visible(messages)
-                if not visible or visible[-1]["role"] != "assistant":
+                if not isinstance(messages, list):
+                    raise AgentError("runtime_error")
+                response_info = response.get("info", {})
+                parent_id = response_info.get("parentID")
+                if (response_info.get("role") != "assistant"
+                        or not isinstance(response_info.get("id"), str)
+                        or response_info["id"] in prior_message_ids
+                        or not isinstance(parent_id, str) or parent_id in prior_message_ids
+                        or not any(message.get("info", {}).get("id") == parent_id
+                                   and message.get("info", {}).get("role") == "user"
+                                   for message in messages)):
                     raise AgentError("model_error")
-                self.diagnostics.clear(owner, session_id)
+                # Render the returned final message even if the bounded history
+                # read has not caught up, while retaining persisted tool evidence.
+                messages = [message for message in messages
+                            if message.get("info", {}).get("id") != response_info["id"]] + [response]
+                visible = self.visible(messages)
+                todo_verified = todo_claims_verified(outcome, response, messages, prior_message_ids)
+                if _current_turn_websearch_failed(messages, prior_message_ids):
+                    # A model response after a failed search can misrepresent memory
+                    # or guessed links as search evidence. Replace that turn's claims.
+                    user_index = _latest_user_message_index(messages)
+                    if user_index is not None:
+                        visible = self.visible(messages[:user_index + 1])
+                    else:
+                        last_user = max(
+                            (index for index, item in enumerate(visible)
+                             if item["role"] == "user"), default=-1)
+                        visible = visible[:last_user + 1]
+                    visible.append({"role": "assistant", "text": (
+                        "Веб-поиск завершился ошибкой, поэтому я не смог проверить "
+                        "сведения и не подтверждаю их по результатам поиска."
+                    )})
+                    visible = visible[-60:]
+                elif not todo_verified:
+                    # Drop every assistant message after the current user turn,
+                    # including intermediate claims made before finalization.
+                    user_index = _latest_user_message_index(messages)
+                    if user_index is not None:
+                        visible = self.visible(messages[:user_index + 1])
+                    else:
+                        last_user = max(
+                            (index for index, item in enumerate(visible)
+                             if item["role"] == "user"), default=-1)
+                        visible = visible[:last_user + 1]
+                    visible.append({"role": "assistant", "text": UNVERIFIED_TODO_TEXT})
+                    visible = visible[-60:]
+                    self.diagnostics.record(owner, session_id, {"message": "todo_receipt_not_verified"})
+                if todo_verified:
+                    self.diagnostics.clear(owner, session_id)
                 return {"session_id": session_id, "messages": visible}
             except AgentError as error:
                 if error.code == "runtime_timeout":

@@ -41,7 +41,11 @@ HABAB_TEXT_CAPABILITY_MAX_BYTES = 16 * 1024
 
 @dataclass(frozen=True)
 class ProviderContract:
-    """One resolved text transport shared by conversation and OpenCode."""
+    """One resolved text transport shared by conversation and OpenCode.
+
+    ``model`` is the request model ID for direct providers. For a managed
+    provider it is the gateway alias, not the upstream provider's model ID.
+    """
 
     provider: str
     protocol: str
@@ -49,6 +53,8 @@ class ProviderContract:
     base_url: str
     managed_model: str | None = None
     text_ready: bool | None = None
+    configured_upstream_provider: str | None = None
+    configured_upstream_model: str | None = None
 
 
 def _direct_contract(settings: dict[str, str]) -> ProviderContract:
@@ -120,10 +126,20 @@ async def resolve_provider_contract(
             or not isinstance(payload.get("ready"), bool)
             or payload["configured"] != payload["ready"]):
         raise ProviderError("invalid_response")
+    upstream_provider = payload.get("configured_upstream_provider")
+    upstream_model = payload.get("configured_upstream_model")
+    upstream_is_valid = (
+        isinstance(upstream_provider, str)
+        and upstream_provider in {"deepseek", "openai", "gemini"}
+        and isinstance(upstream_model, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", upstream_model)
+    )
     return ProviderContract(
         provider="habab", protocol="openai_compatible", model="habab-chat",
         base_url=HABAB_TEXT_ORIGIN + "/v1", managed_model="habab-chat",
         text_ready=payload["ready"],
+        configured_upstream_provider=upstream_provider if upstream_is_valid else None,
+        configured_upstream_model=upstream_model if upstream_is_valid else None,
     )
 
 
@@ -255,7 +271,7 @@ class ProviderClient:
             raise ProviderError("invalid_response") from None
 
     async def check(self) -> None:
-        """Test the selected model and tool calling, without touching devices."""
+        """Test the selected provider route and tool calling without device actions."""
         tool = {
             "type": "function",
             "function": {

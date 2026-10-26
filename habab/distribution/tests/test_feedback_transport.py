@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "habab_home
 from feedback_transport import (  # noqa: E402
     RECEIVER_URL,
     REQUEST_TIMEOUT_SECONDS,
+    get_feedback_status,
     send_feedback,
 )
 
@@ -125,6 +126,74 @@ class FeedbackTransportTests(unittest.TestCase):
         self.assertEqual(result.status, "not_configured")
         self.assertEqual(opener.calls, [])
 
+    def test_status_read_uses_existing_receipt_and_installation_bearer(self):
+        created = {
+            **receipt(issue_state="created", duplicate=False),
+            "issue_number": 42,
+            "issue_url": "https://github.com/habab-test/feedback-test/issues/42",
+        }
+        opener = FakeOpener([FakeResponse(created)])
+
+        result = get_feedback_status(RECEIPT_ID, INSTALLATION_TOKEN, _opener=opener)
+
+        self.assertEqual(
+            (result.status, result.receipt_id, result.issue_state,
+             result.issue_number, result.issue_url),
+            ("saved_on_server", RECEIPT_ID, "created", 42, created["issue_url"]),
+        )
+        request, timeout = opener.calls[0]
+        self.assertEqual(request.full_url, f"{RECEIVER_URL}/{RECEIPT_ID}")
+        self.assertEqual(request.get_method(), "GET")
+        self.assertIsNone(request.data)
+        self.assertEqual(request.get_header("Authorization"), f"Bearer {INSTALLATION_TOKEN}")
+        self.assertEqual(request.get_header("Accept"), "application/json")
+        self.assertEqual(request.get_header("Cache-control"), "no-store")
+        self.assertEqual(timeout, REQUEST_TIMEOUT_SECONDS)
+        self.assertNotIn(INSTALLATION_TOKEN, repr(result))
+
+    def test_status_read_preserves_old_created_without_link_as_unknown(self):
+        opener = FakeOpener([FakeResponse(receipt(issue_state="created"))])
+
+        result = get_feedback_status(RECEIPT_ID, INSTALLATION_TOKEN, _opener=opener)
+
+        self.assertEqual(result.status, "saved_on_server")
+        self.assertEqual(result.issue_state, "unknown")
+        self.assertEqual(result.error_code, "issue_reference_unavailable")
+        self.assertIsNone(result.issue_number)
+        self.assertIsNone(result.issue_url)
+
+    def test_status_read_rejects_mismatched_or_invalid_issue_reference(self):
+        invalid_payloads = (
+            {**receipt(issue_state="created"), "issue_number": 42},
+            {**receipt(issue_state="created"), "issue_number": 42,
+             "issue_url": "https://github.com.evil/habab-test/feedback-test/issues/42"},
+            {**receipt(issue_state="created"), "issue_number": 43,
+             "issue_url": "https://github.com/habab-test/feedback-test/issues/42"},
+            {**receipt(issue_state="created"), "issue_number": 42,
+             "issue_url": "https://github.com/habab-test/feedback-test/issues/42?redirect=1"},
+            {**receipt(issue_state="pending_issue"), "issue_number": 42,
+             "issue_url": "https://github.com/habab-test/feedback-test/issues/42"},
+            {**receipt(issue_state="pending_issue"), "receipt_id": str(uuid.uuid4())},
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                opener = FakeOpener([FakeResponse(payload)])
+
+                result = get_feedback_status(RECEIPT_ID, INSTALLATION_TOKEN, _opener=opener)
+
+                self.assertEqual((result.status, result.error_code), ("pending", "invalid_receipt"))
+                self.assertIsNone(result.issue_state)
+
+    def test_status_read_without_credentials_or_valid_receipt_id_never_uses_network(self):
+        opener = FakeOpener([])
+
+        missing = get_feedback_status(RECEIPT_ID, None, _opener=opener)
+        malformed = get_feedback_status("not-a-uuid", INSTALLATION_TOKEN, _opener=opener)
+
+        self.assertEqual(missing.status, "not_configured")
+        self.assertEqual(malformed.error_code, "invalid_receipt_id")
+        self.assertEqual(opener.calls, [])
+
     def test_disallowed_event_fields_and_nested_credentials_are_rejected_before_http(self):
         cases = (
             ("owner_id", "foreign-owner"),
@@ -213,7 +282,13 @@ class FeedbackTransportTests(unittest.TestCase):
     def test_saved_receipt_accepts_issue_progress_states_but_keeps_strict_schema(self):
         for issue_state in ("pending_issue", "sending", "created", "unknown"):
             with self.subTest(issue_state=issue_state):
-                response = FakeResponse(receipt(issue_state=issue_state, duplicate=True))
+                payload = receipt(issue_state=issue_state, duplicate=True)
+                if issue_state == "created":
+                    payload.update({
+                        "issue_number": 42,
+                        "issue_url": "https://github.com/habab-test/feedback-test/issues/42",
+                    })
+                response = FakeResponse(payload)
                 opener = FakeOpener([response])
                 result = send_feedback(representative_package(), INSTALLATION_TOKEN, _opener=opener)
 

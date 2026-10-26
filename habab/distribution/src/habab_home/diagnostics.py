@@ -23,6 +23,11 @@ from homeassistant.const import __version__ as HA_VERSION
 
 from .agent_diagnostics import safe_error_summary
 from .const import DOMAIN, VERSION
+from .diagnostics_sessions import (
+    MAX_ARCHIVED_TELEGRAM_SESSIONS_PER_OWNER,
+    MAX_ARCHIVED_WEB_SESSIONS_PER_OWNER,
+    MAX_SESSION_INDEX_OWNERS,
+)
 from .setup_agent import AgentError, VOICE_TURN_METADATA_KEY, VOICE_TURN_METADATA_VALUE
 from .voice_history import VOICE_EVENT_PROTOCOL_KEY, decode_voice_event_part
 
@@ -99,7 +104,8 @@ _HA_LOG_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}\s")
 
 
 def _sources(history_available: bool, reason: str | None = None,
-             session_limit_reached: bool = False) -> dict:
+             session_limit_reached: bool = False,
+             archive_retention: dict | None = None) -> dict:
     return {
         "history": {"available": history_available, "reason": reason,
                     "limit_messages": MAX_MESSAGES,
@@ -110,8 +116,11 @@ def _sources(history_available: bool, reason: str | None = None,
                     "projection_events_limit": MAX_PROJECTED_EVENTS,
                     "projection_items_limit": MAX_PROJECTED_ITEMS,
                     "session_limit_reached": session_limit_reached,
-                    "scope": "currently_mapped_sessions_only",
-                    "retention": "available_while_owner_mapping_exists"},
+                    "scope": "current_owner_mappings_and_bounded_archived_web_and_telegram_sessions",
+                    "archived_web_sessions_per_owner_limit": MAX_ARCHIVED_WEB_SESSIONS_PER_OWNER,
+                    "archived_telegram_sessions_per_owner_limit": MAX_ARCHIVED_TELEGRAM_SESSIONS_PER_OWNER,
+                    "archive_retention": archive_retention,
+                    "retention": "current_sessions_plus_most_recent_archived_web_and_telegram_sessions"},
         "backend_ack": {"available": False, "reason": "not_recorded"},
         "model_request": {"available": False, "reason": "not_recorded"},
         "opencode_files": {"available": False, "reason": "not_exposed_by_runtime"},
@@ -122,13 +131,38 @@ def _sources(history_available: bool, reason: str | None = None,
     }
 
 
+def _archive_retention_state(assistant, owner: str) -> dict:
+    web_index = getattr(assistant, "web_diagnostics_sessions", {})
+    telegram_index = getattr(assistant, "telegram_diagnostics_sessions", {})
+    if not isinstance(web_index, dict):
+        web_index = {}
+    if not isinstance(telegram_index, dict):
+        telegram_index = {}
+    web = web_index.get(owner, [])
+    telegram = telegram_index.get(owner, [])
+    web_count = len(web) if isinstance(web, list) else 0
+    telegram_count = len(telegram) if isinstance(telegram, list) else 0
+    return {
+        "web": {"retained": web_count,
+                "limit": MAX_ARCHIVED_WEB_SESSIONS_PER_OWNER,
+                "limit_reached": web_count >= MAX_ARCHIVED_WEB_SESSIONS_PER_OWNER,
+                "owner_index_limit": MAX_SESSION_INDEX_OWNERS,
+                "owner_index_limit_reached": len(web_index) >= MAX_SESSION_INDEX_OWNERS},
+        "telegram": {"retained": telegram_count,
+                     "limit": MAX_ARCHIVED_TELEGRAM_SESSIONS_PER_OWNER,
+                     "limit_reached": telegram_count >= MAX_ARCHIVED_TELEGRAM_SESSIONS_PER_OWNER,
+                     "owner_index_limit": MAX_SESSION_INDEX_OWNERS,
+                     "owner_index_limit_reached": len(telegram_index) >= MAX_SESSION_INDEX_OWNERS},
+    }
+
+
 def _admin(request):
     user = request.get("hass_user")
     return user if user and user.is_active and user.is_admin else None
 
 
 def _mapped_sessions(assistant, owner: str) -> list[dict]:
-    """Return only session IDs already mapped to this owner and channel."""
+    """Return current owner mappings plus bounded archived web and Telegram sessions."""
     records = []
     web_session = getattr(assistant, "web_sessions", {}).get(owner)
     if isinstance(web_session, str) and SESSION_ID.fullmatch(web_session):
@@ -138,17 +172,41 @@ def _mapped_sessions(assistant, owner: str) -> list[dict]:
         if (isinstance(key, str) and key.startswith(prefix)
                 and isinstance(session_id, str) and SESSION_ID.fullmatch(session_id)):
             records.append({"session_id": session_id, "channel": "telegram", "modes": ["telegram"]})
+    archived_web = getattr(assistant, "web_diagnostics_sessions", {}).get(owner, [])
+    if isinstance(archived_web, list):
+        for record in archived_web[:MAX_ARCHIVED_WEB_SESSIONS_PER_OWNER]:
+            session_id = record.get("session_id") if isinstance(record, dict) else None
+            if isinstance(session_id, str) and SESSION_ID.fullmatch(session_id):
+                records.append({"session_id": session_id, "channel": "web", "modes": ["web"]})
+    archived_telegram = getattr(assistant, "telegram_diagnostics_sessions", {}).get(owner, [])
+    if isinstance(archived_telegram, list):
+        for record in archived_telegram[:MAX_ARCHIVED_TELEGRAM_SESSIONS_PER_OWNER]:
+            session_id = record.get("session_id") if isinstance(record, dict) else None
+            if isinstance(session_id, str) and SESSION_ID.fullmatch(session_id):
+                records.append({"session_id": session_id, "channel": "telegram", "modes": ["telegram"]})
     unique = {(row["channel"], row["session_id"]): row for row in records}
-    return sorted(unique.values(), key=lambda row: (row["channel"], row["session_id"]))[:MAX_MAPPED_SESSIONS]
+    return list(unique.values())[:MAX_MAPPED_SESSIONS]
 
 
 def _mapping_is_current(assistant, owner: str, mapping: dict) -> bool:
     session_id = mapping["session_id"]
     if mapping["channel"] == "web":
-        return getattr(assistant, "web_sessions", {}).get(owner) == session_id
+        if getattr(assistant, "web_sessions", {}).get(owner) == session_id:
+            return True
+        archived_web = getattr(assistant, "web_diagnostics_sessions", {}).get(owner, [])
+        if not isinstance(archived_web, list):
+            return False
+        return any(isinstance(record, dict) and record.get("session_id") == session_id
+                   for record in archived_web[:MAX_ARCHIVED_WEB_SESSIONS_PER_OWNER])
     prefix = owner + ":"
-    return any(isinstance(key, str) and key.startswith(prefix) and value == session_id
-               for key, value in getattr(assistant, "telegram_sessions", {}).items())
+    if any(isinstance(key, str) and key.startswith(prefix) and value == session_id
+           for key, value in getattr(assistant, "telegram_sessions", {}).items()):
+        return True
+    archived_telegram = getattr(assistant, "telegram_diagnostics_sessions", {}).get(owner, [])
+    if not isinstance(archived_telegram, list):
+        return False
+    return any(isinstance(record, dict) and record.get("session_id") == session_id
+               for record in archived_telegram[:MAX_ARCHIVED_TELEGRAM_SESSIONS_PER_OWNER])
 
 
 def _parse_time(value: str | None) -> datetime | None:
@@ -556,6 +614,21 @@ def _frontend_version_at_export() -> tuple[str | None, str | None]:
     return value, None
 
 
+def _build_identity_at_export() -> tuple[dict | None, str | None]:
+    """Read validated source identity embedded in the installed build environment."""
+    revision = os.environ.get("HABAB_SOURCE_REVISION")
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+        return None, "source_revision_not_recorded"
+    dirty = os.environ.get("HABAB_SOURCE_DIRTY", "unknown")
+    if dirty not in {"true", "false", "unknown"}:
+        dirty = "unknown"
+    return {
+        "habab_version": VERSION,
+        "source_revision": revision,
+        "source_dirty": dirty,
+    }, None
+
+
 def _filter_instance_log_period(
     sources: dict, raw_files: list[tuple[str, bytes, int, bool]], start: datetime, end: datetime
 ) -> tuple[list[tuple[str, bytes, int, bool]], dict]:
@@ -626,7 +699,7 @@ def _filter_instance_log_period(
                     except ValueError:
                         stamp, timestamp_error = None, "invalid_timestamp"
                     if stamp is not None:
-                        current_in_period = start <= stamp <= end
+                        current_in_period = start <= stamp < end
                         source["period_matched_records"] += int(current_in_period)
                         source["period_excluded_records"] += int(not current_in_period)
                     else:
@@ -675,7 +748,8 @@ async def _runtime_health_version(runtime) -> tuple[str | None, str | None]:
 
 
 async def _export_runtime_logs(
-    hass, assistant, start, end
+    hass, assistant, start, end, *, period_source="requested_period", period_required=False,
+    period_error="selected_session_timestamps_unavailable"
 ) -> tuple[dict, dict[str, bytes], str | None, str | None]:
     """Collect the same bounded, redacted instance tails used by the raw-log export."""
     runtime = getattr(assistant, "runtime", None)
@@ -693,6 +767,7 @@ async def _export_runtime_logs(
         "period": {
             "from": _iso(start), "to": _iso(end), "timezone": "UTC",
             "filter_status": "applied" if start is not None else "not_requested",
+            "source": period_source if start is not None else None,
             "reason": None,
         },
         "home_assistant_log_clock": None,
@@ -718,6 +793,17 @@ async def _export_runtime_logs(
         ],
         "truncated": False,
     }
+    if period_required and (start is None or end is None):
+        base_manifest["reason"] = period_error
+        base_manifest["period"]["filter_status"] = "unavailable"
+        base_manifest["period"]["reason"] = base_manifest["reason"]
+        base_manifest["sources"] = {
+            "opencode_logs": {"available": False, "reason": base_manifest["reason"]},
+            "home_assistant_logs": {"available": False, "reason": base_manifest["reason"]},
+        }
+        version, version_reason = await _runtime_health_version(
+            getattr(assistant, "runtime", None))
+        return base_manifest, {}, version, version_reason
     if runtime is None or not isinstance(getattr(runtime, "root", None), (str, Path)):
         base_manifest["reason"] = "runtime_logs_unavailable"
         base_manifest["sources"] = {
@@ -1130,6 +1216,45 @@ def _matches_window(events: list[dict], start: datetime | None, end: datetime | 
     return False
 
 
+def _period_session_summary(
+    session: dict, events: list[dict], messages: list, start: datetime, end: datetime
+) -> dict:
+    """Keep period-export metadata derived only from events in the requested window."""
+    created_at, updated_at = _window_session_time_bounds(messages, start, end)
+    provider_models = []
+    for event in events:
+        provider = event.get("provider")
+        model = event.get("model")
+        pair = {"provider": provider if isinstance(provider, str) else None,
+                "model": model if isinstance(model, str) else None}
+        if pair["provider"] is not None or pair["model"] is not None:
+            if pair not in provider_models:
+                provider_models.append(pair)
+    failures = [event for event in events if event.get("kind") == "stage_error"]
+    status = "unknown"
+    error = None
+    if failures:
+        latest_failure = failures[-1]
+        status = "cancelled" if latest_failure.get("status") == "cancelled" else "error"
+        error = latest_failure.get("output")
+    return {
+        **session,
+        "modes": [session["channel"]] + (
+            ["voice"] if any(event.get("channel") == "voice" for event in events) else []
+        ),
+        "status": status,
+        "provider_models": provider_models[:MAX_PROVIDER_MODELS],
+        "created_at": _iso(created_at),
+        "updated_at": _iso(updated_at),
+        "processing_duration_ms": None,
+        "message_count": sum(
+            event.get("kind") in {"user_message", "assistant_text", "voice_transcript"}
+            for event in events
+        ),
+        "error": error,
+    }
+
+
 async def _session_data(hass, owner: str, mapping: dict,
                         budget: ProjectionBudget | None = None) -> tuple[dict, list[dict], list]:
     assistant = hass.data[DOMAIN]["assistant"]
@@ -1170,6 +1295,55 @@ def _session_time_bounds(messages: list) -> tuple[datetime | None, datetime | No
             activity_times.append(created)
         if ended is not None and (created is None or ended >= created):
             activity_times.append(ended)
+    return (min(created_times) if created_times else None,
+            max(activity_times) if activity_times else None)
+
+
+def _message_in_window(message, start: datetime, end: datetime) -> bool:
+    """Keep messages with a recorded message or tool timestamp inside the window."""
+    info = message.get("info") if isinstance(message, dict) else None
+    times = info.get("time") if isinstance(info, dict) else None
+    created = _timestamp(times.get("created")) if isinstance(times, dict) else None
+    if created is not None and start <= created < end:
+        return True
+    parts = message.get("parts") if isinstance(message, dict) else None
+    if not isinstance(parts, list):
+        return False
+    for part in parts[:MAX_PARTS_PER_MESSAGE]:
+        if not isinstance(part, dict) or part.get("type") != "tool":
+            continue
+        state = part.get("state") if isinstance(part.get("state"), dict) else {}
+        timing = state.get("time") if isinstance(state.get("time"), dict) else {}
+        if any((stamp := _timestamp(timing.get(key))) is not None and start <= stamp < end
+               for key in ("start", "end")):
+            return True
+    return False
+
+
+def _window_session_time_bounds(
+    messages: list, start: datetime, end: datetime
+) -> tuple[datetime | None, datetime | None]:
+    """Return timestamps from filtered messages without using post-window completion times."""
+    created_times = []
+    activity_times = []
+    for message in messages:
+        created, ended = _message_times(message) if isinstance(message, dict) else (None, None)
+        if created is not None and start <= created < end:
+            created_times.append(created)
+            activity_times.append(created)
+        if ended is not None and start <= ended < end and (created is None or ended >= created):
+            activity_times.append(ended)
+        parts = message.get("parts") if isinstance(message, dict) else None
+        if isinstance(parts, list):
+            for part in parts[:MAX_PARTS_PER_MESSAGE]:
+                if not isinstance(part, dict) or part.get("type") != "tool":
+                    continue
+                state = part.get("state") if isinstance(part.get("state"), dict) else {}
+                timing = state.get("time") if isinstance(state.get("time"), dict) else {}
+                for key in ("start", "end"):
+                    stamp = _timestamp(timing.get(key))
+                    if stamp is not None and start <= stamp < end:
+                        activity_times.append(stamp)
     return (min(created_times) if created_times else None,
             max(activity_times) if activity_times else None)
 
@@ -1270,6 +1444,7 @@ class DiagnosticsSessionsView(HomeAssistantView):
         if assistant is None:
             return self.json({"sessions": [], "next_cursor": None,
                               "sources": _sources(False, "assistant_unavailable")})
+        archive_retention = _archive_retention_state(assistant, owner.id)
         try:
             start, end = _time_window(request.query)
             channel = _valid_channel(request.query.get("channel"))
@@ -1320,7 +1495,8 @@ class DiagnosticsSessionsView(HomeAssistantView):
         response = self.json({"sessions": sessions, "next_cursor": next_cursor,
                               "sources": _sources(history_available,
                                                   None if history_available else "runtime_unavailable",
-                                                  session_limit_reached)})
+                                                  session_limit_reached,
+                                                  archive_retention)})
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1349,6 +1525,7 @@ class DiagnosticsSessionView(HomeAssistantView):
             return self.json_message("not_found", status_code=404)
         mapped = _mapped_sessions(assistant, owner.id)
         session_limit_reached = len(mapped) >= MAX_MAPPED_SESSIONS
+        archive_retention = _archive_retention_state(assistant, owner.id)
         matches = [record for record in mapped
                    if record["session_id"] == session_id and
                    (channel_query in {"all", record["channel"]}
@@ -1367,7 +1544,8 @@ class DiagnosticsSessionView(HomeAssistantView):
                             "provider_models": [], "processing_duration_ms": None,
                             "at_message_limit": False, "events_truncated": False, "error": None},
                 "events": [_unavailable_stage("conversation_history", matches[0]["channel"], "runtime_unavailable")],
-                "sources": _sources(False, "runtime_unavailable", session_limit_reached),
+                "sources": _sources(False, "runtime_unavailable", session_limit_reached,
+                                     archive_retention),
             })
             response.headers["Cache-Control"] = "no-store"
             return response
@@ -1377,7 +1555,8 @@ class DiagnosticsSessionView(HomeAssistantView):
             events = [event for event in events
                       if _matches_window([event], start, end, raw_messages)]
         response = self.json({"session": session, "events": _stage_rows(events, session["channel"]),
-                              "sources": _sources(True, session_limit_reached=session_limit_reached)})
+                              "sources": _sources(True, session_limit_reached=session_limit_reached,
+                                                  archive_retention=archive_retention)})
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1442,7 +1621,14 @@ class DiagnosticsExportView(HomeAssistantView):
             try:
                 runtime, messages, message_limit_reached = await _load_session_messages(
                     hass, owner.id, record)
-                _created_at, activity_at = _session_time_bounds(messages)
+                if start is not None:
+                    messages = [message for message in messages
+                                if _message_in_window(message, start, end)]
+                    if not messages:
+                        continue
+                    _created_at, activity_at = _window_session_time_bounds(messages, start, end)
+                else:
+                    _created_at, activity_at = _session_time_bounds(messages)
                 loaded_sessions.append({
                     "record": record, "record_index": record_index,
                     "runtime": runtime, "messages": messages,
@@ -1468,6 +1654,7 @@ class DiagnosticsExportView(HomeAssistantView):
         exported_with_recency = []
         for item in loaded_sessions:
             record = item["record"]
+            activity_at = item["activity_at"]
             try:
                 if item["runtime"] is None:
                     raise AgentError("runtime_unavailable")
@@ -1486,13 +1673,19 @@ class DiagnosticsExportView(HomeAssistantView):
                 events = []
             if channel == "voice" and "voice" not in session["modes"]:
                 continue
-            if not _matches_window(events, start, end, item["messages"]):
-                continue
+            if start is not None:
+                events = [event for event in events
+                          if _matches_window([event], start, end, item["messages"])]
+                if not events:
+                    continue
+                session = _period_session_summary(
+                    session, events, item["messages"], start, end)
+                activity_at = _timestamp(session["updated_at"])
             if not events and session["status"] == "unknown":
                 events.append(_unavailable_stage("conversation_history", session["channel"],
                                                  "runtime_unavailable"))
             exported_with_recency.append((
-                item["activity_at"], item["record_index"],
+                activity_at, item["record_index"],
                 {"session": session, "events": _stage_rows(events, session["channel"])},
             ))
         oldest_time = datetime.max.replace(tzinfo=timezone.utc)
@@ -1507,12 +1700,41 @@ class DiagnosticsExportView(HomeAssistantView):
         opencode_version = None
         opencode_version_reason = "not_requested"
         if include_runtime_logs:
+            runtime_log_start, runtime_log_end = start, end
+            runtime_log_source = "requested_period"
+            runtime_log_period_error = None
+            selected_session_period_required = session_id is not None
+            if selected_session_period_required and start is None:
+                selected_messages = loaded_sessions[0]["messages"] if loaded_sessions else []
+                session_start, session_activity = _session_time_bounds(selected_messages)
+                if session_start is None or session_activity is None:
+                    runtime_log_start = runtime_log_end = None
+                    runtime_log_period_error = "selected_session_timestamps_unavailable"
+                elif session_activity < session_start:
+                    runtime_log_start = runtime_log_end = None
+                    runtime_log_period_error = "invalid_selected_session_time_bounds"
+                elif session_activity - session_start > MAX_WINDOW:
+                    runtime_log_start = runtime_log_end = None
+                    runtime_log_period_error = "selected_session_window_too_wide"
+                else:
+                    runtime_log_start = session_start
+                    # Log timestamps have millisecond or second precision and the
+                    # period end is exclusive.
+                    runtime_log_end = session_activity + timedelta(seconds=1)
+                    runtime_log_source = "selected_session_messages"
             runtime_log_manifest, runtime_log_files, opencode_version, opencode_version_reason = (
-                await _export_runtime_logs(hass, assistant, start, end))
+                await _export_runtime_logs(
+                    hass, assistant, runtime_log_start, runtime_log_end,
+                    period_source=runtime_log_source,
+                    period_required=selected_session_period_required,
+                    period_error=(runtime_log_period_error or
+                                  "selected_session_timestamps_unavailable"),
+                ))
         else:
             opencode_version, opencode_version_reason = await _runtime_health_version(
                 getattr(assistant, "runtime", None))
         frontend_version, frontend_version_reason = _frontend_version_at_export()
+        build_identity, build_identity_reason = _build_identity_at_export()
 
         manifest = {
             "product": "Habab Home", "versions": {
@@ -1538,23 +1760,24 @@ class DiagnosticsExportView(HomeAssistantView):
                 "frontend": {"version": None, "reason": "not_recorded"},
                 "opencode": {"version": None, "reason": "not_recorded"},
             },
-            "build_identity": None,
+            "build_identity": build_identity,
             "version_sources": {
                 "frontend": {"available": frontend_version is not None,
                              "reason": frontend_version_reason},
                 "opencode": {"available": opencode_version is not None,
                              "reason": opencode_version_reason},
             },
-            "build_identity_reason": "not_recorded",
+            "build_identity_reason": build_identity_reason,
             "unavailable_build_fields": [
                 *( ["frontend_version"] if frontend_version is None else []),
                 *(["opencode_version"] if opencode_version is None else []),
-                "build_identity",
+                *( ["build_identity"] if build_identity is None else []),
             ],
             "period": {"from": _iso(start), "to": _iso(end), "timezone": "UTC"},
             "sources": _sources(history_available,
                                  None if history_available else "runtime_unavailable",
-                                 session_limit_reached),
+                                 session_limit_reached,
+                                 _archive_retention_state(assistant, owner.id)),
             "limits": {"sessions": MAX_EXPORT_SESSIONS, "messages_per_session": MAX_MESSAGES,
                        "parts_per_message": MAX_PARTS_PER_MESSAGE,
                        "mapped_sessions": MAX_MAPPED_SESSIONS,

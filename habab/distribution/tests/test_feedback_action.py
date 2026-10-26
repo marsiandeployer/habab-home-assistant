@@ -166,7 +166,12 @@ class FeedbackActionTests(unittest.IsolatedAsyncioTestCase):
                 status="saved_on_server", receipt_id="server-r-1",
                 issue_state="pending_issue", duplicate=False, attempts=1,
             ),
-        ) as sender:
+        ) as sender, patch.object(
+            feedback, "get_feedback_status", return_value=FeedbackDeliveryResult(
+                status="saved_on_server", receipt_id="server-r-1",
+                issue_state="pending_issue", duplicate=False, attempts=1,
+            ),
+        ) as status_reader:
             result = await execute(self.hass, self.setup_agent, "alice", package)
             repeat = await execute(self.hass, self.setup_agent, "alice", package)
 
@@ -176,6 +181,7 @@ class FeedbackActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repeat["delivery_status"], "saved_on_server")
         self.assertTrue(repeat["duplicate"])
         sender.assert_called_once()
+        status_reader.assert_called_once_with("server-r-1", token)
         call = sender.call_args
         sent_package, sent_token = call.args
         self.assertEqual(sent_token, token)
@@ -185,6 +191,69 @@ class FeedbackActionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["delivery_status"], "saved_on_server")
         self.assertEqual(record["server_issue_state"], "pending_issue")
         self.assertNotIn("token", record)
+
+    async def test_same_key_refresh_returns_created_only_with_issue_reference(self):
+        token = "V" * 40
+        await self.feedback_manager.async_set_feedback_delivery_credential(token)
+        await self.feedback_manager.async_set_feedback_delivery_enabled(True)
+        package = self.body | {"send_to_habab": True}
+        issue_url = "https://github.com/habab-test/feedback-test/issues/42"
+        created = FeedbackDeliveryResult(
+            status="saved_on_server", receipt_id="server-r-3", issue_state="created",
+            issue_number=42, issue_url=issue_url, duplicate=False, attempts=1,
+        )
+        with patch.object(
+            feedback_action, "_session_data", AsyncMock(return_value=make_context())
+        ), patch.object(
+            feedback_action, "_redact_text", return_value="Очищенный отзыв"
+        ), patch.object(
+            feedback, "send_feedback", return_value=FeedbackDeliveryResult(
+                status="saved_on_server", receipt_id="server-r-3",
+                issue_state="pending_issue", duplicate=False, attempts=1,
+            ),
+        ) as sender, patch.object(
+            feedback, "get_feedback_status", return_value=created,
+        ) as status_reader:
+            first = await execute(self.hass, self.setup_agent, "alice", package)
+            repeat = await execute(self.hass, self.setup_agent, "alice", package)
+
+        self.assertEqual(first["server_issue_state"], "pending_issue")
+        self.assertEqual(repeat["server_issue_state"], "created")
+        self.assertEqual(repeat["server_issue_number"], 42)
+        self.assertEqual(repeat["server_issue_url"], issue_url)
+        self.assertTrue(repeat["duplicate"])
+        sender.assert_called_once()
+        status_reader.assert_called_once_with("server-r-3", token)
+        record = self.store.data["records"][first["receipt_id"]]
+        self.assertEqual(record["server_issue_state"], "created")
+        self.assertEqual(record["server_issue_number"], 42)
+        self.assertEqual(record["server_issue_url"], issue_url)
+
+    async def test_cached_server_receipt_does_not_refresh_after_delivery_is_disabled(self):
+        token = "W" * 40
+        await self.feedback_manager.async_set_feedback_delivery_credential(token)
+        await self.feedback_manager.async_set_feedback_delivery_enabled(True)
+        package = self.body | {"send_to_habab": True}
+        with patch.object(
+            feedback_action, "_session_data", AsyncMock(return_value=make_context())
+        ), patch.object(
+            feedback_action, "_redact_text", return_value="Очищенный отзыв"
+        ), patch.object(
+            feedback, "send_feedback", return_value=FeedbackDeliveryResult(
+                status="saved_on_server", receipt_id="server-r-4",
+                issue_state="pending_issue", duplicate=False, attempts=1,
+            ),
+        ) as sender, patch.object(feedback, "get_feedback_status") as status_reader:
+            accepted = await execute(self.hass, self.setup_agent, "alice", package)
+            await self.feedback_manager.async_set_feedback_delivery_enabled(False)
+            repeat = await execute(self.hass, self.setup_agent, "alice", package)
+
+        self.assertEqual(accepted["delivery_status"], "saved_on_server")
+        self.assertEqual(repeat["state"], "saved_locally")
+        self.assertNotIn("delivery_status", repeat)
+        sender.assert_called_once()
+        status_reader.assert_not_called()
+        self.assertEqual(self.hass.async_add_executor_job.await_count, 1)
 
     async def test_explicit_same_key_retry_reuses_stored_projection_and_uuid(self):
         await self.feedback_manager.async_set_feedback_delivery_credential("R" * 40)

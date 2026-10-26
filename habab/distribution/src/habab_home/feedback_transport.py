@@ -17,6 +17,7 @@ import re
 import socket
 import ssl
 from typing import Any
+from urllib.parse import urlsplit
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import (
@@ -64,6 +65,8 @@ class FeedbackDeliveryResult:
     status: str
     receipt_id: str | None = None
     issue_state: str | None = None
+    issue_number: int | None = None
+    issue_url: str | None = None
     duplicate: bool | None = None
     attempts: int = 0
     error_code: str | None = None
@@ -258,8 +261,10 @@ def _valid_receipt(status_code: int, headers: Any, raw: bytes) -> dict[str, Any]
         receipt = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None
-    if not isinstance(receipt, dict) or set(receipt) != {
-        "receipt_id", "state", "issue_state", "created_at", "duplicate",
+    base_fields = {"receipt_id", "state", "issue_state", "created_at", "duplicate"}
+    issue_fields = {"issue_number", "issue_url"}
+    if not isinstance(receipt, dict) or frozenset(receipt) not in {
+        frozenset(base_fields), frozenset(base_fields | issue_fields),
     }:
         return None
     receipt_id = receipt.get("receipt_id")
@@ -279,7 +284,137 @@ def _valid_receipt(status_code: int, headers: Any, raw: bytes) -> dict[str, Any]
         or receipt["issue_state"] not in RECEIPT_ISSUE_STATES
     ):
         return None
+    if receipt["issue_state"] == "created":
+        if set(receipt) == base_fields:
+            # Older receivers report `created` without the persisted link. Keep
+            # the durable save, but do not surface an unverified creation claim.
+            receipt = {
+                **receipt,
+                "issue_state": "unknown",
+                "status_error": "issue_reference_unavailable",
+            }
+        elif not valid_issue_reference(receipt.get("issue_number"), receipt.get("issue_url")):
+            return None
+    elif set(receipt) != base_fields:
+        return None
     return receipt
+
+
+def valid_issue_reference(issue_number: Any, issue_url: Any) -> bool:
+    if type(issue_number) is not int or issue_number < 1:
+        return False
+    if not isinstance(issue_url, str) or len(issue_url) > 300:
+        return False
+    try:
+        parts = urlsplit(issue_url)
+        segments = parts.path.split("/")
+        if (
+            parts.scheme != "https"
+            or parts.netloc != "github.com"
+            or parts.query
+            or parts.fragment
+            or parts.username is not None
+            or parts.password is not None
+            or parts.port is not None
+            or len(segments) != 5
+            or segments[0] != ""
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", segments[1])
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", segments[2])
+            or segments[3] != "issues"
+            or segments[4] != str(issue_number)
+        ):
+            return False
+        return issue_url == f"https://github.com/{segments[1]}/{segments[2]}/issues/{issue_number}"
+    except ValueError:
+        return False
+
+
+def _status_url(receipt_id: str) -> str | None:
+    if not isinstance(receipt_id, str):
+        return None
+    try:
+        parsed = uuid.UUID(receipt_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if str(parsed) != receipt_id.lower():
+        return None
+    return f"{RECEIVER_URL}/{parsed}"
+
+
+def _status_once(opener: Any, receipt_id: str, token: str) -> _Attempt:
+    url = _status_url(receipt_id)
+    if url is None:
+        return _Attempt(error_code="invalid_receipt_id")
+    request = Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Cache-Control": "no-store",
+        },
+        method="GET",
+    )
+    try:
+        with opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            status_code = response.status
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+            receipt = _valid_receipt(status_code, response.headers, raw)
+            if receipt is None or receipt.get("receipt_id") != str(uuid.UUID(receipt_id)):
+                return _Attempt(error_code="invalid_receipt")
+            return _Attempt(receipt=receipt)
+    except HTTPError as error:
+        status_code = error.code
+        error.close()
+        if 300 <= status_code < 400:
+            return _Attempt(error_code="redirect_rejected")
+        if status_code == 401:
+            return _Attempt(error_code="unauthorized")
+        if status_code == 404:
+            return _Attempt(error_code="receipt_not_found")
+        if status_code >= 500:
+            return _Attempt(error_code="receiver_unavailable", ambiguous=True)
+        return _Attempt(error_code=f"receiver_http_{status_code}")
+    except (TimeoutError, socket.timeout):
+        return _Attempt(error_code="timeout", ambiguous=True)
+    except URLError as error:
+        if isinstance(error.reason, (TimeoutError, socket.timeout)):
+            return _Attempt(error_code="timeout", ambiguous=True)
+        return _Attempt(error_code="network_unavailable", ambiguous=True)
+    except OSError:
+        return _Attempt(error_code="network_unavailable", ambiguous=True)
+
+
+def get_feedback_status(
+    receipt_id: str,
+    installation_token: str | None,
+    *,
+    _opener: Any = None,
+) -> FeedbackDeliveryResult:
+    """Read one existing receipt from the fixed authenticated receiver."""
+    if not isinstance(installation_token, str) or not installation_token:
+        return FeedbackDeliveryResult(status="not_configured")
+    if not TOKEN_PATTERN.fullmatch(installation_token):
+        return FeedbackDeliveryResult(status="rejected", error_code="credential_invalid")
+    if _status_url(receipt_id) is None:
+        return FeedbackDeliveryResult(status="rejected", error_code="invalid_receipt_id")
+    opener = _opener if _opener is not None else _build_opener()
+    attempt = _status_once(opener, receipt_id, installation_token)
+    if attempt.receipt is None:
+        return FeedbackDeliveryResult(
+            status="pending", receipt_id=receipt_id,
+            attempts=1, error_code=attempt.error_code or "receiver_unavailable",
+        )
+    receipt = attempt.receipt
+    return FeedbackDeliveryResult(
+        status="saved_on_server",
+        receipt_id=receipt["receipt_id"],
+        issue_state=receipt["issue_state"],
+        issue_number=receipt.get("issue_number"),
+        issue_url=receipt.get("issue_url"),
+        duplicate=receipt["duplicate"],
+        attempts=1,
+        error_code=receipt.get("status_error"),
+    )
 
 
 def _post_once(opener: Any, body: bytes, idempotency_key: str, token: str) -> _Attempt:
@@ -357,8 +492,11 @@ def send_feedback(
                 status="saved_on_server",
                 receipt_id=receipt["receipt_id"],
                 issue_state=receipt["issue_state"],
+                issue_number=receipt.get("issue_number"),
+                issue_url=receipt.get("issue_url"),
                 duplicate=receipt["duplicate"],
                 attempts=attempt_number,
+                error_code=receipt.get("status_error"),
             )
         if not (retry_ambiguous and attempt.ambiguous and attempt_number < max_attempts):
             return FeedbackDeliveryResult(

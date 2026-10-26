@@ -101,6 +101,11 @@ async def async_setup(hass, config):
 
     hass.data[DOMAIN]["integration_setup"] = IntegrationSetup(hass, agent)
     register_integration_setup_commands(hass)
+    from .automation_setup import AutomationSetup, async_register_commands as register_automation_setup_commands
+
+    hass.data[DOMAIN]["automation_setup"] = AutomationSetup(hass)
+    await hass.data[DOMAIN]["automation_setup"].setup()
+    register_automation_setup_commands(hass)
     from .telemetry import TelemetryManager, async_register_commands as async_register_telemetry_commands
 
     telemetry = TelemetryManager(hass)
@@ -133,6 +138,11 @@ async def async_setup(hass, config):
         hass, frontend_url_path="habab-diagnostics", webcomponent_name="habab-diagnostics-panel",
         sidebar_title="История и диагностика", sidebar_icon="mdi:clipboard-text-clock",
         require_admin=True, module_url="/habab-home/diagnostics-panel.js?v=1",
+    )
+    await async_register_panel(
+        hass, frontend_url_path="habab-support", webcomponent_name="habab-support-panel",
+        sidebar_title="Поддержка (бета)", sidebar_icon="mdi:message-question-outline",
+        require_admin=False, module_url="/habab-home/support-panel.js?v=1",
     )
     from .websocket import async_register_commands
 

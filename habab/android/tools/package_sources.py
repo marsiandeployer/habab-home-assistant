@@ -47,7 +47,7 @@ def main():
             if path.is_file(): bundle.add(path, arcname='upstream/' + path.name)
         for directory in ('app/src', 'runtime', 'tools', 'tests', 'relay'):
             for path in sorted((ROOT / directory).rglob('*')):
-                if path.is_file() and path.suffix in {'.java', '.xml', '.py', '.md', '.json', '.txt', '.conf', '.cjs'} and '__pycache__' not in path.parts:
+                if path.is_file() and path.suffix in {'.java', '.xml', '.py', '.md', '.json', '.txt', '.conf', '.cjs', '.patch'} and '__pycache__' not in path.parts:
                     bundle.add(path, arcname='habab-android/' + str(path.relative_to(ROOT)))
         for name in ('build.gradle', 'settings.gradle', 'gradle.properties', 'app/build.gradle', 'README.md', 'NOTICE.md', 'native-packages.json', 'voice-model.json'):
             bundle.add(ROOT / name, arcname='habab-android/' + name)

@@ -75,6 +75,18 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         hass.data["habab_home"]["feedback"] = manager
         return manager, store
 
+    async def test_legacy_created_status_without_issue_reference_is_not_reported_as_created(self):
+        delivery = feedback.FeedbackManager._public_delivery({
+            "delivery_status": "saved_on_server",
+            "server_receipt_id": str(uuid.uuid4()),
+            "server_issue_state": "created",
+        })
+
+        self.assertEqual(delivery["server_issue_state"], "unknown")
+        self.assertEqual(delivery["delivery_error"], "issue_reference_unavailable")
+        self.assertNotIn("server_issue_number", delivery)
+        self.assertNotIn("server_issue_url", delivery)
+
     async def test_submit_requires_active_admin_explicit_consent_and_exact_schema(self):
         hass, _assistant, runtime = make_runtime()
         manager, store = self.make_manager(hass)

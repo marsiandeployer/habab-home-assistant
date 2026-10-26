@@ -282,6 +282,24 @@ def discovered_flows(hass, manager):
 
 async def execute(hass, manager, owner, body, trusted_origin=None):
     action = body.get("action")
+    if action in {"automation_draft", "automation_helper_draft", "automation_status"}:
+        # Scope comes only from the active model turn and current server mapping.
+        # No model action can prepare, confirm, save, cancel, or delete a draft.
+        active = manager.active
+        if active is None or active[0] != owner:
+            raise ValueError("stale_session")
+        controller = hass.data[DOMAIN]["automation_setup"]
+        if action == "automation_status":
+            if set(body) != {"action"}:
+                raise ValueError("invalid_draft")
+            return await controller.status(owner, active[1])
+        draft = await controller.draft(owner, active[1], body, helper=action == "automation_helper_draft")
+        return {"draft": draft, "instruction": (
+            "Draft only. Ask the owner to review and confirm its card in this Home Assistant web chat. "
+            "The model cannot confirm or save it. After confirmation, use automation_status; "
+            "only phase=saved with verification=native_config_and_off_state confirms saving. "
+            "The automation and virtual helper start off; never enable or trigger them for this step."
+        )}
     if action == "save_feedback":
         try:
             return await save_feedback_action(hass, manager, owner, body)

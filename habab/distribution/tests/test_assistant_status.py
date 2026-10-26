@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from homeassistant.components.habab_home.assistant_status import get_assistant_status
+from homeassistant.components.habab_home.assistant_status import get_assistant_status, voice_route_metadata
 from homeassistant.components.habab_home import assistant_status
 from homeassistant.components.habab_home.const import DOMAIN
 from homeassistant.components.habab_home.gemini_live import DEFAULT_MODEL
@@ -15,6 +15,20 @@ class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
     async def status(self, settings):
         hass = SimpleNamespace(data={})
         return await get_assistant_status(hass, "alice", settings, verify_telegram=False)
+
+    def test_voice_route_readback_separates_configured_provider_from_text_model(self):
+        habab = voice_route_metadata({
+            "provider": "habab", "api_key": "fixture-key", "model": "gemini-3.1-flash-lite",
+        })
+        self.assertEqual(habab, {
+            "voice_provider": "habab", "voice_protocol": "gemini_live",
+            "default_voice_model": DEFAULT_MODEL, "voice_supported": True, "voice_ready": True,
+        })
+        unsupported = voice_route_metadata({"provider": "deepseek", "api_key": "fixture-key"})
+        self.assertEqual(unsupported, {
+            "voice_provider": None, "voice_protocol": None, "default_voice_model": None,
+            "voice_supported": False, "voice_ready": False,
+        })
 
     async def test_voice_transport_matches_each_selected_provider(self):
         expected = {

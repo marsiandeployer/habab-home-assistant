@@ -336,6 +336,27 @@ test("status refresh never reparents a mounted native form", async () => {
   assert.deepEqual(ready, [{interaction_id: "i1", domain: "mqtt"}]);
 });
 
+test("conversation-scoped interactions hide old flows, show new IDs, and retain old flows for resume", () => {
+  installBridge();
+  const card = setupShell(new module.HababIntegrationSetup());
+  const oldFlow = formRecord({id: "old-flow", flow_id: "ha-old-flow"});
+  card._applyInteractions([oldFlow]);
+  const retainedCard = card.cards.get("old-flow");
+  card.setSuppressedInteractionIds(new Set(["old-flow"]));
+  assert.equal(retainedCard.element.hidden, true);
+  assert.equal(card.cards.get("old-flow"), retainedCard, "hiding a conversation does not discard the native flow UI");
+
+  card._applyInteractions([
+    {...oldFlow, step_id: "advanced"},
+    formRecord({id: "new-flow", flow_id: "ha-new-flow"}),
+  ]);
+  assert.equal(retainedCard.element.hidden, true, "status updates to the old flow stay hidden");
+  assert.equal(card.cards.get("new-flow").element.hidden, false, "a newly started flow appears in the current chat");
+
+  card.setSuppressedInteractionIds(new Set());
+  assert.equal(retainedCard.element.hidden, false, "explicit resume restores the retained old flow");
+});
+
 test("native submit sends protected values directly to controller and emits no form data", async () => {
   const calls = [];
   const bridgeCalls = installBridge();

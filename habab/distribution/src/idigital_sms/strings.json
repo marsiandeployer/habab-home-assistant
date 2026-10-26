@@ -22,7 +22,9 @@
       "rate_limited": "SMS sending is limited to one message per minute and ten messages per hour.",
       "authentication_error": "I-Digital rejected the API credentials.",
       "provider_rejected": "I-Digital rejected the SMS. Check the sender, recipient and account rules.",
-      "unknown_outcome": "The send result is unknown. Do not retry automatically; check the provider status first.",
+      "unknown_outcome": "The send result is unknown. Do not retry automatically. If a message UUID is available, check its status; otherwise ask the account owner or I-Digital to check the provider history before sending again.",
+      "storage_error": "SMS retry protection could not be saved. Sending is blocked to prevent duplicates.",
+      "guard_capacity": "The unresolved SMS attempt limit was reached. Sending is blocked until the stored attempts are reviewed.",
       "invalid_response": "I-Digital returned an unexpected response.",
       "invalid_message_uuid": "Enter the message UUID returned by I-Digital.",
       "status_unavailable": "I-Digital status is unavailable. Try one explicit status check later."
@@ -64,7 +66,13 @@
       "message": "I-Digital rejected the SMS. Check the sender, recipient and account rules."
     },
     "unknown_outcome": {
-      "message": "The send result is unknown. Do not retry automatically; check the provider status first."
+      "message": "The send result is unknown. Do not retry automatically. If a message UUID is available, check its status; otherwise ask the account owner or I-Digital to check the provider history before sending again."
+    },
+    "storage_error": {
+      "message": "SMS retry protection could not be saved. Sending is blocked to prevent duplicates."
+    },
+    "guard_capacity": {
+      "message": "The unresolved SMS attempt limit was reached. Sending is blocked until the stored attempts are reviewed."
     },
     "invalid_response": {
       "message": "I-Digital returned an unexpected response."
