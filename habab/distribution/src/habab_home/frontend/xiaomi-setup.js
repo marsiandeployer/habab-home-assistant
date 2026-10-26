@@ -16,6 +16,7 @@ const copy = {
     callbackLabel: 'Адрес страницы после входа', callbackSubmit: 'Завершить вход',
     homes: 'Выберите дома для подключения.', selectHomes: 'Подключить выбранные дома',
     configuring: 'Home Assistant добавляет устройства…', completed: 'Xiaomi Home подключён.',
+    dismissCompleted: 'Скрыть подключение Xiaomi',
     counts: 'Устройств: {devices}. Сущностей в реестре: {entities}.', verify: 'Проверить с помощником', openDevices: 'Показать пылесос на главной',
     error: 'Подключение не завершено.', retry: 'Повторить подключение',
     installation_failed: 'Не удалось скачать или проверить интеграцию. Повторите установку.',
@@ -43,6 +44,7 @@ const copy = {
     callbackLabel: 'Page address after sign-in', callbackSubmit: 'Complete sign-in',
     homes: 'Choose the homes to connect.', selectHomes: 'Connect selected homes',
     configuring: 'Home Assistant is adding devices…', completed: 'Xiaomi Home is connected.',
+    dismissCompleted: 'Hide Xiaomi setup',
     counts: 'Devices: {devices}. Registered entities: {entities}.', verify: 'Check with the assistant', openDevices: 'Show vacuum on Home',
     error: 'Setup is incomplete.', retry: 'Retry sign-in',
     installation_failed: 'The integration could not be downloaded or verified. Retry installation.',
@@ -123,13 +125,17 @@ class HababXiaomiSetup extends HTMLElement {
       body = `<a id="login" class="button" target="_blank" rel="noopener noreferrer">${this.t('login')}</a><details><summary>${this.t('callbackHelp')}</summary><p>${this.t('callbackInstructions')}</p><label for="callback">${this.t('callbackLabel')}</label><input id="callback" type="password" autocomplete="off" spellcheck="false"><button id="callback-submit" type="button">${this.t('callbackSubmit')}</button></details>`;
     } else if (phase === 'homes') body = `<div id="homes"></div><button id="main" type="button">${this.t('selectHomes')}</button>`;
     else if (phase === 'completed') body = `<p id="counts"></p><div class="actions"><button id="open-devices" type="button">${this.t('openDevices')}</button><button id="verify" type="button">${this.t('verify')}</button></div>`;
+    const dismiss = canDismissXiaomiSetup(phase)
+      ? `<button id="dismiss" class="dismiss" type="button" aria-label="${this.t('dismissCompleted')}" title="${this.t('dismissCompleted')}">×</button>`
+      : '';
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;margin-block:20px;color:var(--primary-text-color);font:inherit}*{box-sizing:border-box}
       section{padding:16px;border:1px solid var(--divider-color,#ddd);border-radius:12px;background:var(--card-background-color,#fff)}
-      h3{font-size:16px;margin:0 0 8px}p{margin:8px 0;overflow-wrap:anywhere}label{display:block;margin:12px 0}.accept{display:flex;align-items:start;gap:10px}.accept input{width:20px;min-width:20px;height:20px;margin-top:2px}
+      .heading{display:flex;align-items:flex-start;gap:8px}h3{font-size:16px;margin:0 0 8px;flex:1}p{margin:8px 0;overflow-wrap:anywhere}label{display:block;margin:12px 0}.accept{display:flex;align-items:start;gap:10px}.accept input{width:20px;min-width:20px;height:20px;margin-top:2px}
       button,.button,select,input{font:inherit;min-height:44px}button,.button{display:inline-flex;align-items:center;padding:8px 14px;border:1px solid var(--divider-color,#ddd);border-radius:8px;cursor:pointer;background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff);text-decoration:none}
+      button.dismiss{min-width:44px;min-height:44px;padding:0 8px;border-color:transparent;background:transparent;color:var(--secondary-text-color,#5f6368);font-size:22px;line-height:1}
       button:disabled{opacity:.5;cursor:default}select,input[type=password]{width:100%;max-width:100%;padding:8px;background:var(--card-background-color,#fff);color:inherit;border:1px solid var(--divider-color,#ddd);border-radius:6px}a{color:var(--primary-color,#007a9e)}details{margin-top:16px}summary{cursor:pointer;min-height:44px;padding-block:10px}#feedback{color:var(--error-color,#b3261e)}:is(button,a,input,select,summary):focus-visible{outline:3px solid var(--primary-color,#007a9e);outline-offset:3px}
-    </style><section aria-labelledby="title"><h3 id="title">${this.t('title')}</h3><p>${this.t(phase)}</p>${body}<p id="feedback" role="status" aria-live="polite"></p></section>`;
+    </style><section aria-labelledby="title"><div class="heading"><h3 id="title">${this.t('title')}</h3>${dismiss}</div><p>${this.t(phase)}</p>${body}<p id="feedback" role="status" aria-live="polite"></p></section>`;
     const main = this.q('#main');
     if (phase === 'install_required') main.onclick = () => this.act('install', {accept_license: this.q('#accept').checked});
     else if (phase === 'restart_required') main.onclick = () => this.act('restart');
@@ -153,9 +159,17 @@ class HababXiaomiSetup extends HTMLElement {
       this.q('#open-devices').onclick = () => this.dispatchEvent(new CustomEvent('habab-open-devices'));
       this.q('#verify').onclick = () => this.dispatchEvent(new CustomEvent('habab-setup-verify'));
     }
+    const dismissButton = this.q('#dismiss');
+    if (dismissButton) dismissButton.onclick = () => this.dismissCompleted();
     if (this.q('#accept')) this.q('#accept').onchange = () => this.controls();
     if (this.state.error) this.showError(this.state.error);
     this.controls();
   }
+
+  dismissCompleted() {
+    if (!canDismissXiaomiSetup(this.state?.phase)) return;
+    this.dispatchEvent(new CustomEvent('habab-setup-dismiss', {bubbles: true, composed: true}));
+  }
 }
+export function canDismissXiaomiSetup(phase) { return phase === 'completed'; }
 if (!customElements.get('habab-xiaomi-setup')) customElements.define('habab-xiaomi-setup', HababXiaomiSetup);

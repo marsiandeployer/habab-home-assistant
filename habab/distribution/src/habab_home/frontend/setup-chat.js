@@ -103,6 +103,16 @@ export function assistantDiagnosticMessage(diagnostic, copy) {
   return copy.diagnosticGeneric;
 }
 
+export function getXiaomiSetupPresentation(phase, dismissed) {
+  const completed = phase === "completed";
+  const showReopen = completed && dismissed === true;
+  return {
+    showCard: !showReopen,
+    showReopen,
+    clearDismissal: !completed && dismissed === true,
+  };
+}
+
 function installChat() {
   // HA installs its scoped registry polyfill before defining home-assistant.
   // Registering earlier loses the extension when that registry is replaced.
@@ -118,6 +128,7 @@ function installChat() {
       answering: "Готовлю ответ…", rate_limited: "Слишком много запросов. Повторите позже.",
       settings: "Подключить AI", retry: "Повторить подключение",
       setup_ui_unavailable: "Не удалось открыть настройку устройств. Обновите страницу и попробуйте снова.",
+      reopenXiaomiSetup: "Показать подключение Xiaomi",
       deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
       provider_required: "Сначала подключите провайдера ИИ в разделе AI.",
       not_installed: "OpenCode ещё не подключён к контейнеру. Добавьте compose.opencode.yaml по инструкции установки.",
@@ -171,6 +182,7 @@ function installChat() {
       answering: "Preparing an answer…", rate_limited: "Too many requests. Try again later.",
       settings: "Connect AI", retry: "Reconnect",
       setup_ui_unavailable: "Device setup could not open. Refresh the page and try again.",
+      reopenXiaomiSetup: "Show Xiaomi setup",
       deepseek_required: "Connect DeepSeek in AI settings first.",
       provider_required: "Connect an AI provider in AI settings first.",
       not_installed: "OpenCode is not mounted. Follow the installation guide to add compose.opencode.yaml.",
@@ -283,6 +295,9 @@ function installChat() {
       this.markdownUpgradeLifecycle = 0;
       this.drawGeneration = 0;
       this.followSetupForms = true;
+      this.xiaomiSetupDismissedInstance = false;
+      this.xiaomiSetupDismissalIdentity = undefined;
+      this.xiaomiSetupDismissalStorageFailed = false;
     }
 
     get hass() { return this._hass; }
@@ -306,6 +321,67 @@ function installChat() {
       const current = classifyAssistantContext(this.ownerId, locateMain(document));
       return current.state === "admin" && current.ownerId === this.ownerId &&
         this.hass?.user?.is_admin === true && this.hass.user.id === this.ownerId;
+    }
+
+    xiaomiSetupDismissalKey() {
+      const user = this.hass?.user;
+      if (user?.is_admin !== true || typeof user.id !== "string" || !user.id || typeof window === "undefined") return null;
+      const origin = window.location?.origin;
+      if (typeof origin !== "string" || !origin) return null;
+      return `habab-home-xiaomi-setup-dismissed:${encodeURIComponent(origin)}:${encodeURIComponent(user.id)}`;
+    }
+
+    getXiaomiSetupDismissed() {
+      const key = this.xiaomiSetupDismissalKey();
+      const identity = key || null;
+      if (identity !== this.xiaomiSetupDismissalIdentity) {
+        this.xiaomiSetupDismissalIdentity = identity;
+        this.xiaomiSetupDismissedInstance = false;
+        this.xiaomiSetupDismissalStorageFailed = false;
+      }
+      if (!key || this.xiaomiSetupDismissalStorageFailed) return this.xiaomiSetupDismissedInstance;
+      try {
+        return window.localStorage.getItem(key) === "1";
+      } catch (_) {
+        this.xiaomiSetupDismissalStorageFailed = true;
+        return this.xiaomiSetupDismissedInstance;
+      }
+    }
+
+    setXiaomiSetupDismissed(dismissed) {
+      const key = this.xiaomiSetupDismissalKey();
+      const identity = key || null;
+      if (identity !== this.xiaomiSetupDismissalIdentity) {
+        this.xiaomiSetupDismissalIdentity = identity;
+        this.xiaomiSetupDismissedInstance = false;
+        this.xiaomiSetupDismissalStorageFailed = false;
+      }
+      this.xiaomiSetupDismissedInstance = dismissed === true;
+      if (!key) return;
+      try {
+        if (this.xiaomiSetupDismissedInstance) window.localStorage.setItem(key, "1");
+        else window.localStorage.removeItem(key);
+        this.xiaomiSetupDismissalStorageFailed = false;
+      } catch (_) {
+        this.xiaomiSetupDismissalStorageFailed = true;
+      }
+    }
+
+    updateXiaomiSetupPresentation(phase) {
+      const presentation = getXiaomiSetupPresentation(phase, this.getXiaomiSetupDismissed());
+      if (presentation.clearDismissal) this.setXiaomiSetupDismissed(false);
+      const reopenButton = this.q(".xiaomi-reopen");
+      if (reopenButton) reopenButton.hidden = !presentation.showReopen;
+      const container = this.q("#setup-cards");
+      if (presentation.showCard) {
+        if (this.integrationCard?.parentNode === container) {
+          if (this.setupCard.parentNode !== container || this.setupCard.nextSibling !== this.integrationCard) {
+            container.insertBefore(this.setupCard, this.integrationCard);
+          }
+        } else {
+          mountStableElement(container, this.setupCard);
+        }
+      } else this.setupCard.remove();
     }
 
     setContextAvailable(available) {
@@ -409,10 +485,15 @@ function installChat() {
     async loadSetup(afterTurn = false) {
       if (this.demo || !this.isCurrentOwnerContext()) return;
       try {
-        await import("/habab-home/xiaomi-setup.js?v=2");
+        await import("/habab-home/xiaomi-setup.js?v=3");
         await import("/habab-home/integration-setup.js?v=1");
         if (!this.setupCard) {
           this.setupCard = document.createElement("habab-xiaomi-setup");
+          this.setupCard.addEventListener("habab-setup-dismiss", () => {
+            if (!this.isCurrentOwnerContext() || this.setupCard?.state?.phase !== "completed") return;
+            this.setXiaomiSetupDismissed(true);
+            this.updateXiaomiSetupPresentation("completed");
+          });
           this.setupCard.addEventListener("habab-setup-verify", () => {
             if (this.busy) return;
             this.q("textarea").value = this.language === "ru"
@@ -421,7 +502,9 @@ function installChat() {
             this.send();
           });
           this.setupCard.addEventListener("habab-setup-state", ({detail}) => {
-            if (detail.phase === "restarting") {
+            const phase = detail?.phase;
+            if (typeof phase === "string") this.updateXiaomiSetupPresentation(phase);
+            if (phase === "restarting") {
               this.setupRestarting = true;
               this.controls();
             } else if (this.setupRestarting) {
@@ -453,8 +536,9 @@ function installChat() {
           });
         }
         this.setupCard.hass = this.hass;
-        mountStableElement(this.q("#setup-cards"), this.setupCard);
+        if (!this.getXiaomiSetupDismissed()) mountStableElement(this.q("#setup-cards"), this.setupCard);
         await this.setupCard.load();
+        this.updateXiaomiSetupPresentation(this.setupCard.state?.phase || "idle");
         this.integrationCard.hass = this.hass;
         this.integrationCard.active = this.q("dialog").open;
         mountStableElement(this.q("#setup-cards"), this.integrationCard);
@@ -491,6 +575,7 @@ function installChat() {
         #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:24px;line-height:1.3;font-weight:500;margin:0 0 16px}
         .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
         .quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
+        .xiaomi-reopen{display:block;margin:8px 0;padding:6px 12px;min-height:36px;border:1px solid var(--divider-color,#c8cccf);border-radius:18px;background:transparent;color:var(--secondary-text-color,#5f6368);font-size:13px}
         footer{padding:12px 20px 20px}.assist-pipeline-control{display:block;margin:0 0 8px;font-size:12px;color:var(--secondary-text-color,#5f6368)}.assist-pipeline{display:block;width:100%;min-height:40px;margin-block-start:4px;padding:6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff)}#voice-mode-help{font-size:12px;color:var(--secondary-text-color,#5f6368);margin:0 0 8px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
         :host([data-assistant-open]){inset:0;z-index:10;pointer-events:none}:host([data-assistant-open]) .launcher{display:none}:host([data-assistant-open]) dialog{inset:0 0 0 auto;width:var(--habab-assistant-chat-width,50vw);height:100dvh;border-radius:0;border-block:0;border-inline-end:0;box-shadow:-8px 0 28px #0002}:host([data-assistant-open]) dialog:not([open]){display:none}:host([data-assistant-open]) dialog::backdrop{background:transparent}
@@ -500,10 +585,15 @@ function installChat() {
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
         <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><select class="voice-mode" aria-label="${t.voiceModeLabel}" title="${t.nativeAssistTitle}"><option value="habab">${t.voiceModeHabab}</option><option value="assist">${t.voiceModeAssist}</option></select><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
+      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"><button class="xiaomi-reopen" type="button" hidden>${t.reopenXiaomiSetup}</button></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
+      this.q(".xiaomi-reopen").onclick = () => {
+        if (!this.isCurrentOwnerContext()) return;
+        this.setXiaomiSetupDismissed(false);
+        void this.loadSetup();
+      };
       this.q("dialog").addEventListener("close", () => {
         this.setAssistantOpen(false);
         this.onClose();
@@ -566,7 +656,7 @@ function installChat() {
       this.q(".stop").onclick = () => this.stop();
       this.shadowRoot.addEventListener("click", (event) => {
         const target = event.composedPath().find((item) => item?.classList);
-        if (target?.classList.contains("quick-reply")) this.chooseQuickReply(target.dataset.prompt);
+        if (target?.classList.contains("quick-reply")) this.chooseQuickReply(target.dataset.prompt, target.dataset.setupKind);
       });
       this.installLayoutLifecycle();
       this.draw();
@@ -665,8 +755,12 @@ function installChat() {
       this.q(".close").focus({preventScroll: true});
     }
 
-    chooseQuickReply(prompt) {
+    chooseQuickReply(prompt, setupKind) {
       if (typeof prompt !== "string" || this.busy || !this.sessionId) return;
+      if (setupKind === "xiaomi") {
+        this.setXiaomiSetupDismissed(false);
+        void this.loadSetup();
+      }
       const textarea = this.q("textarea");
       const draft = textarea.value;
       if (draft.trim()) {
@@ -707,6 +801,7 @@ function installChat() {
       textarea.setAttribute("aria-label", t.placeholder);
       this.q(".recovery a").textContent = t.settings;
       this.q(".retry").textContent = t.retry;
+      this.q(".xiaomi-reopen").textContent = t.reopenXiaomiSetup;
       if (this.q(".setup-jump")) this.q(".setup-jump").textContent = t.showSetupForm;
       this.q(".send").title = t.send;
       this.q(".send").setAttribute("aria-label", t.send);
@@ -1176,16 +1271,17 @@ function installChat() {
       const quickReplies = document.createElement("div");
       quickReplies.className = "quick-replies";
       const choices = [
-        [this.t.quickXiaomi, this.language === "ru" ? "У меня есть устройства Xiaomi Home" : "I have Xiaomi Home devices"],
+        [this.t.quickXiaomi, this.language === "ru" ? "У меня есть устройства Xiaomi Home" : "I have Xiaomi Home devices", "xiaomi"],
         [this.t.quickZigbee, this.language === "ru" ? "Хочу подключить устройства Zigbee" : "I want to connect Zigbee devices"],
         [this.t.quickOther, this.language === "ru" ? "У меня есть другое оборудование" : "I have other equipment"],
       ];
-      for (const [label, prompt] of choices) {
+      for (const [label, prompt, setupKind] of choices) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "quick-reply";
         button.textContent = label;
         button.dataset.prompt = prompt;
+        if (setupKind) button.dataset.setupKind = setupKind;
         button.disabled = this.busy || !this.sessionId;
         quickReplies.append(button);
       }

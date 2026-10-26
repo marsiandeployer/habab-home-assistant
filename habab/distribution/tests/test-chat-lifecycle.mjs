@@ -573,6 +573,107 @@ test("private chat registers its own reload provider and releases it on disconne
   }
 });
 
+test("completed Xiaomi card dismissal stays hidden across loads and resets for reopen or a new setup phase", () => {
+  const presentation = setupChatModule.getXiaomiSetupPresentation;
+  assert.deepEqual(presentation("completed", false), {
+    showCard: true, showReopen: false, clearDismissal: false,
+  });
+  const dismissed = presentation("completed", true);
+  assert.deepEqual(dismissed, {
+    showCard: false, showReopen: true, clearDismissal: false,
+  });
+  assert.deepEqual(presentation("completed", true), dismissed, "reloading the same completed phase preserves dismissal");
+  assert.deepEqual(presentation("completed", false), {
+    showCard: true, showReopen: false, clearDismissal: false,
+  }, "explicit reopen clears the local dismissal");
+  assert.deepEqual(presentation("oauth", true), {
+    showCard: true, showReopen: false, clearDismissal: true,
+  }, "a pending setup remains visible and clears an old completed dismissal");
+  assert.deepEqual(presentation("ready", true), {
+    showCard: true, showReopen: false, clearDismissal: true,
+  }, "starting another setup restores its card");
+});
+
+test("reopened Xiaomi setup returns before the integration card without repeated moves", () => {
+  const order = [];
+  let insertions = 0;
+  const container = {
+    insertBefore(element, reference) {
+      const currentIndex = order.indexOf(element);
+      if (currentIndex >= 0) order.splice(currentIndex, 1);
+      const referenceIndex = order.indexOf(reference);
+      order.splice(referenceIndex, 0, element);
+      element.parentNode = this;
+      element.nextSibling = reference;
+      insertions++;
+    },
+  };
+  const reopenButton = {hidden: false};
+  const integrationCard = {parentNode: container};
+  const setupCard = {parentNode: container, nextSibling: undefined};
+  order.push(reopenButton, integrationCard, setupCard);
+  const chat = Object.create(setupChatElementClass.prototype);
+  chat.setupCard = setupCard;
+  chat.integrationCard = integrationCard;
+  chat.q = (selector) => selector === ".xiaomi-reopen" ? reopenButton : container;
+  chat.getXiaomiSetupDismissed = () => false;
+
+  chat.updateXiaomiSetupPresentation("completed");
+  assert.deepEqual(order, [reopenButton, setupCard, integrationCard]);
+  assert.equal(insertions, 1);
+
+  chat.updateXiaomiSetupPresentation("completed");
+  assert.equal(insertions, 1, "stable card order is not moved again");
+});
+
+test("Xiaomi dismissal preference is origin and authenticated-user scoped with instance-only fallback", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const values = new Map();
+  const storage = {
+    getItem(key) { return values.get(key) ?? null; },
+    setItem(key, value) { values.set(key, value); },
+    removeItem(key) { values.delete(key); },
+  };
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {location: {origin: "https://ha.example"}, localStorage: storage},
+  });
+  try {
+    const makeChat = (id, admin = true) => {
+      const chat = Object.create(setupChatElementClass.prototype);
+      chat._hass = {user: {id, is_admin: admin}};
+      chat.xiaomiSetupDismissedInstance = false;
+      chat.xiaomiSetupDismissalIdentity = undefined;
+      chat.xiaomiSetupDismissalStorageFailed = false;
+      return chat;
+    };
+    const ownerOne = makeChat("owner-one");
+    ownerOne.setXiaomiSetupDismissed(true);
+    const key = "habab-home-xiaomi-setup-dismissed:https%3A%2F%2Fha.example:owner-one";
+    assert.equal(values.get(key), "1", "only a boolean is stored under origin and HA user id");
+    assert.equal(ownerOne.getXiaomiSetupDismissed(), true);
+    const ownerTwo = makeChat("owner-two");
+    assert.equal(ownerTwo.getXiaomiSetupDismissed(), false, "another authenticated user has an independent preference");
+
+    const unknownUser = makeChat(undefined, false);
+    unknownUser.setXiaomiSetupDismissed(true);
+    assert.equal(unknownUser.getXiaomiSetupDismissed(), true, "unknown users fall back to this chat instance");
+    assert.equal(values.size, 1, "unknown users do not create a shared preference");
+
+    const deniedWindow = {location: {origin: "https://ha.example"}};
+    Object.defineProperty(deniedWindow, "localStorage", {get() { throw new Error("storage denied"); }});
+    Object.defineProperty(globalThis, "window", {configurable: true, value: deniedWindow});
+    const deniedStorage = makeChat("owner-one");
+    deniedStorage.setXiaomiSetupDismissed(true);
+    assert.equal(deniedStorage.getXiaomiSetupDismissed(), true, "denied storage falls back to instance state");
+    deniedStorage.setXiaomiSetupDismissed(false);
+    assert.equal(deniedStorage.getXiaomiSetupDismissed(), false);
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else delete globalThis.window;
+  }
+});
+
 
 test("integration verification prompt uses only a validated domain from the sanitized event", () => {
   const detail = {domain: "mqtt", api_key: "protected-value", form: {host: "private-host"}};
