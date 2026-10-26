@@ -5,6 +5,7 @@ Habab credentials are hashed; Google credentials remain process-memory only.
 """
 import argparse
 import asyncio
+from collections import deque
 import hashlib
 import hmac
 import json
@@ -94,7 +95,8 @@ async def redacted_stream(content, secret, max_bytes):
 
 class Gateway:
     def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
-                 browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2):
+                 browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2,
+                 demo_openai_session_window_seconds=86400):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         if not isinstance(browser_origins, (list, tuple, set, frozenset)):
@@ -103,7 +105,9 @@ class Gateway:
             raise ValueError('Invalid browser origin')
         if (type(demo_openai_session_limit) is not int or not 0 <= demo_openai_session_limit <= 1000
                 or type(demo_openai_sessions_per_session) is not int
-                or not 0 <= demo_openai_sessions_per_session <= demo_openai_session_limit):
+                or not 0 <= demo_openai_sessions_per_session <= demo_openai_session_limit
+                or type(demo_openai_session_window_seconds) is not int
+                or not 1 <= demo_openai_session_window_seconds <= 31_536_000):
             raise ValueError('Invalid demo Realtime session limits')
         self.key_hash = key_hash
         self.upstream_key = upstream_key
@@ -115,11 +119,30 @@ class Gateway:
         self.openai_upstream_key = None
         self.demo_openai_session_limit = demo_openai_session_limit
         self.demo_openai_sessions_per_session = demo_openai_sessions_per_session
+        self.demo_openai_session_window_seconds = demo_openai_session_window_seconds
+        self.demo_openai_session_starts = deque()
         self.demo_openai_sessions_started = 0
         self.demo_openai_sessions_by_hash = {}
         self.active_voice = 0
         self.inflight = 0
         self.client = None
+
+    def _prune_demo_openai_session_starts(self):
+        """Expire global and per-session spend charges using monotonic time."""
+        now = self._demo_openai_clock()
+        expires_before = now - self.demo_openai_session_window_seconds
+        while self.demo_openai_session_starts and self.demo_openai_session_starts[0] <= expires_before:
+            self.demo_openai_session_starts.popleft()
+        for session_hash, starts in tuple(self.demo_openai_sessions_by_hash.items()):
+            while starts and starts[0] <= expires_before:
+                starts.popleft()
+            if not starts:
+                del self.demo_openai_sessions_by_hash[session_hash]
+        return now
+
+    @staticmethod
+    def _demo_openai_clock():
+        return time.monotonic()
 
     def authorization(self, request):
         authorization = request.headers.get('Authorization', '')
@@ -189,11 +212,12 @@ class Gateway:
                     token_hash: grant for token_hash, grant in self.demo_openai_credentials.items()
                     if grant['expires'] > now
                 }
-                session_count = self.demo_openai_sessions_by_hash.get(session_hash, 0)
+                self._prune_demo_openai_session_starts()
+                session_count = len(self.demo_openai_sessions_by_hash.get(session_hash, ()))
                 if self.active_voice >= 2 or len(self.demo_openai_credentials) >= 8:
                     writer.write(b'{"ready":false}\n')
                     return
-                if (self.demo_openai_sessions_started >= self.demo_openai_session_limit
+                if (len(self.demo_openai_session_starts) >= self.demo_openai_session_limit
                         or session_count >= self.demo_openai_sessions_per_session):
                     writer.write(b'{"ready":false}\n')
                     return
@@ -259,15 +283,17 @@ class Gateway:
             if item is None or item['expires'] <= time.time() or self.openai_upstream_key is None:
                 await downstream.close(code=1008, message=b'relay_not_authorized')
                 return downstream
+            quota_now = self._prune_demo_openai_session_starts()
             session_hash = item['session_hash']
-            session_count = self.demo_openai_sessions_by_hash.get(session_hash, 0)
-            if (self.demo_openai_sessions_started >= self.demo_openai_session_limit
+            session_count = len(self.demo_openai_sessions_by_hash.get(session_hash, ()))
+            if (len(self.demo_openai_session_starts) >= self.demo_openai_session_limit
                     or session_count >= self.demo_openai_sessions_per_session):
                 await downstream.close(code=1008, message=b'session_limit_reached')
                 return downstream
             # Charge the process and anonymous session before opening the paid upstream socket.
+            self.demo_openai_session_starts.append(quota_now)
             self.demo_openai_sessions_started += 1
-            self.demo_openai_sessions_by_hash[session_hash] = session_count + 1
+            self.demo_openai_sessions_by_hash.setdefault(session_hash, deque()).append(quota_now)
             upstream_key = self.openai_upstream_key
             async with self.client.ws_connect(OPENAI_REALTIME_UPSTREAM,
                     headers={'Authorization': 'Bearer ' + upstream_key,
@@ -917,7 +943,8 @@ def main():
     gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock',
                       browser_origins=config.get('browser_origins', []),
                       demo_openai_session_limit=config.get('demo_openai_session_limit', 5),
-                      demo_openai_sessions_per_session=config.get('demo_openai_sessions_per_session', 2))
+                      demo_openai_sessions_per_session=config.get('demo_openai_sessions_per_session', 2),
+                      demo_openai_session_window_seconds=config.get('demo_openai_session_window_seconds', 86400))
     web.run_app(gateway.app(), host='127.0.0.1', port=config.get('port', 8326), access_log=None, print=None, handler_cancellation=True)
 
 

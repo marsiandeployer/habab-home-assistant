@@ -673,36 +673,91 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('SYNTHETIC_PRIVATE_FAILURE_DETAIL', '\n'.join(captured.output))
         await ws.close()
 
-    async def test_demo_openai_global_budget_stops_sequential_paid_sessions(self):
-        self.gateway.demo_openai_session_limit = 2
+    async def test_demo_openai_global_budget_expires_at_rolling_window_boundary(self):
+        self.gateway.demo_openai_session_limit = 1
         self.gateway.demo_openai_sessions_per_session = 2
-        for index in range(2):
-            session_hash = hashlib.sha256(f'synthetic-global-session-{index}'.encode()).hexdigest()
+        self.gateway.demo_openai_session_window_seconds = 10
+        clock = [100.0]
+        self.gateway._demo_openai_clock = lambda: clock[0]
+
+        first_hash = hashlib.sha256(b'synthetic-global-session-0').hexdigest()
+        grant = await self.demo_openai_credential(first_hash)
+        self.assertTrue(grant['ready'])
+        ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+        await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': grant['value']})
+        self.assertEqual((await ws.receive_json(timeout=3))['type'], 'session.update')
+        await ws.close()
+        self.assertEqual(self.gateway.demo_openai_sessions_started, 1)
+
+        clock[0] = 109.999
+        denied = await self.demo_openai_credential(hashlib.sha256(b'synthetic-global-session-1').hexdigest())
+        self.assertEqual(denied, {'ready': False})
+        self.assertEqual(self.openai_connections, 1)
+
+        # A charge expires exactly at its configured rolling-window boundary.
+        clock[0] = 110.0
+        next_grant = await self.demo_openai_credential(hashlib.sha256(b'synthetic-global-session-2').hexdigest())
+        self.assertTrue(next_grant['ready'])
+        next_ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+        await next_ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': next_grant['value']})
+        self.assertEqual((await next_ws.receive_json(timeout=3))['type'], 'session.update')
+        await next_ws.close()
+        self.assertEqual(self.gateway.demo_openai_sessions_started, 2)
+        self.assertEqual(len(self.gateway.demo_openai_session_starts), 1)
+        self.assertEqual(self.openai_connections, 2)
+
+    async def test_demo_openai_global_budget_is_atomic_for_concurrent_sessions(self):
+        self.gateway.demo_openai_session_limit = 1
+        self.gateway.demo_openai_sessions_per_session = 2
+        grants = [await self.demo_openai_credential(hashlib.sha256(f'synthetic-concurrent-{index}'.encode()).hexdigest())
+                  for index in range(2)]
+        self.assertTrue(all(grant['ready'] for grant in grants))
+
+        async def connect(grant):
+            ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+            await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': grant['value']})
+            message = await ws.receive(timeout=3)
+            if message.type == WSMsgType.TEXT:
+                await ws.close()
+                return 'connected'
+            await ws.close()
+            return 'denied'
+
+        outcomes = await asyncio.gather(*(connect(grant) for grant in grants))
+        self.assertCountEqual(outcomes, ['connected', 'denied'])
+        self.assertEqual(self.gateway.demo_openai_sessions_started, 1)
+        self.assertEqual(len(self.gateway.demo_openai_session_starts), 1)
+        self.assertEqual(self.openai_connections, 1)
+
+    async def test_demo_openai_per_session_budget_stops_repeated_session_bootstrap(self):
+        self.gateway.demo_openai_session_limit = 4
+        self.gateway.demo_openai_sessions_per_session = 2
+        self.gateway.demo_openai_session_window_seconds = 10
+        clock = [100.0]
+        self.gateway._demo_openai_clock = lambda: clock[0]
+        session_hash = hashlib.sha256(b'synthetic-same-session').hexdigest()
+
+        async def start_session():
             grant = await self.demo_openai_credential(session_hash)
             self.assertTrue(grant['ready'])
             ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
             await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': grant['value']})
             self.assertEqual((await ws.receive_json(timeout=3))['type'], 'session.update')
             await ws.close()
-        self.assertEqual(self.gateway.demo_openai_sessions_started, 2)
-        denied = await self.demo_openai_credential(hashlib.sha256(b'synthetic-global-session-2').hexdigest())
-        self.assertEqual(denied, {'ready': False})
-        self.assertEqual(self.openai_connections, 2)
 
-    async def test_demo_openai_per_session_budget_stops_repeated_session_bootstrap(self):
-        self.gateway.demo_openai_session_limit = 4
-        self.gateway.demo_openai_sessions_per_session = 1
-        session_hash = hashlib.sha256(b'synthetic-same-session').hexdigest()
-        grant = await self.demo_openai_credential(session_hash)
-        self.assertTrue(grant['ready'])
-        ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
-        await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': grant['value']})
-        self.assertEqual((await ws.receive_json(timeout=3))['type'], 'session.update')
-        await ws.close()
+        await start_session()
+        await start_session()
         denied = await self.demo_openai_credential(session_hash)
         self.assertEqual(denied, {'ready': False})
-        self.assertEqual(self.gateway.demo_openai_sessions_started, 1)
-        self.assertEqual(self.openai_connections, 1)
+        self.assertEqual(len(self.gateway.demo_openai_sessions_by_hash[session_hash]), 2)
+        self.assertEqual(self.gateway.demo_openai_sessions_started, 2)
+
+        # Both per-session charges expire with the global window, allowing this cookie again.
+        clock[0] = 110.0
+        await start_session()
+        self.assertEqual(self.gateway.demo_openai_sessions_started, 3)
+        self.assertEqual(len(self.gateway.demo_openai_sessions_by_hash[session_hash]), 1)
+        self.assertEqual(self.openai_connections, 3)
 
     async def test_managed_text_capabilities_report_configured_upstream_without_key_material(self):
         headers = {'Authorization': 'Bearer synthetic-owner'}
