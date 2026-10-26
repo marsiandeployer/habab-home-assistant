@@ -53,6 +53,8 @@ async def async_setup(hass, config):
     assistant_url, static_paths = _assistant_static_paths(frontend_dir, assistant_digest)
     await hass.http.async_register_static_paths(static_paths)
     frontend.add_extra_js_url(hass, assistant_url)
+    frontend.add_manifest_json_key("name", "Habab Home Assistant")
+    frontend.add_manifest_json_key("short_name", "Habab Home")
     from .setup_agent import SetupAgent
 
     agent = SetupAgent(hass)
