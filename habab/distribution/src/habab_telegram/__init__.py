@@ -976,11 +976,11 @@ class TelegramManager:
                 request_id = uuid.uuid4().hex
                 future = asyncio.get_running_loop().create_future()
                 self.pending_sends[request_id] = (entry_id, future)
+                request_ids.append(request_id)
                 if not await self._write(entry_id, {"type": "send", "chat_id": int(chat_id),
                                                     "text": chunk, "request_id": request_id}):
                     self.pending_sends.pop(request_id, None)
                     break
-                request_ids.append(request_id)
                 futures.append(future)
             if len(futures) != len(chunks):
                 if futures:

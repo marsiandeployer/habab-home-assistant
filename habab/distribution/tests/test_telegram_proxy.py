@@ -196,6 +196,38 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
                   "bot_username": "fixture_bot"},
         )
 
+    async def test_rejected_or_unresponsive_getme_keeps_form_without_creating_entry(self):
+        token = "123456:" + "a" * 20
+        for failure, code in (("rejected", "invalid_token"), ("timeout", "cannot_validate")):
+            with self.subTest(failure=failure):
+                session = self.Session([
+                    self.Response(401, {"ok": False, "error_code": 401,
+                                        "description": "private upstream details"}),
+                ])
+                if failure == "timeout":
+                    session.get = Mock(side_effect=TimeoutError("private upstream details"))
+                form = {"type": "form"}
+                flow = SimpleNamespace(
+                    context={"habab_owner_id": "owner"},
+                    hass=SimpleNamespace(
+                        auth=SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(
+                            is_active=True, is_admin=True))),
+                        data=provider_hass("deepseek", "fixture-provider-key").data,
+                    ),
+                    async_set_unique_id=AsyncMock(),
+                    async_create_entry=Mock(),
+                    async_show_form=Mock(return_value=form),
+                )
+                with patch(
+                    "homeassistant.components.habab_telegram.config_flow.async_get_clientsession",
+                    return_value=session,
+                ):
+                    result = await HababTelegramConfigFlow.async_step_user(flow, {"token": token})
+                self.assertIs(result, form)
+                self.assertEqual(flow.async_show_form.call_args.kwargs["errors"], {"base": code})
+                flow.async_set_unique_id.assert_not_awaited()
+                flow.async_create_entry.assert_not_called()
+
     async def test_other_selected_provider_uses_direct_route_without_capability_request(self):
         token = "123456:" + "a" * 20
         session = self.Session([

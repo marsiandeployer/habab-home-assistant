@@ -1477,6 +1477,11 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.hass.auth.async_get_user.assert_awaited()
         manager.send.assert_awaited_once()
         self.assertIn("владельца", manager.send.await_args.args[2])
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        assistant.telegram_session.assert_not_awaited()
+        assistant.run.assert_not_awaited()
+        self.assertEqual(manager.dedupe, set())
+        self.assertEqual(manager.entries["entry"]["chat_id"], "10")
 
     async def test_persisted_replay_guard_and_commands(self):
         manager = self.manager()
@@ -1576,6 +1581,30 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager._write.side_effect = acknowledge
         delivered = await TelegramManager.send(manager, "entry", "10", "answer")
         self.assertTrue(delivered)
+        self.assertEqual(manager.pending_sends, {})
+
+    async def test_send_without_worker_ack_times_out_without_claiming_delivery(self):
+        manager = self.manager()
+        manager._write.return_value = True
+        native_wait_for = asyncio.wait_for
+
+        async def fast_wait_for(awaitable, timeout):
+            return await native_wait_for(awaitable, 0.01)
+
+        # Exercise the actual future timeout, without waiting 18 seconds.
+        with patch(
+            "homeassistant.components.habab_telegram.asyncio.wait_for",
+            new=fast_wait_for,
+        ):
+            delivered = await TelegramManager.send(manager, "entry", "10", "answer")
+        self.assertFalse(delivered)
+        manager._write.assert_awaited_once()
+        self.assertEqual(manager.pending_sends, {})
+
+    async def test_send_pipe_failure_does_not_leave_an_unacknowledged_request(self):
+        manager = self.manager()
+        manager._write.side_effect = BrokenPipeError()
+        self.assertFalse(await TelegramManager.send(manager, "entry", "10", "answer"))
         self.assertEqual(manager.pending_sends, {})
 
     async def test_pairing_again_revokes_old_chat_and_session(self):
@@ -1790,6 +1819,34 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         await manager.handle_one(entry, {"chat_type": "private", "chat_id": 10, "user_id": 20, "message_id": 7, "text": f"/start {nonce}"})
         self.assertEqual(manager.bindings["entry"], {"chat_id": "10", "user_id": "20", "bot_id": 7})
         self.assertNotIn("entry", manager.pairing)
+
+    async def test_missing_start_keeps_pairing_pending_without_running_assistant(self):
+        manager = self.manager()
+        manager.entries["entry"].update(chat_id=None, user_id=None)
+        entry = SimpleNamespace(entry_id="entry", data={
+            "owner_id": "alice", "bot_id": 7, "bot_username": "testbot",
+        })
+        manager.hass.config_entries = SimpleNamespace(async_entries=lambda _domain: [entry])
+        link = await manager.pair("alice")
+        manager.send.reset_mock()
+        for message_id, text in enumerate(("hello", "/start", "/start wrong"), 1):
+            with self.subTest(text=text):
+                await manager.handle_one(entry, {
+                    "chat_type": "private", "chat_id": 10, "user_id": 20,
+                    "message_id": message_id, "text": text,
+                })
+                status = await manager.status("alice")
+                self.assertEqual(status["phase"], "pairing")
+                self.assertEqual(status["pairing_url"], link["pairing_url"])
+                self.assertIsNone(manager.entries["entry"]["chat_id"])
+                self.assertNotIn("entry", manager.bindings)
+        self.assertEqual(manager.send.await_count, 3)
+        self.assertTrue(all(call.args == ("entry", 10, BOT_ONBOARDING_MESSAGE)
+                            for call in manager.send.await_args_list))
+        assistant = manager.hass.data["habab_home"]["assistant"]
+        assistant.telegram_session.assert_not_awaited()
+        assistant.run.assert_not_awaited()
+        self.assertEqual(manager.dedupe, set())
 
 
 class TokenValidationTests(unittest.IsolatedAsyncioTestCase):
