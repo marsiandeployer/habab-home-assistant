@@ -85,18 +85,27 @@ class HababTelegramConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = str(err)
                 else:
                     await self.async_set_unique_id(owner_id)
-                    current = next((entry for entry in self._async_current_entries()
+                    entries = self._async_current_entries()
+                    current = next((entry for entry in entries
                                     if entry.unique_id == owner_id), None)
-                    data = {"token": token, "owner_id": owner_id,
-                            "bot_id": bot["id"], "bot_username": bot["username"]}
-                    if proxy:
-                        data["proxy_url"] = proxy
-                    if current:
-                        self.hass.config_entries.async_update_entry(current, data=data)
-                        if not await self.hass.config_entries.async_reload(current.entry_id):
-                            return self.async_abort(reason="setup_failed")
-                        return self.async_abort(reason="reconfigured")
-                    return self.async_create_entry(title=f"@{bot['username']}", data=data)
+                    duplicate_bot = any(
+                        entry is not current
+                        and entry.data.get("bot_id") == bot["id"]
+                        for entry in entries
+                    )
+                    if duplicate_bot:
+                        errors["base"] = "bot_already_configured"
+                    else:
+                        data = {"token": token, "owner_id": owner_id,
+                                "bot_id": bot["id"], "bot_username": bot["username"]}
+                        if proxy:
+                            data["proxy_url"] = proxy
+                        if current:
+                            self.hass.config_entries.async_update_entry(current, data=data)
+                            if not await self.hass.config_entries.async_reload(current.entry_id):
+                                return self.async_abort(reason="setup_failed")
+                            return self.async_abort(reason="reconfigured")
+                        return self.async_create_entry(title=f"@{bot['username']}", data=data)
 
         return self.async_show_form(
             step_id="user", data_schema=probatio.Schema({

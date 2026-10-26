@@ -1,0 +1,17 @@
+{
+  "title": "Telegram-бот Habab",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключить Telegram-бота",
+        "data": {
+          "token": "Токен бота",
+          "proxy_url": "Адрес прокси (необязательно)"
+        }
+      }
+    },
+    "error": {
+      "bot_already_configured": "Этот бот уже подключён к другой учётной записи Home Assistant. Укажите другого бота."
+    }
+  }
+}

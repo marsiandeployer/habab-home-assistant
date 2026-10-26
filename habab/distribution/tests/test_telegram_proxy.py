@@ -1,5 +1,6 @@
 """Provider-aware Telegram routing never confuses service and bot credentials."""
 import json
+from pathlib import Path
 import unittest
 from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -132,6 +133,15 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
             self.calls.append((url, kwargs))
             return self.responses.pop(0)
 
+    def test_duplicate_bot_error_is_localized_in_english_and_russian(self):
+        translations = Path(__file__).parent.parent / "src/habab_telegram/translations"
+        for locale in ("en", "ru"):
+            with self.subTest(locale=locale):
+                content = json.loads((translations / f"{locale}.json").read_text())
+                message = content["config"]["error"]["bot_already_configured"]
+                self.assertTrue(message)
+                self.assertNotEqual(message, "bot_already_configured")
+
     async def test_selected_habab_validates_capability_then_separates_keys(self):
         session = self.Session([
             self.Response(200, capabilities_payload()),
@@ -195,6 +205,78 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
             data={"token": token, "owner_id": "owner", "bot_id": 12,
                   "bot_username": "fixture_bot"},
         )
+
+    async def test_duplicate_bot_id_shows_localized_error_without_changing_entries(self):
+        token = "123456:" + "a" * 20
+        session = self.Session([
+            self.Response(200, {"ok": True, "result": {"id": 12, "username": "fixture_bot"}}),
+        ])
+        existing = SimpleNamespace(unique_id="another-owner", data={"bot_id": 12})
+        form = {"type": "form"}
+        flow = SimpleNamespace(
+            context={"habab_owner_id": "owner"},
+            hass=SimpleNamespace(
+                auth=SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(
+                    is_active=True, is_admin=True))),
+                data=provider_hass("deepseek", "fixture-provider-key").data,
+            ),
+            async_set_unique_id=AsyncMock(),
+            _async_current_entries=Mock(return_value=[existing]),
+            async_create_entry=Mock(),
+            async_show_form=Mock(return_value=form),
+        )
+        with patch(
+            "homeassistant.components.habab_telegram.config_flow.async_get_clientsession",
+            return_value=session,
+        ):
+            result = await HababTelegramConfigFlow.async_step_user(flow, {"token": token})
+
+        self.assertIs(result, form)
+        self.assertEqual(flow.async_show_form.call_args.kwargs["errors"], {
+            "base": "bot_already_configured",
+        })
+        flow.async_set_unique_id.assert_awaited_once_with("owner")
+        flow.async_create_entry.assert_not_called()
+        self.assertEqual(existing.data, {"bot_id": 12})
+
+    async def test_existing_owner_can_reconfigure_its_bot(self):
+        token = "123456:" + "a" * 20
+        session = self.Session([
+            self.Response(200, {"ok": True, "result": {"id": 12, "username": "fixture_bot"}}),
+        ])
+        existing = SimpleNamespace(unique_id="owner", entry_id="fixture-entry",
+                                   data={"bot_id": 12})
+        config_entries = SimpleNamespace(
+            async_update_entry=Mock(),
+            async_reload=AsyncMock(return_value=True),
+        )
+        flow = SimpleNamespace(
+            context={"habab_owner_id": "owner"},
+            hass=SimpleNamespace(
+                auth=SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(
+                    is_active=True, is_admin=True))),
+                data=provider_hass("deepseek", "fixture-provider-key").data,
+                config_entries=config_entries,
+            ),
+            async_set_unique_id=AsyncMock(),
+            _async_current_entries=Mock(return_value=[existing]),
+            async_abort=Mock(return_value={"type": "abort", "reason": "reconfigured"}),
+            async_create_entry=Mock(),
+        )
+        with patch(
+            "homeassistant.components.habab_telegram.config_flow.async_get_clientsession",
+            return_value=session,
+        ):
+            result = await HababTelegramConfigFlow.async_step_user(flow, {"token": token})
+
+        self.assertEqual(result, {"type": "abort", "reason": "reconfigured"})
+        config_entries.async_update_entry.assert_called_once_with(
+            existing,
+            data={"token": token, "owner_id": "owner", "bot_id": 12,
+                  "bot_username": "fixture_bot"},
+        )
+        config_entries.async_reload.assert_awaited_once()
+        flow.async_create_entry.assert_not_called()
 
     async def test_rejected_or_unresponsive_getme_keeps_form_without_creating_entry(self):
         token = "123456:" + "a" * 20

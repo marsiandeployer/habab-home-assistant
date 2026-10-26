@@ -1,0 +1,17 @@
+{
+  "title": "Habab Telegram bot",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect a Telegram bot",
+        "data": {
+          "token": "Bot token",
+          "proxy_url": "Proxy URL (optional)"
+        }
+      }
+    },
+    "error": {
+      "bot_already_configured": "This bot is already connected to another Home Assistant account. Use a different bot."
+    }
+  }
+}
