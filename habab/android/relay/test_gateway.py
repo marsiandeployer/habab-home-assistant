@@ -34,6 +34,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.rotate_upstream_key = False
         self.oversized_token_response = False
         self.fail_gemini_connect = False
+        self.fail_openai_handshake = False
         self.close_gemini_with = None
         self.telegram_calls = []
         self.telegram_status = 200
@@ -137,6 +138,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             self.openai_connections += 1
             self.openai_frames.append(('auth', request.headers.get('Authorization'),
                                        request.headers.get('OpenAI-Safety-Identifier')))
+            if self.fail_openai_handshake:
+                return web.Response(status=503, reason='SYNTHETIC_PRIVATE_FAILURE_DETAIL')
             ws = web.WebSocketResponse()
             await ws.prepare(request)
             async for message in ws:
@@ -649,6 +652,25 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.openai_connections, 1)
         forwarded = [json.loads(frame[1]) for frame in self.openai_frames if frame[0] == 'frame']
         self.assertEqual([frame['type'] for frame in forwarded], ['session.update'])
+        await ws.close()
+
+    async def test_demo_openai_upstream_failure_logs_only_exception_class_and_status(self):
+        self.fail_openai_handshake = True
+        grant = await self.demo_openai_credential()
+        self.assertTrue(grant['ready'])
+        ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+        await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': grant['value']})
+
+        with self.assertLogs('openai_gateway', level='WARNING') as captured:
+            closed = await ws.receive(timeout=3)
+
+        self.assertEqual(closed.type, WSMsgType.CLOSE)
+        self.assertEqual(closed.data, 1011)
+        self.assertEqual(closed.extra, 'openai_demo_unavailable')
+        self.assertEqual(len(captured.output), 1)
+        self.assertIn('exception=WSServerHandshakeError', captured.output[0])
+        self.assertIn('status=503', captured.output[0])
+        self.assertNotIn('SYNTHETIC_PRIVATE_FAILURE_DETAIL', '\n'.join(captured.output))
         await ws.close()
 
     async def test_demo_openai_global_budget_stops_sequential_paid_sessions(self):

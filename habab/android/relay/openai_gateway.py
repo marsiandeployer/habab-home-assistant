@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -18,7 +19,9 @@ import struct
 import time
 from urllib.parse import urlsplit
 
-from aiohttp import ClientSession, ClientTimeout, ClientWSTimeout, WSMsgType, web
+from aiohttp import ClientSession, ClientResponseError, ClientTimeout, ClientWSTimeout, WSMsgType, web
+
+logger = logging.getLogger(__name__)
 
 GEMINI_TEXT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 DEEPSEEK_CHAT_COMPLETIONS = 'https://api.deepseek.com/chat/completions'
@@ -360,7 +363,11 @@ class Gateway:
                     await asyncio.gather(*tasks, return_exceptions=True)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as error:
+            status = (error.status if isinstance(error, ClientResponseError)
+                      and type(error.status) is int and 100 <= error.status <= 599 else None)
+            logger.warning('OpenAI demo relay upstream failure (exception=%s, status=%s)',
+                           type(error).__name__, status)
             if not downstream.prepared:
                 return web.json_response({'error': {'code': 'openai_demo_unavailable'}}, status=502)
             try:
