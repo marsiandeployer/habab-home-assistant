@@ -54,6 +54,7 @@ CONSENT = {
     "scope": "feedback_and_bounded_context",
     "version": 1,
 }
+RECEIPT_ISSUE_STATES = {"pending_issue", "sending", "created", "unknown"}
 
 
 @dataclass(frozen=True)
@@ -274,7 +275,8 @@ def _valid_receipt(status_code: int, headers: Any, raw: bytes) -> dict[str, Any]
     if (
         parsed_date.tzinfo is None
         or receipt.get("state") != "saved"
-        or receipt.get("issue_state") != "pending_issue"
+        or not isinstance(receipt.get("issue_state"), str)
+        or receipt["issue_state"] not in RECEIPT_ISSUE_STATES
     ):
         return None
     return receipt

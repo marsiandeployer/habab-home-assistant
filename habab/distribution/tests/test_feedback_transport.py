@@ -210,11 +210,36 @@ class FeedbackTransportTests(unittest.TestCase):
             [IDEMPOTENCY_KEY, IDEMPOTENCY_KEY],
         )
 
-    def test_ambiguous_or_wrong_receipt_schema_never_claims_server_save(self):
-        bad_receipt = FakeOpener([FakeResponse(receipt(issue_state="created"))])
-        result = send_feedback(representative_package(), INSTALLATION_TOKEN, _opener=bad_receipt)
-        self.assertEqual((result.status, result.error_code, result.receipt_id),
-                         ("pending", "invalid_receipt", None))
+    def test_saved_receipt_accepts_issue_progress_states_but_keeps_strict_schema(self):
+        for issue_state in ("pending_issue", "sending", "created", "unknown"):
+            with self.subTest(issue_state=issue_state):
+                response = FakeResponse(receipt(issue_state=issue_state, duplicate=True))
+                opener = FakeOpener([response])
+                result = send_feedback(representative_package(), INSTALLATION_TOKEN, _opener=opener)
+
+                self.assertEqual(
+                    (result.status, result.issue_state, result.duplicate),
+                    ("saved_on_server", issue_state, True),
+                )
+
+        invalid_receipts = (
+            receipt(issue_state="queued"),
+            receipt(issue_state=[]),
+            receipt(issue_state={"state": "created"}),
+            receipt(issue_state=None),
+            receipt(issue_state=False),
+            {**receipt(), "secret": "synthetic-secret"},
+            {**receipt(), "download_url": "https://example.invalid/receipt"},
+        )
+        for invalid in invalid_receipts:
+            with self.subTest(keys=tuple(sorted(invalid))):
+                opener = FakeOpener([FakeResponse(invalid)])
+                result = send_feedback(representative_package(), INSTALLATION_TOKEN, _opener=opener)
+
+                self.assertEqual(
+                    (result.status, result.error_code, result.receipt_id),
+                    ("pending", "invalid_receipt", None),
+                )
 
         invalid_payload = {"receipt_id": RECEIPT_ID, "state": "saved"}
         ambiguous_response = FakeOpener([
