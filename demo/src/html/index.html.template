@@ -1,40 +1,47 @@
 <!DOCTYPE html>
+<!-- Habab modifications: application branding and launch-screen attribution. -->
 <html>
   <head>
-    <title>Home Assistant Demo</title>
+    <title>Habab Home Assistant</title>
     <script>window.name = "ha-main-window";</script>
-    <%= renderTemplate("../../../src/html/_header.html.template") %>
-    <link rel="mask-icon" href="/static/icons/mask-icon.svg" color="#03a9f4" />
+    <meta charset="utf-8" />
+    <link rel="manifest" href="<%= hassUrl %>/manifest.json" crossorigin="use-credentials" />
+    <link rel="icon" type="image/svg+xml" href="/static/habab/habab.svg" />
+    <link rel="icon" sizes="any" href="/static/habab/habab.ico" />
+    <link rel="mask-icon" href="/static/habab/habab-mask.svg" color="#155e4b" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/habab/habab-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/habab/habab-192.png" />
+    <% for (const entry of latestEntryJS) { %>
+      <link rel="modulepreload" href="<%= entry %>" crossorigin="use-credentials" />
+    <% } %>
     <link
       rel="apple-touch-icon"
       sizes="180x180"
-      href="/static/icons/favicon-apple-180x180.png"
+      href="/static/habab/apple-touch-icon.png"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Habab Home Assistant" />
+    <meta name="application-name" content="Habab Home Assistant" />
     <meta
       name="msapplication-square70x70logo"
-      content="/static/icons/tile-win-70x70.png"
+      content="/static/habab/habab-192.png"
     />
     <meta
       name="msapplication-square150x150logo"
-      content="/static/icons/tile-win-150x150.png"
-    />
-    <meta
-      name="msapplication-wide310x150logo"
-      content="/static/icons/tile-win-310x150.png"
+      content="/static/habab/habab-192.png"
     />
     <meta
       name="msapplication-square310x310logo"
-      content="/static/icons/tile-win-310x310.png"
+      content="/static/habab/habab-512.png"
     />
-    <meta name="msapplication-TileColor" content="#03a9f4ff" />
+    <meta name="msapplication-TileColor" content="#155e4b" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="referrer" content="same-origin" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, shrink-to-fit=no"
     />
-    <meta name="theme-color" content="#03a9f4" />
+    <meta name="theme-color" content="#155e4b" />
     <%= renderTemplate("_social_meta.html.template") %>
     <style>
       html {
@@ -125,7 +132,7 @@
     <div id="ha-launch-screen">
       <div class="ha-launch-screen-spacer-top"></div>
       <div class="ha-lockup">
-        <img class="ha-logo" src="/static/images/home-assistant-logo-loading.svg" alt="Home Assistant">
+        <img class="ha-logo" src="/static/habab/habab.svg" alt="Habab Home Assistant">
       </div>
       <div id="ha-launch-screen-info-box" class="ha-launch-screen-spacer-bottom"></div>
       <a class="habab-attribution" href="https://habab.ru">Сделано в habab.ru</a>

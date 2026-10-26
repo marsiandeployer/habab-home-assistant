@@ -22,6 +22,17 @@ STAGE = ROOT / 'tmp/ha-frontend-build/publish-stage'
 PUBLISHED_ASSET_DIRS = ('assets', 'frontend_es5', 'frontend_latest', 'static', 'stub_config')
 PUBLISHED_ASSET_FILES = ('_headers', 'manifest.json', 'LICENSE.md')
 PUBLISHED_ENTRYPOINT = ROOT / 'build/flat-entrypoint.html'
+BRAND_ASSET_DIR = ROOT / 'build/brand-assets'
+BRAND_ASSETS = (
+    'habab.svg',
+    'habab-mask.svg',
+    'habab.ico',
+    'habab-32.png',
+    'habab-192.png',
+    'habab-512.png',
+    'habab-maskable-512.png',
+    'apple-touch-icon.png',
+)
 UPSTREAM_BASELINE = '92599a88037ef5b7bd822efd7301028d824f7f5b'
 RELEASE = os.environ.get('HABAB_DEMO_RELEASE', '20261021-ui5')
 if not re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,79}', RELEASE):
@@ -86,6 +97,65 @@ def stage_published_frontend(source_root, stage, entrypoint, *, license_source=N
         raise
 
 
+def install_brand_assets(stage):
+    """Copy the checked-in Habab icons into the staged frontend."""
+    destination = stage / 'static' / 'habab'
+    for name in BRAND_ASSETS:
+        source = BRAND_ASSET_DIR / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f'Missing Habab brand asset: {name}')
+    if destination.is_symlink():
+        raise ValueError('Compiled frontend static/habab is a symlink')
+    if destination.exists():
+        if not destination.is_dir():
+            raise ValueError('Compiled frontend static/habab is not a directory')
+        for name in BRAND_ASSETS:
+            source = BRAND_ASSET_DIR / name
+            installed = destination / name
+            if installed.is_symlink() or not installed.is_file():
+                raise ValueError(f'Incomplete staged Habab brand assets: {name}')
+            if source.read_bytes() != installed.read_bytes():
+                raise ValueError(f'Conflicting staged Habab brand asset: {name}')
+        return
+    destination.mkdir()
+    try:
+        for name in BRAND_ASSETS:
+            shutil.copy2(BRAND_ASSET_DIR / name, destination / name)
+    except Exception:
+        shutil.rmtree(destination, ignore_errors=True)
+        raise
+
+
+def brand_demo_manifest(data):
+    """Set the demo PWA identity and icon set to the Habab brand."""
+    data['name'] = 'Habab Home Assistant'
+    data['short_name'] = 'Habab Home'
+    data['start_url'] = '/demos/home-assistant/?homescreen=1'
+    data['description'] = 'Демо-интерфейс Habab Home Assistant для умного дома.'
+    data['theme_color'] = '#155e4b'
+    data['icons'] = [
+        {
+            'src': './static/habab/habab-192.png',
+            'sizes': '192x192',
+            'type': 'image/png',
+            'purpose': 'any',
+        },
+        {
+            'src': './static/habab/habab-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+            'purpose': 'any',
+        },
+        {
+            'src': './static/habab/habab-maskable-512.png',
+            'sizes': '512x512',
+            'type': 'image/png',
+            'purpose': 'maskable',
+        },
+    ]
+    return data
+
+
 def scope_javascript(content, *, legacy=False):
     """Scope both DOM-relative legacy chunks and demo media to this release."""
     for old in ('./..//frontend_latest/', './..//frontend_es5/',
@@ -134,9 +204,12 @@ def scope_javascript(content, *, legacy=False):
 
 
 def scope_html(html):
-    if html.count('<title>Home Assistant Demo</title>') != 1:
+    upstream_title = '<title>Home Assistant Demo</title>'
+    habab_title = '<title>Habab Home Assistant</title>'
+    if html.count(upstream_title) == 1 and html.count(habab_title) == 0:
+        html = html.replace(upstream_title, habab_title)
+    elif html.count(upstream_title) != 0 or html.count(habab_title) != 1:
         raise ValueError('Pinned demo title changed; review Habab branding')
-    html = html.replace('<title>Home Assistant Demo</title>', '<title>Habab Home</title>')
     for quote in ('"', "'"):
         for directory in ('static', 'frontend_latest', 'frontend_es5'):
             for old in ('./..//', './/', './', '/'):
@@ -312,6 +385,7 @@ def main():
     assistant = publish_assistant(TARGET, ROOT / 'distribution/src/habab_home/frontend/setup-chat.js')
     if not args.from_published and not args.source_dir:
         shutil.copy2(UPSTREAM / 'LICENSE.md', STAGE / 'LICENSE.md')
+    install_brand_assets(STAGE)
     (STAGE / 'ATTRIBUTION.md').write_text(attribution_text(frontend_revision), encoding='utf-8')
     write_provenance(STAGE, frontend_revision)
 
@@ -322,11 +396,7 @@ def main():
     manifest = STAGE / 'manifest.json'
     if manifest.exists():
         data = json.loads(manifest.read_text(encoding='utf-8'))
-        data['name'] = 'Habab Home'
-        data['short_name'] = 'Habab Home'
-        data['start_url'] = '/demos/home-assistant/?homescreen=1'
-        for icon in data.get('icons', []):
-            icon['src'] = './' + icon['src'].lstrip('/')
+        brand_demo_manifest(data)
         manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
     headers_file = STAGE / '_headers'

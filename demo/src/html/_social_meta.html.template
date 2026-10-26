@@ -1,26 +1,24 @@
-<meta property="fb:app_id" content="338291289691179" />
-<meta property="og:title" content="Home Assistant Demo" />
-<meta property="og:site_name" content="Home Assistant" />
-<meta property="og:url" content="https://demo.home-assistant.io/" />
+<!-- Habab modifications: social metadata for Habab Home Assistant. -->
+<meta property="og:title" content="Habab Home Assistant" />
+<meta property="og:site_name" content="Habab Home Assistant" />
+<meta property="og:url" content="https://habab-demo.wpmix.net/" />
 <meta property="og:type" content="website" />
 <meta
   property="og:description"
-  content="Open source home automation that puts local control and privacy first."
+  content="Демо-интерфейс Habab Home Assistant для умного дома."
 />
 <meta
   property="og:image"
-  content="https://www.home-assistant.io/images/default-social.png"
+  content="https://habab.ru/static/brand/habab-social.webp"
 />
 
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:site" content="@home_assistant" />
-
-<meta name="twitter:title" content="Home Assistant" />
+<meta name="twitter:title" content="Habab Home Assistant" />
 <meta
   name="twitter:description"
-  content="Open source home automation that puts local control and privacy first."
+  content="Демо-интерфейс Habab Home Assistant для умного дома."
 />
 <meta
   name="twitter:image"
-  content="https://www.home-assistant.io/images/default-social.png"
+  content="https://habab.ru/static/brand/habab-social.webp"
 />
