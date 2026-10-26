@@ -6,7 +6,7 @@ diff --git a/test/panels/home/ha-panel-home.test.ts b/test/panels/home/ha-panel-
    _showBanner: boolean;
    _loadConfigPromise?: Promise<void>;
 +  _testSetLovelace: ReturnType<typeof vi.spyOn>;
-+  _testWaitForSetup: () => Promise<void>;
++  waitForTestSetup: () => Promise<void>;
    [key: string]: unknown;
  };
  
@@ -68,7 +68,7 @@ diff --git a/test/panels/home/ha-panel-home.test.ts b/test/panels/home/ha-panel-
 +      setupTasks.push(task);
 +      return task;
 +    });
-+  panel._testWaitForSetup = async () => {
++  panel.waitForTestSetup = async () => {
 +    await panel._loadConfigPromise;
 +    await vi.waitFor(() => expect(setupTasks.length).toBeGreaterThan(0));
 +    await Promise.all(setupTasks);
@@ -84,7 +84,7 @@ diff --git a/test/panels/home/ha-panel-home.test.ts b/test/panels/home/ha-panel-
    await panel.updateComplete;
    if (waitForLoad) {
 -    await panel._loadConfigPromise;
-+    await panel._testWaitForSetup();
++    await panel.waitForTestSetup();
    }
    return panel;
  };
@@ -101,7 +101,7 @@ diff --git a/test/panels/home/ha-panel-home.test.ts b/test/panels/home/ha-panel-
  
      resolveHomeFetch({ favorite_entities: ["light.kitchen"] });
 -    await panel._loadConfigPromise;
-+    await panel._testWaitForSetup();
++    await panel.waitForTestSetup();
      expect((panel as any)._config).toEqual(liveConfig);
    });
  });

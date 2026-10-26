@@ -95,11 +95,11 @@ SHA-256 values:
 
 - `bridge.patch`: `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`
 - `native-test-fixes.patch`:
-  `0792a6073d8b5adde35bff1f9466230d689e2942f4307b16fbcb97fedba0360a`
+  `95c2f19010624cf5d9b53157bf5e06e74bedf905bbac79ae417177baa80898f3`
 - `native-branding.patch`:
   `b2c03dc54b90747c6e29f23448f95e115d096bfb93137ca1548f4f7538695a54`
 - composed three-patch input:
-  `70986af7797de84526ba5d3004f98e6008ca45d65a8471a1be85a3a3bd494481`
+  `cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a`
 
 The three patches contain 46 diff sections across 41 unique target paths;
 they must be applied in the listed order.
@@ -123,7 +123,7 @@ cat habab/native-frontend/bridge.patch \
   habab/native-frontend/native-branding.patch > "$patch"
 HABAB_NATIVE_FRONTEND_WORKTREE="$worktree" \
 HABAB_NATIVE_FRONTEND_PATCH_FILE="$patch" \
-HABAB_NATIVE_FRONTEND_PATCH_SHA=70986af7797de84526ba5d3004f98e6008ca45d65a8471a1be85a3a3bd494481 \
+HABAB_NATIVE_FRONTEND_PATCH_SHA=cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a \
 HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.13 \
 HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT="$artifact_root" \
 HABAB_NATIVE_FRONTEND_RETENTION_STATE="$retention_state" \
