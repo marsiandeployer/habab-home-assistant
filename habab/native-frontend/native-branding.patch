@@ -1,0 +1,103 @@
+diff --git a/src/html/authorize.html.template b/src/html/authorize.html.template
+index 1ebf8535e988a2a773922396d80fd3a1ae7b2914..5b6eb96019997584f1f953bc94ebcdd63e811cdf 100644
+--- a/src/html/authorize.html.template
++++ b/src/html/authorize.html.template
+@@ -1,7 +1,7 @@
+ <!DOCTYPE html>
+ <html>
+   <head>
+-    <title>Home Assistant</title>
++    <title>Habab Home Assistant</title>
+     <%= renderTemplate("_header.html.template") %>
+     <%= renderTemplate("_style_base.html.template") %>
+     <style>
+@@ -49,7 +49,7 @@
+   <body>
+     <div class="content">
+       <div class="header">
+-        <img src="/static/icons/favicon-192x192.png" alt="Home Assistant" />
++        <img src="/static/icons/favicon-192x192.png" alt="Habab Home Assistant" />
+       </div>
+       <ha-authorize></ha-authorize>
+     </div>
+diff --git a/src/html/index.html.template b/src/html/index.html.template
+index 93433e83c5385361da686b922babf0b63ced8263..3052c31683c620971860179b2028264402276fa0 100644
+--- a/src/html/index.html.template
++++ b/src/html/index.html.template
+@@ -1,7 +1,7 @@
+ <!DOCTYPE html>
+ <html>
+   <head>
+-    <title>Home Assistant</title>
++    <title>Habab Home Assistant</title>
+     <% if (useCacheRecovery) { %><%= renderTemplate("_bootstrap_recovery.html.template") %><% } %>
+     <%= renderTemplate("_header.html.template") %>
+     <link rel="mask-icon" href="/static/icons/mask-icon.svg" color="#18bcf2" />
+@@ -12,10 +12,10 @@
+     <meta name="apple-itunes-app" content="app-id=1099568401" />
+     <meta name="apple-mobile-web-app-capable" content="yes" />
+     <meta name="apple-mobile-web-app-status-bar-style" content="default">
+-    <meta name="apple-mobile-web-app-title" content="Home Assistant">
++    <meta name="apple-mobile-web-app-title" content="Habab Home Assistant">
+     <meta name="msapplication-config" content="/static/icons/browserconfig.xml" />
+     <meta name="mobile-web-app-capable" content="yes" />
+-    <meta name="application-name" content="Home Assistant">
++    <meta name="application-name" content="Habab Home Assistant">
+     <meta name="referrer" content="same-origin" />
+     <meta name="theme-color" content="{{ theme_color }}" />
+     <meta name="color-scheme" content="dark light" />
+@@ -92,6 +92,11 @@
+         line-height: 12px;
+         text-transform: uppercase;
+       }
++      .habab-attribution {
++        color: inherit;
++        font-size: 12px;
++        line-height: 16px;
++      }
+       .ohf-logo picture {
+         display: flex;
+       }
+@@ -133,6 +138,7 @@
+       </div>
+       <div id="ha-launch-screen-info-box" class="ha-launch-screen-spacer-bottom"></div>
+       <div class="ohf-logo">
++        <a class="habab-attribution" href="https://habab.ru">Сделано в habab.ru</a>
+         <span id="ha-launch-screen-attribution">A project from the</span>
+         <picture>
+           <source media="(prefers-color-scheme: dark)" srcset="/static/images/open-home-foundation-on-dark.svg">
+diff --git a/src/html/onboarding.html.template b/src/html/onboarding.html.template
+index cc9855b9ebb1210ccf87ed198258ca1f6fcd53f2..69cbaaa67c7855b37de31f8425465638eab1baf4 100644
+--- a/src/html/onboarding.html.template
++++ b/src/html/onboarding.html.template
+@@ -1,7 +1,7 @@
+ <!DOCTYPE html>
+ <html>
+   <head>
+-    <title>Home Assistant</title>
++    <title>Habab Home Assistant</title>
+     <%= renderTemplate("_header.html.template") %>
+     <%= renderTemplate("_style_base.html.template") %>
+     <style>
+@@ -45,7 +45,7 @@
+   <body id="particles">
+     <div class="content">
+       <div class="header">
+-        <img src="/static/icons/favicon-192x192.png" alt="Home Assistant" />
++        <img src="/static/icons/favicon-192x192.png" alt="Habab Home Assistant" />
+       </div>
+       <ha-onboarding></ha-onboarding>
+     </div>
+diff --git a/src/state/panel-title-mixin.ts b/src/state/panel-title-mixin.ts
+index e1ff98d9a3a7dcb00f1efc5f9188ebf0f47ee3ec..063c59ea40977329a5c24e77c0a257ca8446a8d2 100644
+--- a/src/state/panel-title-mixin.ts
++++ b/src/state/panel-title-mixin.ts
+@@ -5,7 +5,7 @@
+ import type { HassBaseEl } from "./hass-base-mixin";
+ 
+ const setPageTitle = (title: string | undefined) => {
+-  document.title = title ? `${title} – Home Assistant` : "Home Assistant";
++  document.title = title ? `${title} – Habab Home Assistant` : "Habab Home Assistant";
+ };
+ 
+ const getRoutePath = (): string =>
