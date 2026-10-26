@@ -2,8 +2,9 @@
 
 Инструкция для Git-checkout относится к Habab Home 0.3.6 на Home Assistant
 Core 2026.10.2; текущий `native-frontend-release.json` закрепляет frontend
-`20260930.4+habab.13`. На [странице загрузки](https://habab.ru/home-assistant)
-сейчас доступен ZIP preview 0.3.6.
+`20260930.4+habab.16`. На [странице загрузки](https://habab.ru/home-assistant)
+сейчас доступен ZIP preview 0.3.6 с прежним frontend `.13`; pin исходников
+не обновляет уже опубликованный ZIP или установленный контейнер.
 Распакуйте его в выбранную папку и запустите `start-windows.bat` оттуда. Для
 автоматической загрузки и распаковки используйте отдельный [preview BAT](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-453a45504433.bat).
 Он проверяет SHA-256 и распаковывает ZIP в `%LOCALAPPDATA%\HababHome`.
@@ -16,7 +17,7 @@ Core 2026.10.2; текущий `native-frontend-release.json` закрепляе
 Для новой Git-установки из корня checkout запустите отслеживаемый
 `habab\distribution\start-windows.bat`; двойной щелчок тоже подходит. Для
 обновления сначала выполните `git pull`. Батник пересобирает локальный Docker-
-образ с закреплённым frontend `20260930.4+habab.13` и повторно использует том
+образ с закреплённым frontend `20260930.4+habab.16` и повторно использует том
 `config`. Сохраните рядом остальные файлы `distribution`; не удаляйте том и не
 выполняйте `docker compose down -v`, если нужно сохранить Home Assistant.
 

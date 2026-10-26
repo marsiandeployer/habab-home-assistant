@@ -1,7 +1,7 @@
 # Habab Home 0.3.6 (source candidate)
 
 Windows-пакет выпускается отдельно; этот checkout исходников 0.3.6 использует
-frontend wheel `20260930.4+habab.13`. Windows preview `.13` и Android APK
+frontend wheel `20260930.4+habab.16`. Последние опубликованные Windows preview `.13` и Android APK
 code21/runtime `28a72a31da972bf0` опубликованы из source
 `90445c71ab5ca6a6dbc91433046de54cea955e4f`; физическая установка на Windows и
 P30 **NOT RUN**.
@@ -15,7 +15,18 @@ P30 **NOT RUN**.
 upstream-репозиторий Home Assistant.
 
 Habab Home — локальный Docker-дистрибутив на основе Home Assistant Core
-2026.10.2. Указатель frontend wheel закрепляет `habab.13`, собранный из
+2026.10.2. Исходный кандидат закрепляет frontend `habab.16`: существующий
+wheel CI run `40378445187`, producer source
+`6cbf5ba258c39b963cf4cea9fcf6e47c7122b9b3`, SHA-256
+`3e9f21dfa65e746bf701d765712ca2bc35fdc01697cc6bec04f2c0a8c54c5508`,
+110,480,208 байт; patch bundle
+`66ed3fdfe8fd6fed6494837bbc6777b1c36bc33e021684be41a493d510b88a99`.
+Это перенос проверенных байтов, не повторная компиляция из нового backend SHA.
+До выпуска Windows нужно отдельно разместить wheel/producer manifest, проверить
+публичную загрузку и собрать новый installer candidate из commit с этим pin.
+Физическая установка Windows `.16` — **NOT RUN**.
+
+Последний публичный frontend `habab.13` был собран из
 upstream frontend `20260930.4` с упорядоченным
 патчем SHA-256
 `cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a`. Его
