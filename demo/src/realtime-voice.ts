@@ -165,9 +165,15 @@ class HaDemoRealtimeVoice extends LitElement {
       border: 0;
     }
     @media (max-width: 720px) {
+      details { position: static; }
       .details-panel {
+        left: 0;
         inset-block-start: calc(100% + var(--ha-space-2, 8px));
         inset-block-end: auto;
+        width: min(
+          320px,
+          calc(100dvw - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right)))
+        );
       }
     }
   `;

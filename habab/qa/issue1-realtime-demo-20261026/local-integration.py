@@ -52,6 +52,8 @@ def build_browser_bundle(output):
         'role="status" aria-live="polite"',
         'width: auto;',
         'inset-block-start: max(16px, env(safe-area-inset-top));',
+        'details { position: static; }',
+        'calc(100dvw - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right)))',
     )
     missing = [contract for contract in required_source_contract if contract not in source]
     if missing:
@@ -415,6 +417,29 @@ const { chromium } = require('/root/but/node_modules/playwright');
         && mobileLayout.voice.bottom > mobileLayout.composer.top
         && mobileLayout.voice.top < mobileLayout.composer.bottom)
       throw new Error('mobile voice panel overlaps chat composer: ' + JSON.stringify(mobileLayout));
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    const mobileDisclosure = await page.evaluate(() => {
+      const host = document.querySelector('ha-demo-realtime-voice');
+      const panel = host.shadowRoot.querySelector('.details-panel').getBoundingClientRect();
+      const control = host.getBoundingClientRect();
+      const style = getComputedStyle(host.shadowRoot.querySelector('.details-panel'));
+      return { left: panel.left, right: panel.right, top: panel.top, bottom: panel.bottom,
+        width: panel.width, height: panel.height, position: style.position,
+        controlLeft: control.left, viewportWidth: innerWidth,
+        composerHit: (() => {
+          const composer = document.querySelector('#chat-composer').getBoundingClientRect();
+          return document.elementFromPoint(composer.left + composer.width / 2,
+            composer.top + composer.height / 2)?.id;
+        })() };
+    });
+    if (mobileDisclosure.position !== 'absolute' || mobileDisclosure.width > 320.5
+        || mobileDisclosure.height > 320.5 || mobileDisclosure.left < 15
+        || mobileDisclosure.right > mobileDisclosure.viewportWidth - 15
+        || Math.abs(mobileDisclosure.left - mobileDisclosure.controlLeft) > 1
+        || mobileDisclosure.composerHit !== 'chat-composer')
+      throw new Error('mobile privacy disclosure is clipped or blocks chat: ' + JSON.stringify(mobileDisclosure));
+    await page.keyboard.press('Enter');
     const expandedMobile = await page.evaluate(() => {
       const voice = document.querySelector('ha-demo-realtime-voice');
       const chat = document.querySelector('habab-setup-chat');
