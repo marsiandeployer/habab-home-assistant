@@ -11,10 +11,10 @@ dialog fallback remains available.
 
 Released `.7` patch SHA-256: `06b9ddd22e5ab57ac625f62c856afbba9f780e5e5ca9177da19afcf36c4267bb`.
 
-## `.9` source release and `.8` previous wheel
+## `.9` promoted release (historical acceptance) and `.8` earlier wheel
 
-`distribution/native-frontend-release.json` and the current owner runtime use
-the `.9` wheel below. The current `bridge.patch` is the `.9` source
+The `.9` wheel below was the promoted release before the `.13` promotion draft.
+Its `bridge.patch` is the `.9` source
 with SHA-256
 `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`.
 `build-wheel.sh` targets `20260930.4+habab.9` in a fresh
@@ -33,12 +33,12 @@ It ran with a 5 GiB memory cap, no swap, a two-CPU quota, and a 256-task limit.
 The largest sampled `MemoryCurrent` was 3,013,914,624 bytes and the largest
 sampled task count was 45; the removed cgroup did not leave exact kernel peak
 counters.
-The owner runtime is on `.9`. The owner browser rendered the protected Yandex
-form, accepted keyboard input, retained it across a polling update, and cancelled
-the flow without creating an entry. See
+The previously accepted owner runtime used `.9`. The owner browser rendered the
+protected Yandex form, accepted keyboard input, retained it across a polling
+update, and cancelled the flow without creating an entry. See
 [`native-form-manual-pass.json`](../qa/owner-native-yandex-form-20261025/native-form-manual-pass.json).
 This verifies native form interaction, not an LLM response or live speech.
-The source manifest now pins `.9`; the Windows package is released separately.
+The Windows package is released separately.
 
 The `.8` wheel was built privately as
 `home_assistant_frontend-20260930.4+habab.8-py3-none-any.whl`: 111,324,155 bytes,
@@ -59,9 +59,9 @@ preparation, and reused the `.7` license asset because the `gen-licenses` cache
 index was unavailable. The canonical `.9` build used the normal license
 generation stage instead.
 
-The immutable `.8` artifact is available on the artifact server, with its full
-HTTPS body verified against the digest and size. It is the previous promoted
-wheel. A local
+The `.8` artifact was previously hosted, with its full HTTPS body verified
+against the digest and size. It was promoted before `.9` and later removed from
+registered retention when `.13` became current and `.9` became previous. A local
 candidate image was built from clean commit
 `f803277c68511622e3ad780d10a8a046cb9ef478` on branch
 `qa/owner-frontend8-20261025`: all 44 component files matched and 80 baked backend
@@ -69,7 +69,7 @@ tests passed without a source overlay. See
 [`frontend8-candidate-image-independent.json`](../qa/issue-monitor-20261024/frontend8-candidate-image-independent.json).
 Build and archive readback are not live acceptance. The historical image receipt does not cover later source changes or the `.9` wheel.
 
-## Native product branding profile for the `.13` candidate
+## Native product branding profile for `.13`
 
 The `.13` source profile uses these overlays, in order, on pinned source
 `26690e06b0bf64a1487929245c32842ef92c62b5`:
@@ -88,8 +88,25 @@ full-color SVG is not used as a Safari mask icon.
 
 The private `.11` install exposed sidebar title clipping. The `.12` private
 build failed its mandatory `ResizeController` test. The test-only overlay passed
-3/3 focused tests under `NODE_ENV=production`; no `.13` wheel has been built.
-The public `.9` release pointer remains unchanged.
+3/3 focused tests under `NODE_ENV=production`. Manual CI run `40281615966` built
+the `.13` wheel from producer source
+`84d9ca0f6f7c54a762e26da7de969072a1e649aa`. Its wheel is
+`home_assistant_frontend-20260930.4+habab.13-py3-none-any.whl`, 110,479,800
+bytes, SHA-256
+`86947316d3745af4cc286bce055606b7aefdfd48f667514191bede4a75d5e705`.
+The run passed 75 focused tests, lint, type checks, font checks, and modern and
+legacy bundle compilation. A full HTTPS readback of the published wheel matched
+the digest and size above. Retention now keeps `.13` and `.9`; it removed the
+registered `.8` artifact directory (111,324,155 logical bytes).
+
+The owner runtime now runs `.13` and reports healthy. Owner-browser checks passed
+for desktop sidebar title wrapping (201 px wide by 48 px high), desktop and
+emulated-mobile chat splits, idle close, and Xiaomi dismiss/reload/reopen. The
+owner API returned HTTP 200. The root page shows the Habab credit link and no
+Open Home Foundation loader block; the authorization page does not require a
+footer. Visibility of the title in the mobile navigation drawer remains
+**NOT RUN**. Android and Windows packages built from `.13` have not been
+installed or accepted.
 
 SHA-256 values:
 
@@ -102,36 +119,13 @@ SHA-256 values:
   `cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a`
 
 The three patches contain 46 diff sections across 41 unique target paths;
-they must be applied in the listed order.
+they must be applied in the listed order. The default `build-wheel.sh` still
+uses the `.9` bridge patch. The `.13` candidate uses the manual CI profile and
+the ordered three-patch overlay recorded above.
 
-For a separately authorized `.13` build, use the existing frozen builder with a
-fresh pinned worktree, the private artifact root, and an absent retention state
-(the builder records retention as `SKIP`):
-
-```sh
-candidate=/root/.local/share/habab-native-frontend13-candidate
-worktree=/root/.local/share/habab-native-frontend13-build
-patch="$candidate/composed.patch"
-artifact_root="$candidate/artifacts"
-retention_state="$candidate/retention-not-initialized.json"
-test ! -e "$candidate" && test ! -e "$worktree"
-mkdir -p "$artifact_root"
-test ! -e "$retention_state"
-git worktree add --detach "$worktree" 26690e06b0bf64a1487929245c32842ef92c62b5
-cat habab/native-frontend/bridge.patch \
-  habab/native-frontend/native-test-fixes.patch \
-  habab/native-frontend/native-branding.patch > "$patch"
-HABAB_NATIVE_FRONTEND_WORKTREE="$worktree" \
-HABAB_NATIVE_FRONTEND_PATCH_FILE="$patch" \
-HABAB_NATIVE_FRONTEND_PATCH_SHA=cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a \
-HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.13 \
-HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT="$artifact_root" \
-HABAB_NATIVE_FRONTEND_RETENTION_STATE="$retention_state" \
-bash habab/native-frontend/build-wheel.sh
-```
-
-This recipe is documentation only; build, release, and runtime acceptance were
-not run for `.13`.
+The release manifest pins `.13`; the owner runtime and the scoped browser checks
+above use that wheel. Mobile navigation-drawer visibility and physical Android
+and Windows package acceptance remain **NOT RUN**.
 
 ## Manual CI candidate
 

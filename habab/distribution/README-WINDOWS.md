@@ -1,13 +1,15 @@
 # Запуск на Windows
 
-Инструкция для Git-checkout относится к исходному кандидату Habab Home 0.3.6
-на Home Assistant Core 2026.10.2 с frontend `20260930.4+habab.9`. На [странице
-загрузки](https://habab.ru/home-assistant) сейчас доступен ZIP preview 0.3.6.
+Инструкция для Git-checkout относится к Habab Home 0.3.6 на Home Assistant
+Core 2026.10.2; текущий `native-frontend-release.json` закрепляет frontend
+`20260930.4+habab.13`. На [странице загрузки](https://habab.ru/home-assistant)
+сейчас доступен ZIP preview 0.3.6.
 Распакуйте его в выбранную папку и запустите `start-windows.bat` оттуда. Для
 автоматической загрузки и распаковки используйте отдельный [preview BAT](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-1a844fb6f7a3.bat).
-Он проверяет SHA-256 и распаковывает ZIP в `%LOCALAPPDATA%\HababHome`. ZIP
-собран из исходников коммита `3bdc03b6d13f41d142550703e698591bf032563d`;
-физическая установка preview на Windows не проверялась.
+Он проверяет SHA-256 и распаковывает ZIP в `%LOCALAPPDATA%\HababHome`. Этот ZIP
+собран из исходников коммита `3bdc03b6d13f41d142550703e698591bf032563d` и
+содержит frontend `.9`; физическая установка preview на Windows не проверялась.
+Новый Windows-пакет с frontend `.13` ещё не собран и не принят.
 [Метаданные preview](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-1a844fb6f7a3.json)
 указывают ZIP `habab-home-windows-1a844fb6f7a3.zip`, 290827 байт, SHA-256
 `1a844fb6f7a30e16925fd3aa05ff20c0653cf45caf55def36530cdd3a2e746f7` и `physical_windows_run=false`.
@@ -15,7 +17,7 @@
 Для новой Git-установки из корня checkout запустите отслеживаемый
 `habab\distribution\start-windows.bat`; двойной щелчок тоже подходит. Для
 обновления сначала выполните `git pull`. Батник пересобирает локальный Docker-
-образ с закреплённым frontend `20260930.4+habab.9` и повторно использует том
+образ с закреплённым frontend `20260930.4+habab.13` и повторно использует том
 `config`. Сохраните рядом остальные файлы `distribution`; не удаляйте том и не
 выполняйте `docker compose down -v`, если нужно сохранить Home Assistant.
 
@@ -175,7 +177,8 @@ docker compose --env-file .env.opencode-windows -p habab-home-windows -f compose
 инициализировался. Аккаунт, провайдер и устройства не создавались; первичная
 настройка осталась незавершённой. Контейнер и новая конфигурация удалены, образ
 сохранён. [Отчёт](../qa/windows-candidate-0.3.6/clean-image-boot.json). Установка на
-физической Windows не проверялась.
+физической Windows не проверялась. Это историческая Linux-проверка frontend
+`.9`; Windows-пакет с frontend `.13` ещё не собран и не принят.
 
 Изолированный Linux Docker QA для принятого образа 0.3.0 без overlays прошёл 7/7 browser
 сценариев и 100 Python, 26 JavaScript и 10 native frontend tests; lint,

@@ -55,6 +55,29 @@ async def async_setup(hass, config):
     frontend.add_extra_js_url(hass, assistant_url)
     frontend.add_manifest_json_key("name", "Habab Home Assistant")
     frontend.add_manifest_json_key("short_name", "Habab Home")
+    frontend.add_manifest_json_key(
+        "icons",
+        [
+            {
+                "src": "/static/habab/habab-192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": "/static/habab/habab-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any",
+            },
+            {
+                "src": "/static/habab/habab-maskable-512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "maskable",
+            },
+        ],
+    )
     from .setup_agent import SetupAgent
 
     agent = SetupAgent(hass)

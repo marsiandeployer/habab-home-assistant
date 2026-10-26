@@ -1,13 +1,15 @@
 {
-  "version": "20260930.4+habab.9",
+  "version": "20260930.4+habab.13",
   "upstream_frontend_version": "20260930.4",
   "source_commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
   "source": "https://github.com/home-assistant/frontend/tree/26690e06b0bf64a1487929245c32842ef92c62b5",
   "license": "Apache-2.0",
-  "patch_sha256": "d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092",
+  "producer_source_commit": "84d9ca0f6f7c54a762e26da7de969072a1e649aa",
+  "producer_workflow_run_id": "40281615966",
+  "patch_sha256": "cccdebad3a85a4f8b1e0e9d1e20b4374747498890cbf3c4a2e4983ed0bd29a9a",
   "russian_catalog_sha256": "154cc8ea8822c85d63b46e34ccc667cbac01df2cbf8cacb0a300bfe1fecda3ce",
-  "filename": "home_assistant_frontend-20260930.4+habab.9-py3-none-any.whl",
-  "sha256": "9faecade64144e2a6af3c3a4edc951e183292eaab0147cc49f85f8ec555d2952",
-  "bytes": 110461281,
-  "url": "https://habab-demo.wpmix.net/downloads/native-frontend/9faecade64144e2a6af3c3a4edc951e183292eaab0147cc49f85f8ec555d2952/home_assistant_frontend-20260930.4+habab.9-py3-none-any.whl"
+  "filename": "home_assistant_frontend-20260930.4+habab.13-py3-none-any.whl",
+  "sha256": "86947316d3745af4cc286bce055606b7aefdfd48f667514191bede4a75d5e705",
+  "bytes": 110479800,
+  "url": "https://habab-demo.wpmix.net/downloads/native-frontend/86947316d3745af4cc286bce055606b7aefdfd48f667514191bede4a75d5e705/home_assistant_frontend-20260930.4+habab.13-py3-none-any.whl"
 }
