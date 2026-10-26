@@ -2,6 +2,7 @@ import { customElement } from "lit/decorators";
 import type { LocalizeFunc } from "../../src/common/translations/localize";
 import { isNavigationClick } from "../../src/common/dom/is-navigation-click";
 import { navigate } from "../../src/common/navigate";
+import { MockBaseEntity } from "../../src/fake_data/entities/base-entity";
 import type { MockHomeAssistant } from "../../src/fake_data/provide_hass";
 import { provideHass } from "../../src/fake_data/provide_hass";
 import { HomeAssistantAppEl } from "../../src/layouts/home-assistant";
@@ -426,6 +427,37 @@ export class HaDemo extends HomeAssistantAppEl {
         }
       }
     );
+
+    window.addEventListener("habab-demo-realtime-action", (event) => {
+      if (!demoStateReady) return;
+      for (const update of event.detail.entities) {
+        if (!isDemoPersistedEntity(update.entity_id)) continue;
+        const currentStates = this.hass?.states;
+        const current = currentStates?.[update.entity_id];
+        if (!current || !currentStates) continue;
+        const attributes = {
+          ...current.attributes,
+          ...(update.brightness === undefined ? {} : { brightness: update.brightness }),
+          ...(update.temperature === undefined ? {} : { temperature: update.temperature }),
+        };
+        lastPersistedState[update.entity_id] = JSON.stringify({
+          state: update.state,
+          brightness: attributes.brightness,
+          temperature: attributes.temperature,
+        });
+        const mockEntity: unknown = hass.mockEntities[update.entity_id];
+        if (mockEntity instanceof MockBaseEntity) {
+          mockEntity.update({ state: update.state, attributes });
+        } else {
+          this._updateHass({
+            states: {
+              ...currentStates,
+              [update.entity_id]: { ...current, state: update.state, attributes },
+            },
+          });
+        }
+      }
+    });
 
     // Taken from polymer/pwa-helpers. BSD-3 licensed
     document.body.addEventListener(

@@ -1,9 +1,11 @@
 """Same-origin API for the Home Assistant frontend's mock-only public demo."""
 
+import json
 import hashlib
 import hmac
 import os
 import secrets
+import socket
 
 from flask import Blueprint, current_app, jsonify, request, session
 from flask.sessions import SecureCookieSessionInterface
@@ -89,6 +91,38 @@ def _same_origin():
     return bool(expected and origin == expected)
 
 
+def _demo_openai_bootstrap():
+    """Ask the local voice relay for a short-lived, session-scoped browser grant."""
+    upstream_key = current_app.config.get('OPENAI_API_KEY') or os.getenv('OPENAI_API_KEY')
+    control_path = (current_app.config.get('HA_DEMO_REALTIME_CONTROL_SOCKET')
+                    or os.getenv('HA_DEMO_REALTIME_CONTROL_SOCKET')
+                    or '/root/.local/share/habab-voice-relay/control.sock')
+    if not isinstance(upstream_key, str) or not 8 <= len(upstream_key) <= 2048:
+        return None
+    payload = json.dumps({'purpose': 'demo_openai_bootstrap', 'upstream_key': upstream_key,
+                          'session_hash': _session_hash()}, separators=(',', ':')).encode() + b'\n'
+    if len(payload) > 4096:
+        return None
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(2)
+        connection.connect(control_path)
+        connection.sendall(payload)
+        response = bytearray()
+        while len(response) <= 4096:
+            block = connection.recv(1024)
+            if not block:
+                break
+            response.extend(block)
+            if b'\n' in block:
+                break
+    result = json.loads(bytes(response).split(b'\n', 1)[0])
+    if (not isinstance(result, dict) or result.get('ready') is not True
+            or not isinstance(result.get('value'), str) or not isinstance(result.get('websocket_url'), str)):
+        return None
+    return {'value': result['value'], 'expires_at': result.get('expires_at'),
+            'websocket_url': result['websocket_url']}
+
+
 @ha_demo_bp.before_request
 def restrict_demo_api_hosts():
     host = request.host.split(':', 1)[0].lower()
@@ -112,6 +146,22 @@ def get_demo_state():
         return jsonify(error='Демо временно недоступно. Обновите страницу позже.'), 503
     merged = {**SEED, **saved}
     return jsonify(states=merged)
+
+
+@ha_demo_bp.post('/realtime/bootstrap')
+def bootstrap_demo_realtime():
+    if not _same_origin():
+        return jsonify(error='origin'), 403
+    if request.args or request.content_length not in (None, 0) or request.headers.get('Transfer-Encoding'):
+        return jsonify(error='invalid'), 400
+    try:
+        result = _demo_openai_bootstrap()
+    except Exception:
+        current_app.logger.warning('Home Assistant demo voice bootstrap failed')
+        return jsonify(error='Голосовой помощник сейчас недоступен.'), 503
+    if result is None:
+        return jsonify(error='Голосовой помощник сейчас недоступен.'), 503
+    return jsonify(result)
 
 
 @ha_demo_bp.post('/state')

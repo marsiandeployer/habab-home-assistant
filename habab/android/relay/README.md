@@ -30,6 +30,20 @@ token не попадают на устройство. Для прямого Ope
 использовать выбранный провайдер напрямую; fallback между ними нет. Старые
 Habab OpenAI Realtime маршруты отключены.
 
+Отдельный public demo OpenAI Realtime использует `/openai/demo/ws`, а не
+legacy endpoint выше. Он выдаёт только одноразовые grants через приватный
+control socket relay и держит OpenAI key на сервере. Приватный relay config
+управляет общим числом запусков за время жизни процесса и числом запусков на
+одну анонимную demo-сессию:
+
+```json
+{"demo_openai_session_limit": 5, "demo_openai_sessions_per_session": 2}
+```
+
+По умолчанию разрешено не более пяти запусков на процесс и двух запусков на
+один session hash. Ноль отключает запуск. Учёт ведётся в RAM и сбрасывается
+при рестарте relay; это ограниченный QA/demo бюджет, не суточная квота.
+
 Для браузера capabilities добавляют `realtime.browser_auth` с режимом
 `first_text_frame` и type `habab.voice.auth.v1`. По умолчанию этот режим
 отключён: список точных Origin задаётся полем `browser_origins` приватной

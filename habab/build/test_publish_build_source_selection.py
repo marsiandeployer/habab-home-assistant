@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -15,6 +16,7 @@ from publish_build import (
     attribution_text,
     copy_public_release,
     replace_public_index,
+    scope_demo_realtime_headers,
     stage_published_frontend,
     validate_source_options,
     write_provenance,
@@ -22,6 +24,35 @@ from publish_build import (
 
 
 class PublishedFrontendSelectionTests(unittest.TestCase):
+    def test_demo_fallback_csp_allows_realtime_websocket(self):
+        headers = scope_demo_realtime_headers(
+            "Content-Security-Policy: default-src 'self'; connect-src 'self';\n"
+        )
+        self.assertIn("connect-src 'self' wss://habab-voice.wpmix.net;", headers)
+
+    def test_demo_realtime_websocket_is_allowed_by_tracked_csp(self):
+        repository = Path(__file__).resolve().parents[2]
+        policies = [
+            (repository / 'demo/public/_headers').read_text(encoding='utf-8'),
+            (repository / 'habab/deploy/nginx-location.conf').read_text(encoding='utf-8'),
+            (repository / 'habab/deploy/nginx-vhost.conf').read_text(encoding='utf-8'),
+        ]
+        for policy in policies:
+            connect_src = re.search(r'connect-src ([^;\n]+)', policy)
+            self.assertIsNotNone(connect_src)
+            self.assertIn('wss://habab-voice.wpmix.net', connect_src.group(1))
+
+    def test_demo_nginx_proxies_realtime_bootstrap(self):
+        vhost = (Path(__file__).resolve().parents[1] / 'deploy/nginx-vhost.conf').read_text(encoding='utf-8')
+        match = re.search(
+            r'location = /api/ha-demo/realtime/bootstrap\s*\{([^}]*)\}',
+            vhost,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        self.assertIn('proxy_pass http://127.0.0.1:8318;', match.group(1))
+        self.assertIn('proxy_set_header X-Forwarded-Proto https;', match.group(1))
+
     def test_public_permissions_survive_restrictive_umask_without_changing_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

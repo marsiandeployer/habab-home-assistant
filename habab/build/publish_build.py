@@ -29,6 +29,14 @@ if not re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,79}', RELEASE):
 PREFIX = f'/demos/home-assistant/releases/{RELEASE}/'
 
 
+def scope_demo_realtime_headers(headers_text):
+    """Allow the demo Realtime relay through the fallback CSP."""
+    return headers_text.replace(
+        "connect-src 'self';",
+        "connect-src 'self' wss://habab-voice.wpmix.net;",
+    )
+
+
 def stage_published_frontend(source_root, stage, entrypoint, *, license_source=None):
     """Copy only the retained flat frontend inputs, excluding adjacent public artifacts."""
     for name in PUBLISHED_ASSET_DIRS:
@@ -313,6 +321,7 @@ def main():
         "manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; "
         "frame-ancestors 'self' https://habab.ru https://www.habab.ru",
     )
+    headers_text = scope_demo_realtime_headers(headers_text)
     headers_file.write_text(headers_text, encoding='utf-8')
 
     # Upstream source maps embed raw.githubusercontent.com sources. They are

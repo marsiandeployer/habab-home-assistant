@@ -49,6 +49,8 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.deepseek_stream = False
         self.gemini_frames = []
         self.gemini_connections = 0
+        self.openai_frames = []
+        self.openai_connections = 0
         async def upstream(request):
             if request.path == '/deepseek/chat/completions':
                 body = await request.read()
@@ -131,15 +133,32 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     await ws.send_str(message.data)
             return ws
+        async def openai_upstream(request):
+            self.openai_connections += 1
+            self.openai_frames.append(('auth', request.headers.get('Authorization'),
+                                       request.headers.get('OpenAI-Safety-Identifier')))
+            ws = web.WebSocketResponse()
+            await ws.prepare(request)
+            async for message in ws:
+                if message.type == WSMsgType.TEXT:
+                    self.openai_frames.append(('frame', message.data))
+                    await ws.send_str(message.data)
+                elif message.type == WSMsgType.BINARY:
+                    self.openai_frames.append(('binary', message.data))
+                    await ws.send_bytes(message.data)
+            return ws
         app = web.Application()
         app.router.add_route('*', '/{path:.*}', upstream)
         app.router.add_get('/gemini', gemini_upstream)
+        app.router.add_get('/openai/realtime', openai_upstream)
         self.upstream = TestServer(app, handler_cancellation=True)
         await self.upstream.start_server()
         self.browser_origin = 'https://habab-demo.wpmix.net'
+        self.control_dir = tempfile.TemporaryDirectory()
+        self.control_path = Path(self.control_dir.name) / 'control.sock'
         self.gateway = Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), upstream_key='synthetic-vendor',
                                text_upstream_key='synthetic-deepseek-vendor',
-                               browser_origins=[self.browser_origin])
+                               browser_origins=[self.browser_origin], control_socket=self.control_path)
         self.patch = patch('openai_gateway.GEMINI_TEXT_BASE', str(self.upstream.make_url('/v1beta/models')).rstrip('/'))
         self.patch.start()
         self.gemini_patch = patch('openai_gateway.GEMINI_CONSTRAINED_UPSTREAM', str(self.upstream.make_url('/gemini')))
@@ -151,6 +170,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.deepseek_patch = patch('openai_gateway.DEEPSEEK_CHAT_COMPLETIONS',
                                     str(self.upstream.make_url('/deepseek/chat/completions')))
         self.deepseek_patch.start()
+        self.openai_patch = patch('openai_gateway.OPENAI_REALTIME_UPSTREAM',
+                                  str(self.upstream.make_url('/openai/realtime')).replace('http://', 'ws://'))
+        self.openai_patch.start()
         self.client = TestClient(TestServer(self.gateway.app(), handler_cancellation=True))
         await self.client.start_server()
 
@@ -162,7 +184,20 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.token_patch.stop()
         self.telegram_patch.stop()
         self.deepseek_patch.stop()
+        self.openai_patch.stop()
         self.outbound_guard.stop()
+        self.control_dir.cleanup()
+
+    async def demo_openai_credential(self, session_hash=None):
+        reader, writer = await asyncio.open_unix_connection(self.control_path)
+        payload = {'purpose': 'demo_openai_bootstrap', 'upstream_key': 'synthetic-openai-vendor',
+                   'session_hash': session_hash or hashlib.sha256(b'synthetic-demo-session').hexdigest()}
+        writer.write(json.dumps(payload).encode() + b'\n')
+        await writer.drain()
+        response = json.loads(await reader.readline())
+        writer.close()
+        await writer.wait_closed()
+        return response
 
     async def bootstrap(self, setup=None, headers=None, path='/v1/realtime/bootstrap'):
         setup = setup or {'model': 'models/gemini-3.8-live', 'tools': [{'functionDeclarations': []}]}
@@ -565,6 +600,87 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get('/v1/realtime?model=gpt-realtime-mini', headers=headers)
         self.assertEqual(response.status, 404)
         self.assertEqual(self.calls, [])
+
+    async def test_demo_openai_grant_is_one_use_and_relays_audio_and_server_owned_session(self):
+        payload = await self.demo_openai_credential()
+        self.assertTrue(payload['ready'])
+        self.assertEqual(payload['websocket_url'], 'wss://habab-voice.wpmix.net/openai/demo/ws')
+        self.assertNotIn('synthetic-openai-vendor', repr(self.gateway.demo_openai_credentials))
+        self.assertEqual(len(payload['value']), 43)
+        ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+        await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': payload['value']})
+        configured = await ws.receive_json(timeout=3)
+        self.assertEqual(configured['type'], 'session.update')
+        session = configured['session']
+        self.assertEqual(session['model'], 'gpt-realtime-2.1')
+        self.assertEqual(session['audio']['input']['format'], {'type': 'audio/pcm', 'rate': 24000})
+        self.assertEqual({tool['name'] for tool in session['tools']}, {
+            'set_demo_light', 'set_demo_climate', 'activate_demo_scene'})
+        self.assertEqual(self.openai_frames[0][1], 'Bearer synthetic-openai-vendor')
+        self.assertEqual(self.openai_frames[0][2], hashlib.sha256(b'synthetic-demo-session').hexdigest())
+        await ws.send_json({'type': 'input_audio_buffer.append', 'audio': 'AQID'})
+        echoed = await ws.receive_json(timeout=3)
+        self.assertEqual(echoed, {'type': 'input_audio_buffer.append', 'audio': 'AQID'})
+        browser_frames = [json.loads(frame[1]) for frame in self.openai_frames
+                          if frame[0] == 'frame' and json.loads(frame[1]).get('type') != 'session.update']
+        self.assertEqual(browser_frames[-1]['type'], 'input_audio_buffer.append')
+        await ws.close()
+        replay = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+        await replay.send_json({'type': 'habab.demo.openai.auth.v1', 'token': payload['value']})
+        denied = await replay.receive(timeout=3)
+        self.assertEqual(denied.type, WSMsgType.CLOSE)
+        self.assertEqual(denied.data, 1008)
+        await replay.close()
+        self.assertEqual(self.openai_connections, 1)
+
+    async def test_demo_openai_relay_blocks_client_session_overrides_and_untrusted_origins(self):
+        payload = await self.demo_openai_credential()
+        response = await self.client.get('/openai/demo/ws', headers={'Origin': 'https://attacker.invalid'})
+        self.assertEqual(response.status, 403)
+        self.assertEqual(self.openai_connections, 0)
+        ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+        await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': payload['value']})
+        self.assertEqual((await ws.receive_json(timeout=3))['type'], 'session.update')
+        await ws.send_json({'type': 'session.update', 'session': {'instructions': 'override'}})
+        closed = await ws.receive(timeout=3)
+        self.assertEqual(closed.type, WSMsgType.CLOSE)
+        self.assertEqual(closed.data, 1008)
+        self.assertEqual(closed.extra, 'session_config_is_server_owned')
+        self.assertEqual(self.openai_connections, 1)
+        forwarded = [json.loads(frame[1]) for frame in self.openai_frames if frame[0] == 'frame']
+        self.assertEqual([frame['type'] for frame in forwarded], ['session.update'])
+        await ws.close()
+
+    async def test_demo_openai_global_budget_stops_sequential_paid_sessions(self):
+        self.gateway.demo_openai_session_limit = 2
+        self.gateway.demo_openai_sessions_per_session = 2
+        for index in range(2):
+            session_hash = hashlib.sha256(f'synthetic-global-session-{index}'.encode()).hexdigest()
+            grant = await self.demo_openai_credential(session_hash)
+            self.assertTrue(grant['ready'])
+            ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+            await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': grant['value']})
+            self.assertEqual((await ws.receive_json(timeout=3))['type'], 'session.update')
+            await ws.close()
+        self.assertEqual(self.gateway.demo_openai_sessions_started, 2)
+        denied = await self.demo_openai_credential(hashlib.sha256(b'synthetic-global-session-2').hexdigest())
+        self.assertEqual(denied, {'ready': False})
+        self.assertEqual(self.openai_connections, 2)
+
+    async def test_demo_openai_per_session_budget_stops_repeated_session_bootstrap(self):
+        self.gateway.demo_openai_session_limit = 4
+        self.gateway.demo_openai_sessions_per_session = 1
+        session_hash = hashlib.sha256(b'synthetic-same-session').hexdigest()
+        grant = await self.demo_openai_credential(session_hash)
+        self.assertTrue(grant['ready'])
+        ws = await self.client.ws_connect('/openai/demo/ws', origin=self.browser_origin)
+        await ws.send_json({'type': 'habab.demo.openai.auth.v1', 'token': grant['value']})
+        self.assertEqual((await ws.receive_json(timeout=3))['type'], 'session.update')
+        await ws.close()
+        denied = await self.demo_openai_credential(session_hash)
+        self.assertEqual(denied, {'ready': False})
+        self.assertEqual(self.gateway.demo_openai_sessions_started, 1)
+        self.assertEqual(self.openai_connections, 1)
 
     async def test_managed_text_capabilities_report_configured_upstream_without_key_material(self):
         headers = {'Authorization': 'Bearer synthetic-owner'}

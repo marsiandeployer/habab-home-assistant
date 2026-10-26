@@ -31,10 +31,13 @@ GEMINI_TEXT_MODELS = (GEMINI_TEXT_MODEL, 'gemini-3.8-flash')
 HABAB_TEXT_MODEL = 'habab-chat'
 DEEPSEEK_TEXT_MODEL = 'deepseek-flash'
 GEMINI_WEBSOCKET = 'wss://habab-voice.wpmix.net/gemini/ws'
+OPENAI_REALTIME_UPSTREAM = 'wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1'
+OPENAI_DEMO_WEBSOCKET = 'wss://habab-voice.wpmix.net/openai/demo/ws'
 TOKEN_RESPONSE_MAX = 64 * 1024
 VOICE_FIRST_FRAME_TIMEOUT = 10
 VOICE_SETUP_MAX_BYTES = 64 * 1024
 BROWSER_VOICE_AUTH_TYPE = 'habab.voice.auth.v1'
+DEMO_OPENAI_AUTH_TYPE = 'habab.demo.openai.auth.v1'
 LEGACY_OPENAI_ROUTES = {'audio/speech', 'audio/transcriptions', 'realtime/client_secrets'}
 TELEGRAM_METHODS = ('getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction')
 TELEGRAM_BOT_TOKEN = re.compile(r'[0-9]{1,20}:[A-Za-z0-9_-]{20,256}\Z')
@@ -88,19 +91,29 @@ async def redacted_stream(content, secret, max_bytes):
 
 class Gateway:
     def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
-                 browser_origins=()):
+                 browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         if not isinstance(browser_origins, (list, tuple, set, frozenset)):
             raise ValueError('Expected a list of exact browser origins')
         if any(not exact_web_origin(origin) for origin in browser_origins):
             raise ValueError('Invalid browser origin')
+        if (type(demo_openai_session_limit) is not int or not 0 <= demo_openai_session_limit <= 1000
+                or type(demo_openai_sessions_per_session) is not int
+                or not 0 <= demo_openai_sessions_per_session <= demo_openai_session_limit):
+            raise ValueError('Invalid demo Realtime session limits')
         self.key_hash = key_hash
         self.upstream_key = upstream_key
         self.text_upstream_key = text_upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
         self.browser_origins = frozenset(browser_origins)
         self.gemini_credentials = {}
+        self.demo_openai_credentials = {}
+        self.openai_upstream_key = None
+        self.demo_openai_session_limit = demo_openai_session_limit
+        self.demo_openai_sessions_per_session = demo_openai_sessions_per_session
+        self.demo_openai_sessions_started = 0
+        self.demo_openai_sessions_by_hash = {}
         self.active_voice = 0
         self.inflight = 0
         self.client = None
@@ -146,6 +159,8 @@ class Gateway:
             self.upstream_key = None
             self.text_upstream_key = None
             self.gemini_credentials.clear()
+            self.demo_openai_credentials.clear()
+            self.openai_upstream_key = None
             await self.client.close()
 
     async def enroll(self, reader, writer):
@@ -158,6 +173,35 @@ class Gateway:
             payload = json.loads(await asyncio.wait_for(reader.readline(), 3))
             key = payload.get('upstream_key')
             purpose = payload.get('purpose', 'voice')
+            if purpose == 'demo_openai_bootstrap':
+                session_hash = payload.get('session_hash')
+                if (set(payload) != {'purpose', 'upstream_key', 'session_hash'}
+                        or not isinstance(session_hash, str)
+                        or not re.fullmatch(r'[0-9a-f]{64}', session_hash)):
+                    raise ValueError('Invalid demo bootstrap')
+                if not isinstance(key, str) or not 8 <= len(key) <= 2048 or any(ord(c) < 33 or ord(c) > 126 for c in key):
+                    raise ValueError('Invalid enrollment')
+                now = time.time()
+                self.demo_openai_credentials = {
+                    token_hash: grant for token_hash, grant in self.demo_openai_credentials.items()
+                    if grant['expires'] > now
+                }
+                session_count = self.demo_openai_sessions_by_hash.get(session_hash, 0)
+                if self.active_voice >= 2 or len(self.demo_openai_credentials) >= 8:
+                    writer.write(b'{"ready":false}\n')
+                    return
+                if (self.demo_openai_sessions_started >= self.demo_openai_session_limit
+                        or session_count >= self.demo_openai_sessions_per_session):
+                    writer.write(b'{"ready":false}\n')
+                    return
+                value = secrets.token_urlsafe(32)
+                self.openai_upstream_key = key
+                self.demo_openai_credentials[hashlib.sha256(value.encode()).hexdigest()] = {
+                    'expires': now + 60, 'session_hash': session_hash,
+                }
+                writer.write((json.dumps({'ready': True, 'value': value, 'expires_at': int(now + 60),
+                                          'websocket_url': OPENAI_DEMO_WEBSOCKET}) + '\n').encode())
+                return
             if set(payload) - {'upstream_key', 'purpose'} or purpose not in {'voice', 'text'}:
                 raise ValueError('Invalid enrollment purpose')
             if not isinstance(key, str) or not 8 <= len(key) <= 2048 or any(ord(c) < 33 or ord(c) > 126 for c in key):
@@ -174,6 +218,160 @@ class Gateway:
             finally:
                 writer.close()
                 await writer.wait_closed()
+
+    async def openai_demo_voice(self, request):
+        if request.query:
+            return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        if request.headers.get('Authorization'):
+            return web.json_response({'error': {'code': 'relay_route_not_allowed'}}, status=404)
+        if request.headers.get('Origin') not in self.browser_origins:
+            return web.json_response({'error': {'code': 'relay_origin_not_allowed'}}, status=403)
+        if self.openai_upstream_key is None:
+            return web.json_response({'error': {'code': 'openai_demo_not_ready'}}, status=503)
+        if self.active_voice >= 2:
+            return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)
+        self.active_voice += 1
+        downstream = web.WebSocketResponse(max_msg_size=256 * 1024, heartbeat=20)
+        try:
+            await downstream.prepare(request)
+            try:
+                first = await downstream.receive(timeout=VOICE_FIRST_FRAME_TIMEOUT)
+            except asyncio.TimeoutError:
+                await downstream.close(code=1008, message=b'auth_timeout')
+                return downstream
+            if first.type != WSMsgType.TEXT or len(first.data.encode()) > 2048:
+                await downstream.close(code=1008, message=b'invalid_auth_frame')
+                return downstream
+            try:
+                frame = json.loads(first.data)
+                if (not isinstance(frame, dict) or set(frame) != {'type', 'token'}
+                        or frame.get('type') != DEMO_OPENAI_AUTH_TYPE
+                        or not isinstance(frame.get('token'), str) or not 1 <= len(frame['token']) <= 2048):
+                    raise ValueError
+            except (ValueError, TypeError):
+                await downstream.close(code=1008, message=b'invalid_auth_frame')
+                return downstream
+            digest = hashlib.sha256(frame['token'].encode()).hexdigest()
+            item = self.demo_openai_credentials.pop(digest, None)
+            if item is None or item['expires'] <= time.time() or self.openai_upstream_key is None:
+                await downstream.close(code=1008, message=b'relay_not_authorized')
+                return downstream
+            session_hash = item['session_hash']
+            session_count = self.demo_openai_sessions_by_hash.get(session_hash, 0)
+            if (self.demo_openai_sessions_started >= self.demo_openai_session_limit
+                    or session_count >= self.demo_openai_sessions_per_session):
+                await downstream.close(code=1008, message=b'session_limit_reached')
+                return downstream
+            # Charge the process and anonymous session before opening the paid upstream socket.
+            self.demo_openai_sessions_started += 1
+            self.demo_openai_sessions_by_hash[session_hash] = session_count + 1
+            upstream_key = self.openai_upstream_key
+            async with self.client.ws_connect(OPENAI_REALTIME_UPSTREAM,
+                    headers={'Authorization': 'Bearer ' + upstream_key,
+                             'OpenAI-Safety-Identifier': item['session_hash']},
+                    max_msg_size=256 * 1024,
+                    timeout=ClientWSTimeout(ws_receive=60, ws_close=5), heartbeat=20) as upstream:
+                upstream_key = None
+                session = {
+                    'type': 'realtime',
+                    'model': 'gpt-realtime-2.1',
+                    'output_modalities': ['audio'],
+                    'instructions': ('Ты голосовой помощник демо-квартиры Habab. Отвечай по-русски. '
+                        'Для управления используй только объявленные функции. Объясняй, что меняешь, '
+                        'и не утверждай, что состояние изменено, до результата функции.'),
+                    'audio': {
+                        'input': {'format': {'type': 'audio/pcm', 'rate': 24000},
+                                  'transcription': {'model': 'gpt-4o-mini-transcribe'},
+                                  'turn_detection': {'type': 'semantic_vad'}},
+                        'output': {'format': {'type': 'audio/pcm', 'rate': 24000}, 'voice': 'marin'},
+                    },
+                    'tools': [
+                        {'type': 'function', 'name': 'set_demo_light',
+                         'description': 'Включить или выключить разрешённый свет в демо-квартире.',
+                         'parameters': {'type': 'object', 'properties': {
+                             'entity_id': {'type': 'string', 'enum': sorted({'light.living_room_floor_lamp',
+                                 'light.living_room_spotlights', 'light.kitchen_spotlights', 'light.kitchen_worktop',
+                                 'light.entrance_ceiling', 'light.bedroom_ceiling', 'light.bedside_lamp',
+                                 'light.office_desk_lamp', 'light.garden_path'})},
+                             'state': {'type': 'string', 'enum': ['on', 'off']}},
+                             'required': ['entity_id', 'state'], 'additionalProperties': False}},
+                        {'type': 'function', 'name': 'set_demo_climate',
+                         'description': 'Настроить климат демо-гостиной.',
+                         'parameters': {'type': 'object', 'properties': {
+                             'state': {'type': 'string', 'enum': ['heat', 'off', 'auto']},
+                             'temperature': {'type': 'number', 'minimum': 7, 'maximum': 35}},
+                             'required': ['state'], 'additionalProperties': False}},
+                        {'type': 'function', 'name': 'activate_demo_scene',
+                         'description': 'Включить одну из двух сцен демо-квартиры.',
+                         'parameters': {'type': 'object', 'properties': {
+                             'entity_id': {'type': 'string', 'enum': ['scene.evening', 'scene.focus']}},
+                             'required': ['entity_id'], 'additionalProperties': False}},
+                    ],
+                    'tool_choice': 'auto',
+                }
+                await upstream.send_json({'type': 'session.update', 'session': session})
+
+                async def browser_to_openai():
+                    total = 0
+                    async for message in downstream:
+                        if message.type == WSMsgType.TEXT:
+                            total += len(message.data.encode())
+                            if total > 16 * 1024 * 1024:
+                                break
+                            try:
+                                event = json.loads(message.data)
+                            except (ValueError, TypeError):
+                                await downstream.close(code=1008, message=b'invalid_event')
+                                break
+                            if isinstance(event, dict) and event.get('type') == 'session.update':
+                                await downstream.close(code=1008, message=b'session_config_is_server_owned')
+                                break
+                            await upstream.send_str(message.data)
+                        elif message.type == WSMsgType.BINARY:
+                            total += len(message.data)
+                            if total > 16 * 1024 * 1024:
+                                break
+                            await upstream.send_bytes(message.data)
+                        elif message.type in (WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSED):
+                            break
+
+                async def openai_to_browser():
+                    total = 0
+                    async for message in upstream:
+                        if message.type == WSMsgType.TEXT:
+                            total += len(message.data.encode())
+                            if total > 16 * 1024 * 1024:
+                                break
+                            await downstream.send_str(message.data)
+                        elif message.type == WSMsgType.BINARY:
+                            total += len(message.data)
+                            if total > 16 * 1024 * 1024:
+                                break
+                            await downstream.send_bytes(message.data)
+                        elif message.type in (WSMsgType.ERROR, WSMsgType.CLOSE, WSMsgType.CLOSED):
+                            break
+
+                tasks = [asyncio.create_task(browser_to_openai()), asyncio.create_task(openai_to_browser())]
+                try:
+                    await asyncio.wait(tasks, timeout=300, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if not downstream.prepared:
+                return web.json_response({'error': {'code': 'openai_demo_unavailable'}}, status=502)
+            try:
+                await downstream.close(code=1011, message=b'openai_demo_unavailable')
+            except Exception:
+                pass
+        finally:
+            self.active_voice -= 1
+            if downstream.prepared:
+                await downstream.close()
+        return downstream
 
     async def health(self, request):
         return web.json_response({'service': 'habab-voice-relay', 'ok': True, 'upstreamReady': self.upstream_key is not None})
@@ -698,6 +896,7 @@ class Gateway:
         app.router.add_route('*', '/telegram/{method}', self.telegram)
         app.router.add_post('/v1/realtime/bootstrap', self.gemini_bootstrap)
         app.router.add_get('/gemini/ws', self.gemini_voice)
+        app.router.add_get('/openai/demo/ws', self.openai_demo_voice)
         app.router.add_route('*', '/gemini/{tail:.*}', self.gemini_text)
         app.router.add_route('*', '/v1/{route:.*}', self.legacy_http)
         return app
@@ -709,7 +908,9 @@ def main():
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock',
-                      browser_origins=config.get('browser_origins', []))
+                      browser_origins=config.get('browser_origins', []),
+                      demo_openai_session_limit=config.get('demo_openai_session_limit', 5),
+                      demo_openai_sessions_per_session=config.get('demo_openai_sessions_per_session', 2))
     web.run_app(gateway.app(), host='127.0.0.1', port=config.get('port', 8326), access_log=None, print=None, handler_cancellation=True)
 
 
