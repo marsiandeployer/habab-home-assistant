@@ -34,7 +34,7 @@ def retention_preview(state, retention):
     return preview
 
 
-def publish(manifest, public_key, destination, state, retention, source_revision):
+def publish(manifest, public_key, destination, state, retention, source_revision, apply_retention=True):
     manifest, public_key = Path(manifest).resolve(), Path(public_key).resolve()
     destination, state, retention = Path(destination).resolve(), Path(state).resolve(), Path(retention).resolve()
     if not re.fullmatch(r'[0-9a-f]{40}', source_revision):
@@ -81,12 +81,14 @@ def publish(manifest, public_key, destination, state, retention, source_revision
                 target = destination / source.name
                 if not target.exists():
                     os.replace(stage / source.name, target)
-        command = [sys.executable, str(retention), '--state', str(state),
-                   '--release', identity, '--apply']
-        for value in artifacts:
-            command.extend(['--artifact', value])
-        subprocess.run(command, check=True)
-    return {'published_runtime': identity, 'destination': str(destination)}
+        if apply_retention:
+            command = [sys.executable, str(retention), '--state', str(state),
+                       '--release', identity, '--apply']
+            for value in artifacts:
+                command.extend(['--artifact', value])
+            subprocess.run(command, check=True)
+    return {'published_runtime': identity, 'destination': str(destination),
+            'retention_applied': apply_retention, 'artifacts': artifacts}
 
 
 def main():
@@ -98,9 +100,11 @@ def main():
     parser.add_argument('--destination', type=Path, default=HABAB / 'public/downloads/android')
     parser.add_argument('--state', type=Path, default=Path('/root/tools/release-retention/states/habab-android.json'))
     parser.add_argument('--retention', type=Path, default=Path('/root/tools/release-retention/retention.py'))
+    parser.add_argument('--defer-retention', action='store_true',
+                        help='publish and verify the immutable bundle, but leave retention state unchanged')
     args = parser.parse_args()
     print(json.dumps(publish(args.manifest, args.public_key, args.destination, args.state, args.retention,
-                             args.source_revision)))
+                             args.source_revision, apply_retention=not args.defer_retention)))
 
 
 if __name__ == '__main__':

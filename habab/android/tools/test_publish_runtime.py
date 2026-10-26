@@ -82,6 +82,21 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(sum('--release' in command for command in commands), 1)
         self.assertEqual(sum('--release' not in command for command in commands), 1)
 
+    def test_deferred_retention_publishes_verified_bundle_without_applying_ledger(self):
+        commands = []
+        def observe(command, **kwargs):
+            commands.append(command)
+            self.assertNotIn('--release', command)
+            return self.preview(command, **kwargs)
+        with patch('publish_runtime.verify'), patch('publish_runtime.subprocess.run', side_effect=observe):
+            result = publish(*self.publish_args(), apply_retention=False)
+        self.assertEqual(len(list(self.destination.iterdir())), 3)
+        self.assertFalse(result['retention_applied'])
+        self.assertEqual(len(result['artifacts']), 6)
+        self.assertIn(str((self.destination / self.archive.name).relative_to(self.root)), result['artifacts'])
+        self.assertIn(str(self.archive.relative_to(self.root)), result['artifacts'])
+        self.assertEqual(len(commands), 1)
+
     def test_existing_immutable_file_is_not_overwritten(self):
         self.destination.mkdir()
         target = self.destination / self.archive.name
