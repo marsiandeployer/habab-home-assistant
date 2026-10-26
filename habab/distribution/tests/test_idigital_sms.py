@@ -8,6 +8,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import tempfile
 import time
 import types
 import unittest
@@ -167,6 +168,23 @@ class FakeSession:
 class FakeHass:
     async def async_add_executor_job(self, function, *args):
         return function(*args)
+
+
+class JsonFileStore:
+    """Small Store double that crosses JSON serialization between instances."""
+
+    def __init__(self, path):
+        self.path = str(path)
+        self.hass = FakeHass()
+
+    async def async_load(self):
+        try:
+            return json.loads(Path(self.path).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+
+    async def async_save(self, state):
+        Path(self.path).write_text(json.dumps(state), encoding="utf-8")
 
 
 class MemoryStore:
@@ -464,31 +482,36 @@ class IDigitalSmsProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.calls, 1)
 
     async def test_acknowledged_uuid_is_saved_and_restored_after_restart(self):
-        initial = {"attempts": []}
-        writer = MemoryStore(initial)
-        reader = MemoryStore(initial)
-        guard = PersistentSendGuard(writer, reader)
-        await guard.async_load()
+        with tempfile.TemporaryDirectory() as directory:
+            store_path = Path(directory) / "send-guard.json"
+            guard = PersistentSendGuard(
+                JsonFileStore(store_path), JsonFileStore(store_path)
+            )
+            await guard.async_load()
 
-        attempt_id = await guard.async_reserve("Test body")
-        await guard.async_finish(
-            attempt_id,
-            "accepted",
-            message_uuid="063474ec-a34f-4558-90c5-984395000004",
-        )
+            attempt_id = await guard.async_reserve("Test body")
+            await guard.async_finish(
+                attempt_id,
+                "accepted",
+                message_uuid="063474ec-a34f-4558-90c5-984395000004",
+            )
 
-        self.assertEqual(writer.state["attempts"][0]["phase"], "accepted")
-        self.assertEqual(
-            writer.state["attempts"][0]["message_uuid"],
-            "063474ec-a34f-4558-90c5-984395000004",
-        )
-        restarted_guard = PersistentSendGuard(writer, reader)
-        await restarted_guard.async_load()
-        entity = IDigitalSmsNotifyEntity(object(), "entry", restarted_guard)
-        self.assertEqual(
-            entity.extra_state_attributes,
-            {"message_uuid": "063474ec-a34f-4558-90c5-984395000004"},
-        )
+            persisted = json.loads(store_path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["attempts"][0]["phase"], "accepted")
+            self.assertEqual(
+                persisted["attempts"][0]["message_uuid"],
+                "063474ec-a34f-4558-90c5-984395000004",
+            )
+
+            restarted_guard = PersistentSendGuard(
+                JsonFileStore(store_path), JsonFileStore(store_path)
+            )
+            await restarted_guard.async_load()
+            entity = IDigitalSmsNotifyEntity(object(), "entry", restarted_guard)
+            self.assertEqual(
+                entity.extra_state_attributes,
+                {"message_uuid": "063474ec-a34f-4558-90c5-984395000004"},
+            )
 
     async def test_old_guard_records_without_uuid_still_load(self):
         old_record = {
