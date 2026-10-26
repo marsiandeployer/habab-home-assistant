@@ -54,6 +54,8 @@ def build_browser_bundle(output):
         'inset-block-start: max(16px, env(safe-area-inset-top));',
         'details { position: static; }',
         'calc(100dvw - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right)))',
+        ':host-context(html[data-habab-assistant-expanded="true"])',
+        'this.toggleAttribute("data-voice-active", this._running || this._starting);',
     )
     missing = [contract for contract in required_source_contract if contract not in source]
     if missing:
@@ -203,6 +205,8 @@ html, body { margin: 0; }
 #dashboard-probe { position: fixed; z-index: 0; inset: 0; pointer-events: auto; }
 habab-setup-chat { position: fixed; z-index: 10; inset: 0 0 0 auto; width: max(420px, 50vw); height: 100dvh; pointer-events: none; }
 habab-setup-chat .drawer { position: absolute; inset: 0; display: flex; flex-direction: column; background: white; pointer-events: auto; }
+habab-setup-chat header { min-height: 56px; pointer-events: auto; }
+habab-setup-chat #chat-collapse { min-height: 44px; }
 habab-setup-chat footer { margin-top: auto; min-height: 100px; }
 @media (max-width: 720px) {
   habab-setup-chat { inset: 0; z-index: 1000; width: 100vw; }
@@ -211,7 +215,7 @@ habab-setup-chat footer { margin-top: auto; min-height: 100px; }
 }
 </style>
 <div id="dashboard-probe">Dashboard</div>
-<habab-setup-chat data-assistant-open><div class="drawer"><main></main><footer id="chat-composer">Chat composer</footer></div></habab-setup-chat>
+<habab-setup-chat data-assistant-open><div class="drawer"><header><button id="chat-collapse" type="button">Collapse chat</button></header><main></main><footer id="chat-composer">Chat composer</footer></div></habab-setup-chat>
 <script>
 customElements.define("ha-demo", class extends HTMLElement {});
 window.__micStarts = 0;
@@ -304,13 +308,19 @@ customElements.whenDefined("ha-demo-realtime-voice").then(() => {
     </section>`;
   window.__voice = voice;
   const action = voice.shadowRoot.querySelector("#voice-action");
-  action.addEventListener("click", () => { void voice._start(); });
+  action.addEventListener("click", () => {
+    if (voice._running) voice._stopFromClick();
+    else void voice._start();
+  });
   window.__syncVoiceControl = () => {
-    if (!voice._running) return;
-    action.setAttribute("aria-label", "Остановить");
-    action.title = "Остановить";
-    action.textContent = "Остановить";
-    action.onclick = () => voice._stopFromClick();
+    const active = voice._running || voice._starting;
+    voice.toggleAttribute("data-voice-active", active);
+    const label = voice._running ? "Остановить"
+      : voice._starting ? "Подключаемся…" : "Начать разговор";
+    action.setAttribute("aria-label", label);
+    action.title = label;
+    action.textContent = label;
+    action.disabled = voice._starting;
   };
 });
 </script>
@@ -444,10 +454,20 @@ const { chromium } = require('/root/but/node_modules/playwright');
       const voice = document.querySelector('ha-demo-realtime-voice');
       const chat = document.querySelector('habab-setup-chat');
       chat.setAttribute('data-expanded', '');
-      return { voiceZ: Number(getComputedStyle(voice).zIndex), chatZ: Number(getComputedStyle(chat).zIndex) };
+      document.documentElement.dataset.hababAssistantExpanded = 'true';
+      const voiceHidden = getComputedStyle(voice).display === 'none';
+      const collapse = document.querySelector('#chat-collapse').getBoundingClientRect();
+      const collapseHit = document.elementFromPoint(collapse.left + collapse.width / 2,
+        collapse.top + collapse.height / 2)?.id;
+      delete document.documentElement.dataset.hababAssistantExpanded;
+      const voiceRestored = getComputedStyle(voice).display !== 'none'
+        && voice.getBoundingClientRect().height > 0;
+      chat.removeAttribute('data-expanded');
+      return { voiceHidden, collapseHit, voiceRestored };
     });
-    if (expandedMobile.voiceZ >= expandedMobile.chatZ)
-      throw new Error('expanded mobile chat does not stack above voice panel: ' + JSON.stringify(expandedMobile));
+    if (!expandedMobile.voiceHidden || expandedMobile.collapseHit !== 'chat-collapse'
+        || !expandedMobile.voiceRestored)
+      throw new Error('expanded mobile chat does not hide voice and preserve collapse: ' + JSON.stringify(expandedMobile));
     await page.setViewportSize({ width: 1280, height: 800 });
     const beforeStart = await page.evaluate(() => window.__micStarts);
     if (beforeStart !== 0) throw new Error('microphone requested before explicit start');
@@ -483,12 +503,51 @@ const { chromium } = require('/root/but/node_modules/playwright');
     if (active.processors !== 1 || active.audioStops !== 1
         || !active.wsTypes.includes('input_audio_buffer.speech_started'))
       throw new Error('interruption did not stop synthetic partial playback: ' + JSON.stringify(active));
-    await page.getByRole('button', { name: 'Остановить' }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const activeExpanded = await page.evaluate(() => {
+      const voice = document.querySelector('ha-demo-realtime-voice');
+      const chat = document.querySelector('habab-setup-chat');
+      chat.setAttribute('data-expanded', '');
+      document.documentElement.dataset.hababAssistantExpanded = 'true';
+      const voiceRect = voice.getBoundingClientRect();
+      const header = document.querySelector('#chat-collapse').getBoundingClientRect();
+      const button = voice.shadowRoot.querySelector('#voice-action').getBoundingClientRect();
+      const composer = document.querySelector('#chat-composer').getBoundingClientRect();
+      const buttonHit = voice.shadowRoot.elementFromPoint(button.left + button.width / 2,
+        button.top + button.height / 2)?.id;
+      const collapseHit = document.elementFromPoint(header.left + header.width / 2,
+        header.top + header.height / 2)?.id;
+      const composerHit = document.elementFromPoint(composer.left + composer.width / 2,
+        composer.top + composer.height / 2)?.id;
+      return { display: getComputedStyle(voice).display,
+        detailsDisplay: getComputedStyle(voice.shadowRoot.querySelector('details')).display,
+        top: voiceRect.top, bottom: voiceRect.bottom, headerBottom: header.bottom,
+        composerTop: composer.top, buttonHit, collapseHit, composerHit };
+    });
+    const stopButton = page.getByRole('button', { name: 'Остановить' });
+    if (await stopButton.count() !== 1 || !(await stopButton.isVisible())
+        || activeExpanded.display === 'none' || activeExpanded.detailsDisplay !== 'none'
+        || activeExpanded.top < activeExpanded.headerBottom
+        || activeExpanded.bottom > activeExpanded.composerTop
+        || activeExpanded.buttonHit !== 'voice-action'
+        || activeExpanded.collapseHit !== 'chat-collapse'
+        || activeExpanded.composerHit !== 'chat-composer')
+      throw new Error('active voice Stop conflicts with expanded chat: ' + JSON.stringify(activeExpanded));
+    await stopButton.click();
     await page.waitForFunction(() => window.__trackStops === 1, null, { timeout: 3000 });
+    await page.evaluate(() => window.__syncVoiceControl());
     const stopped = await page.evaluate(() => ({ micStarts: window.__micStarts,
-      trackStops: window.__trackStops, running: window.__voice._running }));
+      trackStops: window.__trackStops, running: window.__voice._running,
+      voiceHidden: getComputedStyle(window.__voice).display === 'none' }));
     if (stopped.trackStops !== 1 || stopped.running !== false)
       throw new Error('stop did not release synthetic microphone track: ' + JSON.stringify(stopped));
+    if (!stopped.voiceHidden)
+      throw new Error('inactive voice control remains over expanded chat');
+    await page.evaluate(() => {
+      delete document.documentElement.dataset.hababAssistantExpanded;
+      document.querySelector('habab-setup-chat').removeAttribute('data-expanded');
+    });
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('ha-demo-realtime-voice')).display !== 'none');
 
     const isolatedContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const isolatedPage = await isolatedContext.newPage();

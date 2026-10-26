@@ -76,6 +76,20 @@ class HaDemoRealtimeVoice extends LitElement {
       font: 14px Roboto, Arial, sans-serif;
     }
     @media (max-width: 720px) {
+      :host-context(html[data-habab-assistant-expanded="true"]) {
+        display: none;
+      }
+      :host-context(html[data-habab-assistant-expanded="true"]):host([data-voice-active]) {
+        display: block;
+        z-index: 1001;
+        inset-block-start: calc(var(--assistant-viewport-offset-top, 0px) + max(64px, calc(env(safe-area-inset-top) + 48px)));
+        inset-block-end: auto;
+      }
+      :host-context(html[data-habab-assistant-expanded="true"]):host([data-voice-active]) details {
+        display: none;
+      }
+    }
+    @media (max-width: 720px) {
       :host {
         inset-block-start: max(16px, env(safe-area-inset-top));
         inset-block-end: auto;
@@ -214,6 +228,10 @@ class HaDemoRealtimeVoice extends LitElement {
         <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">${this._status}</span>
       </section>
     `;
+  }
+
+  protected updated() {
+    this.toggleAttribute("data-voice-active", this._running || this._starting);
   }
 
   disconnectedCallback() {
