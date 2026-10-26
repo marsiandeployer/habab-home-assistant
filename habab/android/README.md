@@ -85,33 +85,55 @@ ADB; публикация приложения требует отдельной
 python3 habab/android/tools/publish_runtime.py \
   "habab/android/dist/release-<ID>.json" \
   --source-revision "<full-frozen-source-commit-SHA>" \
-  --public-key habab/android/app/src/main/assets/release/trusted-key.der
+  --public-key habab/android/app/src/main/assets/release/trusted-key.der \
+  --defer-retention
 ```
 
-Publisher проверяет подпись, SHA-256 и содержимое нового runtime, публикует
-неизменяемый комплект и вызывает общий release-retention. На VM104 его
-манифест — `/root/tools/release-retention/states/habab-android.json`.
-Сохраняются текущий и предыдущий runtime; старые зарегистрированные артефакты
-и их сборочные копии удаляются без архивирования. При ошибке проверки очистка
-не запускается. На другом хосте задать `--state` и `--retention`, предварительно
-инициализировав текущий и предыдущий выпуски по общим инструкциям сервера.
-Публикация runtime не публикует APK и не обновляет устройство. Версии APK
-и runtime учитываются отдельно: два последовательных APK могут использовать
-один runtime. Незавершённые сборки в манифест хранения не добавлять.
+Для публикации используйте `--defer-retention`. Publisher проверяет подпись,
+SHA-256 и содержимое runtime, размещает неизменяемый комплект и возвращает
+`published_runtime` и точные пути в `artifacts`; retention state при этом не
+меняется. Затем проверьте публичные GET манифеста и подписи, подпись
+манифеста, локальный SHA-256 архива и его публичные HEAD/Range. Отдельно
+опубликуйте APK и выполните полный публичный GET APK и receipt с проверкой
+хешей, размера, сертификата, версии, `debuggable` и URL runtime. Если любой
+readback не прошёл, retention не запускайте: current и previous должны
+остаться на месте.
 
-После выпуска APK зарегистрируйте файл в retention-манифесте под новым ID.
-Замените `apk-release-id` и имя файла фактическими значениями выпущенного APK
-(путь в примере указан относительно `/root`):
+После успешного readback примените retention по точным ID и путям из вывода
+publisher, включая candidate и public copies. Передайте отдельный `--artifact`
+для каждого пути из массива `artifacts`. На VM104 runtime state и CLI:
+
+```sh
+python3 /root/tools/release-retention/retention.py \
+  --state /root/tools/release-retention/states/habab-android.json \
+  --release "<published_runtime из вывода publisher>" \
+  --artifact "<candidate archive path из artifacts>" \
+  --artifact "<public archive path из artifacts>" \
+  --artifact "<candidate manifest path из artifacts>" \
+  --artifact "<public manifest path из artifacts>" \
+  --artifact "<candidate signature path из artifacts>" \
+  --artifact "<public signature path из artifacts>" --apply
+```
+
+Для APK используйте отдельный state и передайте точные candidate/public APK и
+receipt paths, включённые в успешный выпуск:
 
 ```sh
 python3 /root/tools/release-retention/retention.py \
   --state /root/tools/release-retention/states/habab-android-apk.json \
-  --release apk-release-id \
-  --artifact "homeassistent/habab/android/dist/<имя-APK-файла>.apk" --apply
+  --release "<APK release ID>" \
+  --artifact "<candidate APK path>" \
+  --artifact "<public APK path>" \
+  --artifact "<candidate receipt path>" \
+  --artifact "<public receipt path>" --apply
 ```
 
-Артефакт текущего и предыдущего APK хранить на постоянном диске. RAM-каталог
-с незавершённой сборкой не использовать как единственную копию для отката.
+Незавершённые сборки в манифест хранения не добавлять. Публикация runtime не
+публикует APK и не обновляет устройство. Версии APK и runtime учитываются
+отдельно: два последовательных APK могут использовать один runtime.
+
+Артефакты текущего и предыдущего APK храните на постоянном диске. RAM-каталог
+с незавершённой сборкой не используйте как единственную копию для отката.
 
 PRoot и его библиотеки берутся из пакетов Termux с закреплёнными SHA-256.
 `prepare_native.py` меняет пути динамических библиотек на `$ORIGIN` и
