@@ -1,8 +1,8 @@
 import { strings } from "./strings.js";
 
-const TELEGRAM_GUIDE_VIDEO_URL = "https://habab-demo.wpmix.net/downloads/telegram-guide/fb3ae06bee59a03ae531be670e68d46d1faea0cbeccae9229439bf01dac87903/telegram-guide-fb3ae06bee59a03ae531be670e68d46d1faea0cbeccae9229439bf01dac87903.mp4";
+const TELEGRAM_GUIDE_VIDEO_URL = "https://habab-demo.wpmix.net/downloads/telegram-guide/0edb8b93307461572f125cab64c81d8ed904e0455b6b1ff75fe1d8bba26c31d7/telegram-guide-0edb8b93307461572f125cab64c81d8ed904e0455b6b1ff75fe1d8bba26c31d7.mp4";
 const TELEGRAM_GUIDE_CAPTIONS_URL = new URL(
-  "./telegram-guide-7de8462799aca7de.vtt", import.meta.url,
+  "./telegram-guide-497ffa9b5d572b53.vtt", import.meta.url,
 ).href;
 
 const OWNER_PHASES = ["not_configured", "pairing", "connected", "error"];
