@@ -56,6 +56,8 @@ def build_browser_bundle(output):
         'calc(100dvw - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right)))',
         ':host-context(html[data-habab-assistant-expanded="true"])',
         'this.toggleAttribute("data-voice-active", this._running || this._starting);',
+        'if (!this._running || socket?.readyState !== WebSocket.OPEN) return;',
+        'this._stop(true, "Сервис не принял голосовой запрос. Попробуйте ещё раз.");',
     )
     missing = [contract for contract in required_source_contract if contract not in source]
     if missing:
@@ -92,7 +94,7 @@ async def run_fixture():
     function_output_received = threading.Event()
     relay_sessions = 0
     bootstrap_count = 0
-    token = 'synthetic-one-use-demo-grant'
+    microphone_audio_appends = 0
 
     async def control_client(reader, writer):
         nonlocal bootstrap_count
@@ -102,6 +104,7 @@ async def run_fixture():
             assert request['upstream_key'] == 'synthetic-openai-key'
             assert len(request['session_hash']) == 64
             bootstrap_count += 1
+            token = f'synthetic-one-use-demo-grant-{bootstrap_count}'
             writer.write((json.dumps({'ready': True, 'value': token,
                 'websocket_url': websocket_url}) + '\n').encode())
             await writer.drain()
@@ -109,12 +112,38 @@ async def run_fixture():
             writer.close()
             await writer.wait_closed()
 
+    async def capture_client_frames(socket, *, stop_on_audio_error):
+        nonlocal microphone_audio_appends
+        try:
+            async for message in socket:
+                event = json.loads(message)
+                if event.get('type') == 'input_audio_buffer.append':
+                    microphone_audio_appends += 1
+                    # Keep only the event type in diagnostics, never synthetic PCM bytes.
+                    browser_frames.append({'type': event['type']})
+                    if stop_on_audio_error:
+                        await socket.send(json.dumps({'type': 'error', 'error': {
+                            'code': 'synthetic_audio_stream_error',
+                        }}))
+                    continue
+                browser_frames.append(event)
+                if (event.get('type') == 'conversation.item.create'
+                        and event.get('item', {}).get('type') == 'function_call_output'):
+                    function_output_received.set()
+        except websockets.ConnectionClosed:
+            pass
+
     async def relay_ws(socket):
-        nonlocal relay_sessions
+        nonlocal relay_sessions, microphone_audio_appends
         relay_sessions += 1
         auth = json.loads(await asyncio.wait_for(socket.recv(), 3))
-        if auth != {'type': 'habab.demo.openai.auth.v1', 'token': token}:
+        if auth != {'type': 'habab.demo.openai.auth.v1',
+                    'token': f'synthetic-one-use-demo-grant-{relay_sessions}'}:
             await socket.close(code=1008, reason='invalid fixture grant')
+            return
+        if relay_sessions != 1:
+            await socket.send(json.dumps({'type': 'session.updated'}))
+            await capture_client_frames(socket, stop_on_audio_error=False)
             return
         await socket.send(json.dumps({'type': 'session.updated'}))
         await socket.send(json.dumps({'type': 'response.created', 'response': {'id': 'fixture-audio-response'}}))
@@ -167,15 +196,7 @@ async def run_fixture():
                 'arguments': success_arguments,
             }],
         }}))
-        try:
-            async for message in socket:
-                event = json.loads(message)
-                browser_frames.append(event)
-                if (event.get('type') == 'conversation.item.create'
-                        and event.get('item', {}).get('type') == 'function_call_output'):
-                    function_output_received.set()
-        except websockets.ConnectionClosed:
-            pass
+        await capture_client_frames(socket, stop_on_audio_error=True)
 
     control_server = None
     relay_server = None
@@ -219,17 +240,30 @@ habab-setup-chat footer { margin-top: auto; min-height: 100px; }
 <script>
 customElements.define("ha-demo", class extends HTMLElement {});
 window.__micStarts = 0;
+window.__micAppendSent = 0;
 window.__trackStops = 0;
 window.__processorCount = 0;
+window.__processorDisconnects = 0;
+window.__socketCloseCalls = 0;
 window.__wsTypes = [];
 window.__fetchTrace = [];
 const nativeFetch = window.fetch.bind(window);
 window.fetch = async (...args) => {
   const response = await nativeFetch(...args);
-  let body;
-  try { body = await response.clone().json(); } catch (_) { body = null; }
-  window.__fetchTrace.push({ url: String(args[0]), status: response.status, body });
+  window.__fetchTrace.push({ url: String(args[0]), status: response.status });
   return response;
+};
+const nativeWebSocketSend = WebSocket.prototype.send;
+WebSocket.prototype.send = function(data) {
+  try {
+    if (JSON.parse(data).type === "input_audio_buffer.append") window.__micAppendSent++;
+  } catch (_) {}
+  return nativeWebSocketSend.call(this, data);
+};
+const nativeWebSocketClose = WebSocket.prototype.close;
+WebSocket.prototype.close = function(...args) {
+  window.__socketCloseCalls++;
+  return nativeWebSocketClose.apply(this, args);
 };
 const nativeAddEventListener = WebSocket.prototype.addEventListener;
 WebSocket.prototype.addEventListener = function(type, listener, options) {
@@ -264,7 +298,10 @@ window.AudioContext = class {
   createMediaStreamSource() { return { connect() {} }; }
   createScriptProcessor() {
     window.__processorCount++;
-    return { onaudioprocess: null, connect() {}, disconnect() {} };
+    const processor = { onaudioprocess: null, connect() {},
+      disconnect() { window.__processorDisconnects++; } };
+    window.__audioProcessor = processor;
+    return processor;
   }
   createGain() { return { gain: { value: 1 }, connect() {} }; }
   createBuffer(_channels, length, sampleRate) {
@@ -469,8 +506,10 @@ const { chromium } = require('/root/but/node_modules/playwright');
         || !expandedMobile.voiceRestored)
       throw new Error('expanded mobile chat does not hide voice and preserve collapse: ' + JSON.stringify(expandedMobile));
     await page.setViewportSize({ width: 1280, height: 800 });
-    const beforeStart = await page.evaluate(() => window.__micStarts);
-    if (beforeStart !== 0) throw new Error('microphone requested before explicit start');
+    const beforeStart = await page.evaluate(() => ({ micStarts: window.__micStarts,
+      audioAppends: window.__micAppendSent }));
+    if (beforeStart.micStarts !== 0 || beforeStart.audioAppends !== 0)
+      throw new Error('microphone requested or audio streamed before explicit start');
     await page.getByRole('button', { name: 'Начать разговор' }).click();
     const deadline = Date.now() + 10000;
     let saved = false;
@@ -494,11 +533,12 @@ const { chromium } = require('/root/but/node_modules/playwright');
     await page.evaluate(() => window.__syncVoiceControl());
     const active = await page.evaluate(() => ({ micStarts: window.__micStarts,
       processors: window.__processorCount, trackStops: window.__trackStops,
+      audioAppends: window.__micAppendSent,
       audioStops: window.__audioStops,
       status: window.__voice._status, hasStream: Boolean(window.__voice._stream),
       hasContext: Boolean(window.__voice._context), socketState: window.__voice._socket?.readyState,
       wsTypes: window.__wsTypes, fetchTrace: window.__fetchTrace }));
-    if (active.micStarts !== 1 || active.trackStops !== 0)
+    if (active.micStarts !== 1 || active.trackStops !== 0 || active.audioAppends !== 0)
       throw new Error('synthetic microphone permission did not begin only after click: ' + JSON.stringify(active));
     if (active.processors !== 1 || active.audioStops !== 1
         || !active.wsTypes.includes('input_audio_buffer.speech_started'))
@@ -533,14 +573,36 @@ const { chromium } = require('/root/but/node_modules/playwright');
         || activeExpanded.collapseHit !== 'chat-collapse'
         || activeExpanded.composerHit !== 'chat-composer')
       throw new Error('active voice Stop conflicts with expanded chat: ' + JSON.stringify(activeExpanded));
-    await stopButton.click();
-    await page.waitForFunction(() => window.__trackStops === 1, null, { timeout: 3000 });
+    const syntheticAppend = await page.evaluate(() => {
+      const samples = new Float32Array(16);
+      samples.fill(0.25);
+      window.__audioProcessor.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+      return { audioAppends: window.__micAppendSent };
+    });
+    if (syntheticAppend.audioAppends !== 1)
+      throw new Error('started session did not append one synthetic audio frame');
+    await page.waitForFunction(() => window.__wsTypes.includes('error')
+      && window.__trackStops === 1 && !window.__voice._running, null, { timeout: 3000 });
+    await page.evaluate(() => {
+      const samples = new Float32Array(16);
+      samples.fill(0.5);
+      window.__audioProcessor.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
     await page.evaluate(() => window.__syncVoiceControl());
     const stopped = await page.evaluate(() => ({ micStarts: window.__micStarts,
-      trackStops: window.__trackStops, running: window.__voice._running,
+      audioAppends: window.__micAppendSent, trackStops: window.__trackStops,
+      processorDisconnects: window.__processorDisconnects,
+      socketCloseCalls: window.__socketCloseCalls,
+      running: window.__voice._running, hasStream: Boolean(window.__voice._stream),
+      hasContext: Boolean(window.__voice._context), hasSocket: Boolean(window.__voice._socket),
+      errorReceived: window.__wsTypes.includes('error'),
       voiceHidden: getComputedStyle(window.__voice).display === 'none' }));
-    if (stopped.trackStops !== 1 || stopped.running !== false)
-      throw new Error('stop did not release synthetic microphone track: ' + JSON.stringify(stopped));
+    if (stopped.trackStops !== 1 || stopped.audioAppends !== 1
+        || stopped.processorDisconnects !== 1 || stopped.socketCloseCalls !== 1
+        || stopped.running !== false || stopped.hasStream || stopped.hasContext
+        || stopped.hasSocket || !stopped.errorReceived)
+      throw new Error('server error did not immediately stop synthetic mic streaming: ' + JSON.stringify(stopped));
     if (!stopped.voiceHidden)
       throw new Error('inactive voice control remains over expanded chat');
     await page.evaluate(() => {
@@ -548,6 +610,40 @@ const { chromium } = require('/root/but/node_modules/playwright');
       document.querySelector('habab-setup-chat').removeAttribute('data-expanded');
     });
     await page.waitForFunction(() => getComputedStyle(document.querySelector('ha-demo-realtime-voice')).display !== 'none');
+
+    await page.getByRole('button', { name: 'Начать разговор' }).click();
+    await page.waitForFunction(() => window.__micStarts === 2
+      && window.__processorCount === 2 && window.__voice._running
+      && window.__voice._socket?.readyState === WebSocket.OPEN, null, { timeout: 3000 });
+    await page.evaluate(() => window.__syncVoiceControl());
+    const secondSessionAppend = await page.evaluate(() => {
+      const samples = new Float32Array(16);
+      samples.fill(0.25);
+      window.__audioProcessor.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+      return window.__micAppendSent;
+    });
+    if (secondSessionAppend !== 2)
+      throw new Error('second started session did not append its synthetic audio frame');
+    await page.getByRole('button', { name: 'Остановить' }).click();
+    await page.waitForFunction(() => window.__trackStops === 2 && !window.__voice._running,
+      null, { timeout: 3000 });
+    await page.evaluate(() => {
+      const samples = new Float32Array(16);
+      samples.fill(0.5);
+      window.__audioProcessor.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const manualStop = await page.evaluate(() => ({ micStarts: window.__micStarts,
+      audioAppends: window.__micAppendSent, trackStops: window.__trackStops,
+      processorDisconnects: window.__processorDisconnects,
+      socketCloseCalls: window.__socketCloseCalls, running: window.__voice._running,
+      hasStream: Boolean(window.__voice._stream), hasContext: Boolean(window.__voice._context),
+      hasSocket: Boolean(window.__voice._socket) }));
+    if (manualStop.micStarts !== 2 || manualStop.audioAppends !== 2
+        || manualStop.trackStops !== 2 || manualStop.processorDisconnects !== 2
+        || manualStop.socketCloseCalls !== 2 || manualStop.running
+        || manualStop.hasStream || manualStop.hasContext || manualStop.hasSocket)
+      throw new Error('Stop did not close the second synthetic capture session: ' + JSON.stringify(manualStop));
 
     const isolatedContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const isolatedPage = await isolatedContext.newPage();
@@ -558,7 +654,7 @@ const { chromium } = require('/root/but/node_modules/playwright');
       return payload.states['light.living_room_floor_lamp'].state;
     });
     if (isolatedState !== 'on') throw new Error('another anonymous session saw persisted voice state');
-    process.stdout.write(JSON.stringify({ beforeStart, active, stopped, isolatedState }) + '\\n');
+    process.stdout.write(JSON.stringify({ beforeStart, active, stopped, manualStop, isolatedState }) + '\\n');
     await isolatedContext.close();
     await context.close();
   } finally {
@@ -578,10 +674,11 @@ const { chromium } = require('/root/but/node_modules/playwright');
                     + '; bootstrap=' + str(bootstrap_count) + '; relay=' + str(relay_sessions)
                     + '; frames=' + repr(browser_frames) + '; stored=' + repr(store.states)
                     + '; reads=' + repr(store.reads))
-            if bootstrap_count != 1 or relay_sessions != 1:
-                raise AssertionError('fixture did not complete exactly one bootstrap/WebSocket session')
-            if any(frame.get('type') == 'input_audio_buffer.append' for frame in browser_frames):
-                raise AssertionError('fixture unexpectedly sent synthetic microphone audio')
+            if bootstrap_count != 2 or relay_sessions != 2:
+                raise AssertionError('fixture did not complete two bounded bootstrap/WebSocket sessions')
+            if microphone_audio_appends != 2 or sum(
+                    frame.get('type') == 'input_audio_buffer.append' for frame in browser_frames) != 2:
+                raise AssertionError('fixture did not send exactly two sanitized synthetic audio frames')
             outputs = [frame for frame in browser_frames
                        if frame.get('type') == 'conversation.item.create'
                        and frame.get('item', {}).get('type') == 'function_call_output']
@@ -606,7 +703,8 @@ const { chromium } = require('/root/but/node_modules/playwright');
                 'result': 'PASS', 'bootstrap_count': bootstrap_count,
                 'relay_websocket_sessions': relay_sessions,
                 'virtual_state_sessions': len(store.states),
-                'function_output_received': True, 'microphone_audio_frames': 0,
+                'function_output_received': True, 'synthetic_audio_frames': microphone_audio_appends,
+                'error_stops_capture': True, 'manual_stop_stops_capture': True,
                 'browser': result.stdout.strip(),
             }, sort_keys=True))
         finally:

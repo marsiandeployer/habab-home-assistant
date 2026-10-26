@@ -333,7 +333,7 @@ class HaDemoRealtimeVoice extends LitElement {
       this._pendingResponses.clear();
       this._interruptPlayback(true);
     } else if (event.type === "error") {
-      this._status = "Сервис не принял голосовой запрос. Попробуйте ещё раз.";
+      this._stop(true, "Сервис не принял голосовой запрос. Попробуйте ещё раз.");
     }
   }
 
@@ -344,7 +344,8 @@ class HaDemoRealtimeVoice extends LitElement {
     const muted = this._context.createGain();
     muted.gain.value = 0;
     processor.onaudioprocess = (event) => {
-      if (this._socket?.readyState !== WebSocket.OPEN) return;
+      const socket = this._socket;
+      if (!this._running || socket?.readyState !== WebSocket.OPEN) return;
       const input = event.inputBuffer.getChannelData(0);
       const pcm = this._resamplePcm(input, this._context!.sampleRate, SAMPLE_RATE);
       if (pcm.length) {
@@ -352,7 +353,7 @@ class HaDemoRealtimeVoice extends LitElement {
         for (const byte of new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)) {
           binary += String.fromCharCode(byte);
         }
-        this._socket.send(JSON.stringify({ type: "input_audio_buffer.append", audio: btoa(binary) }));
+        socket.send(JSON.stringify({ type: "input_audio_buffer.append", audio: btoa(binary) }));
       }
     };
     source.connect(processor);
