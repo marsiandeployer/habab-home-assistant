@@ -1,0 +1,46 @@
+{
+  "release_candidate": "native-frontend-0.10-private",
+  "source_commit": "59291f7f2a620fb696438ad027e0d0702f6b0de9",
+  "upstream_frontend_commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
+  "branding_patch_sha256": "709818518535065ac4f9018ffb9a565db9eb1429a3e5843640452ab230c3c58a",
+  "composed_patch_sha256": "256f963f8cb379549c7be9d92f94cdf867b79f37e662f0d6838a212fafa17f87",
+  "wheel": {
+    "filename": "home_assistant_frontend-20260930.4+habab.10-py3-none-any.whl",
+    "version": "20260930.4+habab.10",
+    "bytes": 110458384,
+    "sha256": "e0b65b7aec94690bfca92711688cb36bbe90e208b1b7105ff1e911e1a67ea91f"
+  },
+  "build": {
+    "unit": "habab-native10-59291f7-20261026-012606.scope",
+    "exit_code": 0,
+    "limits": {
+      "memory_max": "5G",
+      "memory_swap_max": "0",
+      "cpu_quota": "200%",
+      "tasks_max": 256
+    },
+    "retention": "SKIP: dedicated retention state absent; no pointers/files changed"
+  },
+  "artifact_checks": {
+    "wheel_metadata_version": "PASS",
+    "index_authorize_onboarding_titles_and_branding": "PASS",
+    "index_app_meta_and_habab_attribution": "PASS",
+    "OHF_launch_screen_id_attribution_logo_alt_preserved": "PASS",
+    "compiled_app_js_contains_Habab_Home_Assistant": "PASS",
+    "required_font_assets": "PASS: 12 WOFF2, required fonts match",
+    "wheel_sha_size": "PASS"
+  },
+  "provenance": {
+    "builder_clean_worktree_preflight": "PASS: builder clean-worktree gate passed before applying candidate patches",
+    "reconstruction_check": "PASS: extracted exact upstream commit blobs for all 32 unique patch paths; applied bridge.patch then native-branding.patch from accepted source commit in order; final bytes of all changed/new paths match build worktree; no dirty paths outside those 32.",
+    "source_commit": "59291f7f2a620fb696438ad027e0d0702f6b0de9",
+    "upstream_frontend_commit": "26690e06b0bf64a1487929245c32842ef92c62b5",
+    "patch_path_count": 32,
+    "unpatched_dirty_paths": [],
+    "quarantined": false,
+    "release_readiness": "PRIVATE_BUILD_ONLY; publication, owner install, and browser acceptance remain unrun"
+  },
+  "public_release": "NOT_DONE",
+  "owner_install": "NOT_RUN",
+  "browser_acceptance": "NOT_RUN"
+}

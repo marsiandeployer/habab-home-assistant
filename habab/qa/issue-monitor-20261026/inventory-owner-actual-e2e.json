@@ -1,0 +1,54 @@
+{
+  "schema": "habab.issue2.owner_inventory_turn.v1",
+  "target": "owner-test-loopback-8395",
+  "overlay_revision": "59291f7f2a620fb696438ad027e0d0702f6b0de9",
+  "run_status": "COMPLETED",
+  "trace": {
+    "http_status": 200,
+    "status": "completed",
+    "events_truncated": false,
+    "prompt_event_count": 1
+  },
+  "tool_evidence": {
+    "same_turn_prompt_index": 0,
+    "tool_call_count": 1,
+    "tool_result_count": 1,
+    "tool_name": "bash",
+    "action": "devices",
+    "completed": true,
+    "read_only_devices_action": true
+  },
+  "devices_result": {
+    "count": 4,
+    "total_count": 4,
+    "limit": 200,
+    "truncated": false,
+    "len_matches_count": true,
+    "truncated_consistent": true
+  },
+  "answer": {
+    "assistant_text_event_count": 1,
+    "all_returned_names_present": true,
+    "matched_name_count": 4,
+    "returned_named_rows": 4
+  },
+  "semantic": {
+    "service_record_lines_labeled_from_enum": true,
+    "null_entry_not_given_unsupported_specific_type": true,
+    "no_physical_count_inferred_from_registry_total": true,
+    "model_manufacturer_claims_present": 5,
+    "model_manufacturer_claims_source_backed": true,
+    "model_manufacturer_labels_checked": 0,
+    "model_manufacturer_labels_mismatched": 0
+  },
+  "registry_readback": {
+    "devices_count_after": 4,
+    "entity_registry_count_after": 153,
+    "device_entry_type_counts_after": {
+      "service": 3,
+      "null": 1
+    },
+    "matches_pre_counts": true
+  },
+  "semantic_gate": "PASS"
+}

@@ -1,0 +1,178 @@
+{
+  "schema": "habab.issue16.combined_owner_e2e.v1",
+  "created_at_utc": "2026-10-26T01:35:46.807Z",
+  "target": "owner-test-loopback-8395",
+  "overlay_revision": "59291f7f2a620fb696438ad027e0d0702f6b0de9",
+  "status": "passed",
+  "admin_preflight": true,
+  "product_version": "0.3.6",
+  "core_version": "2026.10.2",
+  "session_created": true,
+  "turn_api_success": true,
+  "visible_message_count": 2,
+  "export_http_status": 200,
+  "content_type_valid": true,
+  "zip_deleted": true,
+  "failure_code": null,
+  "prior_readonly_preflight_attempt": {
+    "stopped_before_session": true,
+    "combined_current_user_guard": "did_not_match"
+  },
+  "archive_transfer_bytes": 14519,
+  "export_archive": {
+    "members": [
+      {
+        "name": "manifest.json",
+        "bytes": 9408
+      },
+      {
+        "name": "history.json",
+        "bytes": 4830
+      },
+      {
+        "name": "history.txt",
+        "bytes": 692
+      },
+      {
+        "name": "opencode/availability.json",
+        "bytes": 1614
+      },
+      {
+        "name": "logs/manifest.json",
+        "bytes": 3731
+      },
+      {
+        "name": "opencode/logs/2026-10-26T013548.log",
+        "bytes": 6982
+      },
+      {
+        "name": "opencode/logs/2026-10-25T233425.log",
+        "bytes": 7048
+      },
+      {
+        "name": "opencode/logs/2026-10-25T195136.log",
+        "bytes": 7914
+      },
+      {
+        "name": "opencode/logs/2026-10-25T153019.log",
+        "bytes": 6399
+      },
+      {
+        "name": "opencode/logs/2026-10-25T150115.log",
+        "bytes": 5130
+      },
+      {
+        "name": "opencode/logs/2026-10-25T144330.log",
+        "bytes": 6397
+      },
+      {
+        "name": "opencode/logs/2026-10-25T142142.log",
+        "bytes": 6398
+      },
+      {
+        "name": "opencode/logs/2026-10-25T131737.log",
+        "bytes": 6396
+      },
+      {
+        "name": "opencode/logs/2026-10-25T102650.log",
+        "bytes": 7251
+      },
+      {
+        "name": "opencode/logs/2026-10-25T095602.log",
+        "bytes": 7812
+      },
+      {
+        "name": "homeassistant/home-assistant.log",
+        "bytes": 2426
+      },
+      {
+        "name": "homeassistant/home-assistant.log.1",
+        "bytes": 7863
+      }
+    ],
+    "member_count": 17,
+    "uncompressed_bytes": 98291,
+    "runtime_logs": {
+      "available": true,
+      "reason": null,
+      "scope_kind": "home_assistant_instance",
+      "shared_across_conversations": true,
+      "shared_across_users": true,
+      "session_id_is_null": true,
+      "period": {
+        "from": null,
+        "to": null,
+        "timezone": "UTC",
+        "filter_status": "not_requested",
+        "reason": null
+      },
+      "home_assistant_log_clock": {
+        "kind": null,
+        "label": null,
+        "utc_offset_seconds": null,
+        "historical_binding": null,
+        "fresh_file_per_boot": null
+      },
+      "sources": {
+        "opencode_logs": {
+          "available": true,
+          "reason": null,
+          "candidate_files": 11,
+          "omitted_files": 1,
+          "unsafe_files": 0,
+          "read_errors": 0,
+          "truncated_files": 10,
+          "bytes": 67727
+        },
+        "home_assistant_logs": {
+          "available": true,
+          "reason": null,
+          "candidate_files": 2,
+          "omitted_files": 0,
+          "unsafe_files": 0,
+          "read_errors": 0,
+          "truncated_files": 1,
+          "bytes": 10289
+        }
+      },
+      "redactions_applied_count": 3,
+      "truncated": true
+    },
+    "manifest_consistency": {
+      "opencode_availability_matches": true,
+      "no_stale_not_exposed_reason": true
+    },
+    "environment_at_export": {
+      "scope": "environment_at_export",
+      "frontend": {
+        "available": true,
+        "version": "20260930.4+habab.9",
+        "source": "installed_distribution_metadata",
+        "reason": null
+      },
+      "opencode": {
+        "available": true,
+        "version": "1.14.21",
+        "source": "running_runtime_health",
+        "reason": null
+      },
+      "home_assistant_core": "2026.10.2",
+      "habab": "0.3.6"
+    },
+    "history_source_available": true,
+    "historical_session_versions": {
+      "frontend": {
+        "version": null,
+        "reason": "not_recorded"
+      },
+      "opencode": {
+        "version": null,
+        "reason": "not_recorded"
+      }
+    },
+    "build_identity_is_null": true,
+    "build_identity_reason": "not_recorded"
+  },
+  "zip_private_path": "temporary_outside_repository",
+  "completed_at_utc": "2026-10-26T01:35:51.898Z"
+}

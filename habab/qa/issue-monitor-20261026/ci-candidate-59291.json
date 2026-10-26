@@ -1,0 +1,88 @@
+{
+  "run_id": 40254665226,
+  "run_url": "https://github.com/marsiandeployer/habab-home-assistant/actions/runs/40254665226",
+  "workflow": "Habab release candidate",
+  "event": "workflow_dispatch",
+  "source_sha": "59291f7f2a620fb696438ad027e0d0702f6b0de9",
+  "workflow_conclusion": "success",
+  "candidate_scope_status": "partial_candidate_ready",
+  "targets": {
+    "windows": "built",
+    "linux-amd64": "built",
+    "linux-arm64": "built",
+    "android": "blocked; job skipped"
+  },
+  "jobs": [
+    {
+      "id": 121353835857,
+      "name": "resolve-source",
+      "conclusion": "success"
+    },
+    {
+      "id": 121353861152,
+      "name": "windows-source",
+      "conclusion": "success"
+    },
+    {
+      "id": 121353861183,
+      "name": "linux-image (linux/amd64)",
+      "conclusion": "success"
+    },
+    {
+      "id": 121353861367,
+      "name": "linux-image (linux/arm64)",
+      "conclusion": "success"
+    },
+    {
+      "id": 121353862370,
+      "name": "android",
+      "conclusion": "skipped"
+    },
+    {
+      "id": 121354516739,
+      "name": "assemble-candidate",
+      "conclusion": "success"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "candidate-windows",
+      "bytes": 287931,
+      "expired": false,
+      "retention_days": 1,
+      "expires_at": "2026-10-27T01:32:07Z"
+    },
+    {
+      "name": "candidate-linux-amd64",
+      "bytes": 781332732,
+      "expired": false,
+      "retention_days": 1,
+      "expires_at": "2026-10-27T01:33:21Z"
+    },
+    {
+      "name": "candidate-linux-arm64",
+      "bytes": 766176994,
+      "expired": false,
+      "retention_days": 1,
+      "expires_at": "2026-10-27T01:33:59Z"
+    },
+    {
+      "name": "habab-release-candidate-59291f7f2a620fb696438ad027e0d0702f6b0de9",
+      "bytes": 956,
+      "expired": false,
+      "retention_days": 1,
+      "expires_at": "2026-10-27T01:34:57Z"
+    }
+  ],
+  "manifest": {
+    "source_dirty": false,
+    "targets": {
+      "windows": "built",
+      "linux-amd64": "built",
+      "linux-arm64": "built",
+      "android": "blocked"
+    },
+    "source_revision": "59291f7f2a620fb696438ad027e0d0702f6b0de9",
+    "source_matches_requested": true
+  }
+}
