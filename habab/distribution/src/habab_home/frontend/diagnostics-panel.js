@@ -600,8 +600,12 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.listAbort = controller;
     const version = ++this.requestVersion;
     if (!append) {
+      this.detailAbort?.abort();
+      this.detailAbort = undefined;
+      this.detailVersion++;
       this.selectedSession = undefined;
       this.detail = undefined;
+      this.loadingDetail = false;
       this.cursor = undefined;
       this.sessions = [];
     }

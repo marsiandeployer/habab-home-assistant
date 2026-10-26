@@ -116,6 +116,56 @@ test("selected-conversation export includes shared logs only after explicit opt-
   assert.equal(nodes.get("#include-runtime-logs").checked, false);
 });
 
+test("refreshing the session list cancels an in-flight detail request", async () => {
+  const panel = Object.create(DiagnosticsPanel.prototype);
+  let resolveDetail;
+  let detailSignal;
+  Object.assign(panel, {
+    _hass: {
+      user: {id: "owner", is_admin: true},
+      fetchWithAuth: (url, options) => {
+        if (url.includes("/diagnostics/sessions/")) {
+          detailSignal = options.signal;
+          return new Promise((resolve) => { resolveDetail = resolve; });
+        }
+        return Promise.resolve({ok: true, json: async () => ({
+          sessions: [], next_cursor: null, sources: {},
+        })});
+      },
+    },
+    filters: {from: "", to: "", channel: "all", status: "all", session_id: ""},
+    sessions: [{session_id: "synthetic-session", channel: "web"}],
+    selectedSession: undefined,
+    detail: undefined,
+    sources: {},
+    cursor: undefined,
+    loading: false,
+    loadingDetail: false,
+    requestVersion: 0,
+    detailVersion: 0,
+    q: (selector) => selector === "#include-runtime-logs" ? {checked: false} : undefined,
+    renderStatus() {},
+    renderSessions() {},
+    renderDetail() {},
+    renderSources() {},
+    updateControls() {},
+  });
+
+  const detailRequest = panel.openSession({session_id: "synthetic-session", channel: "web"});
+  await Promise.resolve();
+  assert.ok(detailSignal);
+  assert.equal(detailSignal.aborted, false);
+
+  await panel.loadSessions(false);
+  assert.equal(detailSignal.aborted, true);
+  assert.equal(panel.selectedSession, undefined);
+  assert.equal(panel.loadingDetail, false);
+
+  resolveDetail({ok: true, json: async () => ({session: {session_id: "synthetic-session"}, events: [], sources: {}})});
+  await detailRequest;
+  assert.equal(panel.detail, undefined);
+});
+
 test("feedback retries reuse one idempotency UUID until its payload changes", () => {
   const first = diagnostics.feedbackAttemptFor("session_123", "  The answer missed the room.  ");
   const retry = diagnostics.feedbackAttemptFor("session_123", "The answer missed the room.", first);
