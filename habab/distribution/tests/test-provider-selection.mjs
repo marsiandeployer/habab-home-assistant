@@ -90,6 +90,45 @@ function panelWithPendingProviderList(providerList) {
   return panel;
 }
 
+function panelForProviderCheck(checkError, draft) {
+  const entry = {
+    provider: "deepseek", entry_id: "synthetic-entry", model: "deepseek-flash",
+    assistant_selected: true, api_check_status: "unknown",
+  };
+  const { panel, nodes } = panelForKeyFetch("deepseek", entry, []);
+  const calls = [];
+  Object.assign(panel, {
+    isConnected: true,
+    providerSelectionExplicit: true,
+    initialProviderSelectionApplied: true,
+    connectionsLoaded: true,
+    connectionCheckStates: new Map(),
+    pipelines: [],
+    keyEdited: true,
+    modelEdited: true,
+    language: "en",
+    busy: false,
+    _hass: {
+      callWS: async (request) => {
+        calls.push(request.type);
+        if (request.type === "habab_home/providers/check") throw checkError;
+        if (request.type === "habab_home/providers/list") return { connections: [{ ...entry, api_check_status: "unknown" }] };
+        if (request.type === "assist_pipeline/pipeline/list") return { pipelines: [] };
+        if (request.type === "habab_home/feedback_delivery/status") {
+          return { enabled: false, credential_configured: false, ready: false };
+        }
+        throw new Error(`unexpected synthetic request: ${request.type}`);
+      },
+    },
+    feedbackDeliveryStatusText() { return "Synthetic status"; },
+    t: (key) => key.endsWith("Guide") ? [] : strings.en[key] || key,
+    feedback(text, error = false) { this.lastFeedback = { text, error }; },
+  });
+  panel.q("#key").value = draft.key;
+  panel.q("#model").value = draft.model;
+  return { panel, calls, entry, nodes };
+}
+
 test("initial selected provider does not capture a key or model draft typed during load", async () => {
   const providerList = deferred();
   const panel = panelWithPendingProviderList(providerList);
@@ -447,3 +486,27 @@ test("a stale saved-key rejection after switching providers is ignored", async (
   await newFetch;
   assert.equal(panel.q("#key").value, "synthetic-current-key");
 });
+
+for (const [name, failure, expectedMessage] of [
+  ["provider error", { code: "invalid_auth" }, strings.en.invalid_auth],
+  ["timeout", { code: "timeout" }, strings.en.providerCheckTimeout],
+]) {
+  test(`provider check ${name} leaves unsaved model and key drafts intact`, async () => {
+    const draft = { key: "synthetic-unsaved-key-fixture", model: "synthetic-unsaved-model-fixture" };
+    const { panel, calls, nodes } = panelForProviderCheck(failure, draft);
+
+    await panel.check();
+
+    assert.deepEqual(panel.lastFeedback, { text: expectedMessage, error: true });
+    assert.equal(panel.busy, false);
+    assert.equal(panel.connectionCheckStates.size, 0);
+    assert.equal(panel.q("#key").value, draft.key);
+    assert.equal(panel.q("#model").value, draft.model);
+    assert.equal(panel.keyEdited, true);
+    assert.equal(panel.modelEdited, true);
+    assert.equal(calls.filter((type) => type === "habab_home/providers/check").length, 1);
+    assert.equal(calls.includes("habab_home/providers/save"), false);
+    assert.equal(calls.includes("habab_home/providers/key"), false);
+    assert.ok(nodes.has("#feedback"));
+  });
+}
