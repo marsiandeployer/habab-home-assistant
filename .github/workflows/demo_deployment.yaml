@@ -2,6 +2,12 @@ name: Demo deployment
 
 on:
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Candidate SHA (required by the fork-only job); full lowercase 40-character SHA in origin/main
+        required: false
+        default: ""
+        type: string
   schedule:
     - cron: "0 0 * * *"
   push:
@@ -77,3 +83,147 @@ jobs:
           dir: demo/dist
           auth-token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           site-id: ${{ secrets.NETLIFY_DEMO_SITE_ID }}
+
+  build_habab_candidate:
+    name: Build unpublished Habab demo candidate
+    if: github.repository != 'home-assistant/frontend' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      SKIP_FETCH_NIGHTLY_TRANSLATIONS: "1"
+    steps:
+      - name: Resolve and validate source SHA from commit history
+        id: resolve
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo '::error::source_ref must be a full lowercase 40-character SHA-1'
+            exit 1
+          }
+
+          resolution="$RUNNER_TEMP/habab-demo-source-resolution"
+          git init --quiet "$resolution"
+          git -C "$resolution" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -C "$resolution" config extensions.partialClone origin
+          git -C "$resolution" config remote.origin.promisor true
+          git -C "$resolution" config remote.origin.partialclonefilter blob:none
+          git -C "$resolution" fetch --filter=blob:none --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+
+          if ! resolved="$(git -C "$resolution" rev-parse --verify "${SOURCE_REF}^{commit}")"; then
+            echo '::error::The requested SHA is not present in origin/main history'
+            exit 1
+          fi
+          [[ "$resolved" == "$SOURCE_REF" ]] || {
+            echo '::error::The requested SHA did not resolve exactly'
+            exit 1
+          }
+          if ! git -C "$resolution" merge-base --is-ancestor \
+            "$resolved" refs/remotes/origin/main; then
+            echo '::error::Selected source is not an ancestor of current origin/main'
+            exit 1
+          fi
+          printf 'source_revision=%s\n' "$resolved" >> "$GITHUB_OUTPUT"
+
+      - name: Check out selected source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.resolve.outputs.source_revision }}
+          fetch-depth: 1
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Verify exact selected checkout
+        env:
+          SOURCE_SHA: ${{ steps.resolve.outputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]] || {
+            echo '::error::Checkout does not match the requested source SHA'
+            exit 1
+          }
+
+      - name: Setup Node and install
+        uses: ./.github/actions/setup
+
+      - name: Prepare Habab Russian translations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p translations/frontend
+          cp habab/build/source/ru.json translations/frontend/ru.json
+
+      - name: Build Demo
+        uses: ./.github/actions/build
+        with:
+          target: build-demo
+
+      - name: Write candidate manifest
+        env:
+          SOURCE_SHA: ${{ steps.resolve.outputs.source_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          dist = Path("demo/dist")
+          if not dist.is_dir() or dist.is_symlink():
+              raise SystemExit("Compiled demo/dist is missing or is a symlink")
+
+          entries = []
+          for path in sorted(dist.rglob("*")):
+              if path.is_symlink():
+                  raise SystemExit(f"Symlink in compiled demo output: {path}")
+              if not path.is_file():
+                  continue
+              relative = path.relative_to(dist).as_posix()
+              if relative == "habab-candidate-manifest.json":
+                  continue
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              entries.append({"path": relative, "size": path.stat().st_size, "sha256": digest})
+
+          entries.sort(key=lambda entry: entry["path"])
+          catalog = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+          package_manager = json.loads(Path("package.json").read_text())["packageManager"]
+          node_version = subprocess.check_output(["node", "--version"], text=True).strip()
+          pnpm_version = subprocess.check_output(["pnpm", "--version"], text=True).strip()
+          expected_node = "v" + Path(".nvmrc").read_text().strip()
+          if node_version != expected_node:
+              raise SystemExit("Installed Node version does not match .nvmrc")
+          if package_manager != f"pnpm@{pnpm_version}":
+              raise SystemExit("Installed pnpm version does not match packageManager")
+
+          manifest = {
+              "schemaVersion": 1,
+              "sourceRevision": os.environ["SOURCE_SHA"],
+              "buildTarget": "build-demo",
+              "catalogAlgorithm": "sha256-canonical-json-file-inventory-v1",
+              "catalogSha256": hashlib.sha256(catalog).hexdigest(),
+              "catalogFileCount": len(entries),
+              "pnpmLockSha256": hashlib.sha256(Path("pnpm-lock.yaml").read_bytes()).hexdigest(),
+              "nodeVersion": node_version,
+              "pnpmVersion": pnpm_version,
+          }
+          (dist / "habab-candidate-manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload unpublished demo candidate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: habab-demo-candidate-${{ steps.resolve.outputs.source_revision }}
+          path: demo/dist/
+          if-no-files-found: error
+          retention-days: 1

@@ -49,3 +49,9 @@ timeout 120s npm run test:browser
 Браузерные проверки используют /snap/bin/chromium и публичное демо. Не запускайте их против чужого production без разрешения. CDP-проверки требуют отдельного принадлежащего проверке endpoint.
 
 Сборка текущих исходников: sh habab/build/build.sh из корня. [Обновление upstream](docs/UPDATING.md) · [Docker-установка](distribution/README.md).
+
+## Candidate demo build
+
+В fork запустите Actions → Demo deployment вручную и передайте полный lowercase SHA-1 исходника, который уже входит в историю `main`. Fork-only job собирает `demo/dist` штатной целью `build-demo`, копирует Habab `ru.json` и загружает candidate artifact на 1 день. Manifest содержит исходный SHA, версии Node/pnpm, SHA lockfile и SHA каталога. Последний считается как SHA-256 от компактного JSON-инвентаря с отсортированными путями, размерами и SHA-256 каждого файла.
+
+Job не публикует сайт и не меняет текущий release. После проверки скачайте artifact и передайте его корневой каталог publisher-у с новым immutable ID: `HABAB_DEMO_RELEASE=<new-release-id> python3 habab/build/publish_build.py --source-dir <downloaded-artifact> --frontend-source-revision <полный-SHA>`; это отдельный шаг публикации.
