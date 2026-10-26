@@ -104,9 +104,12 @@ for desktop sidebar title wrapping (201 px wide by 48 px high), desktop and
 emulated-mobile chat splits, idle close, and Xiaomi dismiss/reload/reopen. The
 owner API returned HTTP 200. The root page shows the Habab credit link and no
 Open Home Foundation loader block; the authorization page does not require a
-footer. Visibility of the title in the mobile navigation drawer remains
-**NOT RUN**. Android and Windows packages built from `.13` have not been
-installed or accepted.
+footer. A separate public demo readback passed desktop, mobile, and focus checks
+for the updated preloader. Visibility of the title in the mobile navigation
+drawer remains **NOT RUN**. The Windows `.13` preview and Android code21/runtime
+`28a72a31da972bf0` are published from source
+`90445c71ab5ca6a6dbc91433046de54cea955e4f`; public integrity checks passed, but
+physical Windows and P30 installation **NOT RUN**.
 
 SHA-256 values:
 
@@ -120,12 +123,15 @@ SHA-256 values:
 
 The three patches contain 46 diff sections across 41 unique target paths;
 they must be applied in the listed order. The default `build-wheel.sh` still
-uses the `.9` bridge patch. The `.13` candidate uses the manual CI profile and
+uses the `.9` bridge patch. The `.13` release uses the manual CI profile and
 the ordered three-patch overlay recorded above.
 
 The release manifest pins `.13`; the owner runtime and the scoped browser checks
-above use that wheel. Mobile navigation-drawer visibility and physical Android
-and Windows package acceptance remain **NOT RUN**.
+above use that wheel. Mobile navigation-drawer visibility remains **NOT RUN**.
+The Windows `.13` preview and Android code21/runtime
+`28a72a31da972bf0` are publicly available from source
+`90445c71ab5ca6a6dbc91433046de54cea955e4f`; physical Windows and P30 installation
+and voice acceptance remain **NOT RUN**.
 
 ## Manual CI candidate
 

@@ -12,21 +12,20 @@ Telegram-компонент из текущего Docker-пакета. Данн�
 
 ## Текущий preview
 
-Опубликованный preview — [APK 0.1.12-preview, versionCode 20](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.12-preview-code20-release-08f975af45fe.apk).
-Его [отчёт сборки](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.12-preview-code20-release-08f975af45fe.json)
-связывает APK с runtime `eac396cc5dc3c9d1` и исходным commit
-`3bdc03b6d13f41d142550703e698591bf032563d`. В отдельном
-[отчёте публикации](../qa/issue-monitor-20261025/android-preview-publication-eac396cc5dc3c9d1.json)
-зафиксированы публичные хеши, проверка подписи, APK-сертификат и состояние
-retention.
+Опубликованный preview — [APK 0.1.13-preview, versionCode 21](https://habab-demo.wpmix.net/downloads/android/habab-home-0.1.13-preview-code21-release-dcbde1d79e94.apk),
+SHA-256 `dcbde1d79e94994e382d0cdf854990afaa8fd36ab5ac4cff09dfcd83db891805`,
+размер 51,421,007 байт. Он использует runtime `28a72a31da972bf0` из source
+commit `90445c71ab5ca6a6dbc91433046de54cea955e4f`; публичная загрузка runtime и
+APK прошла проверку SHA-256. Подпись runtime и извлечённое из APK
+Java-содержимое также проверены.
 
-Сборка использовала release-вариант с внешним Gradle init script. Его SHA-256
-`2ef871c4b32405b9c818bbf7a7b1d8e5397b2ccfef3aba0e9deedc94bdbc07ee` указан
-в отчёте; настройки исходников по-прежнему задают versionCode 18 и
-`0.1.10-notification`. Preview подписан тем же сертификатом, что и предыдущие
-APK; `debuggable` выключен. Этот выпуск не переводили в stable и не
-устанавливали на устройство. Перед preview-обновлением сохраните резервную
-копию данных.
+APK собран release-вариантом с внешним Gradle version/signing override.
+`versionCode 21` и `0.1.13-preview` относятся к этому выпуску; настройки
+исходников по-прежнему задают versionCode 18 и `0.1.10-notification` как
+developer baseline. Содержимое приватного override в репозитории не хранится.
+APK подписан тем же сертификатом, что code20; `debuggable` выключен. Preview
+не переводили в stable и не устанавливали на P30; физическая приёмка **NOT RUN**.
+Перед preview-обновлением сохраните резервную копию данных.
 
 Runtime работает в PRoot от имени приложения. UID 0 внутри гостя не даёт root
 на Android; эта установка не предоставляет HAOS/Supervisor и доступ к системным
@@ -191,8 +190,9 @@ OpenAI сохраняет пары реплик с идентификатора�
 `record_voice_event`; без него сервер отклоняет запуск Gemini до запроса токена.
 
 Выключенный экран поддерживается отдельной foreground-службой; полностью
-выключенный телефон слушать не может. Native13 ещё не прошёл проверку на P30:
-нужно отдельно проверить фразу, громкий динамик, эхо, перебивание, завершение
+выключенный телефон слушать не может. Опубликованный Android preview code21
+ещё не устанавливали на P30; голосовые и физические проверки **NOT RUN**.
+Отдельно нужно проверить фразу, громкий динамик, эхо, перебивание, завершение
 и работу с выключенным экраном. Серверные тесты с синтетической речью этого
 не подтверждают. Последнее подтверждённое подключение, провайдер и голосовая
 модель доступны в локальном `voice-status.json` → `lastConnection`.

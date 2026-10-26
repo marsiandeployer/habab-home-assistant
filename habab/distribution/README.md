@@ -1,8 +1,10 @@
 # Habab Home 0.3.6 (source candidate)
 
 Windows-пакет выпускается отдельно; этот checkout исходников 0.3.6 использует
-frontend wheel `20260930.4+habab.13`. Физическая приёмка Windows-пакета `.13` не
-проводилась.
+frontend wheel `20260930.4+habab.13`. Windows preview `.13` и Android APK
+code21/runtime `28a72a31da972bf0` опубликованы из source
+`90445c71ab5ca6a6dbc91433046de54cea955e4f`; физическая установка на Windows и
+P30 **NOT RUN**.
 
 Для проверки на Windows: [запуск батником](README-WINDOWS.md). Он устанавливает недостающее ПО и открывает локальный Home Assistant; API-ключи в пакет не входят.
 
@@ -24,9 +26,15 @@ upstream frontend `20260930.4` с упорядоченным
 размера; owner runtime установлен на `.13` и работает. Проверены desktop title
 wrap, desktop/emulated-mobile чат, закрытие по простою, Xiaomi dismiss/reload/
 reopen и owner API (HTTP 200). Видимость заголовка в мобильном navigation drawer
-остаётся **NOT RUN**; Android и Windows пакеты `.13` ещё не приняты. Установщик
-проверяет URL и его origin, имя и версию файла, размер и SHA-256. Версия Core
-остаётся 2026.10.2.
+остаётся **NOT RUN**. Android APK code21/runtime `28a72a31da972bf0` и Windows
+preview с frontend `.13` прошли публичные GET/hash проверки; APK подписан тем же
+сертификатом, что code20, и имеет `debuggable=false`. Пакеты не устанавливали
+на P30 или Windows. Для Android использовали внешний Gradle version/signing
+override; приватные значения override в исходниках не хранятся. Установщик
+проверяет URL и его origin, имя и версию файла, размер и SHA-256. CI run
+`40287116354` собрал OCI для AMD64 и ARM64 из source
+`90445c71ab5ca6a6dbc91433046de54cea955e4f`; runtime и label readback не
+проводились. Версия Core остаётся 2026.10.2.
 Интеграция добавляет защищённый
 статусный API, разделы AI и Telegram, один глобальный чат и нативные Assist
 подключения. [Инструкция помощника](../docs/SETUP-ASSISTANT.md). OpenCode

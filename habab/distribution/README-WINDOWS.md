@@ -5,15 +5,14 @@ Core 2026.10.2; текущий `native-frontend-release.json` закрепляе
 `20260930.4+habab.13`. На [странице загрузки](https://habab.ru/home-assistant)
 сейчас доступен ZIP preview 0.3.6.
 Распакуйте его в выбранную папку и запустите `start-windows.bat` оттуда. Для
-автоматической загрузки и распаковки используйте отдельный [preview BAT](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-1a844fb6f7a3.bat).
-Он проверяет SHA-256 и распаковывает ZIP в `%LOCALAPPDATA%\HababHome`. Этот ZIP
-собран из исходников коммита `3bdc03b6d13f41d142550703e698591bf032563d` и
-содержит frontend `.9`; физическая установка preview на Windows не проверялась.
-Новый Windows-пакет с frontend `.13` ещё не собран и не принят.
-[Метаданные preview](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-1a844fb6f7a3.json)
-указывают ZIP `habab-home-windows-1a844fb6f7a3.zip`, 290827 байт, SHA-256
-`1a844fb6f7a30e16925fd3aa05ff20c0653cf45caf55def36530cdd3a2e746f7` и `physical_windows_run=false`.
-Стабильный 0.3.1 доступен отдельно через [обычный загрузчик](https://habab-demo.wpmix.net/downloads/start-home-assistant.bat), который проверяет SHA-256 стабильного ZIP; кнопка страницы на него сейчас не ведёт.
+автоматической загрузки и распаковки используйте отдельный [preview BAT](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-453a45504433.bat).
+Он проверяет SHA-256 и распаковывает ZIP в `%LOCALAPPDATA%\HababHome`.
+[Текущие метаданные preview](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6.json)
+указывают ZIP `habab-home-windows-453a45504433.zip`, 296220 байт, SHA-256
+`453a45504433232c35c2a7912ccb8312be76d330943b5bcbec4739dcf803c076`. Пакет
+собран из исходного коммита `90445c71ab5ca6a6dbc91433046de54cea955e4f` и
+содержит frontend `.13`; физическая установка на Windows **NOT RUN**.
+Стабильный 0.3.1 доступен отдельно через [обычный загрузчик](https://habab-demo.wpmix.net/downloads/start-home-assistant.bat), который проверяет SHA-256 стабильного ZIP.
 Для новой Git-установки из корня checkout запустите отслеживаемый
 `habab\distribution\start-windows.bat`; двойной щелчок тоже подходит. Для
 обновления сначала выполните `git pull`. Батник пересобирает локальный Docker-
@@ -178,7 +177,8 @@ docker compose --env-file .env.opencode-windows -p habab-home-windows -f compose
 настройка осталась незавершённой. Контейнер и новая конфигурация удалены, образ
 сохранён. [Отчёт](../qa/windows-candidate-0.3.6/clean-image-boot.json). Установка на
 физической Windows не проверялась. Это историческая Linux-проверка frontend
-`.9`; Windows-пакет с frontend `.13` ещё не собран и не принят.
+`.9`; текущий Windows preview `.13` опубликован, но физическая установка
+**NOT RUN**.
 
 Изолированный Linux Docker QA для принятого образа 0.3.0 без overlays прошёл 7/7 browser
 сценариев и 100 Python, 26 JavaScript и 10 native frontend tests; lint,
