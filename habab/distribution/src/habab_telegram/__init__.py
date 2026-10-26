@@ -942,11 +942,13 @@ class TelegramManager:
             while line := await state["process"].stdout.readline():
                 if len(line) > MAX_LINE:
                     state["error"] = "worker_protocol_error"
+                    state["ready"] = False
                     return
                 try:
                     payload = json.loads(line)
                 except (ValueError, UnicodeDecodeError):
                     state["error"] = "worker_protocol_error"
+                    state["ready"] = False
                     return
                 kind = payload.get("type")
                 if kind == "ready":
@@ -971,6 +973,8 @@ class TelegramManager:
                         pending[1].set_result(False)
                     if payload.get("fatal") or payload.get("operation") == "poll":
                         state["error"] = "worker_error"
+                        if payload.get("fatal"):
+                            state["ready"] = False
                 elif kind == "sent":
                     request_id = payload.get("request_id")
                     pending = self.pending_sends.pop(request_id, None) if isinstance(request_id, str) else None
@@ -1036,10 +1040,12 @@ class TelegramManager:
                     pass
                 await asyncio.wait_for(state["process"].wait(), timeout=1)
             state["error"] = "worker_stopped"
+            state["ready"] = False
         except asyncio.CancelledError:
             raise
         except Exception:
             state["error"] = "worker_error"
+            state["ready"] = False
 
     def _should_route_control(self, entry, state, msg):
         value = msg.get("text")

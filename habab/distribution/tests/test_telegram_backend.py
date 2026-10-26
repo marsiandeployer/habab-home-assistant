@@ -419,6 +419,52 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.group_candidates["entry"]["error"], "verification_unavailable")
         self.assertFalse(await manager._is_group_member(entry, -200, 20))
 
+    async def test_terminal_worker_poll_errors_clear_readiness_in_status(self):
+        class Stdout:
+            def __init__(self, lines, wait_after_lines=False):
+                self.lines = list(lines)
+                self.wait_after_lines = wait_after_lines
+                self.waiting = asyncio.Event()
+
+            async def readline(self):
+                if self.lines:
+                    return self.lines.pop(0)
+                if self.wait_after_lines:
+                    self.waiting.set()
+                    await asyncio.Event().wait()
+                return b""
+
+        class Process:
+            def __init__(self, lines, wait_after_lines=False):
+                self.stdout = Stdout(lines, wait_after_lines)
+                self.returncode = 0
+                self.wait = AsyncMock(return_value=0)
+
+        ready = b'{"type":"ready","username":"testbot"}\n'
+        conflict = b'{"type":"error","operation":"poll","code":"telegram_conflict","fatal":true}\n'
+        entry = self.group_entry()
+
+        manager = self.manager()
+        self.bind_owner(manager, entry)
+        manager.entries["entry"]["process"] = Process([ready, conflict], wait_after_lines=True)
+        manager.queues["entry"] = asyncio.Queue(maxsize=5)
+        reader = asyncio.create_task(manager._reader(entry, manager.entries["entry"]))
+        await asyncio.wait_for(manager.entries["entry"]["process"].stdout.waiting.wait(), timeout=1)
+        self.assertEqual(manager.entries["entry"]["error"], "worker_error")
+        self.assertFalse(manager.entries["entry"]["ready"])
+        self.assertEqual((await manager.status("alice"))["phase"], "error")
+        reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
+
+        stopped_manager = self.manager()
+        self.bind_owner(stopped_manager, entry)
+        stopped_manager.entries["entry"]["process"] = Process([ready])
+        stopped_manager.queues["entry"] = asyncio.Queue(maxsize=5)
+        await stopped_manager._reader(entry, stopped_manager.entries["entry"])
+        self.assertEqual(stopped_manager.entries["entry"]["error"], "worker_stopped")
+        self.assertFalse(stopped_manager.entries["entry"]["ready"])
+        self.assertEqual((await stopped_manager.status("alice"))["phase"], "error")
+
     async def test_bot_admin_update_finishes_pending_group_without_repeating_nonce(self):
         class Stdout:
             def __init__(self, lines):
