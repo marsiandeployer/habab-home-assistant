@@ -376,6 +376,19 @@ index 0000000000000000000000000000000000000000..01a0872b8087537b03ae3a47130da4a4
 @@ -0,0 +1 @@
 +<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><title>Habab</title><rect width="64" height="64" rx="14" fill="#155e4b"/><path d="M18 16h8v12h12V16h8v32h-8V36H26v12h-8Z" fill="#f7f8f4"/></svg>
 \ No newline at end of file
+diff --git a/src/components/ha-sidebar.ts b/src/components/ha-sidebar.ts
+index 8787f80b572e69369a88c97b90c0c1cb314ebbb2..97fda45cc121bb905c0b29cfc0da8d757f9a4999 100644
+--- a/src/components/ha-sidebar.ts
++++ b/src/components/ha-sidebar.ts
+@@ -720,6 +720,8 @@ class HaSidebar extends SubscribeMixin(ScrollableFadeMixin(LitElement)) {
+           flex: 1;
+           min-width: 0;
+           max-width: 0;
++          white-space: normal;
++          line-height: var(--ha-line-height-condensed);
+           opacity: 0;
+           transition:
+             max-width var(--ha-animation-duration-normal) ease,
 diff --git a/src/html/_header.html.template b/src/html/_header.html.template
 index 772bf100503156f35eacee99139f81760b6bca36..321fe66d5f56c84f4bdc7356a69a757887f2b1ba 100644
 --- a/src/html/_header.html.template

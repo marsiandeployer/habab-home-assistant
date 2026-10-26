@@ -69,7 +69,7 @@ tests passed without a source overlay. See
 [`frontend8-candidate-image-independent.json`](../qa/issue-monitor-20261024/frontend8-candidate-image-independent.json).
 Build and archive readback are not live acceptance. The historical image receipt does not cover later source changes or the `.9` wheel.
 
-## Native product branding profile for the next `.11` candidate
+## Native product branding profile for the next `.12` candidate
 
 `native-branding.patch` applies after the unchanged `.9` `bridge.patch` on pinned
 source `26690e06b0bf64a1487929245c32842ef92c62b5`. It updates browser/app and
@@ -80,26 +80,27 @@ for `/static/habab/` URLs. It keeps Open Home Foundation attribution, logo, and
 existing element IDs. Manifest icon declarations are a separate source change.
 The full-color SVG is not used as a Safari mask icon.
 
-The installed `.10` candidate is private and is not a release. This source
-profile is for `.11`; no wheel was built here.
+The installed `.11` candidate is private and is not a release; its sidebar
+title clips on desktop. This source profile is for `.12`; no wheel was built here.
 
 SHA-256 values:
 
 - `bridge.patch` (unchanged):
   `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`
 - `native-branding.patch`:
-  `286f7b438938fb7126c990d40474c4e3eb24225e9cc906275b607a9a090d6d9f`
+  `0dcd173f25222ae53a6c04b82a6d35c3f40e1d168d333f9a79dc4aa034567f07`
 - composed patch:
-  `4e7d4e880b6d16b62992570ab6fd70c75b73e6ed2c5d5161589286139343499e`
+  `6022010aeaaa19192bec70659045c6654b8b668959641d88c44cfecf8ea559e1`
 
 The composed patch passed `git apply --check` on the exact pinned source
-snapshot. For a separately authorized `.11` build, use the existing builder with
+snapshot. The sidebar title wraps naturally and uses the pinned condensed line-height
+theme token. For a separately authorized `.12` build, use the existing builder with
 a fresh clean pinned worktree, a private artifact root, and an absent retention
 state (the builder records retention as `SKIP`):
 
 ```sh
-candidate=/root/.local/share/habab-native-frontend11-candidate
-worktree=/root/.local/share/habab-native-frontend11-build
+candidate=/root/.local/share/habab-native-frontend12-candidate
+worktree=/root/.local/share/habab-native-frontend12-build
 patch="$candidate/composed.patch"
 artifact_root="$candidate/artifacts"
 retention_state="$candidate/retention-not-initialized.json"
@@ -110,8 +111,8 @@ git worktree add --detach "$worktree" 26690e06b0bf64a1487929245c32842ef92c62b5
 cat habab/native-frontend/bridge.patch habab/native-frontend/native-branding.patch > "$patch"
 HABAB_NATIVE_FRONTEND_WORKTREE="$worktree" \
 HABAB_NATIVE_FRONTEND_PATCH_FILE="$patch" \
-HABAB_NATIVE_FRONTEND_PATCH_SHA=4e7d4e880b6d16b62992570ab6fd70c75b73e6ed2c5d5161589286139343499e \
-HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.11 \
+HABAB_NATIVE_FRONTEND_PATCH_SHA=6022010aeaaa19192bec70659045c6654b8b668959641d88c44cfecf8ea559e1 \
+HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.12 \
 HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT="$artifact_root" \
 HABAB_NATIVE_FRONTEND_RETENTION_STATE="$retention_state" \
 bash habab/native-frontend/build-wheel.sh
