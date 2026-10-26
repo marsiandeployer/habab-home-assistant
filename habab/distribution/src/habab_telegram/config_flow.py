@@ -13,10 +13,12 @@ from .transport import (
     get_me_request, proxy_url, resolve_telegram_transport,
 )
 
+_BOT_TOKEN_PATTERN = re.compile(r"[0-9]{1,20}:[A-Za-z0-9_-]{20,256}")
+
 
 async def get_bot(session, token, proxy=None, telegram_transport=None):
     """Validate a token without exposing Telegram's response or URL."""
-    if not isinstance(token, str) or not re.fullmatch(r"[0-9]{1,20}:[A-Za-z0-9_-]{20,256}", token):
+    if not isinstance(token, str) or not _BOT_TOKEN_PATTERN.fullmatch(token):
         raise ValueError("invalid_token")
     proxy = proxy_url(proxy)
     try:
@@ -70,7 +72,7 @@ class HababTelegramConfigFlow(ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input:
             token = user_input.get("token", "").strip()
-            if not token or len(token) > 256:
+            if len(token) > 256 or not _BOT_TOKEN_PATTERN.fullmatch(token):
                 errors["base"] = "invalid_token"
             else:
                 try:

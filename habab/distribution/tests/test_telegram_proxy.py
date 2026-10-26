@@ -228,6 +228,32 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
                 flow.async_set_unique_id.assert_not_awaited()
                 flow.async_create_entry.assert_not_called()
 
+    async def test_malformed_token_is_rejected_before_relay_lookup_or_entry_creation(self):
+        session = SimpleNamespace(get=Mock(side_effect=AssertionError("network forbidden")))
+        flow = SimpleNamespace(
+            context={"habab_owner_id": "owner"},
+            hass=SimpleNamespace(
+                auth=SimpleNamespace(async_get_user=AsyncMock(return_value=SimpleNamespace(
+                    is_active=True, is_admin=True))),
+                data=provider_hass("habab", "fixture-service-key").data,
+            ),
+            async_set_unique_id=AsyncMock(),
+            async_create_entry=Mock(),
+            async_show_form=Mock(return_value={"type": "form"}),
+        )
+        with patch(
+            "homeassistant.components.habab_telegram.config_flow.async_get_clientsession",
+            return_value=session,
+        ) as get_session:
+            result = await HababTelegramConfigFlow.async_step_user(
+                flow, {"token": "synthetic-invalid-bot-token"})
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(flow.async_show_form.call_args.kwargs["errors"], {"base": "invalid_token"})
+        get_session.assert_not_called()
+        session.get.assert_not_called()
+        flow.async_set_unique_id.assert_not_awaited()
+        flow.async_create_entry.assert_not_called()
+
     async def test_other_selected_provider_uses_direct_route_without_capability_request(self):
         token = "123456:" + "a" * 20
         session = self.Session([
