@@ -42,6 +42,15 @@ class ReleaseCandidateTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def test_rejects_source_revisions_that_are_not_full_git_sha_lengths(self):
+        for revision in ("a" * 39, "a" * 41, "a" * 63, "a" * 65):
+            with self.subTest(length=len(revision)):
+                with self.assertRaisesRegex(ValueError, "source revision must be a full Git SHA"):
+                    release_candidate.assemble(
+                        self.root, revision, "blocked", self.source_tree, "windows",
+                        workflow_identity=self.workflow_identity,
+                    )
+
     def add_status(self, target, state="built", **extra):
         directory = self.root / target
         directory.mkdir(parents=True, exist_ok=True)

@@ -18,7 +18,7 @@ if str(_DISTRIBUTION_MODULES) not in sys.path:
 from windows_package_files import resolve_windows_package_source
 
 
-_SHA = re.compile(r"\A[0-9a-f]{40,64}\Z")
+_SHA = re.compile(r"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 _OCI_DIGEST = re.compile(r"\Asha256:([0-9a-f]{64})\Z")
 _OCI_IDENTITY_LABELS = (
     "org.opencontainers.image.revision",
