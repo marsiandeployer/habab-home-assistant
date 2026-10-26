@@ -69,84 +69,56 @@ tests passed without a source overlay. See
 [`frontend8-candidate-image-independent.json`](../qa/issue-monitor-20261024/frontend8-candidate-image-independent.json).
 Build and archive readback are not live acceptance. The historical image receipt does not cover later source changes or the `.9` wheel.
 
-## Native product branding profile for a future `.10` candidate
+## Native product branding profile for the next `.11` candidate
 
-`native-branding.patch` is an overlay for the pinned source commit
-`26690e06b0bf64a1487929245c32842ef92c62b5`. It updates the browser title,
-Apple/web app names, and panel-title suffix/fallback to `Habab Home Assistant`.
-The authorization and onboarding templates use that same document title and
-logo alt text. The native launch screen adds the `Сделано в habab.ru` link using
-the small attribution style and markup already used by
-`demo/src/html/index.html.template`; the existing Open Home Foundation
-attribution, logo, and element IDs remain in place. No translations or artwork
-change, and the released `.9` bridge patch remains unchanged.
+`native-branding.patch` applies after the unchanged `.9` `bridge.patch` on pinned
+source `26690e06b0bf64a1487929245c32842ef92c62b5`. It updates browser/app and
+sidebar names, standard favicon and Apple touch links, authorization/onboarding
+marks, and the launch-screen mark. The official source assets are from
+`/root/hababru/public/brand/`; the patch installs them under `public/static/habab/`
+for `/static/habab/` URLs. It keeps Open Home Foundation attribution, logo, and
+existing element IDs. Manifest icon declarations are a separate source change.
+The full-color SVG is not used as a Safari mask icon.
 
-`native-branding.patch` SHA-256:
-`709818518535065ac4f9018ffb9a565db9eb1429a3e5843640452ab230c3c58a`.
-Compose it after the unchanged `.9` bridge patch for a future candidate:
+The installed `.10` candidate is private and is not a release. This source
+profile is for `.11`; no wheel was built here.
 
-```sh
-cat habab/native-frontend/bridge.patch \
-  habab/native-frontend/native-branding.patch > /tmp/habab-native-frontend10.patch
-sha256sum /tmp/habab-native-frontend10.patch
-# Expected SHA-256: 256f963f8cb379549c7be9d92f94cdf867b79f37e662f0d6838a212fafa17f87
-```
+SHA-256 values:
 
-The composition passed `git apply --check` against exact blobs from the pinned source commit.
-It applies the existing `.9` bridge first, then the native branding overlay.
-The unchanged `bridge.patch` SHA-256 remains
-`d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`.
-This source profile does not change the `/manifest.json` hook; that is a
-separate native-agent scope, so this overlay alone is not full issue #10.
+- `bridge.patch` (unchanged):
+  `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`
+- `native-branding.patch`:
+  `286f7b438938fb7126c990d40474c4e3eb24225e9cc906275b607a9a090d6d9f`
+- composed patch:
+  `4e7d4e880b6d16b62992570ab6fd70c75b73e6ed2c5d5161589286139343499e`
 
-A `.10` wheel has not been built or released. After review and a separate build
-go, run the existing builder from a clean detached worktree at the pinned
-commit. Keep the wheel under a private artifact root and point retention at an
-absent state file; the builder records an explicit retention `SKIP` and does
-not change the public `.9`/`.8` pointers. No marker releases are needed. The
-builder writes `habab/qa/native-font-assets/font-assets-report.json`, so save
-the current report, copy the generated candidate report to the private root on
-success, and restore the saved report on both success and failure.
-
-Example command shape for that future, separately authorized build:
+The composed patch passed `git apply --check` on the exact pinned source
+snapshot. For a separately authorized `.11` build, use the existing builder with
+a fresh clean pinned worktree, a private artifact root, and an absent retention
+state (the builder records retention as `SKIP`):
 
 ```sh
-set -euo pipefail
-candidate=/root/.local/share/habab-native-frontend10-candidate
-worktree=/root/.local/share/habab-native-frontend10-build
+candidate=/root/.local/share/habab-native-frontend11-candidate
+worktree=/root/.local/share/habab-native-frontend11-build
 patch="$candidate/composed.patch"
+artifact_root="$candidate/artifacts"
 retention_state="$candidate/retention-not-initialized.json"
-font_report=habab/qa/native-font-assets/font-assets-report.json
-font_backup="$candidate/font-assets-report.before.json"
-test ! -e "$candidate"
-mkdir -p "$candidate/artifacts"
+test ! -e "$candidate" && test ! -e "$worktree"
+mkdir -p "$artifact_root"
 test ! -e "$retention_state"
 git worktree add --detach "$worktree" 26690e06b0bf64a1487929245c32842ef92c62b5
 cat habab/native-frontend/bridge.patch habab/native-frontend/native-branding.patch > "$patch"
-test "$(sha256sum "$patch" | cut -d' ' -f1)" = \
-  256f963f8cb379549c7be9d92f94cdf867b79f37e662f0d6838a212fafa17f87
-cp "$font_report" "$font_backup"
-restore_report() { cp "$font_backup" "$font_report"; rm -f "$font_backup"; }
-trap restore_report EXIT
-if HABAB_NATIVE_FRONTEND_WORKTREE="$worktree" \
-   HABAB_NATIVE_FRONTEND_PATCH_FILE="$patch" \
-   HABAB_NATIVE_FRONTEND_PATCH_SHA=256f963f8cb379549c7be9d92f94cdf867b79f37e662f0d6838a212fafa17f87 \
-   HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.10 \
-   HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT="$candidate/artifacts" \
-   HABAB_NATIVE_FRONTEND_RETENTION_STATE="$retention_state" \
-   bash habab/native-frontend/build-wheel.sh; then
-  cp "$font_report" "$candidate/font-assets-report.candidate.json"
-  restore_report
-  trap - EXIT
-else
-  exit 1
-fi
+HABAB_NATIVE_FRONTEND_WORKTREE="$worktree" \
+HABAB_NATIVE_FRONTEND_PATCH_FILE="$patch" \
+HABAB_NATIVE_FRONTEND_PATCH_SHA=4e7d4e880b6d16b62992570ab6fd70c75b73e6ed2c5d5161589286139343499e \
+HABAB_NATIVE_FRONTEND_WHEEL_VERSION=20260930.4+habab.11 \
+HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT="$artifact_root" \
+HABAB_NATIVE_FRONTEND_RETENTION_STATE="$retention_state" \
+bash habab/native-frontend/build-wheel.sh
 ```
 
-The source worktree and artifact root are private candidate outputs. The clean
-builder's `pnpm install --frozen-lockfile` may fetch dependencies if its cache
-is incomplete. The normal release manifest and owner runtime remain on `.9`
-until a separately accepted release.
+The recipe is documented only; build, release, and runtime acceptance were not
+run as part of this source change.
 
 ## Rebuild
 
