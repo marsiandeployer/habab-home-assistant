@@ -95,9 +95,14 @@ class AssistAdapter:
         }} for tool in api.tools]
         client = ProviderClient(async_get_clientsession(self.hass), self.entry.data)
         actions = 0
-        for _ in range(MAX_ROUNDS):
-            message = await client.complete(format_messages(chat_log.content), tools)
-            calls = parse_calls(message, {tool.name for tool in api.tools})
+        for round_number in range(MAX_ROUNDS + 1):
+            # Reserve one text-only completion after the last allowed action.
+            # Otherwise successful tool results end in a false limit error.
+            available_tools = tools if round_number < MAX_ROUNDS and actions < MAX_TOOLS else []
+            message = await client.complete(format_messages(chat_log.content), available_tools)
+            calls = parse_calls(message, {
+                tool["function"]["name"] for tool in available_tools
+            })
             actions += len(calls)
             if actions > MAX_TOOLS:
                 raise ProviderError("too_many_actions")
