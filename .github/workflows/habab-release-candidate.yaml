@@ -355,7 +355,7 @@ jobs:
     uses: ./.github/workflows/habab-native-frontend-candidate.yaml
     with:
       source_ref: ${{ needs.resolve-source.outputs.source_revision }}
-      wheel_version: 20260930.4+habab.14
+      wheel_version: 20260930.4+habab.17
 
   android:
     needs: [resolve-source, android-inputs, android-frontend]

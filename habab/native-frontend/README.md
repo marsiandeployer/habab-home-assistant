@@ -141,7 +141,7 @@ reusable `workflow_call` from the Android release candidate, and uses
 the public `ubuntu-24.04` runner (4 vCPUs and 16 GiB RAM). Choose `main` or a
 full commit SHA that is an ancestor of the current `origin/main`; the workflow
 resolves and records the exact source SHA. The wheel version defaults to
-`20260930.4+habab.14` and accepts only the `20260930.4+habab.N` form.
+`20260930.4+habab.17` and accepts only the `20260930.4+habab.N` form.
 
 The job checks out only the native frontend producer and font QA files, fetches
 upstream frontend commit `26690e06b0bf64a1487929245c32842ef92c62b5`, and

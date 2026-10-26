@@ -11,7 +11,7 @@ on:
       wheel_version:
         description: "Habab wheel version for Core 2026.10.2"
         required: true
-        default: 20260930.4+habab.14
+        default: 20260930.4+habab.17
         type: string
 
   workflow_call:
@@ -21,7 +21,7 @@ on:
         type: string
       wheel_version:
         required: false
-        default: 20260930.4+habab.14
+        default: 20260930.4+habab.17
         type: string
     outputs:
       artifact_name:

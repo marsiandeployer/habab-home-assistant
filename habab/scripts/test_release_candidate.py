@@ -506,6 +506,21 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
         self.assertIn("verify_apk_provenance", workflow[sign_step:])
         self.assertIn("verify_apk_version", workflow[sign_step:])
 
+    def test_android_release_frontend_version_matches_native_candidate_defaults(self):
+        repository = Path(__file__).resolve().parents[2]
+        release_workflow = self.workflow_text()
+        frontend_job = release_workflow[
+            release_workflow.index("  android-frontend:\n"):release_workflow.index("  android:\n")
+        ]
+        release_version = re.search(r"(?m)^      wheel_version: (\S+)$", frontend_job)
+        self.assertIsNotNone(release_version)
+        self.assertEqual(release_version.group(1), "20260930.4+habab.17")
+
+        native_workflow = (repository / ".github/workflows/habab-native-frontend-candidate.yaml").read_text()
+        input_definitions = native_workflow[:native_workflow.index("permissions:\n")]
+        native_defaults = re.findall(r"(?m)^        default: (20260930\.4\+habab\.\d+)$", input_definitions)
+        self.assertEqual(native_defaults, [release_version.group(1), release_version.group(1)])
+
 
 if __name__ == "__main__":
     unittest.main()
