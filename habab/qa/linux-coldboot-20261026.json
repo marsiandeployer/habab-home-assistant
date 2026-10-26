@@ -1,0 +1,35 @@
+{
+  "source_commit": "3bdc03b6d13f41d142550703e698591bf032563d",
+  "image_tag": "habab-home:linux-smoke-3bdc03-20261026",
+  "image_source_revision": "3bdc03b6d13f41d142550703e698591bf032563d",
+  "host_arch": "linux/amd64",
+  "http_host": "127.0.0.1",
+  "http_port": 18447,
+  "network_policy": "dedicated internal bridge; no external egress",
+  "actions": [
+    "cold boot only",
+    "read-only HTTP GETs"
+  ],
+  "physical_arm_or_device_proof": false,
+  "model_voice_service_calls": false,
+  "container_started": true,
+  "container_image_id": "sha256:c3648f4773fad69e7480eb3e304d5581f176e8489a137158963eeba50ef25708",
+  "http_readback": {
+    "/": null,
+    "/onboarding": null,
+    "/api/onboarding": null
+  },
+  "http_ready": false,
+  "container_removed": true,
+  "network_removed": true,
+  "config_removed": true,
+  "candidate_image_retained": true,
+  "free_after_cleanup_bytes": 22333763584,
+  "observed_at_utc": "2026-10-26T00:14:22+00:00",
+  "receipt_path": "/root/homeassistent/habab/qa/linux-coldboot-20261026.json",
+  "cleanup_verified": true,
+  "cold_boot_result": "BLOCKED",
+  "blocker": "Host loopback readiness probes timed out; this does not distinguish HA startup from port-forward/internal-bridge reachability.",
+  "in_container_listener_probe": "NOT RUN: container was already removed during bounded-flow cleanup; no second boot was started.",
+  "habab_home_runtime_setup": "NOT VERIFIED: the flow did not reach the component-log/import checks."
+}

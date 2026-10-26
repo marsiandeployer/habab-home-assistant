@@ -1,0 +1,62 @@
+{
+  "api_config": {
+    "habab_home_present": false,
+    "http": 200
+  },
+  "architecture": "amd64",
+  "cleanup": {
+    "container_removed": true,
+    "temp_removed": true
+  },
+  "component_gate": "api/config returned 200 without habab_home; admin WS auth/current_user succeeded; feedback_delivery/status returned unknown_command",
+  "container_state": {
+    "exit_code": 0,
+    "oom_killed": false,
+    "running": true
+  },
+  "dependency_cause": "unknown; bounded logs contained no relevant setup or requirements line",
+  "free_bytes_after": 22332006400,
+  "image": "habab-home:linux-smoke-3bdc03-20261026",
+  "image_id": "sha256:c3648f4773fad69e7480eb3e304d5581f176e8489a137158963eeba50ef25708",
+  "native_onboarding": {
+    "core_config_http": 200,
+    "onboarding_http": 200,
+    "token_http": 200,
+    "token_obtained": true,
+    "user_create_http": 200,
+    "user_created": true
+  },
+  "network_mode": "none",
+  "resource_caps": {
+    "cpus": 1,
+    "memory_bytes": 1073741824,
+    "pids": 256,
+    "swap_bytes": 1073741824
+  },
+  "result": "COMPONENT_MISSING",
+  "safe_error": null,
+  "setup_error_summary": {
+    "dependency_names": [],
+    "import_error_marker": false,
+    "missing_module_marker": false,
+    "relevant_lines_considered": 0,
+    "requirements_marker": false,
+    "setup_failed_marker": false
+  },
+  "source_revision": "3bdc03b6d13f41d142550703e698591bf032563d",
+  "transient_startup_exception_type": "ClientConnectorError",
+  "websocket": {
+    "auth_ok": true,
+    "current_user": {
+      "is_active": null,
+      "is_admin": true,
+      "is_owner": true,
+      "result_is_object": true
+    },
+    "feedback_status": {
+      "error_code": "unknown_command",
+      "response_type": "result",
+      "success": false
+    }
+  }
+}

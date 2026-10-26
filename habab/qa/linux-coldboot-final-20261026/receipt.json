@@ -1,0 +1,85 @@
+{
+  "fixture": "single_disposable_linux_coldboot",
+  "image": "habab-home:linux-smoke-3bdc03-20261026",
+  "expected_source": "3bdc03b6d13f41d142550703e698591bf032563d",
+  "network_mode": "isolated_internal",
+  "ports_published": false,
+  "devices_attached": false,
+  "credentials_persisted": false,
+  "image_id": "sha256:c3648f4773fad69e7480eb3e304d5581f176e8489a137158963eeba50ef25708",
+  "entrypoint": [
+    "/usr/local/bin/habab-home-entrypoint"
+  ],
+  "cmd": [
+    "/init"
+  ],
+  "working_dir": "/config",
+  "image_source_label": "3bdc03b6d13f41d142550703e698591bf032563d",
+  "empty_config_before_start": true,
+  "container_started": true,
+  "api_config_final_state": "RUNNING",
+  "api_config_first_state": "NOT_RUNNING",
+  "api_config_http": 200,
+  "auth_token_stored": "RAM_ONLY",
+  "current_user": {
+    "status": "NOT_RUN",
+    "reason": "runner_requested_nonexistent_rest_routes_http_404",
+    "admin_gate": "PASS_INFERRED_FROM_SUCCESSFUL_ADMIN_ONLY_FEEDBACK_COMMAND"
+  },
+  "feedback_delivery_status": {
+    "credential_configured": false,
+    "enabled": false,
+    "ready": false,
+    "status": "ok"
+  },
+  "habab_home_component": true,
+  "onboarding_api_http": 200,
+  "onboarding_page_http": 200,
+  "onboarding_steps": [
+    "analytics",
+    "core_config",
+    "integration",
+    "user"
+  ],
+  "owner_creation": "PASS",
+  "owner_creation_http": 200,
+  "readiness": "PASS",
+  "root_http": 200,
+  "safe_mode": false,
+  "seed_after_core_config": {
+    "exists": true,
+    "habab_home": true,
+    "sha256": "d2812209ffec48d939fb73c038100882540135ab6e14df0b03417b1c936f5754",
+    "top_level_keys": [
+      "api",
+      "config",
+      "frontend",
+      "habab_home",
+      "homeassistant"
+    ]
+  },
+  "seed_before_onboarding": {
+    "exists": true,
+    "habab_home": true,
+    "sha256": "d2812209ffec48d939fb73c038100882540135ab6e14df0b03417b1c936f5754",
+    "top_level_keys": [
+      "api",
+      "config",
+      "frontend",
+      "habab_home",
+      "homeassistant"
+    ]
+  },
+  "token_exchange_http": 200,
+  "cleanup": {
+    "container_removed": true,
+    "network_removed": true,
+    "temporary_config_removed": true,
+    "image_preserved": true,
+    "container_terminal_exit": "137 (stop grace 3s expired; container force-killed after checks)"
+  },
+  "container_terminal_exit": "137",
+  "run_status": "FAIL_OR_UNVERIFIED",
+  "elapsed_seconds": 11.2,
+  "readiness_note": "The initial native auth/current_user REST probes returned 404; this run did not call the required WebSocket auth/current_user command. The saved probe helper was corrected after cleanup; no second cold-start was run."
+}

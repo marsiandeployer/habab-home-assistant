@@ -1,0 +1,54 @@
+{
+  "architecture": "amd64",
+  "cleanup": {
+    "container_removed": true,
+    "temp_removed": true
+  },
+  "container_state": {
+    "exit_code": 0,
+    "oom_killed": false,
+    "running": true
+  },
+  "custom_status_route": "HTTP 404; unauthenticated route was not registered in this fresh config",
+  "free_bytes_after": 22332780544,
+  "ha_listener_reachable": true,
+  "http": {
+    "/": {
+      "http": 200
+    },
+    "/api/habab_home/status": {
+      "http": 404
+    },
+    "/api/onboarding": {
+      "http": 200
+    },
+    "/onboarding": {
+      "http": 404
+    }
+  },
+  "image": "habab-home:linux-smoke-3bdc03-20261026",
+  "image_id": "sha256:c3648f4773fad69e7480eb3e304d5581f176e8489a137158963eeba50ef25708",
+  "listener_8123": false,
+  "listener_evidence": "GET / and /api/onboarding returned HTTP 200 from inside container",
+  "log_summary": {
+    "bootstrap_terms_seen": false,
+    "exception_marker_seen": true,
+    "interpretation": "No network or requirements marker in bounded tail; exception marker present but no raw log lines retained. HTTP success is direct boot evidence.",
+    "network_error_seen": false,
+    "requirements_error_seen": false,
+    "tail_lines_considered": 30
+  },
+  "network_mode": "none",
+  "probe": "docker exec Python urllib to 127.0.0.1:8123",
+  "probe_window_seconds": 90,
+  "proc_listener_8123": "INVALID_PROBE",
+  "proc_listener_note": "Probe encoded the port incorrectly; disregard its false result. No second container start.",
+  "resource_caps": {
+    "cpus": 1,
+    "memory_bytes": 1073741824,
+    "pids": 256,
+    "swap_bytes": 1073741824
+  },
+  "result": "HA_HTTP_REACHED",
+  "source_revision": "3bdc03b6d13f41d142550703e698591bf032563d"
+}
