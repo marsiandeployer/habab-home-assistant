@@ -42,7 +42,7 @@ try {
     if ($config.relay_host -notmatch '^[A-Za-z0-9.-]+$' -or
         $config.relay_user -notmatch '^[A-Za-z0-9_-]+$' -or
         $config.relay_port -lt 1 -or $config.relay_port -gt 65535 -or
-        $config.remote_port -lt 1024 -or $config.remote_port -gt 65535 -or
+        $config.remote_port -lt 32000 -or $config.remote_port -gt 39999 -or
         $config.local_port -lt 1024 -or $config.local_port -gt 65535 -or
         $config.host_key -notmatch '^ssh-ed25519 [A-Za-z0-9+/=]+$') {
         throw 'Invalid product tunnel configuration.'
