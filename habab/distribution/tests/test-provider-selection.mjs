@@ -200,6 +200,8 @@ test("managed Habab presentation never presents a saved model as the current mod
   assert.doesNotMatch(managed.help, /Gateway alias|OpenAI-compatible API/i);
   assert.doesNotMatch(managed.help, /gemini-3\.1-flash-lite/i);
   assert.doesNotMatch(managed.help, /current model is habab-chat/i);
+  assert.doesNotMatch(strings.ru.hababGuide[2], /модель/i);
+  assert.doesNotMatch(strings.en.hababGuide[2], /model/i);
 
   const managedSelected = assistantProviderPresentation({
     provider: "habab",
