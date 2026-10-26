@@ -1,27 +1,47 @@
 # Запуск на Windows
 
-Инструкция для Git-checkout относится к Habab Home 0.3.6 на Home Assistant
-Core 2026.10.2; текущий `native-frontend-release.json` закрепляет frontend
-`20260930.4+habab.16`. На [странице загрузки](https://habab.ru/home-assistant)
-сейчас доступен ZIP preview 0.3.6 с прежним frontend `.13`; pin исходников
-не обновляет уже опубликованный ZIP или установленный контейнер.
-Распакуйте его в выбранную папку и запустите `start-windows.bat` оттуда. Для
-автоматической загрузки и распаковки используйте отдельный [preview BAT](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-453a45504433.bat).
-Он проверяет SHA-256 и распаковывает ZIP в `%LOCALAPPDATA%\HababHome`.
-[Текущие метаданные preview](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6.json)
-указывают ZIP `habab-home-windows-453a45504433.zip`, 296220 байт, SHA-256
-`453a45504433232c35c2a7912ccb8312be76d330943b5bcbec4739dcf803c076`. Пакет
-собран из исходного коммита `90445c71ab5ca6a6dbc91433046de54cea955e4f` и
-содержит frontend `.13`; физическая установка на Windows **NOT RUN**.
-Стабильный 0.3.1 доступен отдельно через [обычный загрузчик](https://habab-demo.wpmix.net/downloads/start-home-assistant.bat), который проверяет SHA-256 стабильного ZIP.
-Для новой Git-установки из корня checkout запустите отслеживаемый
-`habab\distribution\start-windows.bat`; двойной щелчок тоже подходит. Для
-обновления сначала выполните `git pull`. Батник пересобирает локальный Docker-
-образ с закреплённым frontend `20260930.4+habab.16` и повторно использует том
-`config`. Сохраните рядом остальные файлы `distribution`; не удаляйте том и не
-выполняйте `docker compose down -v`, если нужно сохранить Home Assistant.
+Habab Home 0.3.6 использует Home Assistant Core 2026.10.2. Выберите способ
+запуска по тому, как вы установили Habab Home.
 
-Стабильный пакет 0.3.1 загружается отдельным `start-home-assistant.bat` в `%LOCALAPPDATA%\HababHome`. Если вы скачали ZIP preview со страницы, его файлы остаются в выбранной папке: запускайте `start-windows.bat` оттуда. Только preview BAT автоматически скачивает архив и распаковывает его в `%LOCALAPPDATA%\HababHome`.
+**Из Git-checkout.** Для первой установки из корня репозитория запустите
+`habab\distribution\start-windows.bat`. Для обновления откройте `cmd` в корне
+того же checkout и выполните:
+
+```bat
+git pull --ff-only
+```
+
+Если Git завершился без ошибки, запустите:
+
+```bat
+habab\distribution\start-windows.bat
+```
+
+BAT пересобирает образ из локальных исходников, устанавливает frontend,
+закреплённый в `native-frontend-release.json`, и запускает Home Assistant
+с прежним томом `config`. Если Git сообщил об ошибке или конфликте, остановитесь
+и сохраните свои изменения перед повторным обновлением. Не удаляйте том и не
+выполняйте `docker compose down -v`, если нужно сохранить аккаунт и настройки.
+
+**Скачать preview.** [Preview BAT 0.3.6](https://habab-demo.wpmix.net/downloads/start-home-assistant-preview-0.3.6-545d36f2eec7.bat)
+скачивает проверенный ZIP, сверяет SHA-256, распаковывает его в
+`%LOCALAPPDATA%\HababHome` и запускает установку. Для обновления этой установки
+скачайте новый preview BAT и запустите его; том Home Assistant сохраняется.
+Для ручной распаковки доступен [тот же ZIP](https://habab-demo.wpmix.net/downloads/habab-home-windows-545d36f2eec7.zip):
+запустите `start-windows.bat` из распакованной папки.
+
+[Метаданные preview](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-545d36f2eec7.json):
+333548 байт, SHA-256
+`545d36f2eec7bfccbd41941d580c1dd96d319ac9de220deeabe08cdfbb22c08d`,
+исходный коммит `a7cace7ec2ae75aff57d1e85764ee2d48806af06`, frontend
+`20260930.4+habab.16`. Этот preview содержит раздел **Поддержка (бета)**
+в левом меню и видеоинструкцию в разделе **Telegram**. Физическая установка
+preview на Windows **NOT RUN**.
+
+Отслеживаемый `habab\distribution\start-windows.bat` запускает ваш Git-checkout.
+Отдельный [стабильный загрузчик](https://habab-demo.wpmix.net/downloads/start-home-assistant.bat)
+скачивает пакет 0.3.1 в `%LOCALAPPDATA%\HababHome`; для обновления Git-checkout
+используйте команды выше.
 
 Если Docker Desktop отсутствует, скрипт запускает установку через winget или скачивает официальный установщик Docker и проверяет его цифровую подпись. Следуйте окнам установщика и Docker Desktop. Если нужен WSL 2, появится запрос прав администратора. После требуемой перезагрузки Windows запустите батник ещё раз. Виртуализация должна быть включена в BIOS/UEFI.
 

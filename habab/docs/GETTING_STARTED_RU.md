@@ -17,9 +17,14 @@ cd habab-home-assistant
 .\habab\distribution\start-windows.bat
 ```
 
-Так запускается текущий исходный кандидат, а не опубликованный пакет 0.3.1. Повторный запуск использует сохранённый том HA. Перед обновлением исходников выполните `git pull`, затем снова запустите BAT. Не удаляйте Docker volume и не используйте `docker compose down -v`, если хотите сохранить аккаунт и настройки.
+Так запускается текущий исходный кандидат, а не опубликованный пакет 0.3.1. Повторный запуск использует сохранённый том HA. Перед обновлением исходников выполните `git pull --ff-only`. Если Git завершился без ошибки, снова запустите `habab/distribution/start-windows.bat`. Не удаляйте Docker volume и не используйте `docker compose down -v`, если хотите сохранить аккаунт и настройки.
 
-Публичный пакет можно сверить по SHA-256 из [Windows manifest](https://habab-demo.wpmix.net/downloads/windows-package.json). На дату этой инструкции manifest указывает `habab-home-windows-dcfbe4740bb6.zip`, 144222 байта, SHA-256 `dcfbe4740bb6f39044bd14c66a449a7b02d626a28f6405990cc301161748825f`. Для архива в стандартной папке загрузок выполните `Get-FileHash "$env:USERPROFILE\Downloads\habab-home-windows-dcfbe4740bb6.zip" -Algorithm SHA256` и сравните результат с manifest. Перед ручной загрузкой сверяйте текущий manifest: опубликованные версии меняются отдельно от исходного кандидата.
+Публичный preview можно сверить по SHA-256 из [метаданных этого выпуска](https://habab-demo.wpmix.net/downloads/windows-preview-0.3.6-545d36f2eec7.json):
+ZIP `habab-home-windows-545d36f2eec7.zip`, 333548 байт, SHA-256
+`545d36f2eec7bfccbd41941d580c1dd96d319ac9de220deeabe08cdfbb22c08d`.
+Для архива в стандартной папке загрузок выполните
+`Get-FileHash "$env:USERPROFILE\Downloads\habab-home-windows-545d36f2eec7.zip" -Algorithm SHA256`
+и сравните результат с метаданными этого выпуска.
 
 ## Docker на Linux
 

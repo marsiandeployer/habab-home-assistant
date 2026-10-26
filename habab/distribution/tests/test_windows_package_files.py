@@ -1,3 +1,4 @@
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -51,6 +52,27 @@ class WindowsPackageFilesTests(unittest.TestCase):
                 resolve_windows_package_source(distribution, 'product-tunnel/identity'),
                 distribution / 'product-tunnel/identity',
             )
+
+    def test_registered_support_panel_and_referenced_video_captions_are_packaged(self):
+        # A successfully built ZIP can still omit a sidebar module or captions.
+        # Resolve the URLs used by the product against the actual collector.
+        names = set(collect_windows_package_names(DISTRIBUTION))
+        registration = (DISTRIBUTION / 'src/habab_home/__init__.py').read_text()
+        support = re.search(r'module_url="(/habab-home/support-panel[^"?]+)(?:\?[^" ]*)?"', registration)
+        self.assertIsNotNone(support)
+        support_member = 'src/habab_home/frontend/' + support[1].removeprefix('/habab-home/')
+        self.assertIn(support_member, names)
+        self.assertTrue(resolve_windows_package_source(DISTRIBUTION, support_member).is_file())
+
+        telegram_member = 'src/habab_home/frontend/telegram-panel.js'
+        self.assertIn(telegram_member, names)
+        telegram = resolve_windows_package_source(DISTRIBUTION, telegram_member).read_text()
+        captions = re.findall(r'["\']\./([^"\']+\.vtt)["\']', telegram)
+        self.assertTrue(captions, 'The video must retain its local captions')
+        for caption in captions:
+            member = 'src/habab_home/frontend/' + caption
+            self.assertIn(member, names)
+            self.assertTrue(resolve_windows_package_source(DISTRIBUTION, member).read_bytes().startswith(b'WEBVTT'))
 
     def test_missing_product_tunnel_source_fails_instead_of_omitting_it(self):
         with tempfile.TemporaryDirectory() as temporary:
