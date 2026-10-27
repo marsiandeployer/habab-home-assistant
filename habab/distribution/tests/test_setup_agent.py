@@ -208,6 +208,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
     def agent(self):
         agent = object.__new__(SetupAgent)
         agent.lock = asyncio.Lock()
+        agent._aborting = False
+        agent._active_run_completed = False
         agent.ensure = AsyncMock()
         user, final = runtime_turn()
         agent.request = AsyncMock(side_effect=[[], final, [user, final]])
@@ -222,6 +224,299 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         })
         agent.hass = SimpleNamespace(data={}, config_entries=SimpleNamespace(async_entries=lambda _: [entry]))
         return agent
+
+    async def test_cancel_persists_context_before_next_request_without_model_reply(self):
+        agent = self.agent()
+        started, stopped = asyncio.Event(), asyncio.Event()
+        old, incomplete = runtime_turn(user_id="msg-old", message_id="msg-incomplete")
+        old["parts"] = [{"type": "text", "text": "Create the old QA draft"}]
+        incomplete["info"].pop("structured")
+        incomplete["info"]["time"] = {"created": 1, "completed": 2}
+        history, notices, model_requests = [], [], []
+
+        async def request(method, route, body=None, **kwargs):
+            if route.endswith("/abort"):
+                stopped.set()
+                return True
+            if method == "GET":
+                return list(history)
+            if body.get("noReply") is True:
+                self.assertIsNone(agent.active)
+                self.assertTrue(body["parts"][0]["synthetic"])
+                self.assertIn("остановлена владельцем", body["parts"][0]["text"])
+                self.assertIn("новая просьба явно разрешает", body["parts"][0]["text"])
+                self.assertIn("История — контекст", PROMPT)
+                self.assertEqual(body["parts"][0]["metadata"]["habab_context_event"], "request_stopped")
+                notice = {"info": {"id": "msg-stop", "role": "user"}, "parts": body["parts"]}
+                notices.append(notice)
+                history.append(notice)
+                return notice
+            model_requests.append(body)
+            if len(model_requests) == 1:
+                history.extend([old, incomplete])
+                started.set()
+                await stopped.wait()
+                raise AgentError("runtime_error")
+            self.assertEqual(notices, [history[-1]])
+            self.assertEqual(body["parts"][-1]["text"], "Only create the new QA draft")
+            user, final = runtime_turn("Current request only", user_id="msg-new", message_id="msg-new-final")
+            user["parts"] = body["parts"]
+            history.extend([user, final])
+            return final
+
+        agent.request = AsyncMock(side_effect=request)
+        first = asyncio.create_task(agent.run("alice", "ses_alice", "Create the old QA draft"))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            self.assertTrue(await asyncio.wait_for(agent.abort("alice", "ses_alice"), 1))
+            with self.assertRaises(AgentError):
+                await first
+        finally:
+            first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+        self.assertEqual(len(model_requests), 1)  # noReply cancellation made no model turn.
+        self.assertEqual(len(notices), 1)
+        result = await agent.run("alice", "ses_alice", "Only create the new QA draft")
+        self.assertEqual(len(model_requests), 2)
+        self.assertEqual([m["text"] for m in result["messages"] if m["role"] == "user"],
+                         ["Create the old QA draft", "Only create the new QA draft"])
+        self.assertEqual(old["parts"][0]["text"], "Create the old QA draft")
+
+    async def test_abort_blocks_admission_until_http_and_context_finish(self):
+        agent = self.agent()
+        started, finish_run = asyncio.Event(), asyncio.Event()
+        abort_started, finish_abort = asyncio.Event(), asyncio.Event()
+        notice_started, finish_notice = asyncio.Event(), asyncio.Event()
+        history, model_requests = [], []
+
+        async def request(method, route, body=None, **kwargs):
+            if route.endswith("/abort"):
+                abort_started.set()
+                await finish_abort.wait()
+                return True
+            if method == "GET":
+                return list(history)
+            if body.get("noReply") is True:
+                notice_started.set()
+                await finish_notice.wait()
+                history.append({"info": {"id": "msg-stop", "role": "user"}, "parts": body["parts"]})
+                return history[-1]
+            model_requests.append(body)
+            if len(model_requests) == 1:
+                started.set()
+                await finish_run.wait()
+                raise AgentError("runtime_error")
+            user, final = runtime_turn(user_id=f"msg-user-{len(model_requests)}",
+                                       message_id=f"msg-final-{len(model_requests)}")
+            user["parts"] = body["parts"]
+            history.extend([user, final])
+            return final
+
+        agent.request = AsyncMock(side_effect=request)
+        first = asyncio.create_task(agent.run("alice", "ses_alice", "Old request"))
+        stop = None
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            stop = asyncio.create_task(agent.abort("alice", "ses_alice"))
+            await asyncio.wait_for(abort_started.wait(), 1)
+            self.assertFalse(await agent.abort("alice", "ses_alice"))
+            self.assertEqual(sum(call.args[1].endswith("/abort")
+                                 for call in agent.request.await_args_list), 1)
+            finish_run.set()
+            with self.assertRaises(AgentError):
+                await asyncio.wait_for(first, 1)
+            self.assertFalse(agent.lock.locked())
+            self.assertIsNone(agent.active)
+            # The old run ended, but its session-scoped abort is still in flight.
+            with self.assertRaises(AgentError) as error:
+                await agent.run("alice", "ses_alice", "Must wait for abort")
+            self.assertEqual(error.exception.code, "busy")
+            self.assertEqual(len(model_requests), 1)
+            finish_abort.set()
+            await asyncio.wait_for(notice_started.wait(), 1)
+            with self.assertRaises(AgentError) as error:
+                await agent.run("alice", "ses_alice", "Must wait for context")
+            self.assertEqual(error.exception.code, "busy")
+            self.assertFalse(await agent.abort("alice", "ses_alice"))
+            self.assertEqual(len(model_requests), 1)
+            finish_notice.set()
+            self.assertTrue(await asyncio.wait_for(stop, 1))
+            await agent.run("alice", "ses_alice", "New request")
+            self.assertEqual(len(model_requests), 2)
+        finally:
+            finish_run.set()
+            finish_abort.set()
+            finish_notice.set()
+            tasks = [first] + ([stop] if stop is not None else [])
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def test_completed_before_abort_response_does_not_record_cancel(self):
+        agent = self.agent()
+        started, finish_run = asyncio.Event(), asyncio.Event()
+        abort_started, finish_abort = asyncio.Event(), asyncio.Event()
+        history, notices = [], []
+
+        async def request(method, route, body=None, **kwargs):
+            if route.endswith("/abort"):
+                abort_started.set()
+                await finish_abort.wait()
+                return True
+            if method == "GET":
+                return list(history)
+            if body.get("noReply") is True:
+                notices.append(body)
+                return {}
+            started.set()
+            await finish_run.wait()
+            user, final = runtime_turn()
+            user["parts"] = body["parts"]
+            history.extend([user, final])
+            return final
+
+        agent.request = AsyncMock(side_effect=request)
+        first = asyncio.create_task(agent.run("alice", "ses_alice", "Finishes normally"))
+        stop = None
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            stop = asyncio.create_task(agent.abort("alice", "ses_alice"))
+            await asyncio.wait_for(abort_started.wait(), 1)
+            finish_run.set()
+            result = await asyncio.wait_for(first, 1)
+            self.assertEqual(result["messages"][-1]["text"], "OK")
+            finish_abort.set()
+            self.assertFalse(await asyncio.wait_for(stop, 1))
+            self.assertEqual(notices, [])
+            self.assertFalse(agent._aborting)
+        finally:
+            finish_run.set()
+            finish_abort.set()
+            await asyncio.gather(first, *([stop] if stop is not None else []), return_exceptions=True)
+
+    async def test_abort_requires_true_runtime_acknowledgement(self):
+        for acknowledgement in (False, None, {}, "true"):
+            with self.subTest(acknowledgement=acknowledgement):
+                agent = self.agent()
+                agent.active = ("alice", "ses_alice")
+                agent.request = AsyncMock(return_value=acknowledgement)
+                self.assertFalse(await agent.abort("alice", "ses_alice"))
+                agent.request.assert_awaited_once_with("POST", "session/ses_alice/abort")
+                self.assertFalse(agent._aborting)
+
+    async def test_abort_request_error_does_not_claim_interruption(self):
+        agent = self.agent()
+        agent.active = ("alice", "ses_alice")
+        agent.request = AsyncMock(side_effect=AgentError("runtime_error"))
+        agent.close = AsyncMock()
+        self.assertFalse(await agent.abort("alice", "ses_alice"))
+        agent.request.assert_awaited_once_with("POST", "session/ses_alice/abort")
+        agent.close.assert_awaited_once()
+        self.assertFalse(agent._aborting)
+
+    async def test_cancelled_caller_after_server_acceptance_finishes_abort_and_notice(self):
+        agent = self.agent()
+        agent.active = ("alice", "ses_alice")
+        accepted, release_ack = asyncio.Event(), asyncio.Event()
+        notice_started, persist = asyncio.Event(), asyncio.Event()
+        notices = []
+
+        async def request(method, route, body=None, **kwargs):
+            if route.endswith("/abort"):
+                # The server accepted the request; only its HTTP reply is delayed.
+                accepted.set()
+                await release_ack.wait()
+                return True
+            notice_started.set()
+            await persist.wait()
+            notices.append(body)
+            return {}
+
+        agent.request = AsyncMock(side_effect=request)
+        stop = asyncio.create_task(agent.abort("alice", "ses_alice"))
+        try:
+            await asyncio.wait_for(accepted.wait(), 1)
+            for _ in range(2):
+                stop.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(stop.done())
+                self.assertTrue(agent._aborting)
+                with self.assertRaises(AgentError) as error:
+                    await agent.run("alice", "ses_alice", "Must wait for abort acknowledgement")
+                self.assertEqual(error.exception.code, "busy")
+            release_ack.set()
+            await asyncio.wait_for(notice_started.wait(), 1)
+            self.assertTrue(agent._aborting)
+            self.assertEqual(notices, [])
+            persist.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(stop, 1)
+            self.assertEqual(len(notices), 1)
+            self.assertTrue(notices[0]["noReply"])
+            self.assertFalse(agent._aborting)
+            self.assertFalse(agent.lock.locked())
+        finally:
+            release_ack.set()
+            persist.set()
+            await asyncio.gather(stop, return_exceptions=True)
+
+    async def test_cancelled_abort_finishes_notice_before_admitting_next_run(self):
+        agent = self.agent()
+        agent.active = ("alice", "ses_alice")
+        reached, persist = asyncio.Event(), asyncio.Event()
+        notices = []
+
+        async def request(method, route, body=None, **kwargs):
+            if route.endswith("/abort"):
+                return True
+            reached.set()
+            await persist.wait()
+            notices.append(body)
+            return {}
+
+        agent.request = AsyncMock(side_effect=request)
+        stop = asyncio.create_task(agent.abort("alice", "ses_alice"))
+        try:
+            await asyncio.wait_for(reached.wait(), 1)
+            # Cancellation of the caller must not cancel acknowledged context work.
+            for _ in range(2):
+                stop.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(stop.done())
+                self.assertTrue(agent._aborting)
+                with self.assertRaises(AgentError) as error:
+                    await agent.run("alice", "ses_alice", "Must wait for persisted cancellation")
+                self.assertEqual(error.exception.code, "busy")
+            self.assertEqual(notices, [])
+            persist.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(stop, 1)
+            self.assertEqual(len(notices), 1)
+            self.assertTrue(notices[0]["noReply"])
+            self.assertFalse(agent._aborting)
+            self.assertFalse(agent.lock.locked())
+            # A fresh turn is admitted only after the notice has finished.
+            fresh = self.agent()
+            agent.request = fresh.request
+            result = await agent.run("alice", "ses_alice", "New request")
+            self.assertEqual(result["messages"][-1]["text"], "OK")
+        finally:
+            persist.set()
+            await asyncio.gather(stop, return_exceptions=True)
+
+    async def test_foreign_abort_does_not_add_cancellation_context(self):
+        agent = self.agent()
+        agent.active = ("alice", "ses_alice")
+        self.assertFalse(await agent.abort("bob", "ses_alice"))
+        self.assertFalse(await agent.abort("alice", "ses_other"))
+        agent.request.assert_not_awaited()
+
+    async def test_cancel_context_failure_is_not_reported_as_success(self):
+        agent = self.agent()
+        agent.active = ("alice", "ses_alice")
+        agent.request.side_effect = [True, AgentError("runtime_error")]
+        with self.assertRaises(AgentError):
+            await agent.abort("alice", "ses_alice")
+        self.assertTrue(agent.request.await_args_list[-1].args[2]["noReply"])
+        self.assertFalse(agent._aborting)
 
     async def test_busy_does_not_start_another_root_command(self):
         agent = self.agent()
@@ -428,7 +723,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(error.exception.code, "model_error")
                 agent.diagnostics.record.assert_called_once_with(
                     "alice", "ses_alice", {"message": "invalid_action_outcome"})
-                agent.abort.assert_awaited_once_with("alice", "ses_alice")
+                agent.abort.assert_awaited_once_with("alice", "ses_alice", record_context=False)
 
     async def test_real_request_adapter_sends_schema_and_consumes_info_structured(self):
         """Exercise the HTTP JSON adapter, not a mocked SetupAgent.request."""
@@ -650,7 +945,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         diagnostic = agent.diagnostics.get("alice", "ses_alice")
         self.assertTrue(diagnostic["mentions_timeout"])
         self.assertNotIn("message", diagnostic)
-        agent.abort.assert_awaited_once_with("alice", "ses_alice")
+        agent.abort.assert_awaited_once_with("alice", "ses_alice", record_context=False)
         self.assertIsNone(agent.active)
 
     def test_history_omits_tool_outputs_reasoning_and_synthetic_secrets(self):

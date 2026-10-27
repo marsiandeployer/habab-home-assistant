@@ -115,8 +115,15 @@ VOICE_TURN_METADATA_KEY = "habab_voice_turn"
 VOICE_TURN_METADATA_VALUE = "native_realtime.v1"
 VOICE_TURN_EVENT_ID_KEY = "habab_voice_event_id"
 VOICE_TURN_HASH_KEY = "habab_voice_payload_sha256"
+STOPPED_REQUEST_CONTEXT = (
+    "Системная отметка: предыдущая просьба в этом разговоре остановлена владельцем. "
+    "Не возобновляй её незавершённые действия. Выполняй только последнюю просьбу "
+    "пользователя; вернись к остановленной работе только если новая просьба явно разрешает это."
+)
 PROMPT = ASSISTANT_IDENTITY + """Ты помощник по настройке домашнего Home Assistant. Отвечай по-русски,
-кратко. Все сообщения владельцу, включая короткие сообщения о ходе работы, пиши
+кратко. Выполняй только последнюю просьбу пользователя. История — контекст, а не
+очередь незавершённых поручений. Не возобновляй остановленную или отменённую просьбу
+без нового явного указания пользователя. Все сообщения владельцу, включая короткие сообщения о ходе работы, пиши
 по-русски. Внутренние flow_id/session_id не показывай в обычном ответе: владельцу
 нужны понятные названия и шаги в карточке. Ты работаешь через OpenCode от root
 ВНУТРИ Docker-контейнера Home Assistant Core, НЕ на хосте. Это не Home Assistant
@@ -299,6 +306,8 @@ class SetupAgent:
         self.external_search_status = {"mode": "not_checked", "state": "not_checked"}
         self.external_search_retry_at = None
         self.lock = asyncio.Lock()
+        self._aborting = False
+        self._active_run_completed = False
         self.active = None
         self._runtime_secrets = set()
         self.diagnostics = AgentDiagnostics()
@@ -575,12 +584,13 @@ class SetupAgent:
         return result[-60:]
 
     async def run(self, owner, session_id, text):
-        if self.lock.locked():
+        if self.lock.locked() or self._aborting:
             raise AgentError("busy")
         async with self.lock:
             settings = self.settings()
             contract = await self.ensure(settings)
             self.active = (owner, session_id)
+            self._active_run_completed = False
             try:
                 status = await get_assistant_status(self.hass, owner, settings, verify_telegram=False)
                 status["external_search"] = dict(self.external_search_status)
@@ -666,26 +676,66 @@ class SetupAgent:
                     self.diagnostics.record(owner, session_id, {"message": "todo_receipt_not_verified"})
                 if todo_verified:
                     self.diagnostics.clear(owner, session_id)
+                self._active_run_completed = True
                 return {"session_id": session_id, "messages": visible}
             except AgentError as error:
                 if error.code == "runtime_timeout":
                     self.diagnostics.record(owner, session_id, {"message": "timeout"})
-                await self.abort(owner, session_id)
+                await self.abort(owner, session_id, record_context=False)
                 raise
             except asyncio.CancelledError:
-                await self.abort(owner, session_id)
+                await self.abort(owner, session_id, record_context=False)
                 raise
             finally:
                 self.active = None
 
-    async def abort(self, owner, session_id):
-        if self.active == (owner, session_id):
-            try:
-                await self.request("POST", f"session/{session_id}/abort")
-            except AgentError:
-                await self.close()
+    async def abort(self, owner, session_id, *, record_context=True):
+        if self.active != (owner, session_id) or self._aborting:
+            return False
+        # Close admission before the first await. The server may accept abort
+        # before its HTTP response arrives, so shield the whole bounded operation.
+        self._aborting = True
+        try:
+            operation = asyncio.create_task(self._abort_and_record(session_id, record_context))
+            cancelled = False
+            while True:
+                try:
+                    result = await asyncio.shield(operation)
+                    break
+                except asyncio.CancelledError:
+                    if operation.cancelled():
+                        raise
+                    cancelled = True
+            if cancelled:
+                raise asyncio.CancelledError
+            return result
+        finally:
+            self._aborting = False
+
+    async def _abort_and_record(self, session_id, record_context):
+        try:
+            interrupted = await self.request("POST", f"session/{session_id}/abort")
+        except AgentError:
+            await self.close()
+            return False
+        if interrupted is not True:
+            return False
+        if not record_context:
             return True
-        return False
+        # Wait for the stopped run to unwind before appending context.
+        # noReply stores the notice without starting another model turn.
+        async with self.lock:
+            if self._active_run_completed:
+                return False
+            await self.request("POST", f"session/{session_id}/message", {
+                "noReply": True,
+                "parts": [{
+                    "type": "text", "synthetic": True,
+                    "metadata": {"habab_context_event": "request_stopped"},
+                    "text": STOPPED_REQUEST_CONTEXT,
+                }],
+            })
+            return True
 
     async def close(self, _event=None):
         process, self.process = self.process, None
