@@ -87,7 +87,11 @@ export class HababAutomationSetup extends HTMLElement {
       if (!this._valid(scope)) return;
       if (!Array.isArray(result?.drafts) ||
           (result.recovery_drafts !== undefined && !Array.isArray(result.recovery_drafts))) throw new Error("invalid_receipt");
-      this.records = [...result.drafts, ...(result.recovery_drafts || [])];
+      // Saved objects belong to their original conversation. Historical cards
+      // should not repopulate a fresh chat after every status read; uncertain
+      // writes and cleanup still need their recovery UI until reconciled.
+      this.records = [...result.drafts,
+        ...(result.recovery_drafts || []).filter((record) => record.phase !== "saved")];
       this.error = false;
     } catch (_) {
       if (this._valid(scope)) this.error = true;

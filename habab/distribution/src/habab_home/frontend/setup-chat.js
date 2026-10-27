@@ -640,7 +640,7 @@ function installChat() {
       try {
         await import("/habab-home/xiaomi-setup.js?v=4");
         await import("/habab-home/integration-setup.js?v=1");
-        await import("/habab-home/automation-setup.js?v=4");
+        await import("/habab-home/automation-setup.js?v=5");
         if (!this.setupCard) {
           this.setupCard = document.createElement("habab-xiaomi-setup");
           this.setupCard.addEventListener("habab-setup-dismiss", () => {

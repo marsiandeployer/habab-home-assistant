@@ -151,6 +151,28 @@ test("previous-chat recovery receipts cannot authorize saving", async () => {
   assert.deepEqual(calls, []);
 });
 
+test("old saved cards stay out of new chat while current and pending cards remain", async () => {
+  const currentDraft = {...record(), draft_id: "c".repeat(32)};
+  const oldSavedAutomation = {...record("automation", "saved"), from_previous_chat: true};
+  const oldSavedHelper = {...record("input_boolean", "saved"), draft_id: "h".repeat(32), from_previous_chat: true};
+  const oldPending = {...record("automation", "saving"), draft_id: "p".repeat(32), from_previous_chat: true};
+  let statusReads = 0;
+  const {card} = fixture({callWS: async (msg) => {
+    if (msg.operation !== "status") return {};
+    statusReads += 1;
+    return {drafts: [currentDraft], recovery_drafts: [oldSavedAutomation, oldSavedHelper, oldPending]};
+  }});
+
+  await card.refresh();
+  assert.deepEqual(card.records.map(({draft_id}) => draft_id), [currentDraft.draft_id, oldPending.draft_id]);
+  assert.equal(statusReads, 1);
+
+  await card.refresh();
+  assert.deepEqual(card.records.map(({draft_id}) => draft_id), [currentDraft.draft_id, oldPending.draft_id],
+    "a subsequent status response cannot restore completed cards");
+  assert.equal(statusReads, 2);
+});
+
 test("card dismissal survives refresh and stays scoped to its owner and chat", () => {
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const values = new Map();
