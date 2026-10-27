@@ -455,8 +455,8 @@ class TelegramManager:
         if member_origin:
             if (not group_binding or group_binding.get("chat_id") != origin["group_id"]
                     or group_binding.get("bot_id") != origin_bot_id
-                    or not await self._is_group_member(entry, int(origin["group_id"]),
-                                                       origin["user_id"], group_binding)):
+                    or (await self._is_group_member(entry, int(origin["group_id"]),
+                                                        origin["user_id"], group_binding)) is not True):
                 return False
         elif (not binding or str(binding.get("chat_id")) != chat_id
               or state.get("chat_id") != chat_id
@@ -478,8 +478,8 @@ class TelegramManager:
             return False
         if member_origin:
             if (self.group_bindings.get(entry_id) != group_binding
-                    or not await self._is_group_member(entry, int(origin["group_id"]),
-                                                       origin["user_id"], group_binding)):
+                    or (await self._is_group_member(entry, int(origin["group_id"]),
+                                                        origin["user_id"], group_binding)) is not True):
                 return False
         elif self.bindings.get(entry_id) != binding:
             return False
@@ -605,7 +605,8 @@ class TelegramManager:
             and str(binding.get("owner_user_id")) == str(owner_binding.get("user_id"))
         )
 
-    async def _is_group_member(self, entry, chat_id, user_id, expected_binding=None):
+    async def _is_group_member(self, entry, chat_id, user_id, expected_binding=None) -> bool | None:
+        """Return True/False for known access, None for an unavailable lookup."""
         owner = entry.data["owner_id"]
         binding = self.group_bindings.get(entry.entry_id)
         if (not binding or (expected_binding is not None and binding != expected_binding)
@@ -623,19 +624,23 @@ class TelegramManager:
             entry, int(binding_snapshot["chat_id"]))
         context_current = await self._group_access_context_is_current(
             entry, owner, binding_snapshot, state)
-        if bot_is_admin is not True or not context_current:
+        if not context_current or bot_is_admin is False:
             return False
+        if bot_is_admin is None:
+            return None
         member = await self.get_chat_member(
             entry.entry_id, int(binding_snapshot["chat_id"]), user_id)
         if not await self._group_access_context_is_current(
                 entry, owner, binding_snapshot, state):
             return False
-        return bool(member and member.get("is_member") is True
+        if member is None:
+            return None
+        return bool(member.get("is_member") is True
                     and member.get("status") in
                     ("creator", "administrator", "member", "restricted"))
 
     async def _revoke_group_member(self, entry, chat_id, notify=False, cancel_turn=True,
-                                  group_chat=False):
+                                  group_chat=False, preserve_history=False):
         # Group sessions are shared. Losing one participant's membership must not
         # erase that shared history or send a member-specific notice to everyone.
         if group_chat:
@@ -645,6 +650,10 @@ class TelegramManager:
         if cancel_turn and task and not task.done() and task is not asyncio.current_task():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        if preserve_history:
+            # An unavailable roster check still stops the turn, but is not
+            # evidence that this participant left the group.
+            return
         self.group_member_chats.setdefault(entry.entry_id, {}).pop(str(chat_id), None)
         assistant = self.hass.data.get("habab_home", {}).get("assistant")
         if assistant is not None:
@@ -658,11 +667,12 @@ class TelegramManager:
             await asyncio.sleep(5)
             if turn.done():
                 return
-            if not await self._is_group_member(entry, int(binding["chat_id"]), user_id, binding):
+            allowed = await self._is_group_member(entry, int(binding["chat_id"]), user_id, binding)
+            if allowed is not True:
                 is_group_chat = str(chat_id) == binding.get("chat_id")
                 await self._revoke_group_member(
                     entry, chat_id, notify=not is_group_chat, cancel_turn=False,
-                    group_chat=is_group_chat)
+                    group_chat=is_group_chat, preserve_history=allowed is None)
                 if not turn.done():
                     turn.cancel()
                 return
@@ -692,7 +702,7 @@ class TelegramManager:
                 user_id = int(dm_chat)
             except ValueError:
                 return None
-        if not await self._is_group_member(entry, int(binding["chat_id"]), int(user_id), binding):
+        if (await self._is_group_member(entry, int(binding["chat_id"]), int(user_id), binding)) is not True:
             return None
         if (self.group_bindings.get(entry_id) != binding
                 or self.entry_for_owner(owner) is not entry
@@ -737,8 +747,8 @@ class TelegramManager:
         allowed = await self._turn_origin_is_current(
             entry, chat_id, user_id, group_binding, assistant, session_id,
             group_chat=group_chat)
-        if not allowed:
-            return False
+        if allowed is not True:
+            return allowed
         if group_chat:
             state = self.entries.get(entry.entry_id)
             if (group_binding is None or str(chat_id) != group_binding.get("chat_id")
@@ -1281,8 +1291,8 @@ class TelegramManager:
         if is_group_message:
             binding = self.group_bindings.get(entry.entry_id)
             if (not binding or chat_id != binding.get("chat_id")
-                    or not await self._is_group_member(
-                        entry, int(binding["chat_id"]), msg["user_id"], binding)):
+                    or (await self._is_group_member(
+                        entry, int(binding["chat_id"]), msg["user_id"], binding)) is not True):
                 return False
             msg["_habab_member"] = True
             msg["_habab_group_message"] = True
@@ -1304,7 +1314,9 @@ class TelegramManager:
             if not await self._owner_is_active_admin(entry.data["owner_id"]):
                 await self._clear_group_binding(entry)
                 return False
-            if binding and await self._is_group_member(entry, int(binding["chat_id"]), msg["user_id"], binding):
+            allowed = (await self._is_group_member(entry, int(binding["chat_id"]), msg["user_id"], binding)
+                       if binding else False)
+            if allowed is True:
                 msg["_habab_member"] = True
                 self.group_member_chats.setdefault(entry.entry_id, {})[chat_id] = msg["user_id"]
             else:
@@ -1313,8 +1325,10 @@ class TelegramManager:
                                    f"{entry.data['owner_id']}:{entry.entry_id}:{chat_id}"
                                    in assistant.telegram_sessions)
                 if has_history:
-                    await self._revoke_group_member(entry, chat_id)
-                await self.send(entry.entry_id, msg["chat_id"], UNKNOWN_MEMBER_MESSAGE)
+                    await self._revoke_group_member(entry, chat_id, preserve_history=allowed is None)
+                await self.send(entry.entry_id, msg["chat_id"],
+                                "Не удалось проверить доступ к группе. Повторите запрос позже."
+                                if allowed is None else UNKNOWN_MEMBER_MESSAGE)
                 return False
         key = f"{entry.entry_id}:{chat_id}:{msg['message_id']}"
         if key in self.dedupe:
@@ -1385,12 +1399,13 @@ class TelegramManager:
                 await self._clear_binding(entry)
                 await self.send(entry.entry_id, chat_id, "Доступ отозван.")
                 return
-        elif (not group_binding
-              or (is_group_message and chat_id != group_binding.get("chat_id"))
-              or not await self._is_group_member(entry, int(group_binding["chat_id"]), int(user_id), group_binding)):
-            await self._revoke_group_member(entry, chat_id, notify=not is_group_message,
-                                            group_chat=is_group_message)
-            return
+        else:
+            allowed = (await self._is_group_member(entry, int(group_binding["chat_id"]), int(user_id), group_binding)
+                       if group_binding and (not is_group_message or chat_id == group_binding.get("chat_id")) else False)
+            if allowed is not True:
+                await self._revoke_group_member(entry, chat_id, notify=not is_group_message,
+                                                group_chat=is_group_message, preserve_history=allowed is None)
+                return
         if text != "/cancel" and not self._message_epoch_is_current(entry.entry_id, chat_id, epoch):
             return
         msg["_habab_handled"] = True
@@ -1479,40 +1494,46 @@ class TelegramManager:
             cancel_epoch = self.cancel_epochs.get(entry.entry_id, {}).get(str(chat_id), 0)
         try:
             assistant = self.hass.data.get("habab_home", {}).get("assistant")
-            if not await self._turn_origin_is_current(
+            allowed = await self._turn_origin_is_current(
                     entry, chat_id, user_id, group_binding, assistant,
-                    group_chat=group_chat):
+                    group_chat=group_chat)
+            if allowed is not True:
                 if group_binding is not None:
                     await self._revoke_group_member(entry, chat_id, cancel_turn=False,
                                                     group_chat=(str(chat_id) ==
-                                                                group_binding.get("chat_id")))
+                                                                group_binding.get("chat_id")),
+                                                    preserve_history=allowed is None)
                 return
             if assistant is None:
-                if await self._turn_origin_is_current(
+                if (await self._turn_origin_is_current(
                         entry, chat_id, user_id, group_binding, assistant,
-                        group_chat=group_chat):
+                        group_chat=group_chat)) is True:
                     await self.send(entry.entry_id, chat_id,
                                     "Помощник запускается. Повторите запрос позже.")
                 return
             session = await assistant.telegram_session(entry.data["owner_id"], entry.entry_id, chat_id)
             session_id = session["session_id"]
             # Recheck after session loading and again after the typing request.
-            if not await self._turn_origin_is_current(
+            allowed = await self._turn_origin_is_current(
                     entry, chat_id, user_id, group_binding, assistant, session_id,
-                    group_chat=group_chat):
+                    group_chat=group_chat)
+            if allowed is not True:
                 if group_binding is not None:
                     await self._revoke_group_member(entry, chat_id, cancel_turn=False,
                                                     group_chat=(str(chat_id) ==
-                                                                group_binding.get("chat_id")))
+                                                                group_binding.get("chat_id")),
+                                                    preserve_history=allowed is None)
                 return
             await self.typing(entry.entry_id, chat_id)
-            if not await self._turn_origin_is_current(
+            allowed = await self._turn_origin_is_current(
                     entry, chat_id, user_id, group_binding, assistant, session_id,
-                    group_chat=group_chat):
+                    group_chat=group_chat)
+            if allowed is not True:
                 if group_binding is not None:
                     await self._revoke_group_member(entry, chat_id, cancel_turn=False,
                                                     group_chat=(str(chat_id) ==
-                                                                group_binding.get("chat_id")))
+                                                                group_binding.get("chat_id")),
+                                                    preserve_history=allowed is None)
                 return
             if group_binding is not None:
                 monitor = asyncio.create_task(self._monitor_group_member(
@@ -1521,27 +1542,31 @@ class TelegramManager:
                                          text, entry.entry_id, chat_id)
             # Runtime completion does not preserve authority: verify the exact
             # owner/member binding and session again before sending the answer.
-            if await self._turn_can_send(entry, chat_id, user_id, group_binding,
+            allowed = await self._turn_can_send(entry, chat_id, user_id, group_binding,
                                          assistant, session_id, cancel_epoch,
-                                         group_chat=group_chat):
+                                         group_chat=group_chat)
+            if allowed is True:
                 # A later cancel cannot retract a Bot API request already in flight.
                 await self.send(entry.entry_id, chat_id, result["messages"][-1]["text"])
             elif group_binding is not None:
                 await self._revoke_group_member(entry, chat_id, cancel_turn=False,
                                                 group_chat=(str(chat_id) ==
-                                                            group_binding.get("chat_id")))
+                                                            group_binding.get("chat_id")),
+                                                preserve_history=allowed is None)
         except asyncio.CancelledError:
             raise
         except Exception:
-            if await self._turn_can_send(entry, chat_id, user_id, group_binding,
+            allowed = await self._turn_can_send(entry, chat_id, user_id, group_binding,
                                          assistant, session_id, cancel_epoch,
-                                         group_chat=group_chat):
+                                         group_chat=group_chat)
+            if allowed is True:
                 await self.send(entry.entry_id, chat_id,
                                 "Не удалось выполнить запрос. Попробуйте позже.")
             elif group_binding is not None:
                 await self._revoke_group_member(entry, chat_id, cancel_turn=False,
                                                 group_chat=(str(chat_id) ==
-                                                            group_binding.get("chat_id")))
+                                                            group_binding.get("chat_id")),
+                                                preserve_history=allowed is None)
         finally:
             if monitor:
                 monitor.cancel()
@@ -1604,7 +1629,7 @@ class TelegramManager:
                             entry, msg["chat_id"], msg["user_id"], binding)
                     except Exception:
                         member_is_current = False
-                    if member_is_current:
+                    if member_is_current is True:
                         reply_chat_id = msg["chat_id"]
             elif state and state.get("chat_id"):
                 reply_chat_id = state["chat_id"]
