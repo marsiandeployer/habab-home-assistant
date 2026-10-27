@@ -324,8 +324,8 @@ class ReleaseCandidateTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         workflow = (repository / ".github/workflows/habab-release-candidate.yaml").read_text()
 
-        self.assertIn("if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'android' }}", workflow)
-        self.assertIn("state: ${{ steps.inputs.outputs.state }}", workflow)
+        self.assertIn("inputs.target_scope == 'all' || inputs.target_scope == 'android' || inputs.target_scope == 'android-runtime'", workflow)
+        self.assertIn("state: ${{ steps.inputs.outputs.state || steps.unsigned.outputs.state }}", workflow)
         self.assertIn("'state': 'blocked'", workflow)
         self.assertIn("explicit Android version code/name, runtime signing key (or matching signed runtime) and all APK release signing inputs are required", workflow)
         self.assertIn("needs.android.outputs.state", workflow)
@@ -333,7 +333,7 @@ class ReleaseCandidateTests(unittest.TestCase):
     def test_android_prerequisite_gate_blocks_before_build_and_accepts_runtime_key(self):
         workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/habab-release-candidate.yaml").read_text()
         start = workflow.index("        run: |\n", workflow.index("        name: Gate Android runtime and signing inputs")) + len("        run: |\n")
-        stop = workflow.index("\n      - uses:", start)
+        stop = workflow.index("\n      - id: unsigned", start)
         script = textwrap.dedent(workflow[start:stop])
         apk = {
             "ANDROID_KEYSTORE_BASE64": "test-present",
@@ -372,6 +372,53 @@ class ReleaseCandidateTests(unittest.TestCase):
                     status = json.loads((root / "candidate/android/status.json").read_text())
                     self.assertEqual(status["source_revision"], self.revision)
                     self.assertEqual(status["state"], "blocked")
+
+    def test_unsigned_runtime_gate_requires_canonical_base_url_without_injecting_keys(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/habab-release-candidate.yaml").read_text()
+        start = workflow.index("        run: |\n", workflow.index("        name: Gate unsigned runtime candidate inputs")) + len("        run: |\n")
+        stop = workflow.index("\n      - uses:", start)
+        script = textwrap.dedent(workflow[start:stop])
+        step = workflow[workflow.index("      - id: unsigned\n"):workflow.index("      - uses:", start)]
+        self.assertNotIn("secrets.HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64", step)
+        self.assertNotIn("secrets.HABAB_ANDROID_KEYSTORE_BASE64", step)
+        cases = (
+            ("https://habab-demo.wpmix.net/downloads/android/release-old.json", "", "", "", 0, "unsigned_candidate"),
+            ("https://example.invalid/release-old.json", "", "", "", 1, None),
+            ("", "", "", "", 1, None),
+            ("https://habab-demo.wpmix.net/downloads/android/release-old.json",
+             "https://habab-demo.wpmix.net/downloads/android/other.json", "", "", 1, None),
+        )
+        for base_url, runtime_url, version_code, version_name, returncode, expected in cases:
+            with self.subTest(base_url=base_url, runtime_url=runtime_url), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "outputs"
+                result = subprocess.run(
+                    ["bash", "-c", script], cwd=temporary,
+                    env={**os.environ, "ANDROID_BASE_RUNTIME_MANIFEST_URL": base_url,
+                         "ANDROID_RUNTIME_MANIFEST_URL": runtime_url, "ANDROID_VERSION_CODE": version_code,
+                         "ANDROID_VERSION_NAME": version_name, "GITHUB_OUTPUT": str(output)},
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, returncode, result.stderr)
+                if expected:
+                    self.assertEqual(output.read_text().strip(), "state=" + expected)
+
+    def test_unsigned_android_candidate_is_separate_and_never_touches_release_assembly(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/habab-release-candidate.yaml").read_text()
+
+        self.assertIn("          - android-runtime", workflow)
+        self.assertIn("android_base_runtime_manifest_url", workflow)
+        self.assertIn("state=unsigned_candidate", workflow)
+        self.assertIn("--unsigned-candidate --source-revision", workflow)
+        self.assertIn("name: candidate-android-runtime-unsigned", workflow)
+        self.assertIn("inputs.target_scope != 'android-runtime'", workflow)
+        self.assertIn("'candidate_type': 'unsigned-runtime-review-only'", workflow)
+
+        android_job = workflow[workflow.index("  android:\n"):workflow.index("  assemble-candidate:\n")]
+        unsigned_step = android_job[android_job.index("      - name: Build unsigned same-source runtime candidate"):
+                                   android_job.index("      - name: Build fresh same-source runtime with the compiled frontend")]
+        self.assertNotIn("secrets.HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64", unsigned_step)
+        self.assertNotIn("secrets.HABAB_ANDROID_KEYSTORE_BASE64", unsigned_step)
+        self.assertIn("verify_runtime.py", unsigned_step)
 
     def test_aggregate_android_state_branch_handles_skipped_blocked_and_built(self):
         repository = Path(__file__).resolve().parents[2]
@@ -515,7 +562,7 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
         self.assertIn("verify_apk_provenance", workflow[sign_step:])
         self.assertIn("verify_apk_version", workflow[sign_step:])
 
-    def test_android_release_frontend_version_matches_native_candidate_defaults(self):
+    def test_android_release_frontend_version_is_explicit_and_supported_by_native_candidate(self):
         repository = Path(__file__).resolve().parents[2]
         release_workflow = self.workflow_text()
         frontend_job = release_workflow[
@@ -523,12 +570,14 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
         ]
         release_version = re.search(r"(?m)^      wheel_version: (\S+)$", frontend_job)
         self.assertIsNotNone(release_version)
-        self.assertEqual(release_version.group(1), "20260930.4+habab.17")
+        self.assertEqual(release_version.group(1), "20260930.4+habab.18")
 
         native_workflow = (repository / ".github/workflows/habab-native-frontend-candidate.yaml").read_text()
         input_definitions = native_workflow[:native_workflow.index("permissions:\n")]
         native_defaults = re.findall(r"(?m)^        default: (20260930\.4\+habab\.\d+)$", input_definitions)
-        self.assertEqual(native_defaults, [release_version.group(1), release_version.group(1)])
+        self.assertEqual(native_defaults, ["20260930.4+habab.17", "20260930.4+habab.17"])
+        self.assertRegex(release_version.group(1), r"^20260930\.4\+habab\.\d+$")
+        self.assertIn('"$WHEEL_VERSION" =~ ^20260930\\.4\\+habab\\.[0-9]+$', native_workflow)
 
 
 if __name__ == "__main__":

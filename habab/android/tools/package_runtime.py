@@ -415,10 +415,37 @@ def reusable_factory_release(manifest, network_tools):
     return release
 
 
+def finalize_manifest(manifest, signing_key=None, unsigned_candidate=False,
+                      assets=None, public_base=None):
+    """Sign a release or explicitly leave it as an unsigned candidate.
+
+    The unsigned path deliberately does not write the app trust anchor or
+    default runtime URL. Those are release inputs and must remain unchanged.
+    """
+    signature_path = Path(str(manifest) + '.sig')
+    if unsigned_candidate:
+        if signature_path.exists():
+            raise ValueError('Unsigned runtime candidate must not have a signature file')
+        return
+    if signing_key is None or assets is None or public_base is None:
+        raise ValueError('Signed runtime requires a signing key and release asset destinations')
+    signature = subprocess.check_output(
+        ['openssl', 'dgst', '-sha256', '-sign', str(signing_key), str(manifest)])
+    signature_path.write_text(base64.b64encode(signature).decode() + '\n')
+    assets.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['openssl', 'pkey', '-in', str(signing_key), '-pubout', '-outform', 'DER',
+                    '-out', str(assets / 'trusted-key.der')], check=True)
+    (assets / 'default-url.txt').write_text(public_base.rstrip('/') + '/' + Path(manifest).name + '\n')
+
+
 def main():
     global ROOT, DIST
     parser = argparse.ArgumentParser()
-    parser.add_argument('--signing-key', type=Path, required=True, help='Private RSA signing key outside repository')
+    signature_mode = parser.add_mutually_exclusive_group(required=True)
+    signature_mode.add_argument('--signing-key', type=Path,
+                                help='Private RSA signing key outside repository')
+    signature_mode.add_argument('--unsigned-candidate', action='store_true',
+                                help='Build an unsigned review artifact; never changes app trust assets')
     parser.add_argument('--public-base', required=True, help='HTTPS directory serving this release')
     parser.add_argument('--source-revision', required=True,
                         help='Full 40-character committed source SHA used to build this runtime')
@@ -573,15 +600,11 @@ def main():
                     'unpackedBytes': size + 64 * 1024 * 1024})
     manifest = output / f'release-{identity}.json'
     manifest.write_text(json.dumps(release, sort_keys=True, indent=2) + '\n')
-    signature = subprocess.check_output(['openssl', 'dgst', '-sha256', '-sign', str(args.signing_key), str(manifest)])
-    Path(str(manifest) + '.sig').write_text(base64.b64encode(signature).decode() + '\n')
     assets = ROOT / 'app/src/main/assets/release'
-    assets.mkdir(parents=True, exist_ok=True)
-    subprocess.run(['openssl', 'pkey', '-in', str(args.signing_key), '-pubout', '-outform', 'DER',
-                    '-out', str(assets / 'trusted-key.der')], check=True)
-    (assets / 'default-url.txt').write_text(args.public_base.rstrip('/') + '/' + manifest.name + '\n')
+    finalize_manifest(manifest, args.signing_key, args.unsigned_candidate, assets, args.public_base)
     print(json.dumps({'manifest': str(manifest), 'archive': str(archive), 'bytes': release['bytes'],
-                      'unpackedBytes': release['unpackedBytes'], 'sourceFiles': len(inventory)}))
+                      'unpackedBytes': release['unpackedBytes'], 'sourceFiles': len(inventory),
+                      'signature': 'unsigned-candidate' if args.unsigned_candidate else 'signed'}))
 
 
 if __name__ == '__main__':

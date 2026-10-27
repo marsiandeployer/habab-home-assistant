@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from package_runtime import install_serialx_unix
+from package_runtime import finalize_manifest, install_serialx_unix
 
 
 class SerialxUnixRuntimeOverlayTests(unittest.TestCase):
@@ -42,6 +42,32 @@ class SerialxUnixRuntimeOverlayTests(unittest.TestCase):
             hashlib.sha256(unix_file.read_bytes()).hexdigest(),
         )
         self.assertEqual(first['packageVersion'], '1.11.0')
+
+    def test_unsigned_candidate_does_not_write_signature_or_release_trust_assets(self):
+        manifest = self.rootfs / 'release-test.json'
+        manifest.write_text('{"id":"test"}\n')
+        assets = self.rootfs / 'assets'
+        assets.mkdir()
+        trusted_key = assets / 'trusted-key.der'
+        default_url = assets / 'default-url.txt'
+        trusted_key.write_bytes(b'approved-key')
+        default_url.write_text('https://example.test/old.json\n')
+
+        finalize_manifest(manifest, unsigned_candidate=True, assets=assets,
+                          public_base='https://example.test/new')
+
+        self.assertFalse(Path(str(manifest) + '.sig').exists())
+        self.assertEqual(trusted_key.read_bytes(), b'approved-key')
+        self.assertEqual(default_url.read_text(), 'https://example.test/old.json\n')
+
+    def test_signed_finalization_remains_fail_closed_without_key(self):
+        manifest = self.rootfs / 'release-test.json'
+        manifest.write_text('{}\n')
+
+        with self.assertRaisesRegex(ValueError, 'Signed runtime requires'):
+            finalize_manifest(manifest, assets=self.rootfs / 'assets',
+                              public_base='https://example.test')
+        self.assertFalse(Path(str(manifest) + '.sig').exists())
 
     def test_rejects_unpinned_serialx_version(self):
         self.metadata.write_text(

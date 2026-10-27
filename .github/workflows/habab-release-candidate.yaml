@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       target_scope:
-        description: Build all ready candidate targets, only Windows, both Linux architectures, or only Android
+        description: Build all ready targets, one platform, Android, or an unsigned Android runtime review candidate
         required: true
         default: all
         type: choice
@@ -13,6 +13,7 @@ on:
           - windows
           - linux
           - android
+          - android-runtime
       source_ref:
         description: Full commit SHA or existing tag (branches are rejected)
         required: true
@@ -27,6 +28,10 @@ on:
         type: string
       android_runtime_manifest_url:
         description: Optional signed runtime; must match the freshly compiled wheel and selected source
+        required: false
+        type: string
+      android_base_runtime_manifest_url:
+        description: Signed compatible base runtime URL, required only for android-runtime scope
         required: false
         type: string
 
@@ -165,8 +170,8 @@ jobs:
           python3 - "$snapshot/habab/public/downloads" candidate/windows "$SOURCE_REVISION" <<'PY'
           import json
           import os
-          from pathlib import Path
           import shutil
+          from pathlib import Path
           import sys
           source = Path(sys.argv[1])
           destination = Path(sys.argv[2])
@@ -247,6 +252,7 @@ jobs:
           python3 - "$ARTIFACT/status.json" <<'PY'
           import json
           import os
+          import shutil
           from pathlib import Path
           import sys
           status_path = Path('candidate') / sys.argv[1]
@@ -267,18 +273,20 @@ jobs:
 
   android-inputs:
     needs: [resolve-source, release-preflight]
-    if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'android' }}
+    if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'android' || inputs.target_scope == 'android-runtime' }}
     runs-on: ubuntu-latest
     outputs:
-      state: ${{ steps.inputs.outputs.state }}
+      state: ${{ steps.inputs.outputs.state || steps.unsigned.outputs.state }}
     env:
       RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
       ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
       ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
+      ANDROID_BASE_RUNTIME_MANIFEST_URL: ${{ inputs.android_base_runtime_manifest_url }}
       SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
     steps:
       - id: inputs
         name: Gate Android runtime and signing inputs
+        if: ${{ inputs.target_scope != 'android-runtime' }}
         env:
           RUNTIME_SIGNING_KEY_BASE64: ${{ secrets.HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64 }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.HABAB_ANDROID_KEYSTORE_BASE64 }}
@@ -331,15 +339,44 @@ jobs:
           echo 'state=built' >> "$GITHUB_OUTPUT"
           if [[ -n "$RUNTIME_MANIFEST_URL" ]]; then
           python3 - <<'PY'
+          import os
           from urllib.parse import urlsplit
-          from pathlib import Path
-          url = urlsplit(__import__('os').environ['RUNTIME_MANIFEST_URL'])
+          url = urlsplit(os.environ['RUNTIME_MANIFEST_URL'])
           if (url.scheme != 'https' or url.hostname != 'habab-demo.wpmix.net'
                   or url.username or url.password or url.query or url.fragment
                   or not url.path.startswith('/downloads/android/')):
               raise SystemExit('::error::Android runtime manifest must use the canonical HTTPS downloads path')
           PY
           fi
+
+      - id: unsigned
+        name: Gate unsigned runtime candidate inputs
+        if: ${{ inputs.target_scope == 'android-runtime' }}
+        env:
+          ANDROID_BASE_RUNTIME_MANIFEST_URL: ${{ inputs.android_base_runtime_manifest_url }}
+          ANDROID_RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
+          ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+          ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
+        run: |
+          set -euo pipefail
+          [[ -z "$ANDROID_RUNTIME_MANIFEST_URL" && -z "$ANDROID_VERSION_CODE" && -z "$ANDROID_VERSION_NAME" ]] || {
+            echo '::error::android-runtime accepts only the base runtime URL; normal Android runtime/version inputs must be blank'
+            exit 1
+          }
+          [[ -n "$ANDROID_BASE_RUNTIME_MANIFEST_URL" ]] || {
+            echo '::error::android-runtime requires a signed compatible base runtime manifest URL'
+            exit 1
+          }
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          url = urlsplit(os.environ['ANDROID_BASE_RUNTIME_MANIFEST_URL'])
+          if (url.scheme != 'https' or url.hostname != 'habab-demo.wpmix.net'
+                  or url.username or url.password or url.query or url.fragment
+                  or not url.path.startswith('/downloads/android/')):
+              raise SystemExit('::error::Base runtime must use the canonical HTTPS Android downloads path')
+          PY
+          echo 'state=unsigned_candidate' >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         if: ${{ steps.inputs.outputs.state == 'blocked' }}
@@ -351,11 +388,11 @@ jobs:
 
   android-frontend:
     needs: [resolve-source, android-inputs]
-    if: ${{ needs.android-inputs.outputs.state == 'built' }}
+    if: ${{ needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate' }}
     uses: ./.github/workflows/habab-native-frontend-candidate.yaml
     with:
       source_ref: ${{ needs.resolve-source.outputs.source_revision }}
-      wheel_version: 20260930.4+habab.17
+      wheel_version: 20260930.4+habab.18
 
   android:
     needs: [resolve-source, android-inputs, android-frontend]
@@ -368,6 +405,7 @@ jobs:
       RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
       ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
       ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
+      ANDROID_BASE_RUNTIME_MANIFEST_URL: ${{ inputs.android_base_runtime_manifest_url }}
       SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
     steps:
       - name: Fetch only Android and distribution source blobs
@@ -390,10 +428,126 @@ jobs:
           [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Android checkout does not match the selected source'; exit 1; }
           git diff --quiet && git diff --cached --quiet || { echo '::error::Android checkout is dirty'; exit 1; }
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        if: ${{ needs.android-inputs.outputs.state == 'built' }}
+        if: ${{ needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate' }}
         with:
           name: ${{ needs.android-frontend.outputs.artifact_name }}
           path: frontend-input
+      - name: Fetch and validate signed base runtime for unsigned candidate reuse
+        if: ${{ needs.android-inputs.outputs.state == 'unsigned_candidate' }}
+        env:
+          BASE_MANIFEST_URL: ${{ inputs.android_base_runtime_manifest_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-base
+          curl --fail --location --silent --show-error "$BASE_MANIFEST_URL" -o runtime-base/release.json
+          curl --fail --location --silent --show-error "$BASE_MANIFEST_URL.sig" -o runtime-base/release.json.sig
+          openssl pkey -pubin -inform DER -in habab/android/app/src/main/assets/release/trusted-key.der \
+            -out runtime-base/runtime-public.pem
+          base64 --decode runtime-base/release.json.sig > runtime-base/signature
+          openssl dgst -sha256 -verify runtime-base/runtime-public.pem \
+            -signature runtime-base/signature runtime-base/release.json
+          python3 - <<'PY'
+          import json
+          import os
+          import shutil
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          release = json.loads(Path('runtime-base/release.json').read_text())
+          url = urlsplit(release.get('url', ''))
+          if (url.scheme != 'https' or url.hostname != 'habab-demo.wpmix.net'
+                  or url.username or url.password or url.query or url.fragment
+                  or not url.path.startswith('/downloads/android/')):
+              raise SystemExit('Base runtime archive URL is not canonical')
+          name = Path(url.path).name
+          if not name or name in {'.', '..'}:
+              raise SystemExit('Base runtime archive URL has no safe filename')
+          base_manifest = urlsplit(os.environ['BASE_MANIFEST_URL'])
+          expected_manifest_path = url.path.rsplit('/', 1)[0] + '/release-' + release['id'] + '.json'
+          if (base_manifest.scheme != 'https' or base_manifest.hostname != url.hostname
+                  or base_manifest.path != expected_manifest_path):
+              raise SystemExit('Base manifest URL does not identify the signed runtime archive')
+          if (not isinstance(release.get('bytes'), int) or release['bytes'] <= 0
+                  or not isinstance(release.get('unpackedBytes'), int) or release['unpackedBytes'] <= 0):
+              raise SystemExit('Base runtime manifest has invalid disk size fields')
+          required_after_download = release['unpackedBytes'] + release['bytes'] + 1024 ** 3
+          required_before_download = required_after_download + release['bytes']
+          free = shutil.disk_usage('.').free
+          if free < required_before_download:
+              raise SystemExit(
+                  f'Insufficient disk space before base download: need {required_before_download} bytes, have {free}')
+          Path('runtime-base/archive-name.txt').write_text(name)
+          PY
+          archive_name=$(cat runtime-base/archive-name.txt)
+          df -h /
+          curl --fail --location --silent --show-error \
+            "$(python3 -c 'import json; print(json.load(open("runtime-base/release.json"))["url"])')" \
+            -o "runtime-base/$archive_name"
+          python3 - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+          release = json.loads(Path('runtime-base/release.json').read_text())
+          archive = Path('runtime-base') / Path(release['url']).name
+          if archive.stat().st_size != release.get('bytes'):
+              raise SystemExit('Base runtime archive size differs from its signed manifest')
+          required = release['unpackedBytes'] + release['bytes'] + 1024 ** 3
+          free = shutil.disk_usage('.').free
+          if free < required:
+              raise SystemExit(f'Insufficient disk space after base download: need {required} bytes, have {free}')
+          PY
+      - name: Build unsigned same-source runtime candidate
+        if: ${{ needs.android-inputs.outputs.state == 'unsigned_candidate' }}
+        run: |
+          set -euo pipefail
+          df -h /
+          network_tools=()
+          if python3 -c 'import json; from pathlib import Path; raise SystemExit(0 if json.loads(Path("runtime-base/release.json").read_text()).get("networkTools") else 1)'; then
+            network_tools=(--network-tools)
+          fi
+          python3 habab/android/tools/package_runtime.py \
+            --unsigned-candidate --source-revision "$SOURCE_REVISION" \
+            --frontend-candidate frontend-input \
+            --base-runtime-manifest runtime-base/release.json \
+            --public-base https://habab-demo.wpmix.net/downloads/android \
+            "${network_tools[@]}"
+          manifest=$(find habab/android/dist -maxdepth 1 -name 'release-*.json' -type f -print -quit)
+          test -n "$manifest"
+          python3 habab/android/tools/verify_runtime.py "$manifest" \
+            --unsigned-candidate --source-revision "$SOURCE_REVISION" \
+            --frontend-candidate frontend-input
+          mkdir -p candidate/android-runtime
+          archive=$(python3 -c 'import json,sys; from pathlib import Path; print(Path(json.load(open(sys.argv[1]))["url"]).name)' "$manifest")
+          cp "$manifest" candidate/android-runtime/
+          cp "habab/android/dist/$archive" candidate/android-runtime/
+          cp frontend-input/manifest.json candidate/android-runtime/manifest.json
+          cp frontend-input/*.whl candidate/android-runtime/
+          python3 - "$manifest" "$archive" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          release = json.loads(Path(sys.argv[1]).read_text())
+          status = {
+              'state': 'unsigned_candidate',
+              'candidate_type': 'unsigned-runtime-review-only',
+              'signature': 'unsigned-candidate',
+              'publishable': False,
+              'apk_built': False,
+              'source_revision': os.environ['SOURCE_REVISION'],
+              'source_dirty': False,
+              'runtime_id': release['id'],
+              'manifest': Path(sys.argv[1]).name,
+              'archive': sys.argv[2],
+              'sha256': release['sha256'],
+              'bytes': release['bytes'],
+              'native_frontend': release['nativeFrontend'],
+              'workflow_revision': os.environ['GITHUB_WORKFLOW_SHA'],
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+              'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+          }
+          Path('candidate/android-runtime/status.json').write_text(
+              json.dumps(status, indent=2, sort_keys=True) + '\n')
+          PY
       - name: Build fresh same-source runtime with the compiled frontend
         if: ${{ needs.android-inputs.outputs.state == 'built' && inputs.android_runtime_manifest_url == '' }}
         env:
@@ -624,11 +778,19 @@ jobs:
           path: candidate
           if-no-files-found: error
           retention-days: 1
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: ${{ success() && needs.android-inputs.outputs.state == 'unsigned_candidate' }}
+        with:
+          name: candidate-android-runtime-unsigned
+          path: candidate/android-runtime
+          if-no-files-found: error
+          retention-days: 1
 
   assemble-candidate:
     needs: [resolve-source, release-preflight, windows-source, linux-image, android]
     if: >-
       ${{
+        inputs.target_scope != 'android-runtime' &&
         always() && needs.resolve-source.result == 'success' &&
         needs.release-preflight.result == 'success' &&
         ((inputs.target_scope == 'all' || inputs.target_scope == 'windows') && needs.windows-source.result == 'success' ||

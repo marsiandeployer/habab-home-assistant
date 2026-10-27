@@ -125,6 +125,21 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
 
         verify(manifest, self.public_key, require_serialx_unix=True)
 
+    def test_unsigned_candidate_checks_archive_but_never_accepts_or_issues_trust(self):
+        manifest = self.make_release()
+        signature = Path(str(manifest) + '.sig')
+        signature.unlink()
+
+        verify(manifest, require_serialx_unix=True, unsigned_candidate=True)
+        with self.assertRaisesRegex(ValueError, 'signature is required'):
+            verify(manifest, self.public_key, require_serialx_unix=True)
+
+        signature.write_text('stale signature')
+        with self.assertRaisesRegex(ValueError, 'unexpectedly has a signature'):
+            verify(manifest, require_serialx_unix=True, unsigned_candidate=True)
+        with self.assertRaisesRegex(ValueError, 'must not be given a signing key'):
+            verify(manifest, self.public_key, require_serialx_unix=True, unsigned_candidate=True)
+
     def test_signed_archive_rejects_changed_payload_hash(self):
         manifest = self.make_release(wrong_serialx_hash=True)
 

@@ -89,8 +89,8 @@ def verify_apk_version(apk, aapt, version_code, version_name):
     return {'version_code': int(package[2]), 'version_name': package[3]}
 
 
-def verify(manifest, public_key, expected_source_revision=None, require_serialx_unix=False,
-           frontend_candidate=None):
+def verify(manifest, public_key=None, expected_source_revision=None, require_serialx_unix=False,
+           frontend_candidate=None, unsigned_candidate=False):
     release = json.loads(manifest.read_text())
     if frontend_candidate is not None:
         validate_frontend_candidate(release, frontend_candidate, expected_source_revision)
@@ -110,12 +110,23 @@ def verify(manifest, public_key, expected_source_revision=None, require_serialx_
         serialx_metadata_path = site + '/serialx-1.11.0.dist-info/METADATA'
     if expected_source_revision is not None:
         validate_source_revision(release, expected=expected_source_revision)
-    with tempfile.TemporaryDirectory() as directory:
-        signature = Path(directory) / 'signature'
-        signature.write_bytes(decode_signature(Path(str(manifest) + '.sig')))
-        key = Path(directory) / 'public.pem'
-        subprocess.run(['openssl', 'pkey', '-pubin', '-inform', 'DER', '-in', str(public_key), '-out', str(key)], check=True, capture_output=True)
-        subprocess.run(['openssl', 'dgst', '-sha256', '-verify', str(key), '-signature', str(signature), str(manifest)], check=True, capture_output=True)
+    signature_path = Path(str(manifest) + '.sig')
+    if unsigned_candidate:
+        if public_key is not None:
+            raise ValueError('Unsigned candidate verification must not be given a signing key')
+        if signature_path.exists():
+            raise ValueError('Unsigned runtime candidate unexpectedly has a signature')
+    else:
+        if public_key is None:
+            raise ValueError('A public key is required to verify a signed runtime')
+        if not signature_path.is_file():
+            raise ValueError('Signed runtime manifest signature is required')
+        with tempfile.TemporaryDirectory() as directory:
+            signature = Path(directory) / 'signature'
+            signature.write_bytes(decode_signature(signature_path))
+            key = Path(directory) / 'public.pem'
+            subprocess.run(['openssl', 'pkey', '-pubin', '-inform', 'DER', '-in', str(public_key), '-out', str(key)], check=True, capture_output=True)
+            subprocess.run(['openssl', 'dgst', '-sha256', '-verify', str(key), '-signature', str(signature), str(manifest)], check=True, capture_output=True)
     archive = manifest.parent / release['url'].rsplit('/', 1)[1]
     if archive.stat().st_size != release['bytes']:
         raise ValueError('Archive size mismatch')
@@ -231,7 +242,8 @@ def verify(manifest, public_key, expected_source_revision=None, require_serialx_
                     'xiaomi-home-release.json': 'usr/local/bin/xiaomi-home-release.json'}[relative]
         if inventory.get(path) != expected:
             raise ValueError('Habab source snapshot mismatch: ' + relative)
-    print(json.dumps({'result': 'PASS', 'release': release['id'], 'files': files,
+    print(json.dumps({'result': 'PASS', 'signature': 'unsigned-candidate' if unsigned_candidate else 'verified',
+                      'release': release['id'], 'files': files,
                       'symlinks': symlinks, 'regularBytes': total,
                       'hababSourceFiles': len(release['sourceFiles'])}))
 
@@ -239,7 +251,11 @@ def verify(manifest, public_key, expected_source_revision=None, require_serialx_
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('manifest', type=Path)
-    parser.add_argument('--public-key', type=Path, required=True)
+    signature_mode = parser.add_mutually_exclusive_group(required=True)
+    signature_mode.add_argument('--public-key', type=Path,
+                                help='Trusted DER public key required for signed runtimes')
+    signature_mode.add_argument('--unsigned-candidate', action='store_true',
+                                help='Verify archive/provenance only; never treats it as a trusted release')
     parser.add_argument('--source-revision', help='Expected full frozen source commit SHA')
     parser.add_argument('--frontend-candidate', type=Path,
                         help='Require the exact wheel and producer identity from this fresh candidate')
@@ -247,4 +263,4 @@ if __name__ == '__main__':
                         help='Require the Android USB bridge unix:// transport and its signed file hashes')
     args = parser.parse_args()
     verify(args.manifest, args.public_key, args.source_revision, args.require_serialx_unix,
-           args.frontend_candidate)
+           args.frontend_candidate, args.unsigned_candidate)

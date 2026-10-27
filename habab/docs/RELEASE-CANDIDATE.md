@@ -5,8 +5,8 @@ candidate workflow. It accepts only a full Git commit SHA or an existing tag,
 resolves that input once, and fetches only the required source paths at the
 resulting full SHA. The resolver fetches commit metadata with `blob:none` to
 check ancestry against current `origin/main`; platform jobs use shallow,
-blob-filtered sparse checkouts. Choose `all`, `windows`, `linux`, or `android`
-to control which targets are included in the final manifest. It never pushes
+blob-filtered sparse checkouts. Choose `all`, `windows`, `linux`, `android`, or
+`android-runtime` for the separate unsigned runtime review path. It never pushes
 an image, updates `main`/`latest`, uploads to the public download host, or
 creates a GitHub Release. Candidate artifacts stay in GitHub Actions for one
 day.
@@ -68,6 +68,18 @@ day.
   Invalid input, a frontend/compiler failure, runtime mismatch, or APK build/sign
   failure prevents the aggregate manifest. Candidate creation does not publish
   the runtime's download URL, install the APK, or update a phone.
+- **Android runtime-only unsigned review candidate:** `target_scope=android-runtime`
+  compiles a fresh frontend from the selected SHA, verifies the supplied signed
+  base runtime against the checked-in trust anchor and compatible dependency
+  pins, then overlays current sources and the fresh wheel without requiring a
+  signing secret. The output is a separate one-day Actions artifact containing
+  the runtime archive, unsigned manifest, wheel, and producer manifest. Its
+  verifier checks the archive and exact source/frontend identity but labels the
+  result `unsigned-candidate`; it is not a trusted, installable, or publishable
+  runtime and is excluded from the normal release manifest. This path does not
+  modify `trusted-key.der` or `default-url.txt`, and skips APK signing/building.
+  A reviewed artifact can later be signed locally with the existing runtime key;
+  the signed result must pass normal verification and publication/readback checks.
 
 `release-candidate.json` is assembled only after every required target job
 succeeds. It lists only the requested scope's targets; `all` includes Windows,
@@ -81,7 +93,11 @@ physical-device acceptance.
 ## Run a candidate
 
 1. Open **Actions → Habab release candidate → Run workflow** and choose the
-   target scope. Use `windows` for a small Windows-only CI proof. `all` builds
+   target scope. Use `windows` for a small Windows-only CI proof. Use
+   `android-runtime` only for the separate unsigned runtime review artifact; it
+   requires `android_base_runtime_manifest_url`, a signed compatible factory
+   manifest under the canonical downloads path, and does not produce an APK.
+   `all` builds
    Windows and both Linux images and also builds Android when runtime and APK
    signing secrets are configured; otherwise Android is blocked.
 2. Enter a full commit SHA, or a tag name that already exists. Branch names and
@@ -98,9 +114,15 @@ physical-device acceptance.
    build. A supplied URL must be canonical HTTPS under
    `habab-demo.wpmix.net/downloads/android/`, with a signature at `<URL>.sig`,
    and attest the newly compiled wheel exactly.
-4. Download the final `habab-release-candidate-<SHA>` manifest artifact and
-   inspect `release-candidate.json`. Its `artifact` fields name the separate
-   per-target artifacts containing the payloads.
+   For `android-runtime`, leave the Android version and normal runtime URL inputs
+   blank and provide only the signed base manifest URL. The workflow checks free
+   disk after downloading that base against the producer's extraction/archive
+   space formula before extracting it.
+4. For normal scopes, download the final `habab-release-candidate-<SHA>` manifest
+   artifact and inspect `release-candidate.json`; its `artifact` fields name the
+   separate per-target artifacts containing the payloads. For `android-runtime`,
+   download only `candidate-android-runtime-unsigned`; that scope deliberately
+   has no aggregate release manifest.
 
 Android repository Actions secrets:
 
