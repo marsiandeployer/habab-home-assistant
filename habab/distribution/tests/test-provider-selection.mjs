@@ -435,6 +435,15 @@ test("managed Habab API status describes the route, while direct provider status
   });
   assert.match(activeCheckPending.assistantStatus, /Checking the saved key and Habab route/i);
   assert.equal(activeCheckPending.apiStatus, strings.en.apiRejected);
+
+  nodes.clear();
+  const providerNotReady = run({
+    provider: "habab", assistant_selected: true, entry_id: "habab-not-ready", model: "gemini-3.1-flash-lite",
+    managed_model: "habab-chat", effective_model: null, text_ready: false,
+    api_check_status: "unknown", api_check_reason: "provider_not_ready",
+  });
+  assert.match(providerNotReady.assistantStatus, /provider service was not ready during the last check/i);
+  assert.equal(providerNotReady.apiStatus, strings.en.apiProviderNotReady);
 });
 
 test("an explicit hide preference survives a same-provider saved-key refresh", async () => {

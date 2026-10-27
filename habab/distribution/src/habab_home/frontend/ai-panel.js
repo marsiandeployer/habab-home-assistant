@@ -53,6 +53,7 @@ function assistantCheckStatusKey(entry, isChecking) {
   if (status === "rejected") return "apiRejected";
   return ({
     invalid_provider: "apiInvalidProvider",
+    provider_not_ready: "apiProviderNotReady",
     quota: "apiQuota",
     invalid_model: entry?.managed_model ? "apiInvalidManagedModel" : "apiInvalidModel",
     cannot_connect: "apiUnavailable",
@@ -416,6 +417,7 @@ class HababAIPanel extends HTMLElement {
         rejected: time ? "apiRejectedAt" : "apiRejected",
       }[state] || ({
         invalid_provider: time ? "apiInvalidProviderAt" : "apiInvalidProvider",
+        provider_not_ready: time ? "apiProviderNotReadyAt" : "apiProviderNotReady",
         quota: time ? "apiQuotaAt" : "apiQuota",
         invalid_model: time ? "apiInvalidModelAt" : "apiInvalidModel",
         cannot_connect: time ? "apiUnavailableAt" : "apiUnavailable",
