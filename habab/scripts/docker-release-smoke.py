@@ -158,6 +158,10 @@ def main() -> None:
         run(["docker", "exec", container, "sh", "-c",
              f"printf '%s' release-smoke > /config/{marker}"])
         run(["docker", "restart", container], timeout=90)
+        # An automatically allocated host port can change when Docker restarts
+        # the container. The release Compose file uses a fixed port instead.
+        restarted_port = run(["docker", "port", container, "8123/tcp"])
+        base_url = f"http://127.0.0.1:{restarted_port.rsplit(':', 1)[-1]}"
         status_after_restart = wait_for_json(
             base_url, "/api/habab_home/status", args.startup_timeout, token=access_token
         )
