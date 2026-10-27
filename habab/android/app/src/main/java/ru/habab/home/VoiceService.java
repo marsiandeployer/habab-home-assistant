@@ -291,6 +291,7 @@ public final class VoiceService extends Service {
             AudioDeviceInfo input = currentRecorder == null ? null : currentRecorder.getRoutedDevice();
             inputDeviceType = input == null ? -1 : input.getType();
             inputDeviceName = input == null ? "" : VoiceAudioRoute.deviceName(input);
+            android.content.SharedPreferences voicePreferences = getSharedPreferences("voice", 0);
             JSONObject result = new JSONObject().put("phase", status).put("active", running)
                     .put("serviceGeneration", serviceGeneration).put("lifecycleCleanupFailed", lifecycleCleanupFailed)
                     .put("captureFrames", frames).put("wakeCount", wakeCount).put("replies", replies)
@@ -298,8 +299,9 @@ public final class VoiceService extends Service {
                     .put("timingsMs", new JSONObject(timings))
                     .put("audio", new JSONObject().put("echoAvailable", echoAvailable).put("echoEnabled", echoEnabled)
                             .put("noiseSuppressionEnabled", noiseEnabled).put("focus", hasAudioFocus)
-                            .put("requestedRoute", bluetoothAudioRequested()
-                                    ? "bluetooth" : VoiceAudioRoute.PHONE)
+                            .put("requestedRoute", VoiceAudioRoute.requestedRoute(
+                                    voicePreferences.getString("audio_route_mode", null),
+                                    voicePreferences.getBoolean("bluetooth_audio", false)))
                             .put("activeRoute", audioRoute).put("inputDeviceType", inputDeviceType)
                             .put("outputDeviceType", outputDeviceType)
                             .put("inputDeviceName", inputDeviceName).put("outputDeviceName", outputDeviceName))
