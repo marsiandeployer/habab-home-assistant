@@ -4,10 +4,12 @@
 import argparse
 import json
 from pathlib import Path
+import secrets
 import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -18,23 +20,40 @@ def run(command: list[str], *, timeout: int = 60) -> str:
     return result.stdout.strip()
 
 
-def wait_for_onboarding(url: str, timeout: int) -> list:
+def request_json(base_url: str, path: str, body=None, token=None, form=False):
+    headers = {}
+    if body is None:
+        data = None
+    elif form:
+        data = urllib.parse.urlencode(body).encode()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    else:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(base_url + path, data=data, headers=headers)
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.load(response)
+
+
+def wait_for_json(base_url: str, path: str, timeout: int, token=None):
     deadline = time.monotonic() + timeout
     last_error = "no response"
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=5) as response:
-                if response.status != 200:
-                    last_error = f"HTTP {response.status}"
-                else:
-                    payload = json.loads(response.read(1024 * 1024))
-                    if not isinstance(payload, list):
-                        raise ValueError("onboarding response is not a list")
-                    return payload
+            return request_json(base_url, path, token=token)
         except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError) as error:
             last_error = str(error)
         time.sleep(3)
-    raise TimeoutError(f"Home Assistant onboarding endpoint did not become ready: {last_error}")
+    raise TimeoutError(f"Home Assistant endpoint {path} did not become ready: {last_error}")
+
+
+def assert_product_status(status):
+    if (status.get("product") != "Habab Home" or status.get("version") != "0.3.6"
+            or status.get("home_assistant_version") != "2026.10.2"
+            or status.get("status") != "running"):
+        raise RuntimeError("Authenticated Habab Home status did not match the release")
 
 
 def main() -> None:
@@ -69,10 +88,37 @@ def main() -> None:
         started = True
         port = run(["docker", "port", container, "8123/tcp"])
         host_port = port.rsplit(":", 1)[-1]
-        url = f"http://127.0.0.1:{host_port}/api/onboarding"
-        flows = wait_for_onboarding(url, args.startup_timeout)
-        if not flows or not any(isinstance(flow, dict) for flow in flows):
-            raise RuntimeError("Home Assistant returned no onboarding flow")
+        base_url = f"http://127.0.0.1:{host_port}"
+        flows = wait_for_json(base_url, "/api/onboarding", args.startup_timeout)
+        if not isinstance(flows, list) or not any(
+            isinstance(flow, dict) and flow.get("step") == "user" for flow in flows
+        ):
+            raise RuntimeError("Clean Home Assistant install did not offer owner onboarding")
+
+        client_id = base_url + "/"
+        owner = request_json(base_url, "/api/onboarding/users", {
+            "client_id": client_id,
+            "name": "Habab Docker release smoke",
+            "username": f"docker-smoke-{uuid.uuid4().hex[:10]}",
+            "password": secrets.token_urlsafe(24),
+            "language": "en",
+        })
+        auth_code = owner.get("auth_code") if isinstance(owner, dict) else None
+        if not isinstance(auth_code, str) or not auth_code:
+            raise RuntimeError("Owner onboarding did not return an authorization code")
+        auth = request_json(base_url, "/auth/token", {
+            "grant_type": "authorization_code",
+            "code": auth_code,
+            "client_id": client_id,
+        }, form=True)
+        access_token = auth.get("access_token") if isinstance(auth, dict) else None
+        if not isinstance(access_token, str) or not access_token:
+            raise RuntimeError("Owner onboarding did not return an access token")
+        config = request_json(base_url, "/api/config", token=access_token)
+        if config.get("version") != "2026.10.2":
+            raise RuntimeError("Authenticated Home Assistant config did not match Core release")
+        status = request_json(base_url, "/api/habab_home/status", token=access_token)
+        assert_product_status(status)
 
         labels = json.loads(run([
             "docker", "image", "inspect", args.image,
@@ -112,9 +158,13 @@ def main() -> None:
         run(["docker", "exec", container, "sh", "-c",
              f"printf '%s' release-smoke > /config/{marker}"])
         run(["docker", "restart", container], timeout=90)
-        flows_after_restart = wait_for_onboarding(url, args.startup_timeout)
-        if not flows_after_restart:
-            raise RuntimeError("Onboarding endpoint returned no flow after restart")
+        status_after_restart = wait_for_json(
+            base_url, "/api/habab_home/status", args.startup_timeout, token=access_token
+        )
+        assert_product_status(status_after_restart)
+        config_after_restart = request_json(base_url, "/api/config", token=access_token)
+        if config_after_restart.get("version") != "2026.10.2":
+            raise RuntimeError("Owner authentication or Home Assistant API did not survive restart")
         marker_value = run(["docker", "exec", container, "cat", f"/config/{marker}"])
         if marker_value != "release-smoke":
             raise RuntimeError("/config marker did not survive container restart")
@@ -129,8 +179,9 @@ def main() -> None:
                 "habab_home", "habab_telegram", "habab_yandex_speech", "idigital_sms",
             ],
             "opencode_version": expected_opencode,
-            "onboarding_before_restart": "http_200",
-            "onboarding_after_restart": "http_200",
+            "owner_onboarding": "passed",
+            "authenticated_product_status": "passed",
+            "authenticated_status_after_restart": "passed",
             "config_persistence": "passed",
         }
         result_json = json.dumps(result, sort_keys=True)

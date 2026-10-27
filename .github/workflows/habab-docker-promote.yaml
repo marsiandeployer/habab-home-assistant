@@ -1,0 +1,349 @@
+name: Habab Docker promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Habab Docker image release run with an unexpired candidate artifact
+        required: true
+        type: string
+      source_sha:
+        description: Full source commit SHA recorded by that candidate run
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: habab-docker-promotion-${{ inputs.candidate_run_id }}
+  queue: max
+
+jobs:
+  verify-candidate-run:
+    name: Verify candidate run and locate its artifact
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact_name: ${{ steps.verify.outputs.artifact_name }}
+    steps:
+      - id: verify
+        name: Require the exact successful main-branch release candidate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]] || {
+            echo '::error::Run this promotion workflow from main'; exit 1;
+          }
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || {
+            echo '::error::candidate_run_id must be a numeric Actions run ID'; exit 1;
+          }
+          [[ "$SOURCE_SHA" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || {
+            echo '::error::source_sha must be a full lowercase Git commit SHA'; exit 1;
+          }
+
+          run_file="$RUNNER_TEMP/candidate-run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" > "$run_file"
+          python3 - "$run_file" "$SOURCE_SHA" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          run = json.loads(Path(sys.argv[1]).read_text())
+          source_sha = sys.argv[2]
+          required = {
+              "name": "Habab Docker image release",
+              "path": ".github/workflows/habab-docker-release.yaml",
+              "event": "workflow_dispatch",
+              "head_branch": "main",
+              "head_sha": source_sha,
+              "status": "completed",
+              "conclusion": "success",
+          }
+          differences = [f"{key}={run.get(key)!r}" for key, value in required.items()
+                         if run.get(key) != value]
+          if differences:
+              raise SystemExit("Candidate run does not match promotion inputs: " + ", ".join(differences))
+          PY
+
+          artifact_name=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.expired == false) | select(.name | startswith("habab-docker-candidate-"))] | if length == 1 then .[0].name else error("expected exactly one unexpired Docker candidate artifact") end')
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Promote the verified OCI archive without rebuilding
+    needs: verify-candidate-run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    env:
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      IMAGE_NAME: ghcr.io/marsiandeployer/habab-home-assistant
+    steps:
+      - name: Check out the exact source for its OCI validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: release-source
+          persist-credentials: false
+          sparse-checkout: |
+            habab/distribution
+            habab/scripts
+          sparse-checkout-cone-mode: true
+
+      - name: Check out this promotion revision for the full runtime smoke
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: promotion-source
+          persist-credentials: false
+          sparse-checkout: habab/scripts/docker-release-smoke.py
+          sparse-checkout-cone-mode: false
+
+      - name: Download the artifact from the selected candidate run
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ${{ needs.verify-candidate-run.outputs.artifact_name }}
+          path: candidate
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify candidate manifest, smoke receipts, and archive bytes
+        id: candidate
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$SOURCE_SHA" "$CANDIDATE_RUN_ID" candidate <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import sys
+          import tarfile
+          source_sha, candidate_run_id, root_arg = sys.argv[1:]
+          root = Path(root_arg)
+          release = json.loads((root / "release.json").read_text())
+          if release.get("state") != "verified_candidate":
+              raise SystemExit("Candidate artifact is not marked verified_candidate")
+          if release.get("source_revision") != source_sha or release.get("source_dirty") is not False:
+              raise SystemExit("Candidate source identity differs from the requested clean source SHA")
+          if str(release.get("workflow_run_id")) != candidate_run_id:
+              raise SystemExit("Candidate artifact workflow run ID differs from the selected run")
+          if sorted(release.get("platforms", [])) != ["linux/amd64", "linux/arm64"]:
+              raise SystemExit("Candidate does not declare exactly amd64 and arm64")
+          frontend_version = release.get("frontend_version", "")
+          frontend_sha = release.get("frontend_sha256", "")
+          if (not re.fullmatch(r"20260930\.4\+habab\.[0-9]+", frontend_version)
+                  or not re.fullmatch(r"[a-f0-9]{64}", frontend_sha)):
+              raise SystemExit("Candidate frontend version or digest is invalid")
+          prefix = "ghcr.io/marsiandeployer/habab-home-assistant:"
+          image = release.get("image", "")
+          if not isinstance(image, str) or not image.startswith(prefix):
+              raise SystemExit("Candidate image name does not match the approved GHCR repository")
+          image_tag = image[len(prefix):]
+          if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", image_tag):
+              raise SystemExit("Candidate image tag is invalid")
+
+          for architecture in ("amd64", "arm64"):
+              receipt_path = root / f"smoke-{architecture}.json"
+              receipt = json.loads(receipt_path.read_text())
+              expected = {
+                  "state": "passed",
+                  "platform": f"linux/{architecture}",
+                  "source_revision": source_sha,
+                  "config_persistence": "passed",
+                  "onboarding_before_restart": "http_200",
+                  "onboarding_after_restart": "http_200",
+              }
+              if any(receipt.get(key) != value for key, value in expected.items()):
+                  raise SystemExit(f"{architecture} runtime smoke receipt does not match candidate metadata")
+
+          archive_name = release.get("oci_archive")
+          if (not isinstance(archive_name, str) or Path(archive_name).name != archive_name
+                  or not archive_name.endswith(".oci.tar")):
+              raise SystemExit("Candidate OCI archive path is invalid")
+          archive = root / archive_name
+          if not archive.is_file() or archive.is_symlink():
+              raise SystemExit("Candidate OCI archive is missing or not a regular file")
+          if type(release.get("oci_archive_bytes")) is not int or archive.stat().st_size != release["oci_archive_bytes"]:
+              raise SystemExit("Candidate OCI archive size differs from release metadata")
+          expected_sha = release.get("oci_archive_sha256", "")
+          if not re.fullmatch(r"[a-f0-9]{64}", expected_sha):
+              raise SystemExit("Candidate OCI archive SHA-256 is invalid")
+          digest = hashlib.sha256()
+          with archive.open("rb") as file:
+              for block in iter(lambda: file.read(1024 * 1024), b""):
+                  digest.update(block)
+          if digest.hexdigest() != expected_sha:
+              raise SystemExit("Candidate OCI archive SHA-256 does not match release metadata")
+          with tarfile.open(archive, mode="r:") as oci:
+              index_member = oci.getmember("index.json")
+              if not index_member.isfile() or index_member.size > 16 * 1024 * 1024:
+                  raise SystemExit("Candidate OCI index is missing or oversized")
+              index = json.load(oci.extractfile(index_member))
+          references = set()
+          for descriptor in [index, *index.get("manifests", [])]:
+              if not isinstance(descriptor, dict):
+                  continue
+              annotations = descriptor.get("annotations", {})
+              if isinstance(annotations, dict):
+                  reference = annotations.get("org.opencontainers.image.ref.name")
+                  if isinstance(reference, str) and reference:
+                      references.add(reference)
+          if len(references) != 1:
+              raise SystemExit("Candidate OCI index must identify exactly one source reference")
+          oci_reference = references.pop()
+          if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", oci_reference):
+              raise SystemExit("Candidate OCI source reference is not a valid archive tag")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"CANDIDATE_IMAGE={image}\n")
+              output.write(f"CANDIDATE_OCI_REFERENCE={oci_reference}\n")
+              output.write(f"CANDIDATE_ARCHIVE={archive}\n")
+              output.write(f"CANDIDATE_FRONTEND_VERSION={frontend_version}\n")
+              output.write(f"CANDIDATE_FRONTEND_SHA256={frontend_sha}\n")
+          print(f"::notice::Verified candidate run archive {archive_name} ({expected_sha})")
+          PY
+
+      - name: Re-run the existing OCI identity validator for both platforms
+        shell: bash
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            python3 release-source/habab/scripts/release-candidate.py \
+              --verify-linux-image "$CANDIDATE_ARCHIVE" \
+              --platform "$platform" \
+              --source-revision "$SOURCE_SHA" \
+              --status-output "$RUNNER_TEMP/verified-${platform//\//-}.json"
+          done
+
+      - name: Install Skopeo for OCI registry copy
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+
+      - uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
+
+      - name: Re-run owner onboarding and authenticated API smoke on both exact archive platforms
+        shell: bash
+        run: |
+          set -euo pipefail
+          for architecture in amd64 arm64; do
+            platform="linux/$architecture"
+            smoke_image="habab-home:promotion-smoke-$architecture"
+            skopeo copy --override-os linux --override-arch "$architecture" \
+              "oci-archive:${CANDIDATE_ARCHIVE}:${CANDIDATE_OCI_REFERENCE}" \
+              "docker-daemon:${smoke_image}"
+            python3 promotion-source/habab/scripts/docker-release-smoke.py \
+              --image "$smoke_image" --platform "$platform" \
+              --source-revision "$SOURCE_SHA" \
+              --frontend-version "$CANDIDATE_FRONTEND_VERSION" \
+              --frontend-sha256 "$CANDIDATE_FRONTEND_SHA256" \
+              --opencode-manifest release-source/habab/distribution/opencode-release.json \
+              --output "promotion-smoke-${architecture}.json"
+            docker image rm "$smoke_image"
+          done
+
+      - name: Promote the exact verified archive to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | skopeo login ghcr.io \
+            --username "$GITHUB_ACTOR" --password-stdin
+          source="oci-archive:${CANDIDATE_ARCHIVE}:${CANDIDATE_OCI_REFERENCE}"
+          skopeo copy --all "$source" "docker://${CANDIDATE_IMAGE}"
+          skopeo copy --all "$source" "docker://${IMAGE_NAME}:sha-${SOURCE_SHA}"
+
+          skopeo inspect --raw "docker://${CANDIDATE_IMAGE}" \
+            > "$RUNNER_TEMP/registry-manifest.json"
+          registry_digest="sha256:$(sha256sum "$RUNNER_TEMP/registry-manifest.json" | cut -d' ' -f1)"
+          skopeo inspect --raw "docker://${IMAGE_NAME}:sha-${SOURCE_SHA}" \
+            > "$RUNNER_TEMP/source-sha-manifest.json"
+          source_sha_digest="sha256:$(sha256sum "$RUNNER_TEMP/source-sha-manifest.json" | cut -d' ' -f1)"
+          [[ "$source_sha_digest" == "$registry_digest" ]] || {
+            echo '::error::Release tag and source SHA tag do not resolve to the same registry manifest'; exit 1;
+          }
+          python3 - "$RUNNER_TEMP/registry-manifest.json" "$registry_digest" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          manifest = json.loads(Path(sys.argv[1]).read_text())
+          if manifest.get("schemaVersion") != 2 or not isinstance(manifest.get("manifests"), list):
+              raise SystemExit("GHCR readback is not a multi-architecture manifest list")
+          platforms = {
+              f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
+              for entry in manifest["manifests"] if isinstance(entry, dict)
+          }
+          if not {"linux/amd64", "linux/arm64"}.issubset(platforms):
+              raise SystemExit("GHCR readback is missing an expected platform")
+          print(f"::notice::GHCR manifest list read back at {sys.argv[2]}")
+          PY
+
+          anonymous_pull=true
+          if skopeo inspect --raw --no-creds \
+            "docker://${IMAGE_NAME}@${registry_digest}" \
+            > "$RUNNER_TEMP/anonymous-manifest.json" 2>/dev/null; then
+            anonymous_digest="sha256:$(sha256sum "$RUNNER_TEMP/anonymous-manifest.json" | cut -d' ' -f1)"
+            if [[ "$anonymous_digest" != "$registry_digest" ]]; then
+              anonymous_pull=false
+            fi
+          else
+            anonymous_pull=false
+          fi
+
+          python3 - "$RUNNER_TEMP/registry-manifest.json" "$registry_digest" \
+            "$anonymous_pull" "$CANDIDATE_RUN_ID" "$SOURCE_SHA" "$CANDIDATE_IMAGE" \
+            > promotion.json <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import sys
+          manifest_path, digest, anonymous, run_id, source_sha, image = sys.argv[1:]
+          manifest_bytes = Path(manifest_path).read_bytes()
+          release = {
+              "state": "promoted",
+              "candidate_run_id": run_id,
+              "source_revision": source_sha,
+              "source_dirty": False,
+              "image": image,
+              "source_sha_tag": f"ghcr.io/marsiandeployer/habab-home-assistant:sha-{source_sha}",
+              "registry_digest": digest,
+              "registry_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+              "platforms": ["linux/amd64", "linux/arm64"],
+              "anonymous_pull": anonymous == "true",
+              "promoted_at": datetime.now(timezone.utc).isoformat(),
+              "promotion_workflow_run_id": os.environ["GITHUB_RUN_ID"],
+          }
+          print(json.dumps(release, indent=2, sort_keys=True))
+          PY
+          if [[ "$anonymous_pull" != true ]]; then
+            echo '::warning::Image was copied to GHCR, but anonymous pull by digest was not confirmed.'
+          fi
+          printf '%s\n' "$registry_digest" > promotion-digest.txt
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: habab-docker-promotion-${{ inputs.candidate_run_id }}
+          path: |
+            promotion.json
+            promotion-digest.txt
+            promotion-smoke-*.json
+          if-no-files-found: error
+          retention-days: 90
