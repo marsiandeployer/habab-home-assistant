@@ -22,6 +22,9 @@ from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, ClientResponseError, ClientTimeout, ClientWSTimeout, WSMsgType, web
 
+from beta_codes import BetaCodes
+from telegram_speech import capability as speech_capability, telegram_voice_capability, register_routes as register_speech_routes
+
 logger = logging.getLogger(__name__)
 
 GEMINI_TEXT_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
@@ -43,7 +46,7 @@ VOICE_SETUP_MAX_BYTES = 64 * 1024
 BROWSER_VOICE_AUTH_TYPE = 'habab.voice.auth.v1'
 DEMO_OPENAI_AUTH_TYPE = 'habab.demo.openai.auth.v1'
 LEGACY_OPENAI_ROUTES = {'audio/speech', 'audio/transcriptions', 'realtime/client_secrets'}
-TELEGRAM_METHODS = ('getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction')
+TELEGRAM_METHODS = ('getMe', 'getUpdates', 'getChatMember', 'getFile', 'sendMessage', 'sendChatAction')
 TELEGRAM_BOT_TOKEN = re.compile(r'[0-9]{1,20}:[A-Za-z0-9_-]{20,256}\Z')
 TELEGRAM_API_BASE = 'https://api.telegram.org/bot'
 TELEGRAM_REQUEST_MAX = 1024 * 1024
@@ -96,7 +99,7 @@ async def redacted_stream(content, secret, max_bytes):
 class Gateway:
     def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
                  browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2,
-                 demo_openai_session_window_seconds=86400):
+                 demo_openai_session_window_seconds=86400, beta_codes=None):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         if not isinstance(browser_origins, (list, tuple, set, frozenset)):
@@ -110,6 +113,7 @@ class Gateway:
                 or not 1 <= demo_openai_session_window_seconds <= 31_536_000):
             raise ValueError('Invalid demo Realtime session limits')
         self.key_hash = key_hash
+        self.beta_codes = beta_codes or BetaCodes()
         self.upstream_key = upstream_key
         self.text_upstream_key = text_upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
@@ -161,8 +165,13 @@ class Gateway:
             return None, None
         return secret, hashlib.sha256(secret.encode()).hexdigest()
 
-    def owner(self, digest):
-        return digest is not None and hmac.compare_digest(digest, self.key_hash)
+    def owner(self, digest, *, token=None):
+        if digest is None:
+            return False
+        if hmac.compare_digest(digest, self.key_hash):
+            return True
+        return (isinstance(token, str) and self.beta_codes.verify(token)
+                and hmac.compare_digest(digest, hashlib.sha256(token.encode()).hexdigest()))
 
     async def lifecycle(self, app):
         self.client = ClientSession(timeout=ClientTimeout(total=60), trust_env=False)
@@ -410,8 +419,8 @@ class Gateway:
         return web.json_response({'service': 'habab-voice-relay', 'ok': True, 'upstreamReady': self.upstream_key is not None})
 
     async def capabilities(self, request):
-        _, digest = self.authorization(request)
-        if not self.owner(digest):
+        secret, digest = self.authorization(request)
+        if not self.owner(digest, token=secret):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.query:
             return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
@@ -427,12 +436,13 @@ class Gateway:
                          'browser_auth': {'enabled': bool(self.browser_origins),
                                           'mode': 'first_text_frame', 'type': BROWSER_VOICE_AUTH_TYPE}},
             'telegram': {'protocol': 'telegram-bot-api-relay-v1', 'base': '/telegram',
-                         'methods': list(TELEGRAM_METHODS)},
+                         'methods': list(TELEGRAM_METHODS), 'voice': telegram_voice_capability()},
+            'speech': speech_capability(self),
         }, headers={'Cache-Control': 'no-store'})
 
     async def text_capabilities(self, request):
-        _, digest = self.authorization(request)
-        if not self.owner(digest):
+        secret, digest = self.authorization(request)
+        if not self.owner(digest, token=secret):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.method != 'GET':
             return web.json_response({'error': {'code': 'relay_http_method_not_allowed'}}, status=405)
@@ -451,8 +461,8 @@ class Gateway:
         return web.json_response(payload, headers={'Cache-Control': 'no-store'})
 
     async def text_models(self, request):
-        _, digest = self.authorization(request)
-        if not self.owner(digest):
+        secret, digest = self.authorization(request)
+        if not self.owner(digest, token=secret):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.method != 'GET':
             return web.json_response({'error': {'code': 'relay_http_method_not_allowed'}}, status=405)
@@ -465,7 +475,7 @@ class Gateway:
 
     async def text_chat_completions(self, request):
         service_key, digest = self.authorization(request)
-        if not self.owner(digest):
+        if not self.owner(digest, token=service_key):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.method != 'POST':
             return web.json_response({'error': {'code': 'relay_http_method_not_allowed'}}, status=405)
@@ -562,8 +572,8 @@ class Gateway:
         auth_values = request.headers.getall('Authorization', [])
         if len(auth_values) != 1:
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
-        _, digest = self.authorization(request)
-        if not self.owner(digest):
+        secret, digest = self.authorization(request)
+        if not self.owner(digest, token=secret):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.query:
             return web.json_response({'error': {'code': 'telegram_invalid_query'}}, status=400)
@@ -649,7 +659,7 @@ class Gateway:
 
     async def gemini_bootstrap(self, request):
         service_key, digest = self.authorization(request)
-        if not self.owner(digest):
+        if not self.owner(digest, token=service_key):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.query:
             return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
@@ -710,7 +720,7 @@ class Gateway:
 
     async def gemini_text(self, request):
         service_key, digest = self.authorization(request)
-        if not self.owner(digest):
+        if not self.owner(digest, token=service_key):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if self.upstream_key is None:
             return web.json_response({'error': {'code': 'habab_upstream_not_ready'}}, status=503)
@@ -909,8 +919,8 @@ class Gateway:
         return downstream
 
     async def legacy_http(self, request):
-        _, digest = self.authorization(request)
-        if not self.owner(digest):
+        secret, digest = self.authorization(request)
+        if not self.owner(digest, token=secret):
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         route = request.match_info['route']
         if route in LEGACY_OPENAI_ROUTES:
@@ -919,8 +929,10 @@ class Gateway:
         return web.json_response({'error': {'code': 'relay_route_not_allowed'}}, status=404)
 
     def app(self):
-        app = web.Application(client_max_size=2 * 1024 * 1024)
+        app = web.Application(client_max_size=6 * 1024 * 1024)
         app.cleanup_ctx.append(self.lifecycle)
+        self.beta_codes.register_routes(app)
+        register_speech_routes(app, self)
         app.router.add_get('/health', self.health)
         app.router.add_get('/v1/capabilities', self.capabilities)
         app.router.add_route('*', '/text/capabilities', self.text_capabilities)
@@ -941,6 +953,7 @@ def main():
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock',
+                      beta_codes=BetaCodes(config.get('beta_config') or os.environ.get('HABAB_BETA_CONFIG')),
                       browser_origins=config.get('browser_origins', []),
                       demo_openai_session_limit=config.get('demo_openai_session_limit', 5),
                       demo_openai_sessions_per_session=config.get('demo_openai_sessions_per_session', 2),

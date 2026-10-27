@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -18,6 +19,8 @@ from .const import (
     BOT_ONBOARDING_MESSAGE, DOMAIN, GROUP_PAIR_TTL, MAX_LINE,
     OWNER_PAIRING_COMPLETE_MESSAGE, PAIR_TTL, UNKNOWN_MEMBER_MESSAGE,
 )
+from .group_invocation import group_request
+from .voice import VoiceError, transcribe_voice
 from .websocket import async_register_commands
 from .inbox import InboxStore, TelegramInbox
 from .maintenance import maintenance_enabled, maintenance_path
@@ -853,8 +856,9 @@ class TelegramManager:
             if notify_chat is not None:
                 await self.send(entry_id, notify_chat,
                                 "Группа дома подключена. Участники могут писать помощнику "
-                                "в личные сообщения и в эту группу; переписка и ответы "
-                                "в группе видны всем её участникам.")
+                                "в личные сообщения. В группе начните обращение с «Ко» "
+                                "или «Эй дом» либо упомяните бота через @. "
+                                "Переписка и ответы в группе видны всем её участникам.")
             return True
 
     def _schedule_candidate_verification(self, entry, candidate):
@@ -884,7 +888,7 @@ class TelegramManager:
         if len(lanes) >= self.CONTROL_TASK_LIMIT:
             return
         group_cancel_check = (
-            msg.get("text", "").strip() == "/cancel"
+            self._incoming_text(entry, msg) == "/cancel"
             and msg.get("chat_type") in ("group", "supergroup")
             and (binding := self.group_bindings.get(entry_id)) is not None
             and str(msg.get("chat_id")) == binding.get("chat_id")
@@ -955,7 +959,7 @@ class TelegramManager:
             await self._clear_group_binding(entry)
         state = {"process": proc, "chat_id": binding.get("chat_id"),
                  "user_id": binding.get("user_id"), "username": entry.data["bot_username"],
-                 "transport_identity": route_identity}
+                 "transport_identity": route_identity, "telegram_transport": transport}
         self.transport_errors.pop(entry.entry_id, None)
         self.entries[entry.entry_id] = state
         self.queues[entry.entry_id] = asyncio.Queue(maxsize=5)
@@ -1230,8 +1234,15 @@ class TelegramManager:
         await self._retry_waiting_update(entry)
         self._pump_inbox(entry)
 
-    def _should_route_control(self, entry, state, msg):
+    def _incoming_text(self, entry, msg):
         value = msg.get("text")
+        if msg.get("chat_type") in ("group", "supergroup"):
+            state = self.entries.get(entry.entry_id, {})
+            return group_request(value, state.get("username") or entry.data.get("bot_username"))
+        return value.strip() if isinstance(value, str) else None
+
+    def _should_route_control(self, entry, state, msg):
+        value = self._incoming_text(entry, msg)
         if not isinstance(value, str):
             return False
         text = value.strip()
@@ -1272,15 +1283,20 @@ class TelegramManager:
             return False
         if not isinstance(msg.get("text"), str):
             return False
+        # Group voice processing requires an explicit product policy.
+        if msg.get("voice") is not None and msg.get("chat_type") != "private":
+            return False
         chat_type = msg.get("chat_type")
         is_group_message = chat_type in ("group", "supergroup")
         if is_group_message:
             if await self._claim_group_start(entry, msg):
                 return False
-            # Only the shared conversation controls are accepted in the bound
-            # group. Pairing and every other Telegram command remain private.
-            if msg["text"].strip() not in ("/help", "/new", "/cancel") \
-                    and msg["text"].strip().startswith("/"):
+            addressed_text = self._incoming_text(entry, msg)
+            if addressed_text is None:
+                return False
+            # Shared controls need an invocation too. Pairing remains on the
+            # separate authenticated /start nonce handshake above.
+            if addressed_text not in ("/help", "/new", "/cancel") and addressed_text.startswith("/"):
                 return False
         elif chat_type != "private":
             return False
@@ -1296,6 +1312,8 @@ class TelegramManager:
                 return False
             msg["_habab_member"] = True
             msg["_habab_group_message"] = True
+            msg["_habab_source_text"] = msg["text"]
+            msg["text"] = addressed_text
         elif state.get("chat_id") is None:
             pairing = self.pairing.get(entry.entry_id)
             text = msg.get("text", "")
@@ -1362,6 +1380,7 @@ class TelegramManager:
             return
         if is_group_message and not msg.get("_habab_group_message"):
             return
+        text = msg.get("text", "").strip()
         if text != "/cancel" and not self._message_epoch_is_current(entry.entry_id, chat_id, epoch):
             return
         if state.get("chat_id") is None:
@@ -1415,6 +1434,8 @@ class TelegramManager:
         if text == "/help":
             commands = (
                 "Команды работают в личных сообщениях и в подключённой группе:\n"
+                "В группе начните с «Ко» или «Эй дом» либо упомяните бота через @. "
+                "Например: «Ко /new».\n"
                 "/new — начать новый диалог\n"
                 "/cancel — остановить текущую задачу\n"
                 "История и ответы в группе видны всем её участникам."
@@ -1474,7 +1495,7 @@ class TelegramManager:
                 stopped = await assistant.abort(
                     entry.data["owner_id"], "telegram", mapped, entry.entry_id, chat_id) if mapped else False
             await self.send(entry.entry_id, chat_id, "Остановлено." if stopped else "Активной задачи нет.")
-        elif text:
+        elif text or msg.get("voice") is not None:
             current = self.turn_tasks.get(entry.entry_id)
             if current and not current.done():
                 await self.send(entry.entry_id, chat_id, "Задача уже выполняется. Используйте /cancel.")
@@ -1482,11 +1503,11 @@ class TelegramManager:
                 key = self._turn_key(entry.entry_id, chat_id)
                 task = self.hass.async_create_task(self._run_message(
                     entry, chat_id, int(user_id), text, group_binding, epoch,
-                    group_chat=is_group_message))
+                    group_chat=is_group_message, voice=msg.get("voice")))
                 self.turn_tasks[key] = task
 
     async def _run_message(self, entry, chat_id, user_id, text, group_binding=None,
-                           cancel_epoch=None, group_chat=False):
+                           cancel_epoch=None, group_chat=False, voice=None):
         monitor = None
         session_id = None
         assistant = None
@@ -1538,6 +1559,21 @@ class TelegramManager:
             if group_binding is not None:
                 monitor = asyncio.create_task(self._monitor_group_member(
                     entry, chat_id, user_id, group_binding, asyncio.current_task()))
+            if voice is not None:
+                try:
+                    text = await transcribe_voice(
+                        self.hass, async_get_clientsession(self.hass), entry,
+                        self.entries.get(entry.entry_id, {}), voice)
+                except (VoiceError, TransportError) as error:
+                    logging.getLogger(__name__).warning("Telegram voice failed: %s", str(error))
+                    if await self._turn_can_send(entry, chat_id, user_id, group_binding,
+                            assistant, session_id, cancel_epoch, group_chat=group_chat):
+                        await self.send(entry.entry_id, chat_id,
+                            "Не удалось распознать голосовое сообщение. Отправьте текст или повторите запись (до 2 минут и 5 МБ).")
+                    return
+                if not await self._turn_can_send(entry, chat_id, user_id, group_binding,
+                        assistant, session_id, cancel_epoch, group_chat=group_chat):
+                    return
             result = await assistant.run(entry.data["owner_id"], "telegram", session_id,
                                          text, entry.entry_id, chat_id)
             # Runtime completion does not preserve authority: verify the exact

@@ -1,12 +1,18 @@
 """Explicit relay selection must not change the default provider route."""
 import os
 import json
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+import aiohttp
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+from homeassistant.components.habab_home import providers
 from homeassistant.components.habab_home.providers import (
     HABAB_TEXT_CAPABILITIES_URL,
     HABAB_TEXT_CAPABILITY_TIMEOUT,
+    HABAB_TEXT_CAPABILITY_MAX_BYTES,
     ProviderClient,
     ProviderError,
     provider_api_base,
@@ -46,14 +52,12 @@ class _Response:
     def __init__(self, status, payload):
         self.status = status
         self.content_length = len(payload)
-        self.content = SimpleNamespace(read=self._read, iter_chunked=self._iter_chunked)
+        self.content = SimpleNamespace(iter_chunked=self._iter_chunked)
         self._payload = payload
 
-    async def _read(self, _limit):
-        return self._payload
-
     async def _iter_chunked(self, _size):
-        yield self._payload
+        yield self._payload[:1]
+        yield self._payload[1:]
 
     async def __aenter__(self):
         return self
@@ -82,6 +86,51 @@ class HababTextContractTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def settings():
         return {"provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-project-key"}
+
+    async def test_real_fragmented_http_capabilities_are_read_to_eof(self):
+        payload = json.dumps({
+            "protocol": "openai_compatible", "model": "habab-chat", "api_path": "/v1",
+            "managed": True, "configured": True, "ready": True,
+        }).encode()
+
+        async def fragmented_response(request):
+            response = web.StreamResponse(headers={"Content-Type": "application/json"})
+            await response.prepare(request)
+            await response.write(payload[:1])
+            await asyncio.sleep(0.02)
+            try:
+                await response.write(payload[1:])
+                await response.write_eof()
+            except ConnectionResetError:
+                # A client that incorrectly parses the first fragment closes early.
+                pass
+            return response
+
+        app = web.Application()
+        app.router.add_get("/text/capabilities", fragmented_response)
+        async with TestServer(app) as server, aiohttp.ClientSession() as session:
+            with patch.object(providers, "HABAB_TEXT_CAPABILITIES_URL",
+                              str(server.make_url("/text/capabilities"))):
+                contract = await resolve_provider_contract(session, self.settings())
+        self.assertEqual(contract.model, "habab-chat")
+        self.assertTrue(contract.text_ready)
+
+    async def test_chunked_capabilities_keep_the_existing_byte_limit(self):
+        capability = json.dumps({
+            "protocol": "openai_compatible", "model": "habab-chat", "api_path": "/v1",
+            "managed": True, "configured": True, "ready": True,
+        }).encode()
+        for extra, expected_error in ((0, False), (1, True)):
+            payload = b" " * (HABAB_TEXT_CAPABILITY_MAX_BYTES - len(capability) + extra) + capability
+            response = _Response(200, payload)
+            response.content_length = None
+            if expected_error:
+                with self.assertRaises(ProviderError) as error:
+                    await resolve_provider_contract(_Session([response]), self.settings())
+                self.assertEqual(error.exception.code, "invalid_response")
+            else:
+                contract = await resolve_provider_contract(_Session([response]), self.settings())
+                self.assertTrue(contract.text_ready)
 
     async def test_legacy_404_keeps_the_existing_google_route(self):
         session = _Session([_Response(404, b"legacy")])

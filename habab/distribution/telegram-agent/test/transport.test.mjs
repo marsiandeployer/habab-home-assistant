@@ -247,3 +247,27 @@ test('shutdown ignores a late poll body without creating a new ACK wait', async 
     await stopped;
   }
 });
+
+test('voice metadata reaches durable message stream without downloading or exposing paths', async () => {
+  const events = [];
+  const calls = [];
+  let polls = 0;
+  const transport = new TelegramTransport({ fetchImpl: async (url, init) => {
+    const method = url.split('/').at(-1);
+    calls.push(method);
+    if (method === 'getMe') return response({ username: 'voice_bot' });
+    if (method === 'getUpdates' && polls++ === 0) return response([
+      { update_id: 50, message: { message_id: 51, chat: { id: 7, type: 'private' }, from: { id: 8 },
+        voice: { file_id: 'voice_id', file_unique_id: 'unused', duration: 3, file_size: 700, mime_type: 'audio/ogg' } } },
+    ]);
+    return new Promise((resolve) => init.signal.addEventListener('abort', () => resolve(response([])), { once: true }));
+  }, emit: (event) => events.push(event) });
+  await transport.configure('12345678901234567890:unit-test-token');
+  await new Promise((resolve) => setImmediate(resolve));
+  await transport.shutdown();
+  assert.deepEqual(events.find((event) => event.type === 'message'), {
+    type: 'message', update_id: 50, chat_id: 7, user_id: 8, message_id: 51, chat_type: 'private', text: '',
+    voice: { file_id: 'voice_id', duration: 3, file_size: 700, mime_type: 'audio/ogg' },
+  });
+  assert.ok(!calls.includes('getFile'));
+});

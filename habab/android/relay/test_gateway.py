@@ -886,8 +886,12 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         payload = await response.json()
         self.assertEqual(payload['telegram'], {
             'protocol': 'telegram-bot-api-relay-v1', 'base': '/telegram',
-            'methods': ['getMe', 'getUpdates', 'getChatMember', 'sendMessage', 'sendChatAction'],
+            'methods': ['getMe', 'getUpdates', 'getChatMember', 'getFile', 'sendMessage', 'sendChatAction'],
+            'voice': {'download': '/telegram/downloadFile', 'max_bytes': 5 * 1024 * 1024, 'max_duration': 120},
         })
+        self.assertEqual(payload['speech']['transcriptions'], '/v1/audio/transcriptions')
+        self.assertEqual(payload['speech']['model'], 'habab-transcribe')
+        self.assertTrue(payload['speech']['ready'])
 
     async def test_telegram_auth_token_query_and_method_boundaries_do_not_reach_upstream(self):
         owner = {'Authorization': 'Bearer synthetic-owner'}

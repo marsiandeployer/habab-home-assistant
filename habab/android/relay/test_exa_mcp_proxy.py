@@ -6,6 +6,7 @@ import json
 from multidict import CIMultiDict
 from pathlib import Path
 import tempfile
+import uuid
 from urllib.parse import urlsplit
 import unittest
 from unittest.mock import patch
@@ -15,7 +16,8 @@ from aiohttp.client import ClientSession
 from aiohttp.client_exceptions import ClientPayloadError
 from aiohttp.test_utils import TestClient, TestServer
 
-from exa_mcp_proxy import ExaMcpProxy, load_key_hash
+from beta_codes import BetaCodes, create_config
+from exa_mcp_proxy import ExaMcpProxy, load_key_hash, main
 
 
 class ExaMcpProxyTests(unittest.IsolatedAsyncioTestCase):
@@ -150,6 +152,100 @@ class ExaMcpProxyTests(unittest.IsolatedAsyncioTestCase):
 
     async def post_rpc(self, payload, *, headers=None, path='/mcp/exa'):
         return await self.client.post(path, headers=headers or self.rpc_headers(), json=payload)
+
+    async def issued_beta(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.beta_config_path = Path(directory.name) / 'beta.json'
+        create_config(self.beta_config_path)
+        codes = BetaCodes(self.beta_config_path)
+        issuer_app = web.Application()
+        codes.register_routes(issuer_app)
+        issuer = TestClient(TestServer(issuer_app))
+        await issuer.start_server()
+        try:
+            response = await issuer.post('/beta/enroll', json={'installation_id': str(uuid.uuid4())})
+            self.assertEqual(response.status, 200)
+            return codes, (await response.json())['code']
+        finally:
+            await issuer.close()
+
+    async def test_beta_and_legacy_credentials_both_reach_capabilities_and_mcp(self):
+        self.proxy.beta_codes, token = await self.issued_beta()
+        beta_headers = self.rpc_headers(Authorization='Bearer ' + token)
+        for headers in (self.rpc_headers(), beta_headers):
+            response = await self.client.get('/mcp/exa/capabilities', headers=headers)
+            self.assertEqual(response.status, 200)
+            self.assertEqual((await response.json())['tools'], ['web_search_exa', 'get_code_context_exa'])
+            response = await self.post_rpc(self.rpc('tools/call', {
+                'name': 'web_search_exa', 'arguments': {'query': 'fixture', 'objective': 'fixture search'},
+            }), headers=headers)
+            self.assertEqual(response.status, 200)
+            self.assertFalse(self.records[-1]['authorization_present'])
+            self.assertFalse(self.records[-1]['bearer_header_present'])
+        self.assertNotIn(token, repr(self.records))
+        self.assertEqual((await self.client.post('/beta/enroll', json={})).status, 404)
+
+    async def test_stopping_beta_issuance_preserves_existing_exa_access(self):
+        self.proxy.beta_codes, token = await self.issued_beta()
+        config = json.loads(self.beta_config_path.read_text())
+        config['issue_codes_enabled'] = False
+        self.beta_config_path.write_text(json.dumps(config))
+        self.proxy.beta_codes = BetaCodes(self.beta_config_path)
+        headers = self.rpc_headers(Authorization='Bearer ' + token)
+        with patch('beta_codes._read_config', side_effect=AssertionError('auth must not read disk')):
+            self.assertEqual((await self.client.get('/mcp/exa/capabilities', headers=headers)).status, 200)
+            self.assertEqual((await self.post_rpc(self.rpc('ping'), headers=headers)).status, 200)
+
+    async def test_beta_auth_preserves_duplicate_rejection_scopes_and_inflight_limit(self):
+        self.proxy.beta_codes, token = await self.issued_beta()
+        headers = self.rpc_headers(Authorization='Bearer ' + token)
+        invalid_token = token[:37] + ('A' if token[37] != 'A' else 'B') + token[38:]
+        denied = await self.post_rpc(self.rpc('ping'), headers=self.rpc_headers(
+            Authorization='Bearer ' + invalid_token))
+        self.assertEqual(denied.status, 401)
+        duplicate = CIMultiDict(list(headers.items()) + [('Authorization', 'Bearer ' + token)])
+        self.assertEqual((await self.post_rpc(self.rpc('ping'), headers=duplicate)).status, 401)
+        invalid = await self.post_rpc(self.rpc('tools/call', {
+            'name': 'web_fetch_exa', 'arguments': {'query': 'fixture'},
+        }), headers=headers)
+        self.assertEqual(invalid.status, 400)
+        self.assertEqual((await self.post_rpc(self.rpc('ping'), headers=headers,
+                                             path='/mcp/exa?url=https://attacker.invalid')).status, 400)
+        self.assertEqual((await self.post_rpc(self.rpc('ping'), headers={
+            **headers, 'Origin': 'https://attacker.invalid',
+        })).status, 403)
+        self.proxy.inflight = 4
+        try:
+            self.assertEqual((await self.post_rpc(self.rpc('ping'), headers=headers)).status, 429)
+        finally:
+            self.proxy.inflight = 0
+        self.assertEqual(self.records, [])
+
+    async def test_main_loads_beta_path_from_config_or_environment_with_config_precedence(self):
+        _, token = await self.issued_beta()
+        service_config = self.beta_config_path.parent / 'service.json'
+        base_config = {'key_sha256': hashlib.sha256(b'synthetic-service-key').hexdigest()}
+        for config_beta, environment_beta in ((str(self.beta_config_path), '/missing/beta.json'),
+                                               (None, str(self.beta_config_path))):
+            config = dict(base_config)
+            if config_beta:
+                config['beta_config'] = config_beta
+            service_config.write_text(json.dumps(config))
+            service_config.chmod(0o600)
+            with patch('sys.argv', ['exa_mcp_proxy.py', '--config', str(service_config)]), \
+                    patch.dict('os.environ', {'HABAB_BETA_CONFIG': environment_beta}), \
+                    patch('exa_mcp_proxy.web.run_app') as run_app:
+                main()
+            client = TestClient(TestServer(run_app.call_args.args[0]))
+            await client.start_server()
+            try:
+                response = await client.get('/mcp/exa/capabilities', headers={
+                    'Authorization': 'Bearer ' + token,
+                })
+                self.assertEqual(response.status, 200)
+            finally:
+                await client.close()
 
     async def test_health_and_capabilities_are_explicit_and_do_not_probe_upstream(self):
         health = await self.client.get('/health')

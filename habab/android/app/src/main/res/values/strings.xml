@@ -1,4 +1,9 @@
 <resources>
+    <string name="launch_help">Подготавливаем домашний сервер. Когда он будет готов, откроется чат помощника. При первом запуске создайте владельца Home Assistant.</string>
+    <string name="launch_retry">Повторить подготовку</string>
+    <string name="launch_settings">Настройки сервера</string>
+    <string name="launch_release_missing">Адрес серверного пакета отсутствует. Откройте настройки сервера или установите свежую версию приложения.</string>
+    <string name="voice_enable_action">Включить голос</string>
     <string name="app_name">Habab Home</string>
     <string name="server_channel">Домашний сервер</string>
     <string name="server_running">Сервер Habab Home работает</string>
@@ -57,7 +62,7 @@
     <string name="check_compatibility">Проверка совместимости телефона…</string>
     <string name="voice_title">Голосовой помощник</string>
     <string name="voice_authorize">Подключить голос к этому аккаунту</string>
-    <string name="voice_login_help">Войдите в умный дом своим аккаунтом администратора. Затем нажмите сверху «Подключить голос к этому аккаунту».</string>
+    <string name="voice_login_help">Войдите в умный дом своим аккаунтом администратора. Голос подключится автоматически; для микрофона нажмите «Включить голос».</string>
     <string name="voice_privacy">Фраза активации распознаётся на телефоне. Короткий пик открывает голосовой сеанс, два понижающихся — завершают его. Речь передаётся выбранному голосовому сервису во время сеанса; команда и ответ сохраняются в общем чате. Микрофон работает с погашенным экраном. Отключить его можно здесь или в уведомлении.</string>
     <string name="voice_audio_route_help">Для микрофона Bluetooth колонка должна поддерживать гарнитурный профиль Hands-Free. В режиме дублирования ответ и сигналы идут на телефон и Bluetooth; фактический маршрут каждого динамика показывается ниже. После потери связи звук возвращается на телефон.</string>
     <string name="voice_route_bluetooth">Микрофон и динамик Bluetooth-гарнитуры</string>

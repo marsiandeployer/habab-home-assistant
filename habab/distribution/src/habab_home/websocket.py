@@ -13,6 +13,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .assistant_status import voice_route_metadata
+from .beta import BetaError, async_activate
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
 from .feedback import FeedbackError
@@ -73,6 +74,7 @@ def _record_api_check(hass, entry, fingerprint, status, reason=None):
 
 @callback
 def async_register_commands(hass):
+    websocket_api.async_register_command(hass, activate_beta)
     websocket_api.async_register_command(hass, list_connections)
     websocket_api.async_register_command(hass, set_fast_dialog)
     websocket_api.async_register_command(hass, get_connection_key)
@@ -86,6 +88,16 @@ def async_register_commands(hass):
     websocket_api.async_register_command(hass, feedback_delivery_save)
     websocket_api.async_register_command(hass, feedback_delivery_enable)
     websocket_api.async_register_command(hass, feedback_delivery_clear)
+
+
+@websocket_api.websocket_command({probatio.Required("type"): "habab_home/beta/activate"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def activate_beta(hass, connection, msg):
+    try:
+        connection.send_result(msg["id"], await async_activate(hass))
+    except BetaError as error:
+        connection.send_error(msg["id"], error.code, error.code)
 
 
 def _feedback_manager(hass):

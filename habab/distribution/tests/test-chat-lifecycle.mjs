@@ -108,6 +108,8 @@ test("global chat launcher follows the authenticated main element across routes"
       { role: "assistant", text: "The setup card is ready." },
     ];
     assert.deepEqual(setupChatModule.visibleTextMessages(history), [history[0], history[3]]);
+    const toolOnly = {role: "assistant", text: "", tool_calls: [{name: "bash", status: "error"}]};
+    assert.deepEqual(setupChatModule.visibleTextMessages([toolOnly, {role: "user", text: ""}]), [toolOnly]);
     assert.equal(history.length, 4, "filtering display messages must retain session history");
 
     main.route = { path: "/config/areas" };

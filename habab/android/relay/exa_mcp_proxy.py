@@ -15,6 +15,8 @@ import time
 
 from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, web
 
+from beta_codes import BetaCodes
+
 EXA_MCP_URL = 'https://mcp.exa.ai/mcp?tools=web_search_exa,get_code_context_exa'
 SERVICE = 'habab-exa-mcp-relay'
 PROTOCOL = 'habab-exa-mcp-relay-v1'
@@ -228,7 +230,7 @@ def validate_rpc(payload):
     return request_id, None
 
 
-def load_key_hash(config_path):
+def load_config(config_path):
     path = Path(config_path)
     try:
         parent_info = path.parent.lstat()
@@ -249,14 +251,19 @@ def load_key_hash(config_path):
         raise ValueError('private_config_invalid') from error
     if not isinstance(key_hash, str) or re.fullmatch(r'[0-9a-f]{64}', key_hash) is None:
         raise ValueError('private_config_invalid')
-    return key_hash
+    return config
+
+
+def load_key_hash(config_path):
+    return load_config(config_path)['key_sha256']
 
 
 class ExaMcpProxy:
-    def __init__(self, key_hash):
+    def __init__(self, key_hash, *, beta_codes=None):
         if not isinstance(key_hash, str) or re.fullmatch(r'[0-9a-f]{64}', key_hash) is None:
             raise ValueError('invalid_service_key_hash')
         self.key_hash = key_hash
+        self.beta_codes = beta_codes or BetaCodes()
         self.client = None
         self.inflight = 0
 
@@ -270,7 +277,8 @@ class ExaMcpProxy:
         secret = value[7:]
         if not secret or any(ord(char) < 33 or ord(char) > 126 for char in secret):
             return False
-        return hmac.compare_digest(hashlib.sha256(secret.encode()).hexdigest(), self.key_hash)
+        return (hmac.compare_digest(hashlib.sha256(secret.encode()).hexdigest(), self.key_hash)
+                or self.beta_codes.verify(secret))
 
     async def lifecycle(self, app):
         self.client = ClientSession(timeout=ClientTimeout(total=REQUEST_TIMEOUT_SECONDS), trust_env=False,
@@ -496,10 +504,11 @@ def main():
     if not 1 <= args.port <= 65535:
         parser.error('--port must be between 1 and 65535')
     try:
-        key_hash = load_key_hash(args.config)
-    except ValueError as error:
-        parser.error(str(error))
-    proxy = ExaMcpProxy(key_hash)
+        config = load_config(args.config)
+        beta_codes = BetaCodes(config.get('beta_config') or os.environ.get('HABAB_BETA_CONFIG'))
+    except (OSError, ValueError, TypeError):
+        parser.error('private_config_invalid')
+    proxy = ExaMcpProxy(config['key_sha256'], beta_codes=beta_codes)
     web.run_app(proxy.app(), host='127.0.0.1', port=args.port, access_log=None, print=None,
                 handler_cancellation=True)
 

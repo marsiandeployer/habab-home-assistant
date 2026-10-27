@@ -626,10 +626,12 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await agent.run("alice", "ses_alice", "Добавь хлеб в список покупок")
 
-        self.assertEqual(result["messages"][-1], {
+        self.assertEqual({key: result["messages"][-1][key] for key in ("role", "text")}, {
             "role": "assistant",
             "text": "Готово, хлеб добавлен в список покупок.",
         })
+        self.assertEqual(result["messages"][-1]["tool_calls"][0]["id"], "call-add")
+        self.assertEqual(result["messages"][-1]["tool_calls"][0]["status"], "completed")
         agent.hass.services.async_call.assert_not_awaited()
 
     async def test_todo_add_clarification_without_tool_call_is_preserved(self):

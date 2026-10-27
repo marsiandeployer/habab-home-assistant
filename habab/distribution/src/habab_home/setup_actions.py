@@ -21,6 +21,7 @@ from .const import DOMAIN
 from .assistant_status import get_assistant_status
 from .feedback_action import save_feedback_action
 from .feedback import FeedbackError
+from .voice_route_action import call_select_voice_route, call_set_voice_wake
 
 _LOGGER = logging.getLogger(__name__)
 DEVICE_LIST_LIMIT = 200
@@ -33,6 +34,12 @@ BUNDLED_CONFIG_FLOW_INTEGRATIONS = (
     "habab_yandex_speech",
     "idigital_sms",
 )
+
+
+async def _require_voice_route_owner(hass, owner):
+    user = await hass.auth.async_get_user(owner) if isinstance(owner, str) else None
+    if user is None or not user.is_active or not user.is_admin:
+        raise ValueError("not_allowed")
 
 
 def _catalog_language(hass):
@@ -307,6 +314,20 @@ async def execute(hass, manager, owner, body, trusted_origin=None):
             return {"error": error.code}
     if action == "assistant_status":
         return await get_assistant_status(hass, owner)
+    if action == "voice_route_status":
+        if set(body) != {"action"}:
+            raise ValueError("invalid_voice_route_request")
+        await _require_voice_route_owner(hass, owner)
+        return hass.data[DOMAIN]["voice_route"].status(owner)
+    if action == "select_voice_route":
+        if set(body) != {"action", "target"}:
+            raise ValueError("invalid_voice_route_request")
+        target = body.get("target")
+        return await call_select_voice_route(hass, owner, target, Context)
+    if action == "set_voice_wake":
+        if set(body) != {"action", "enabled"}:
+            raise ValueError("invalid_voice_wake_request")
+        return await call_set_voice_wake(hass, owner, body.get("enabled"), Context)
     if action == "discover_devices":
         from .discovery import observe
 

@@ -22,7 +22,12 @@ public final class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean busy;
     private boolean launcherStartRequested;
-    private boolean autoStartServerRequested;
+    private final LaunchStartup startup = new LaunchStartup();
+    private boolean foreground;
+    private boolean voiceSnapshotPending;
+    private VoiceAuthLink voiceAuthorization;
+    private int voicePageGeneration;
+    private Button voiceButton;
     private boolean autoStartVoiceRequested;
     private TextView state;
     private LinearLayout content;
@@ -32,6 +37,8 @@ public final class MainActivity extends Activity {
         @Override public void run() {
             if (launcherStartRequested) ensureServerStarted();
             maybeStartVoiceIfReady();
+            authorizeVoice(false);
+            updateVoiceButton();
             if (state != null && !busy) state.setText(getString(R.string.status, phaseText())
                     + "\nHTTPS: " + tunnelText() + "\n" + MaintenanceService.status);
             handler.postDelayed(this, 2000);
@@ -39,8 +46,18 @@ public final class MainActivity extends Activity {
     };
 
     @Override public void onCreate(Bundle saved) {
-        super.onCreate(saved); store = new RuntimeStore(this); home(); handler.post(refresh);
+        super.onCreate(saved); store = new RuntimeStore(this);
+        voiceAuthorization = new VoiceAuthLink(getSharedPreferences("voice_auth", 0).getString("grant_identity", null));
+        if (saved != null) {
+            launcherStartRequested = saved.getBoolean("launcherStartup");
+            startup.installAttempted = saved.getBoolean("installAttempted");
+            startup.startAttempted = saved.getBoolean("startAttempted");
+            startup.homeOpened = saved.getBoolean("homeOpened");
+        }
+        configureFirstInstallBoot(getSharedPreferences("server", 0), store.installed());
+        home(); handler.post(refresh);
         if (saved == null && beginLauncherStartup(getIntent())) ensureServerStarted();
+        if (saved != null && saved.getBoolean("browserOpen")) openHome();
         maybeStartVoiceIfReady();
         // ADB provisioning is available only in a debug build, never the release APK.
         if (openAlias(getIntent())) return;
@@ -59,9 +76,27 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onResume() {
-        super.onResume();
+        super.onResume(); foreground = true;
         if (launcherStartRequested) ensureServerStarted();
         maybeStartVoiceIfReady();
+    }
+
+    @Override protected void onPause() {
+        foreground = false; super.onPause();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle saved) {
+        saved.putBoolean("launcherStartup", launcherStartRequested);
+        saved.putBoolean("installAttempted", startup.installAttempted);
+        saved.putBoolean("startAttempted", startup.startAttempted);
+        saved.putBoolean("homeOpened", startup.homeOpened);
+        saved.putBoolean("browserOpen", browser != null);
+        super.onSaveInstanceState(saved);
+    }
+
+    static void configureFirstInstallBoot(SharedPreferences preferences, boolean installed) {
+        if (!installed && !preferences.contains(ServerService.PREF_AUTO_START_ON_BOOT))
+            preferences.edit().putBoolean(ServerService.PREF_AUTO_START_ON_BOOT, true).apply();
     }
 
     private boolean openHomeFromNotification(Intent intent) {
@@ -85,7 +120,9 @@ public final class MainActivity extends Activity {
                 .putBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false)
                 .putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false).apply();
         launcherStartRequested = true;
-        autoStartServerRequested = false;
+        startup.installAttempted = false;
+        startup.startAttempted = false;
+        startup.homeOpened = browser != null;
         autoStartVoiceRequested = false;
         return true;
     }
@@ -101,11 +138,28 @@ public final class MainActivity extends Activity {
 
     private void home() {
         if (browser != null) { browser.destroy(); browser = null; }
+        voicePageGeneration++; voiceSnapshotPending = false; voiceAuthorization.navigation();
+        voiceButton = null;
         ScrollView scroll = new ScrollView(this); content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL); content.setPadding(24, 24, 24, 24);
         scroll.addView(content); setContentView(scroll);
         TextView title = text(getString(R.string.app_name)); title.setTextSize(28);
         state = text(getString(R.string.status, phaseText()));
+        text(getString(R.string.launch_help));
+        if (!store.installed()) button(R.string.launch_retry, () -> {
+            if (MaintenanceService.active) return;
+            startup.installAttempted = false;
+            startup.startAttempted = false;
+            launcherStartRequested = true;
+            ensureServerStarted();
+        });
+        Button settings = new Button(this); settings.setText(R.string.launch_settings);
+        settings.setAllCaps(false); settings.setOnClickListener(view -> {
+            settings.setVisibility(View.GONE); maintenanceSettings();
+        }); content.addView(settings);
+    }
+
+    private void maintenanceSettings() {
         text(getString(R.string.local_url));
         String lan = lanAddresses();
         if (!lan.isEmpty()) text(getString(R.string.lan_url, lan));
@@ -126,7 +180,6 @@ public final class MainActivity extends Activity {
                     .putBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, true)
                     .putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, true).apply();
             VoiceService.cancelPendingStart();
-            autoStartServerRequested = true;
             stopService(new Intent(this, VoiceService.class));
             stopService(new Intent(this, ServerService.class));
         });
@@ -162,7 +215,7 @@ public final class MainActivity extends Activity {
                 .putBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false)
                 .putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false).apply();
         launcherStartRequested = true;
-        autoStartServerRequested = false;
+        startup.startAttempted = false;
         autoStartVoiceRequested = false;
         ensureServerStarted();
     }
@@ -171,16 +224,17 @@ public final class MainActivity extends Activity {
         if (!stopped()) return;
         EditText address = new EditText(this); address.setHint(R.string.manifest_url);
         address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        String defaultUrl = getSharedPreferences("server", 0).getString("manifest_url", "");
-        if (defaultUrl.isEmpty()) {
-            try (InputStream input = getAssets().open("release/default-url.txt")) {
-                defaultUrl = new String(RuntimeStore.readLimited(input, 8192), StandardCharsets.UTF_8).trim();
-            } catch (IOException ignored) { /* User can enter their own signed release endpoint. */ }
-        }
+        String defaultUrl = defaultRuntimeUrl();
         address.setText(defaultUrl);
         new AlertDialog.Builder(this).setTitle(R.string.install_title).setView(address)
                 .setPositiveButton(R.string.setup, (dialog, which) -> install(address.getText().toString().trim()))
                 .setNegativeButton(R.string.cancel, null).show();
+    }
+
+    private String defaultRuntimeUrl() {
+        try (InputStream input = getAssets().open("release/default-url.txt")) {
+            return new String(RuntimeStore.readLimited(input, 8192), StandardCharsets.UTF_8).trim();
+        } catch (IOException ignored) { return ""; }
     }
 
     private interface Work { void run() throws Exception; }
@@ -209,19 +263,30 @@ public final class MainActivity extends Activity {
 
     private void openHome(String address) {
         if (busy) return;
+        if (!LaunchStartup.localOrigin(address)) return;
+        startup.homeOpened = true;
         if (browser != null) { browser.destroy(); browser = null; }
+        voicePageGeneration++; voiceSnapshotPending = false; voiceAuthorization.navigation();
         LinearLayout layout = new LinearLayout(this); layout.setOrientation(LinearLayout.VERTICAL);
         Button back = new Button(this); back.setText(R.string.back); back.setOnClickListener(view -> home()); layout.addView(back);
-        Button voice = new Button(this); voice.setText(R.string.voice_authorize);
-        voice.setOnClickListener(view -> authorizeVoice()); layout.addView(voice);
+        voiceButton = new Button(this);
+        voiceButton.setAllCaps(false);
+        voiceButton.setOnClickListener(view -> enableVoice()); layout.addView(voiceButton);
+        updateVoiceButton();
         browser = new WebView(this);
         browser.getSettings().setJavaScriptEnabled(true); browser.getSettings().setDomStorageEnabled(true);
         browser.getSettings().setAllowFileAccess(false); browser.getSettings().setAllowContentAccess(false);
         browser.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         browser.setWebViewClient(new WebViewClient() {
+            @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+                voicePageGeneration++; voiceSnapshotPending = false; voiceAuthorization.navigation();
+            }
+            @Override public void onPageFinished(WebView view, String url) {
+                authorizeVoice(false);
+            }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                if ("http".equals(uri.getScheme()) && "127.0.0.1".equals(uri.getHost()) && uri.getPort() == 8123) return false;
+                if (LaunchStartup.localOrigin(uri.toString())) return false;
                 try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
                 catch (ActivityNotFoundException error) { message(getString(R.string.no_link_handler)); }
                 return true;
@@ -295,20 +360,90 @@ public final class MainActivity extends Activity {
         voiceDialog.show();
     }
 
-    private void authorizeVoice() {
-        if (browser == null || browser.getUrl() == null) return;
-        Uri uri = Uri.parse(browser.getUrl());
-        if (!"http".equals(uri.getScheme()) || !"127.0.0.1".equals(uri.getHost()) || uri.getPort() != 8123) return;
-        browser.evaluateJavascript("localStorage.getItem('hassTokens')", value -> {
+    private void updateVoiceButton() {
+        if (voiceButton == null) return;
+        boolean enabled = getSharedPreferences("voice", 0).getBoolean("enabled", false);
+        voiceButton.setText(enabled && microphoneGranted() && voiceAuthorization.nativeAllowed() ? R.string.voice_title : R.string.voice_enable_action);
+    }
+
+    private boolean microphoneGranted() {
+        return checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void enableVoice() {
+        if (getSharedPreferences("voice", 0).getBoolean("enabled", false) && microphoneGranted()
+                && new VoiceCredentials(this).configured() && voiceAuthorization.nativeAllowed()
+                && !voiceAuthorization.failed()) {
+            voiceSettings(); return;
+        }
+        getSharedPreferences("voice", 0).edit().putBoolean("enabled", true).apply();
+        voiceAuthorization.retry();
+        authorizeVoice(true);
+        startVoice();
+        updateVoiceButton();
+    }
+
+    private void invalidateNativeVoice() {
+        new VoiceCredentials(this).clear();
+        voiceAuthorization.credentialsCleared();
+        autoStartVoiceRequested = false;
+        VoiceService.cancelPendingStart();
+        stopService(new Intent(this, VoiceService.class));
+    }
+
+    private void authorizeVoice(boolean explainMissingLogin) {
+        WebView source = browser;
+        if (source == null || voiceSnapshotPending || !LaunchStartup.localOrigin(source.getUrl())) return;
+        voiceSnapshotPending = true;
+        int generation = voicePageGeneration;
+        source.evaluateJavascript(VoiceAuthLink.SNAPSHOT_SCRIPT, value -> {
+            if (generation != voicePageGeneration || source != browser) return;
+            voiceSnapshotPending = false;
+            if (!LaunchStartup.localOrigin(source.getUrl())) return;
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
-                if (!(decoded instanceof String)) { message(getString(R.string.voice_login_help)); return; }
-                org.json.JSONObject auth = new org.json.JSONObject((String) decoded);
+                if (!(decoded instanceof org.json.JSONObject)) return;
+                org.json.JSONObject snapshot = (org.json.JSONObject) decoded;
+                String phase = snapshot.optString("state");
+                if ("signed_out".equals(phase) || "forbidden".equals(phase)) {
+                    if (voiceAuthorization.signedOut()) invalidateNativeVoice();
+                    if (explainMissingLogin) message(getString(R.string.voice_login_help));
+                    updateVoiceButton(); return;
+                }
+                // Missing DOM/auth during navigation is not proof that the current grant was revoked.
+                if (!"authenticated".equals(phase)) {
+                    if (explainMissingLogin) message(getString(R.string.voice_login_help));
+                    return;
+                }
+                org.json.JSONObject auth = snapshot.getJSONObject("auth");
+                String identity = VoiceAuthLink.identity(snapshot.getString("userId"),
+                        auth.getString("clientId"), auth.getString("refresh_token"));
+                VoiceAuthLink.Ticket ticket = voiceAuthorization.authenticated(identity);
+                if (ticket == null) return;
+                invalidateNativeVoice();
                 operations.execute(() -> {
-                    try { new VoiceCredentials(this).save(auth); handler.post(this::voiceSettings); }
-                    catch (Exception error) { handler.post(() -> message(getString(R.string.voice_auth_failed))); }
+                    try {
+                        // The gate protects the actual preferences write, not only the UI completion.
+                        boolean saved = new VoiceCredentials(this).saveIfCurrent(auth, voiceAuthorization, ticket);
+                        handler.post(() -> {
+                            if (!saved || generation != voicePageGeneration || source != browser) return;
+                            autoStartVoiceRequested = false;
+                            if (getSharedPreferences("voice", 0).getBoolean("enabled", false) && microphoneGranted())
+                                VoiceService.restartAfterConfiguration(this);
+                            maybeStartVoiceIfReady(); updateVoiceButton();
+                        });
+                    } catch (Exception error) {
+                        handler.post(() -> {
+                            if (!voiceAuthorization.current(ticket)) return;
+                            voiceAuthorization.failed(ticket);
+                            message(getString(R.string.voice_auth_failed)); updateVoiceButton();
+                        });
+                    }
                 });
-            } catch (Exception error) { message(getString(R.string.voice_login_help)); }
+            } catch (Exception error) {
+                if (explainMissingLogin) message(getString(R.string.voice_login_help));
+            }
         });
     }
 
@@ -322,7 +457,8 @@ public final class MainActivity extends Activity {
                 == android.content.pm.PackageManager.PERMISSION_GRANTED;
         boolean manuallyStopped = getSharedPreferences("server", 0)
                 .getBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false);
-        if (!ServerService.voiceAutoStartAllowed(enabled, authConfigured, microphoneGranted, manuallyStopped)) return;
+        if (!voiceAuthorization.nativeAllowed()
+                || !ServerService.voiceAutoStartAllowed(enabled, authConfigured, microphoneGranted, manuallyStopped)) return;
         launcherStartRequested = true;
         ensureServerStarted();
         maybeStartVoiceIfReady();
@@ -331,30 +467,29 @@ public final class MainActivity extends Activity {
     private void ensureServerStarted() {
         SharedPreferences preferences = getSharedPreferences("server", 0);
         boolean manuallyStopped = preferences.getBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false);
-        boolean runtimeInstalled = store.installed();
-        if (!ServerService.serverStartAllowed(launcherStartRequested, runtimeInstalled, manuallyStopped)) {
-            if (launcherStartRequested && !manuallyStopped && !runtimeInstalled
-                    && !preferences.getBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false)) {
-                autoStartServerRequested = true;
-                preferences.edit().putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, true).apply();
-                message(getString(R.string.not_installed));
+        LaunchStartup.Action next = startup.next(store.installed(), MaintenanceService.active,
+                ServerService.active, ServerService.stopping,
+                ServerService.active && "running".equals(ServerService.status),
+                manuallyStopped, busy, foreground);
+        try {
+            if (next == LaunchStartup.Action.INSTALL) {
+                String address = defaultRuntimeUrl();
+                if (address.isEmpty()) { message(getString(R.string.launch_release_missing)); return; }
+                install(address);
+            } else if (next == LaunchStartup.Action.START) {
+                    preferences.edit().putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, true).apply();
+                startServer();
+            } else if (next == LaunchStartup.Action.OPEN && browser == null) {
+                openHome();
             }
-            return;
-        }
-        if (ServerService.active || ServerService.stopping || MaintenanceService.active
-                || busy || autoStartServerRequested
-                || preferences.getBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, false)) return;
-        autoStartServerRequested = true;
-        preferences.edit().putBoolean(ServerService.PREF_AUTO_START_ATTEMPTED, true).apply();
-        try { startServer(); }
-        catch (RuntimeException error) {
+        } catch (RuntimeException error) {
             message(getString(R.string.error, error.getMessage() == null
                     ? error.getClass().getSimpleName() : error.getMessage()));
         }
     }
 
     private void maybeStartVoiceIfReady() {
-        if (autoStartVoiceRequested) return;
+        if (autoStartVoiceRequested || !voiceAuthorization.nativeAllowed()) return;
         boolean enabled = getSharedPreferences("voice", 0).getBoolean("enabled", false);
         boolean authConfigured = getSharedPreferences("voice_auth", 0).contains("sealed");
         boolean microphoneGranted = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
@@ -555,6 +690,7 @@ public final class MainActivity extends Activity {
     @Override public void onBackPressed() { if (browser != null) home(); else super.onBackPressed(); }
     @Override protected void onDestroy() {
         handler.removeCallbacks(refresh);
-        operations.shutdown(); if (browser != null) browser.destroy(); super.onDestroy();
+        voicePageGeneration++; voiceAuthorization.navigation();
+        operations.shutdown(); if (browser != null) { browser.destroy(); browser = null; } super.onDestroy();
     }
 }

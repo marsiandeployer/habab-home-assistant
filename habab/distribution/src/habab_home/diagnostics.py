@@ -64,7 +64,8 @@ _SECRET_ASSIGNMENT = re.compile(
     r"signing[_-]?key|encryption[_-]?key|secret[_-]?key|access[_-]?token|"
     r"refresh[_-]?token|oauth[_-]?token|id[_-]?token|token|password|passwd|"
     r"client[_-]?secret|secret|authorization|cookie|oauth[_-]?code|verification[_-]?code)"
-    r"(\s*[:=]\s*)([^\s,;]+)", re.IGNORECASE,
+    r"(\s*[:=]\s*)(?:\"(?:\\[\s\S]?|[^\"\\])*(?:\"|$)|"
+    r"'(?:''|\\[\s\S]?|[^'\\])*(?:'|$)|[^\s,;\"']+)", re.IGNORECASE,
 )
 _JSON_SECRET_FIELD = re.compile(
     r'(?P<key_open>")(?P<key>(?:\\.|[^"\\]){0,256})(?P<key_close>")'
@@ -323,7 +324,11 @@ def _redact_text(runtime, value: str, limit: int = 12000,
                 key = json.loads('"' + key + '"')
             except (json.JSONDecodeError, TypeError):
                 break
-            if isinstance(key, str) and _SENSITIVE_FIELD.fullmatch(key):
+            normalized_key = (
+                re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+                if isinstance(key, str) else ""
+            )
+            if normalized_key and _SENSITIVE_FIELD.search(normalized_key):
                 sensitive = True
                 break
         if not sensitive:

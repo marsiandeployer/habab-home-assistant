@@ -1,4 +1,10 @@
 import { strings } from "./strings.js";
+import {
+  copyTelegramPairingUrl,
+  normalizeTelegramPairingUrl,
+  renderTelegramPairingQr,
+  telegramQrText,
+} from "./telegram-qr.js";
 
 const TELEGRAM_GUIDE_VIDEO_URL = "https://habab-demo.wpmix.net/downloads/telegram-guide/0edb8b93307461572f125cab64c81d8ed904e0455b6b1ff75fe1d8bba26c31d7/telegram-guide-0edb8b93307461572f125cab64c81d8ed904e0455b6b1ff75fe1d8bba26c31d7.mp4";
 const TELEGRAM_GUIDE_CAPTIONS_URL = new URL(
@@ -21,6 +27,9 @@ class HababTelegramPanel extends HTMLElement {
     this.state = { phase: "not_configured" };
     this.group = { phase: "unsupported" };
     this.groupPairingUrl = "";
+    this.qrUrls = { owner: "", group: "" };
+    this.ownerGeneration = 0;
+    this.refreshGeneration = 0;
     this.pendingGroupAction = "";
     this.pendingRecovery = null;
     this.recoveryFeedback = "";
@@ -32,10 +41,17 @@ class HababTelegramPanel extends HTMLElement {
     const ownerChanged = this._hass && this._hass.user?.id !== value?.user?.id;
     this._hass = value;
     if (ownerChanged) {
+      this.ownerGeneration += 1;
+      this.refreshGeneration += 1;
+      this.refreshing = false;
+      this.busy = false;
       this.pendingRecovery = null;
       this.recoveryFeedback = "";
       this.state = { phase: "not_configured" };
       this.group = { phase: "unsupported" };
+      this.groupPairingUrl = "";
+      this.qrUrls = { owner: "", group: "" };
+      if (this.shadowRoot.firstChild) this.applyState();
     }
     const language = value?.locale?.language?.startsWith("ru") ? "ru" : "en";
     if (language !== this.language) {
@@ -61,6 +77,8 @@ class HababTelegramPanel extends HTMLElement {
     if (token) token.value = "";
     const proxy = this.q("#proxy");
     if (proxy) proxy.value = "";
+    this.clearPairingQr("owner");
+    this.clearPairingQr("group");
   }
 
   t(key, values = {}) {
@@ -76,6 +94,7 @@ class HababTelegramPanel extends HTMLElement {
   }
 
   render() {
+    this.qrUrls = { owner: "", group: "" };
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;height:100%;overflow:auto;color:var(--primary-text-color);background:var(--primary-background-color);font:14px/1.5 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif);scrollbar-color:var(--secondary-text-color) transparent;scrollbar-width:thin}
       *{box-sizing:border-box}header{display:flex;align-items:center;gap:16px;min-height:56px;padding:8px 16px;border-block-end:1px solid var(--divider-color);background:var(--card-background-color)}
@@ -90,6 +109,7 @@ class HababTelegramPanel extends HTMLElement {
       .video-guide video{display:block;width:100%;height:auto;aspect-ratio:16/9;border:0;border-radius:var(--ha-border-radius-lg,12px);background:var(--secondary-background-color)}.video-guide p:last-child{margin-block:10px 0}
       details{margin-block:10px}summary{cursor:pointer;min-height:36px;display:flex;align-items:center;color:var(--primary-text-color);text-underline-offset:3px}details p{margin-block:8px}.proxy-field label{margin-block-start:8px}
       .confirmation{padding:12px 0}.confirmation p{font-weight:500}.confirmation .actions{margin-block:8px}[hidden]{display:none!important}
+      .pairing-qr{display:block;width:min(100%,320px);height:auto;aspect-ratio:1;margin-block:12px;padding:8px;border-radius:8px;background:#fff;image-rendering:pixelated}
       @media(max-width:600px){header{min-height:52px}main{padding:12px 16px calc(50vh + 24px)}.intro{font-size:13px;margin-block-end:8px}section{padding-block:12px}h2{font-size:17px}label{margin-block-start:8px}.actions{display:grid;grid-template-columns:1fr}.actions button{width:100%}.status{padding-block:6px}.pairing-link{min-height:44px;display:flex;align-items:center}}
     </style>
     <header><ha-menu-button></ha-menu-button><h1>${this.t("telegramTitle")}</h1></header>
@@ -140,6 +160,9 @@ class HababTelegramPanel extends HTMLElement {
         <p class="help">${this.t("telegramOwnerHelp")}</p>
         <p class="status" id="owner-pair-status" role="status" aria-live="polite"></p>
         <a class="pairing-link" id="owner-pairing-action" target="_blank" rel="noopener noreferrer" hidden>${this.t("telegramOpenPairing")}</a>
+        <canvas class="pairing-qr" id="owner-pairing-qr" hidden></canvas>
+        <div class="actions"><button type="button" id="owner-pairing-copy" hidden>${telegramQrText(this.language, "copyOwnerLink")}</button></div>
+        <p class="status" id="owner-pairing-copy-status" role="status" aria-live="polite"></p>
         <div class="actions"><button type="button" id="owner-pair-action" hidden>${this.t("telegramPair")}</button></div>
       </section>
       <section aria-labelledby="group-step-title" id="group-step">
@@ -148,6 +171,9 @@ class HababTelegramPanel extends HTMLElement {
         <p class="help" id="group-help">${this.t("telegramGroupHelp")}</p>
         <p class="status" id="group-status" role="status" aria-live="polite"></p>
         <a class="pairing-link" id="group-pairing" target="_blank" rel="noopener noreferrer" hidden>${this.t("telegramOpenGroupPairing")}</a>
+        <canvas class="pairing-qr" id="group-pairing-qr" hidden></canvas>
+        <div class="actions"><button type="button" id="group-pairing-copy" hidden>${telegramQrText(this.language, "copyGroupLink")}</button></div>
+        <p class="status" id="group-pairing-copy-status" role="status" aria-live="polite"></p>
         <div class="actions"><button class="primary" type="button" id="group-pair" hidden>${this.t("telegramGroupPair")}</button><button class="danger" type="button" id="group-unlink" hidden>${this.t("telegramGroupUnlink")}</button></div>
         <div class="confirmation" id="group-confirmation" role="group" aria-labelledby="group-confirmation-copy" hidden>
           <p id="group-confirmation-copy"></p>
@@ -171,6 +197,7 @@ class HababTelegramPanel extends HTMLElement {
       this.configure();
     });
     this.q("#owner-pair-action").addEventListener("click", () => this.pair());
+    this.q("#owner-pairing-copy").addEventListener("click", () => this.copyPairingUrl("owner"));
     this.q("#refresh").addEventListener("click", () => this.refresh());
     this.q("#maintenance-refresh").addEventListener("click", () => this.refresh());
     this.q("#edit-bot").addEventListener("click", () => {
@@ -186,6 +213,7 @@ class HababTelegramPanel extends HTMLElement {
       this.q("#edit-bot").focus();
     });
     this.q("#group-pair").addEventListener("click", () => this.requestGroupPair());
+    this.q("#group-pairing-copy").addEventListener("click", () => this.copyPairingUrl("group"));
     this.q("#group-unlink").addEventListener("click", () => this.askGroupConfirmation("unlink"));
     this.q("#group-confirm-action").addEventListener("click", () => this.confirmGroupAction());
     this.q("#group-cancel-action").addEventListener("click", () => this.cancelGroupConfirmation());
@@ -230,9 +258,12 @@ class HababTelegramPanel extends HTMLElement {
     username.textContent = this.state.bot_username
       ? `${this.t("telegramUsername")}: @${this.state.bot_username.replace(/^@/, "")}`
       : "";
+    const ownerPairingUrl = this.currentOwnerPairingUrl();
     const ownerPairingAction = this.q("#owner-pairing-action");
-    ownerPairingAction.hidden = !this.state.pairing_url;
-    ownerPairingAction.href = this.state.pairing_url || "#";
+    ownerPairingAction.hidden = !ownerPairingUrl;
+    ownerPairingAction.href = ownerPairingUrl || "#";
+    this.updatePairingQr("owner", ownerPairingUrl);
+    this.q("#owner-pairing-copy").hidden = !ownerPairingUrl || this.busy;
     const ownerCanPair = this.state.phase === "pairing";
     this.q("#owner-step").hidden = maintenance || this.state.phase === "not_configured" || this.state.phase === "error";
     this.q("#owner-pair-action").hidden = !ownerCanPair;
@@ -359,10 +390,11 @@ class HababTelegramPanel extends HTMLElement {
     );
     this.q("#group-unlink").hidden = !ownerReady || this.group.phase !== "connected";
     const groupPairing = this.q("#group-pairing");
-    const linkWasUsed = this.group.phase === "awaiting_admin"
-      || Boolean(replacementPending && this.group.pending_phase === "awaiting_admin");
-    groupPairing.hidden = !this.groupPairingUrl || this.busy || linkWasUsed;
-    groupPairing.href = this.groupPairingUrl || "#";
+    const currentGroupPairingUrl = this.currentGroupPairingUrl();
+    groupPairing.hidden = !currentGroupPairingUrl || this.busy;
+    groupPairing.href = currentGroupPairingUrl || "#";
+    this.updatePairingQr("group", currentGroupPairingUrl);
+    this.q("#group-pairing-copy").hidden = !currentGroupPairingUrl || this.busy;
     this.q("#group-status").setAttribute("aria-busy", String(this.busy));
     this.q("#owner-unlink").hidden = this.state.phase === "not_configured";
 
@@ -375,6 +407,78 @@ class HababTelegramPanel extends HTMLElement {
       this.q("#group-confirmation-copy").textContent = this.t(key);
     } else if (this.pendingGroupAction === "unlink") {
       this.q("#group-confirmation-copy").textContent = this.t("telegramGroupUnlinkConfirm");
+    }
+  }
+
+  currentOwnerPairingUrl() {
+    return this.state.phase === "pairing"
+      ? normalizeTelegramPairingUrl(this.state.pairing_url, "owner") : "";
+  }
+
+  currentGroupPairingUrl() {
+    return this.state.phase === "connected" && this.group.phase === "pairing"
+      ? normalizeTelegramPairingUrl(this.groupPairingUrl, "group") : "";
+  }
+
+  updatePairingQr(kind, url) {
+    const canvas = this.q(`#${kind}-pairing-qr`);
+    const status = this.q(`#${kind}-pairing-copy-status`);
+    if (!url) {
+      this.clearPairingQr(kind);
+      status.textContent = "";
+      status.dataset.error = "false";
+      return;
+    }
+    if (this.busy) {
+      canvas.hidden = true;
+      this.q(`#${kind}-pairing-copy`).hidden = true;
+      return;
+    }
+    canvas.hidden = false;
+    canvas.setAttribute("aria-label", telegramQrText(
+      this.language, kind === "owner" ? "ownerQrLabel" : "groupQrLabel",
+    ));
+    if (this.qrUrls[kind] === url && canvas.width > 0) return;
+    try {
+      renderTelegramPairingQr(canvas, url, kind);
+      this.qrUrls[kind] = url;
+      status.textContent = "";
+      status.dataset.error = "false";
+    } catch (_error) {
+      this.qrUrls[kind] = "";
+      canvas.hidden = true;
+      status.textContent = telegramQrText(this.language, "qrFailed");
+      status.dataset.error = "true";
+    }
+  }
+
+  clearPairingQr(kind) {
+    if (!this.shadowRoot.firstChild) return;
+    const canvas = this.q(`#${kind}-pairing-qr`);
+    if (canvas) {
+      canvas.hidden = true;
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+    if (this.qrUrls) this.qrUrls[kind] = "";
+    const copy = this.q(`#${kind}-pairing-copy`);
+    if (copy) copy.hidden = true;
+  }
+
+  async copyPairingUrl(kind) {
+    const url = kind === "owner" ? this.currentOwnerPairingUrl() : this.currentGroupPairingUrl();
+    if (!url || this.busy) return;
+    const generation = this.ownerGeneration;
+    const status = this.q(`#${kind}-pairing-copy-status`);
+    try {
+      await copyTelegramPairingUrl(url);
+      if (generation !== this.ownerGeneration) return;
+      status.textContent = telegramQrText(this.language, "copied");
+      status.dataset.error = "false";
+    } catch (_error) {
+      if (generation !== this.ownerGeneration) return;
+      status.textContent = telegramQrText(this.language, "copyFailed");
+      status.dataset.error = "true";
     }
   }
 
@@ -427,6 +531,17 @@ class HababTelegramPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("button,input").forEach((element) => {
       element.disabled = this.busy || (maintenance && element.id !== "maintenance-refresh");
     });
+    if (this.busy || maintenance) {
+      for (const kind of ["owner", "group"]) {
+        const selectors = kind === "owner"
+          ? ["#owner-pairing-action", "#owner-pairing-qr", "#owner-pairing-copy"]
+          : ["#group-pairing", "#group-pairing-qr", "#group-pairing-copy"];
+        for (const selector of selectors) {
+          const element = this.q(selector);
+          if (element) element.hidden = true;
+        }
+      }
+    }
     const confirmButton = this.q("#group-confirm-action");
     if (confirmButton) confirmButton.disabled = this.busy || maintenance;
     const ownerConfirmButton = this.q("#owner-confirm-action");
@@ -446,6 +561,7 @@ class HababTelegramPanel extends HTMLElement {
     if (!this._hass || this.busy || this.refreshing) return;
     this.refreshing = true;
     const context = this.ownerContext();
+    const refreshGeneration = ++this.refreshGeneration;
     this.ownerFeedback = "";
     try {
       const result = await this.request("status");
@@ -455,7 +571,7 @@ class HababTelegramPanel extends HTMLElement {
       this.group = result.group && GROUP_PHASES.includes(result.group.phase)
         ? result.group
         : { phase: "unsupported" };
-      if (this.group.phase === "connected") this.groupPairingUrl = "";
+      if (this.state.phase !== "connected" || this.group.phase !== "pairing") this.groupPairingUrl = "";
       this.applyState();
     } catch (error) {
       if (!this.sameOwnerContext(context)) return;
@@ -463,8 +579,10 @@ class HababTelegramPanel extends HTMLElement {
       this.group = { phase: "unsupported" };
       this.applyState();
     } finally {
-      this.refreshing = false;
-      if (!this.sameOwnerContext(context) && this.isConnected) this.refresh();
+      if (this.refreshGeneration === refreshGeneration) {
+        this.refreshing = false;
+        if (!this.sameOwnerContext(context) && this.isConnected) this.refresh();
+      }
     }
   }
 
@@ -480,19 +598,25 @@ class HababTelegramPanel extends HTMLElement {
 
   async run(action, successText) {
     if (!this._hass || this.busy || this.state.maintenance === true) return;
+    const context = this.ownerContext();
     this.busy = true;
     this.ownerFeedback = "";
     this.updateControls();
     try {
       const result = await action();
+      if (!this.sameOwnerContext(context)) return;
       if (result?.phase) this.state = result;
       else await this.loadStatus();
       if (successText) this.ownerFeedback = this.t(successText);
     } catch (error) {
-      this.state = { phase: "error", error: error?.code || error?.message || "unknown" };
+      if (this.sameOwnerContext(context)) {
+        this.state = { phase: "error", error: error?.code || error?.message || "unknown" };
+      }
     } finally {
-      this.busy = false;
-      this.applyState();
+      if (this.sameOwnerContext(context)) {
+        this.busy = false;
+        this.applyState();
+      }
     }
   }
 
@@ -505,7 +629,7 @@ class HababTelegramPanel extends HTMLElement {
     this.group = result.group && GROUP_PHASES.includes(result.group.phase)
       ? result.group
       : { phase: "unsupported" };
-    if (this.group.phase === "connected") this.groupPairingUrl = "";
+    if (this.state.phase !== "connected" || this.group.phase !== "pairing") this.groupPairingUrl = "";
   }
 
   async configure() {
@@ -564,6 +688,7 @@ class HababTelegramPanel extends HTMLElement {
 
   async generateGroupPairingLink() {
     if (!this._hass || this.state.phase !== "connected" || this.busy) return;
+    const context = this.ownerContext();
     this.busy = true;
     this.q("#group-action-status").dataset.error = "false";
     this.q("#group-action-status").dataset.success = "false";
@@ -571,19 +696,21 @@ class HababTelegramPanel extends HTMLElement {
     this.updateControls();
     try {
       const result = await this.request("group_pair");
-      const url = new URL(result.group_pairing_url);
-      if (url.protocol !== "https:" || url.hostname !== "t.me" || !url.searchParams.has("startgroup")) {
-        throw new Error("group_pairing_url");
-      }
-      this.groupPairingUrl = url.toString();
+      if (!this.sameOwnerContext(context)) return;
+      const url = normalizeTelegramPairingUrl(result.group_pairing_url, "group");
+      if (!url) throw new Error("group_pairing_url");
+      this.groupPairingUrl = url;
       this.q("#group-action-status").textContent = this.t("telegramGroupLinkReady");
       await this.loadStatus();
     } catch (error) {
+      if (!this.sameOwnerContext(context)) return;
       this.q("#group-action-status").textContent = this.t(this.groupErrorKey(error?.code || error?.message));
       this.q("#group-action-status").dataset.error = "true";
     } finally {
-      this.busy = false;
-      this.applyState();
+      if (this.sameOwnerContext(context)) {
+        this.busy = false;
+        this.applyState();
+      }
     }
   }
 

@@ -3,11 +3,42 @@ package ru.habab.home;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.*;
 
 public class VoiceAudioRouteTest {
+    @Test public void clearsSpeakerphoneBeforeStartingLegacySco() {
+        List<String> calls = new ArrayList<>();
+        VoiceAudioRoute.selectLegacyBluetooth(new VoiceAudioRoute.LegacyBluetoothOperations() {
+            @Override public void setCommunicationMode() { calls.add("mode"); }
+            @Override public void setSpeakerphoneOn(boolean enabled) { calls.add("speaker=" + enabled); }
+            @Override public void startSco() { calls.add("start_sco"); }
+        });
+        assertEquals(Arrays.asList("mode", "speaker=false", "start_sco"), calls);
+    }
+
+    @Test public void retriesScoSelectionAfterARealFallbackButKeepsAnActiveScoRoute() {
+        assertTrue(VoiceAudioRoute.shouldReselectLegacyBluetooth(true, false, 15, true));
+        assertTrue(VoiceAudioRoute.shouldReselectLegacyBluetooth(true, false, 15, false));
+        assertFalse(VoiceAudioRoute.shouldReselectLegacyBluetooth(true, false, 7, false));
+        assertFalse(VoiceAudioRoute.shouldReselectLegacyBluetooth(false, false, 15, true));
+    }
+
+    @Test public void retainsScoRouteOnTransientDisconnectOnlyWhenInputAndOutputRemain() {
+        assertTrue(VoiceAudioRoute.shouldKeepActiveScoInput(7, true));
+        assertFalse(VoiceAudioRoute.shouldKeepActiveScoInput(15, true));
+        assertFalse(VoiceAudioRoute.shouldKeepActiveScoInput(7, false));
+    }
+
+    @Test public void selectsScoSpecificCapturePathAndBypassesClientEffectsOnlyForLegacySco() {
+        assertTrue(VoiceAudioRoute.isLegacyScoInput(7));
+        assertFalse(VoiceAudioRoute.isLegacyScoInput(15));
+        assertTrue(VoiceAudioRoute.shouldBypassClientEffects(true));
+        assertFalse(VoiceAudioRoute.shouldBypassClientEffects(false));
+    }
+
     @Test public void requestedRoutePreservesAllCurrentModes() {
         assertEquals(VoiceAudioRoute.PHONE, VoiceAudioRoute.requestedRoute("phone", true));
         assertEquals(VoiceAudioRoute.BLUETOOTH, VoiceAudioRoute.requestedRoute("bluetooth", false));
@@ -28,8 +59,8 @@ public class VoiceAudioRouteTest {
         assertTrue(VoiceAudioRoute.refreshDuplicateOutputs(true, true, primary, secondary,
                 "bt-reconnected", "phone"));
 
-        assertEquals(java.util.Arrays.asList("bt-old", "bt-reconnected"), primary.devices);
-        assertEquals(java.util.Arrays.asList("phone", "phone"), secondary.devices);
+        assertEquals(Arrays.asList("bt-old", "bt-reconnected"), primary.devices);
+        assertEquals(Arrays.asList("phone", "phone"), secondary.devices);
     }
 
     @Test public void phoneModeAndUnavailableBluetoothKeepExistingFallbackUntouched() {

@@ -28,7 +28,7 @@ public final class ServerService extends Service {
     static volatile boolean stopping;
     static volatile String status = "stopped", tunnelStatus = "disabled";
     private volatile Process process;
-    private Thread worker, tunnelThread;
+    private Thread worker, tunnelThread, routeControlThread;
     private Tunnel tunnel;
     private PowerManager.WakeLock wakeLock;
     private WifiManager.MulticastLock multicastLock;
@@ -163,6 +163,8 @@ public final class ServerService extends Service {
         wakeLock.acquire();
         WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
         if (wifi != null) { multicastLock = wifi.createMulticastLock("habab:discovery"); multicastLock.setReferenceCounted(false); multicastLock.acquire(); }
+        routeControlThread = new Thread(new NativeVoiceRouteWorker(this), "habab-voice-route-control");
+        routeControlThread.start();
         worker = new Thread(this::supervise, "habab-core"); worker.start();
         return START_STICKY;
     }
@@ -329,6 +331,7 @@ public final class ServerService extends Service {
         if (tunnel != null) tunnel.close();
         tunnelStatus = "disabled";
         if (tunnelThread != null) tunnelThread.interrupt();
+        if (routeControlThread != null) routeControlThread.interrupt();
         if (worker != null) worker.interrupt();
         Process child = process;
         if (child != null) {

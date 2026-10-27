@@ -36,6 +36,7 @@ from .assistant_status import get_assistant_status
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
 from .fast_dialog import DIALOGUE_METADATA_KEY, decode_dialogue_part
+from .tool_history import tool_calls_by_message
 from .providers import (
     PROVIDERS,
     ProviderContract,
@@ -183,6 +184,9 @@ Bluetooth override с BlueZ применим только к Linux-хосту. �
 {"action":"automation_draft","config":{...},"summary":"..."} — черновик автоматизации: config — полная нативная конфигурация Home Assistant с alias, без id;
 {"action":"automation_status"} — фазы черновиков текущего веб-чата, без дополнительных аргументов;
 {"action":"services"} — доступные сервисы;
+{"action":"select_voice_route","target":"phone|bluetooth|toggle"} — выбрать микрофон установленного Android-приложения; действие только для администратора, target принимает только phone, bluetooth или toggle. Результат status=queued означает, что команда будет применена после безопасного завершения текущего голосового диалога; status=applied подтверждается фактическим маршрутом, status=saved означает, что настройка сохранена при выключенном пробуждении, а error означает отказ. Не называй queued переключением и не утверждай, что микрофон активен при выключенном пробуждении;
+{"action":"set_voice_wake","enabled":true|false} — явно включить или выключить голосовое ожидание Android. Вызывай только при прямой просьбе включить или выключить ожидание; само переключение микрофона не включает пробуждение. queued означает, что действие ждёт безопасного завершения текущего диалога; включение подтверждено только status=applied вместе с wake_enabled=true и реальным маршрутом, выключение — status=applied вместе с wake_enabled=false;
+{"action":"voice_route_status"} — фактический маршрут микрофона и результат последней команды Android; status=unavailable означает, что приложение сейчас недоступно. При queued позже перечитай этот статус и сообщи только подтверждённый результат;
 {"action":"call_service","domain":"light","service":"turn_on","target":{"entity_id":"..."},"data":{}};
 {"action":"save_feedback","feedback":"...","consent":true,"idempotency_key":"UUID","send_to_habab":false} — сохранить отзыв и ограниченный очищенный от чувствительных данных контекст в Home Assistant; send_to_habab=true допустимо только при явной просьбе владельца отправить этот отзыв разработчикам Habab;
 {"action":"integration_setup_status"} — фазы подключений этого владельца без значений форм;
@@ -508,6 +512,7 @@ class SetupAgent:
 
     def visible(self, messages):
         result = []
+        tool_history = tool_calls_by_message(self, messages)
         protocol_turns = {
             message.get("info", {}).get("id") for message in messages
             if message.get("info", {}).get("role") == "user"
@@ -520,9 +525,10 @@ class SetupAgent:
             and isinstance(message["info"].get("structured"), dict)
             and message["info"]["structured"].get("protocol") == OUTCOME_PROTOCOL
         )
-        for message in messages:
+        for message_index, message in enumerate(messages):
             info = message.get("info", {})
             role = info.get("role")
+            tools = tool_history.get(message_index)
             if role not in ("user", "assistant"):
                 continue
             if role == "assistant" and "structured" in info:
@@ -533,9 +539,13 @@ class SetupAgent:
                 else:
                     text = outcome["text"] if todo_claims_verified(outcome, message, messages) else UNVERIFIED_TODO_TEXT
                     result.append({"role": role, "text": self.clean(text)})
+                if tools:
+                    result[-1]["tool_calls"] = tools
                 continue
             if role == "assistant" and info.get("parentID") in protocol_turns:
                 # Intermediate prose is not the final StructuredOutput response.
+                if tools:
+                    result.append({"role": role, "text": "", "tool_calls": tools})
                 continue
             visible_parts = []
             for part in message.get("parts", []):
@@ -584,8 +594,11 @@ class SetupAgent:
                 if not part.get("synthetic"):
                     visible_parts.append(part.get("text", ""))
             text = "\n".join(visible_parts)
-            if text.strip():
-                result.append({"role": role, "text": self.clean(text)})
+            if text.strip() or tools:
+                row = {"role": role, "text": self.clean(text)}
+                if tools:
+                    row["tool_calls"] = tools
+                result.append(row)
         return result[-60:]
 
     async def run(self, owner, session_id, text):
@@ -648,6 +661,7 @@ class SetupAgent:
                 messages = [message for message in messages
                             if message.get("info", {}).get("id") != response_info["id"]] + [response]
                 visible = self.visible(messages)
+                current_tool_calls = visible[-1].get("tool_calls") if visible else None
                 todo_verified = todo_claims_verified(outcome, response, messages, prior_message_ids)
                 if _current_turn_websearch_failed(messages, prior_message_ids):
                     # A model response after a failed search can misrepresent memory
@@ -664,6 +678,8 @@ class SetupAgent:
                         "Веб-поиск завершился ошибкой, поэтому я не смог проверить "
                         "сведения и не подтверждаю их по результатам поиска."
                     )})
+                    if current_tool_calls:
+                        visible[-1]["tool_calls"] = current_tool_calls
                     visible = visible[-60:]
                 elif not todo_verified:
                     # Drop every assistant message after the current user turn,
@@ -677,6 +693,8 @@ class SetupAgent:
                              if item["role"] == "user"), default=-1)
                         visible = visible[:last_user + 1]
                     visible.append({"role": "assistant", "text": UNVERIFIED_TODO_TEXT})
+                    if current_tool_calls:
+                        visible[-1]["tool_calls"] = current_tool_calls
                     visible = visible[-60:]
                     self.diagnostics.record(owner, session_id, {"message": "todo_receipt_not_verified"})
                 if todo_verified:

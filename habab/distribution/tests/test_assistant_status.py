@@ -52,7 +52,11 @@ class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
                     voice["supported_clients"]["android_with_native_voice"][
                         "android_local_voice_settings_control_from_chat"
                     ],
-                    False,
+                    True,
+                )
+                self.assertEqual(
+                    voice["supported_clients"]["android_with_native_voice"]["android_voice_route_targets"],
+                    ["phone", "bluetooth", "toggle"],
                 )
                 self.assertEqual(voice["home_assistant_conversation_entity_exposure"], {
                     "registered": True,

@@ -1,0 +1,24 @@
+select_voice_route:
+  name: Select voice microphone
+  description: Select the microphone route for the installed Habab Home Android app.
+  fields:
+    target:
+      name: Target
+      description: Choose the phone microphone, Bluetooth headset, or toggle the saved choice.
+      required: true
+      selector:
+        select:
+          options:
+            - phone
+            - bluetooth
+            - toggle
+set_voice_wake:
+  name: Set voice wake listening
+  description: Explicitly enable or disable wake phrase listening in the installed Android app.
+  fields:
+    enabled:
+      name: Enabled
+      description: Enabling requires microphone permission and a configured voice connection.
+      required: true
+      selector:
+        boolean:

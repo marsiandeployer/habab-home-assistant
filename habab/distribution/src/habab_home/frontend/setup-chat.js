@@ -1,12 +1,34 @@
 // Independent downstream extension: no dependency on compiled HA internals.
 import { AssistVoice, BrowserGeminiVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js";
-import { strings } from "./strings.js";
+import { strings } from "./strings.js?v=3";
 import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals, writeChatDismissals } from "./chat-dismissal.js";
+import { createToolCalls } from "./chat-tools.js?v=1";
 export function visibleTextMessages(messages) {
   if (!Array.isArray(messages)) return [];
   return messages.filter((message) =>
-    typeof message?.text === "string" && message.text.trim().length > 0
+    (typeof message?.text === "string" && message.text.trim().length > 0) ||
+    (message?.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
   );
+}
+
+export async function requestAssistantSession(hass, {fresh = false, isCurrent, onActivating}) {
+  const request = {type: "habab_home/agent/session", new: fresh};
+  try {
+    const result = await hass.callWS(request);
+    if (!isCurrent()) throw {code: "not_found"};
+    return result;
+  } catch (error) {
+    if (error?.code !== "provider_required" || !isCurrent()) throw error;
+    onActivating();
+    const activation = await hass.callWS({type: "habab_home/beta/activate"});
+    if (!isCurrent()) throw {code: "not_found"};
+    if (!["ready", "existing"].includes(activation?.status)) {
+      throw {code: "habab_beta_invalid_response"};
+    }
+    const result = await hass.callWS(request);
+    if (!isCurrent()) throw {code: "not_found"};
+    return result;
+  }
 }
 
 export function appendNativeAssistTurn(messages, userText, assistantText) {
@@ -133,6 +155,15 @@ function installChat() {
       reopenXiaomiSetup: "Показать подключение Xiaomi",
       deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
       provider_required: "Сначала подключите провайдера ИИ в разделе AI.",
+      activatingBeta: "Подключаем бесплатную бету Habab…",
+      habab_beta_issuance_disabled: "Выдача новых кодов беты завершена. Свой AI-провайдер можно подключить в разделе AI.",
+      habab_beta_unavailable: "Не удалось подключить бету Habab. Повторите подключение.",
+      habab_beta_cannot_connect: "Нет соединения с Habab. Проверьте интернет и повторите подключение.",
+      habab_beta_timeout: "Habab не ответил вовремя. Повторите подключение.",
+      habab_beta_invalid_response: "Не удалось подтвердить подключение к Habab. Повторите попытку.",
+      habab_beta_setup_failed: "Не удалось сохранить подключение Habab. Повторите попытку.",
+      habab_beta_storage_failed: "Не удалось сохранить код установки. Повторите попытку.",
+      habab_beta_rate_limited: "Слишком много попыток подключения к Habab. Повторите немного позже.",
       provider_not_ready: "Текстовый сервис Habab не готов к запросам. Повторите подключение позже.",
       not_installed: "OpenCode ещё не подключён к контейнеру. Добавьте compose.opencode.yaml по инструкции установки.",
       binary_changed: "Файл OpenCode изменился. Повторите prepare-opencode.py и пересоздайте контейнер.",
@@ -191,6 +222,15 @@ function installChat() {
       reopenXiaomiSetup: "Show Xiaomi setup",
       deepseek_required: "Connect DeepSeek in AI settings first.",
       provider_required: "Connect an AI provider in AI settings first.",
+      activatingBeta: "Connecting to the free Habab beta…",
+      habab_beta_issuance_disabled: "New beta registrations have closed. You can connect your own AI provider in AI settings.",
+      habab_beta_unavailable: "Could not connect to the Habab beta. Try reconnecting.",
+      habab_beta_cannot_connect: "Could not reach Habab. Check your internet connection and try again.",
+      habab_beta_timeout: "Habab did not respond in time. Try reconnecting.",
+      habab_beta_invalid_response: "Could not verify the Habab connection. Try again.",
+      habab_beta_setup_failed: "Could not save the Habab connection. Try again.",
+      habab_beta_storage_failed: "Could not save the installation code. Try again.",
+      habab_beta_rate_limited: "Too many connection attempts. Try again shortly.",
       provider_not_ready: "Habab is not ready for text requests. Try connecting again later.",
       not_installed: "OpenCode is not mounted. Follow the installation guide to add compose.opencode.yaml.",
       binary_changed: "The OpenCode executable changed. Run prepare-opencode.py again and recreate the container.",
@@ -718,6 +758,7 @@ function installChat() {
         dialog{pointer-events:auto;position:fixed;inset:auto max(16px,env(safe-area-inset-right)) max(84px,calc(env(safe-area-inset-bottom) + 72px)) auto;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e3e6e8);border-radius:16px;padding:0;width:min(420px,calc(100vw - 32px));height:min(680px,calc(100dvh - 120px));max-width:none;max-height:none;margin:0;box-shadow:0 12px 36px #0003}
         dialog::backdrop{background:transparent}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}.collapse{display:none}
         #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:24px;line-height:1.3;font-weight:500;margin:0 0 16px}
+        .tool-calls{margin-block:12px 4px;border:1px solid var(--divider-color,#c8cccf);border-radius:10px;padding:8px 12px;max-inline-size:100%;font-size:13px;white-space:normal}.tool-calls summary{cursor:pointer;min-height:32px;align-content:center;overflow-wrap:anywhere}.tool-calls summary:focus-visible{outline:2px solid var(--primary-color,#007a9e);outline-offset:2px}.tool-call{margin-block-start:8px;padding-block-start:4px;border-block-start:1px solid var(--divider-color,#c8cccf)}.tool-calls .tool-caption{margin-block:8px 4px;color:var(--secondary-text-color,#5f6368);font-size:12px}.tool-calls pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-block-size:18rem;max-inline-size:100%;margin:0;padding:8px;border-radius:6px;background:var(--secondary-background-color,#f0f2f4);font:12px/1.5 ui-monospace,monospace}.tool-calls a{color:var(--primary-color,#007a9e)}
         .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}.restore-chat-blocks{min-height:32px;margin-block:4px 16px;padding:4px 8px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--secondary-text-color,#5f6368);background:var(--card-background-color,#fff);font:inherit;font-size:12px;cursor:pointer}.restore-chat-blocks:focus-visible{outline:2px solid var(--primary-color,#007a9e);outline-offset:2px}
         .quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
         .xiaomi-reopen{display:block;margin:8px 0;padding:6px 12px;min-height:36px;border:1px solid var(--divider-color,#c8cccf);border-radius:18px;background:transparent;color:var(--secondary-text-color,#5f6368);font-size:13px}
@@ -1095,10 +1136,14 @@ function installChat() {
       this.busy = true;
       this.status(this.t.loading);
       this.controls();
+      const connectionOwner = this.ownerId;
       try {
         const result = this.demo
           ? await this.demoRequest(fresh ? "/reset" : "", fresh ? "POST" : "GET")
-          : await this.hass.callWS({type: "habab_home/agent/session", new: fresh});
+          : await requestAssistantSession(this.hass, {
+            fresh, isCurrent: () => this.ownerId === connectionOwner && this.isCurrentOwnerContext(),
+            onActivating: () => this.status(this.t.activatingBeta),
+          });
         this.sessionId = result.session_id;
         if (this.automationCard) this.automationCard.sessionId = this.sessionId;
         if (fresh) this.captureSetupBaseline();
@@ -1482,7 +1527,13 @@ function installChat() {
         const text = document.createElement(markdown ? "ha-markdown" : "p");
         if (markdown) {text.content = message.text; text.breaks = true;}
         else text.textContent = message.text;
-        row.append(name, text); messageContainer.append(row);
+        row.append(name);
+        if (typeof message.text === "string" && message.text.trim()) row.append(text);
+        if (message.role === "assistant") {
+          const tools = createToolCalls(document, message.tool_calls, strings[this.language]);
+          if (tools) row.append(tools);
+        }
+        messageContainer.append(row);
       }
       log.scrollTop = visibleMessages.length
         ? keepScrollPosition ? previousScrollTop : log.scrollHeight

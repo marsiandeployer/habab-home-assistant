@@ -62,9 +62,42 @@ final class VoiceAudioRoute {
 
     static boolean selectBluetooth(AudioManager manager, AudioDeviceInfo device) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return manager.setCommunicationDevice(device);
-        manager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        manager.startBluetoothSco();
+        selectLegacyBluetooth(new LegacyBluetoothOperations() {
+            @Override public void setCommunicationMode() { manager.setMode(AudioManager.MODE_IN_COMMUNICATION); }
+            @Override public void setSpeakerphoneOn(boolean enabled) { manager.setSpeakerphoneOn(enabled); }
+            @Override public void startSco() { manager.startBluetoothSco(); }
+        });
         return true;
+    }
+
+    interface LegacyBluetoothOperations {
+        void setCommunicationMode();
+        void setSpeakerphoneOn(boolean enabled);
+        void startSco();
+    }
+
+    static void selectLegacyBluetooth(LegacyBluetoothOperations operations) {
+        operations.setCommunicationMode();
+        operations.setSpeakerphoneOn(false);
+        operations.startSco();
+    }
+
+    static boolean shouldReselectLegacyBluetooth(boolean legacySco, boolean scoRequested,
+                                                  int routedInputType, boolean recoveringFallback) {
+        return legacySco && (recoveringFallback
+                || (!scoRequested && routedInputType != AudioDeviceInfo.TYPE_BLUETOOTH_SCO));
+    }
+
+    static boolean shouldKeepActiveScoInput(int inputType, boolean hasScoOutput) {
+        return isLegacyScoInput(inputType) && hasScoOutput;
+    }
+
+    static boolean isLegacyScoInput(int inputType) {
+        return inputType == AudioDeviceInfo.TYPE_BLUETOOTH_SCO;
+    }
+
+    static boolean shouldBypassClientEffects(boolean legacyScoRequested) {
+        return legacyScoRequested;
     }
 
     static void selectPhone(AudioManager manager) {

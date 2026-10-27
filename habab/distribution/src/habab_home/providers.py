@@ -94,9 +94,11 @@ async def resolve_provider_contract(
             if (response.content_length is not None
                     and response.content_length > HABAB_TEXT_CAPABILITY_MAX_BYTES):
                 raise ProviderError("invalid_response")
-            raw = await response.content.read(HABAB_TEXT_CAPABILITY_MAX_BYTES + 1)
-            if len(raw) > HABAB_TEXT_CAPABILITY_MAX_BYTES:
-                raise ProviderError("invalid_response")
+            raw = bytearray()
+            async for chunk in response.content.iter_chunked(HABAB_TEXT_CAPABILITY_MAX_BYTES + 1):
+                raw.extend(chunk)
+                if len(raw) > HABAB_TEXT_CAPABILITY_MAX_BYTES:
+                    raise ProviderError("invalid_response")
     except ProviderError:
         raise
     except TimeoutError:

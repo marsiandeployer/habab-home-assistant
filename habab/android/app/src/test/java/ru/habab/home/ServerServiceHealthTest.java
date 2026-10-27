@@ -44,6 +44,32 @@ public class ServerServiceHealthTest {
         assertFalse(ServerService.resolveAutoStartOnBoot(true, false, true, true));
     }
 
+    @Test public void firstInstallEnablesBootBeforeAnyCheckboxOrServerStart() {
+        SharedPreferences server = inMemoryPreferences(new HashMap<>());
+        MainActivity.configureFirstInstallBoot(server, false);
+        assertTrue(server.getBoolean(ServerService.PREF_AUTO_START_ON_BOOT, false));
+        LaunchStartup launch = new LaunchStartup();
+        assertEquals(LaunchStartup.Action.INSTALL, launch.next(false, false, false, false, false, false, false, true));
+        assertEquals(LaunchStartup.Action.START, launch.next(true, false, false, false, false, false, false, true));
+        boolean boot = ServerService.resolveAutoStartOnBoot(server.contains(ServerService.PREF_AUTO_START_ON_BOOT),
+                server.getBoolean(ServerService.PREF_AUTO_START_ON_BOOT, false), false, false);
+        assertTrue(ServerService.bootStartAllowed(true, boot));
+        assertTrue(ServerService.applyBootStartPreferences(server, boot));
+        assertTrue(server.getBoolean("desired", false));
+    }
+
+    @Test public void firstInstallPreservesExplicitDisabledAndExistingInstallationPreferences() {
+        Map<String, Object> values = new HashMap<>();
+        values.put(ServerService.PREF_AUTO_START_ON_BOOT, false);
+        SharedPreferences disabled = inMemoryPreferences(values);
+        MainActivity.configureFirstInstallBoot(disabled, false);
+        assertFalse(disabled.getBoolean(ServerService.PREF_AUTO_START_ON_BOOT, true));
+        assertFalse(ServerService.bootStartAllowed(true, disabled.getBoolean(ServerService.PREF_AUTO_START_ON_BOOT, true)));
+        SharedPreferences existing = inMemoryPreferences(new HashMap<>());
+        MainActivity.configureFirstInstallBoot(existing, true);
+        assertFalse(existing.contains(ServerService.PREF_AUTO_START_ON_BOOT));
+    }
+
     @Test public void bootStartRestoresServerAndVoiceAfterCurrentRunStop() {
         Map<String, Object> values = new HashMap<>();
         values.put("desired", false);

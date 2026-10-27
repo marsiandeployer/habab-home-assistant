@@ -10,6 +10,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import DOMAIN
+from .effective_provider import effective_provider_entry
 from .providers import PROVIDERS, ProviderClient, ProviderError, validate_settings
 
 
@@ -28,6 +29,9 @@ class HababHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = err.code
             else:
                 await self.async_set_unique_id(settings["provider"])
+                if (self.context.get("habab_beta_enrollment")
+                        and effective_provider_entry(self._async_current_entries()) is not None):
+                    return self.async_abort(reason="already_configured")
                 for entry in self._async_current_entries():
                     if entry.unique_id == settings["provider"]:
                         self.hass.config_entries.async_update_entry(entry, data=settings)

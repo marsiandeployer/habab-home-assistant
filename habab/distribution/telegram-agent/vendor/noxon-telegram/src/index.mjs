@@ -102,12 +102,18 @@ export class TelegramTransport {
           // once the worker has already rejected its pending updates on shutdown.
           if (!this.running) break;
           const message = update.message;
-          if (message && typeof message.text === 'string' && message.chat && message.from) {
+          if (message && (typeof message.text === 'string' || message.voice) && message.chat && message.from) {
             await this.emit({ type: 'message', update_id: Number(update.update_id),
               chat_id: Number(message.chat.id), user_id: Number(message.from.id),
               message_id: Number(message.message_id), chat_type: String(message.chat.type),
               ...(typeof message.chat.title === 'string' ? { chat_title: message.chat.title.slice(0, 256) } : {}),
-              text: message.text });
+              text: typeof message.text === 'string' ? message.text : '',
+              ...(message.voice ? { voice: {
+                file_id: String(message.voice.file_id || '').slice(0, 513),
+                duration: message.voice.duration,
+                ...(message.voice.file_size !== undefined ? { file_size: message.voice.file_size } : {}),
+                ...(message.voice.mime_type !== undefined ? { mime_type: String(message.voice.mime_type).slice(0, 128) } : {}),
+              } } : {}) });
           }
           const member = update.chat_member;
           if (member?.chat && member.new_chat_member?.user?.id) {

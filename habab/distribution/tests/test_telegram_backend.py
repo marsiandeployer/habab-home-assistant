@@ -1065,11 +1065,11 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         try:
             await self.dispatch_queued_message(manager, entry, queue, {
                 "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-                "message_id": 1, "text": "Owner read-only question",
+                "message_id": 1, "text": "Ко Owner read-only question",
             })
             await self.dispatch_queued_message(manager, entry, queue, {
                 "chat_type": "supergroup", "chat_id": -200, "user_id": 50,
-                "message_id": 2, "text": "Member read-only question",
+                "message_id": 2, "text": "Ко Member read-only question",
             })
         finally:
             consumer.cancel()
@@ -1101,13 +1101,13 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         try:
             for message in (
                 {"chat_type": "supergroup", "chat_id": -201, "user_id": 20,
-                 "message_id": 1, "text": "Wrong group"},
+                 "message_id": 1, "text": "Ко Wrong group"},
                 {"chat_type": "supergroup", "chat_id": -201, "user_id": 20,
-                 "message_id": 4, "text": "/cancel"},
+                 "message_id": 4, "text": "/cancel@testbot"},
                 {"chat_type": "supergroup", "chat_id": -200, "user_id": 52,
-                 "message_id": 2, "text": "Departed member"},
+                 "message_id": 2, "text": "Ко Departed member"},
                 {"chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-                 "message_id": 3, "text": "/unsupported"},
+                 "message_id": 3, "text": "/unsupported@testbot"},
             ):
                 await self.dispatch_queued_message(manager, entry, queue, message)
         finally:
@@ -1121,7 +1121,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("-201", manager.cancel_epochs.get(entry.entry_id, {}))
         self.assertFalse(manager._should_route_control(entry, manager.entries[entry.entry_id], {
             "chat_type": "supergroup", "chat_id": -201, "user_id": 20,
-            "message_id": 4, "text": "/help",
+            "message_id": 4, "text": "/help@testbot",
         }))
 
     async def test_group_help_and_new_controls_reply_and_reset_only_bound_group_session(self):
@@ -1136,7 +1136,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
 
         await self.dispatch_group_control(manager, entry, {
             "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-            "message_id": 1, "text": "/help",
+            "message_id": 1, "text": "/help@testbot",
         })
         self.assertEqual(manager.send.await_args.args[:2], ("entry", "-200"))
         self.assertIn("/new", manager.send.await_args.args[2])
@@ -1144,7 +1144,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
 
         await self.dispatch_group_control(manager, entry, {
             "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-            "message_id": 2, "text": "/new",
+            "message_id": 2, "text": "/new@testbot",
         })
         manager.hass.data["habab_home"]["assistant"].telegram_reset.assert_awaited_once_with(
             "alice", "entry", "-200")
@@ -1181,12 +1181,12 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         try:
             queue.put_nowait({
                 "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-                "message_id": 1, "text": "Start shared turn",
+                "message_id": 1, "text": "Ко Start shared turn",
             })
             await asyncio.wait_for(run_started.wait(), timeout=1)
             await self.dispatch_group_control(manager, entry, {
                 "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-                "message_id": 2, "text": "/cancel",
+                "message_id": 2, "text": "/cancel@testbot",
             })
             await asyncio.wait_for(queue.join(), timeout=1)
         finally:
@@ -1237,12 +1237,12 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         try:
             readers.append(await self.dispatch_worker_update(manager, entry, {
                 "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-                "message_id": 1, "text": "Start shared turn",
+                "message_id": 1, "text": "Ко Start shared turn",
             }))
             await asyncio.wait_for(runtime_started.wait(), timeout=1)
             readers.append(await self.dispatch_worker_update(manager, entry, {
                 "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-                "message_id": 2, "text": "/cancel",
+                "message_id": 2, "text": "/cancel@testbot",
             }))
             await asyncio.wait_for(cancel_auth_started.wait(), timeout=1)
             self.assertNotIn("-200", manager.cancel_epochs.get(entry.entry_id, {}))
@@ -1309,12 +1309,12 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
                 try:
                     readers.append(await self.dispatch_worker_update(manager, entry, {
                         "chat_type": "supergroup", "chat_id": -200, "user_id": 20,
-                        "message_id": 1, "text": "Start shared turn",
+                        "message_id": 1, "text": "Ко Start shared turn",
                     }))
                     await asyncio.wait_for(runtime_started.wait(), timeout=1)
                     readers.append(await self.dispatch_worker_update(manager, entry, {
                         "chat_type": "supergroup", "chat_id": -200, "user_id": 52,
-                        "message_id": 2, "text": "/cancel",
+                        "message_id": 2, "text": "/cancel@testbot",
                     }))
                     await asyncio.wait_for(asyncio.gather(
                         *tuple(manager.control_tasks[entry.entry_id]), return_exceptions=True),
@@ -1351,7 +1351,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
                 manager._handle_control = control
                 manager._schedule_control(entry, {
                     "chat_type": "supergroup", "chat_id": -200,
-                    "user_id": 20, "message_id": 1, "text": "/cancel",
+                    "user_id": 20, "message_id": 1, "text": "/cancel@testbot",
                 })
                 check = next(iter(manager.pending_group_cancels[entry.entry_id]["-200"]))
                 waiter = asyncio.create_task(

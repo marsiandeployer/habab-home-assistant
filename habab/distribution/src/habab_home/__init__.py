@@ -45,6 +45,9 @@ async def async_setup(hass, config):
     from .mdns import async_setup_alias
 
     await async_setup_alias(hass)
+    from .voice_route import async_setup_voice_route
+
+    await async_setup_voice_route(hass)
     frontend_dir = Path(__file__).parent / "frontend"
     assistant_file = frontend_dir / "setup-chat.js"
     assistant_digest = await hass.async_add_executor_job(
@@ -132,7 +135,7 @@ async def async_setup(hass, config):
     await async_register_panel(
         hass, frontend_url_path="habab-telegram", webcomponent_name="habab-telegram-panel",
         sidebar_title="Telegram", sidebar_icon="mdi:message-text", require_admin=True,
-        module_url="/habab-home/telegram-panel.js?v=1",
+        module_url="/habab-home/telegram-panel.js?v=4",
     )
     await async_register_panel(
         hass, frontend_url_path="habab-diagnostics", webcomponent_name="habab-diagnostics-panel",

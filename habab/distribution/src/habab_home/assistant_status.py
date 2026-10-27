@@ -80,7 +80,8 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
                 "android_with_native_voice": {
                     "wake_detection": "local_vosk", "transport": "native_realtime",
                     "requires_ha_stt_tts": False,
-                    "android_local_voice_settings_control_from_chat": False,
+                    "android_local_voice_settings_control_from_chat": True,
+                    "android_voice_route_targets": ["phone", "bluetooth", "toggle"],
                     "custom_sound_selection": False},
                 "browser": {"transport": "ha_assist_pipeline", "requires_ha_stt": True},
             },
