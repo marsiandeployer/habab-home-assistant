@@ -1,4 +1,4 @@
-import {strings} from "./strings.js?v=2";
+import {strings} from "./strings.js?v=3";
 import {automationDismissalStorageKey, readAutomationDismissals, writeAutomationDismissals} from "./automation-dismissal.js";
 
 // A protected web card owns native configuration writes. The model's local CLI
@@ -58,12 +58,6 @@ export class HababAutomationSetup extends HTMLElement {
     if (!this._valid(this._scope()) || ["saving", "deleting", "error"].includes(record.phase) ||
         typeof record.draft_id !== "string" || !record.draft_id) return;
     this.dismissedRecords.add(record.draft_id);
-    this._writeDismissedRecords();
-    this.render();
-  }
-  restoreCards() {
-    if (!this._valid(this._scope())) return;
-    this.dismissedRecords.clear();
     this._writeDismissedRecords();
     this.render();
   }
@@ -206,13 +200,6 @@ export class HababAutomationSetup extends HTMLElement {
       button:disabled{opacity:.5;cursor:default}button:focus-visible,summary:focus-visible{outline:3px solid var(--primary-color);outline-offset:2px}
       [role=alert]{color:var(--error-color)}
     </style>`;
-    const restore = document.createElement("button");
-    restore.className = "restore-hidden";
-    restore.textContent = `${this._t("automationRestoreCards")} (${this.dismissedRecords.size})`;
-    restore.hidden = this.dismissedRecords.size === 0;
-    restore.disabled = this.busy;
-    restore.addEventListener("click", () => this.restoreCards());
-    this.shadowRoot.append(restore);
     for (const record of this._visibleRecords()) {
       const article = document.createElement("article");
       const heading = document.createElement("h3");

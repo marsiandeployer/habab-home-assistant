@@ -151,7 +151,7 @@ test("previous-chat recovery receipts cannot authorize saving", async () => {
   assert.deepEqual(calls, []);
 });
 
-test("card dismissal survives refresh but stays scoped to its owner and chat", () => {
+test("card dismissal survives refresh and stays scoped to its owner and chat", () => {
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const values = new Map();
   Object.defineProperty(globalThis, "localStorage", {configurable: true, value: {
@@ -180,8 +180,7 @@ test("card dismissal survives refresh but stays scoped to its owner and chat", (
 
     refreshed.sessionId = "web-one";
     refreshed.records = [stale, other];
-    refreshed.restoreCards();
-    assert.deepEqual(refreshed._visibleRecords().map(({draft_id}) => draft_id), [stale.draft_id, other.draft_id]);
+    assert.deepEqual(refreshed._visibleRecords().map(({draft_id}) => draft_id), [other.draft_id], "a hidden card does not reappear behind a restore action");
   } finally {
     if (previousStorage) Object.defineProperty(globalThis, "localStorage", previousStorage);
     else delete globalThis.localStorage;

@@ -575,44 +575,40 @@ test("private chat registers its own reload provider and releases it on disconne
   }
 });
 
-test("completed or failed Xiaomi card dismissal stays hidden and resets for reopen or a new setup phase", () => {
+test("completed or failed Xiaomi cards stay removed after dismissal and return for a new active phase", () => {
   const presentation = setupChatModule.getXiaomiSetupPresentation;
   assert.deepEqual(presentation("completed", false), {
-    showCard: true, showReopen: false, clearDismissal: false,
+    showCard: false, clearDismissal: false,
   });
   const dismissed = presentation("completed", true);
   assert.deepEqual(dismissed, {
-    showCard: false, showReopen: true, clearDismissal: false,
+    showCard: false, clearDismissal: false,
   });
-  assert.deepEqual(presentation("completed", true), dismissed, "reloading the same completed phase preserves dismissal");
-  assert.deepEqual(presentation("completed", false), {
-    showCard: true, showReopen: false, clearDismissal: false,
-  }, "explicit reopen clears the local dismissal");
+  assert.deepEqual(presentation("completed", true), dismissed, "completed cards never return after reload");
   assert.deepEqual(presentation("error", false), {
-    showCard: true, showReopen: false, clearDismissal: false,
+    showCard: true, clearDismissal: false,
   });
   assert.deepEqual(presentation("error", true), {
-    showCard: false, showReopen: true, clearDismissal: false,
-  }, "a stale failed setup stays hidden but can be reopened");
+    showCard: false, clearDismissal: false,
+  }, "a dismissed failed setup stays removed");
   assert.deepEqual(presentation("oauth", true), {
-    showCard: true, showReopen: false, clearDismissal: true,
+    showCard: true, clearDismissal: true,
   }, "a pending setup remains visible and clears an old completed dismissal");
   assert.deepEqual(presentation("ready", true), {
-    showCard: true, showReopen: false, clearDismissal: true,
+    showCard: true, clearDismissal: true,
   }, "starting another setup restores its card");
 });
 
-test("a new chat suppresses its prior setup identities, reveals new setup IDs, and can resume old flows", async () => {
-  const setupCard = {hidden: false, state: {phase: "oauth", setup_id: "xiaomi-old"}};
+test("a new chat hides completed setup cards while keeping active setup forms available", async () => {
+  const setupCard = {hidden: false, state: {phase: "completed", setup_id: "xiaomi-old"}};
   const integrationCard = {
     hidden: false,
-    interactions: [{id: "active-setup"}],
+    interactions: [{id: "active-setup", phase: "form"}, {id: "completed-setup", phase: "done"}],
     setSuppressedInteractionIds(ids) {
       this.suppressedInteractionIds = new Set(ids);
       this.hiddenIds = new Set(ids);
     },
   };
-  const recoverButton = {hidden: true, textContent: ""};
   const pipelineControl = {value: "pipeline-old"};
   const dialog = {open: false};
   const requests = [];
@@ -638,7 +634,6 @@ test("a new chat suppresses its prior setup identities, reveals new setup IDs, a
     loadSetup: async () => {},
     startPendingAssist() {},
     q: (selector) => ({
-      ".setup-recover": recoverButton,
       ".assist-pipeline": pipelineControl,
       "dialog": dialog,
     })[selector],
@@ -648,27 +643,19 @@ test("a new chat suppresses its prior setup identities, reveals new setup IDs, a
   assert.deepEqual(requests, [{type: "habab_home/agent/session", new: true}]);
   assert.equal(chat.sessionId, "new-session");
   assert.equal(chat.messages.length, 0);
-  assert.equal(setupCard.hidden, true);
+  assert.equal(setupCard.hidden, true, "a completed prior Xiaomi card is suppressed in the new chat");
   assert.equal(setupCard.state.setup_id, "xiaomi-old");
-  assert.deepEqual([...chat.suppressedSetupInteractionIds], ["active-setup"]);
-  assert.deepEqual([...integrationCard.suppressedInteractionIds], ["active-setup"]);
-  assert.equal(recoverButton.hidden, false);
-  assert.equal(recoverButton.textContent, "Show active setup");
-  assert.equal(chat.setupCard, setupCard, "the active Xiaomi setup component is retained");
+  assert.deepEqual([...chat.suppressedSetupInteractionIds], ["completed-setup"]);
+  assert.deepEqual([...integrationCard.suppressedInteractionIds], ["completed-setup"]);
+  assert.equal(chat.setupCard, setupCard, "the Xiaomi setup component remains available for future attempts");
   assert.equal(chat.integrationCard, integrationCard, "the native config flow component is retained");
 
   assert.equal(chat.isXiaomiSetupSuppressed(), true, "the unchanged Xiaomi attempt remains scoped to the old chat");
   setupCard.state = {...setupCard.state, phase: "homes"};
-  assert.equal(chat.isXiaomiSetupSuppressed(), true, "advancing the old attempt does not change its identity");
+  assert.equal(chat.isXiaomiSetupSuppressed(), true, "the completed attempt stays scoped to the prior chat");
   setupCard.state = {...setupCard.state, setup_id: "xiaomi-new", phase: "oauth"};
   assert.equal(chat.isXiaomiSetupSuppressed(), false, "a new Xiaomi attempt in this chat appears automatically");
-
-  chat.resumePreviousSetup();
-  assert.equal(setupCard.hidden, false);
-  assert.equal(recoverButton.hidden, true);
-  assert.deepEqual([...integrationCard.suppressedInteractionIds], []);
-  assert.equal(chat.setupCard, setupCard);
-  assert.equal(chat.integrationCard, integrationCard);
+  assert.deepEqual([...chat.suppressedSetupInteractionIds], ["completed-setup"], "active forms remain visible while old completed flows stay hidden");
 });
 
 test("setup suppression survives reconnect only for its owner and current conversation", async () => {
@@ -685,12 +672,11 @@ test("setup suppression survives reconnect only for its owner and current conver
   });
   try {
     const makeChat = () => {
-      const setupCard = {hidden: false, state: {phase: "oauth", setup_id: "xiaomi-old"}};
+      const setupCard = {hidden: false, state: {phase: "completed", setup_id: "xiaomi-old"}};
       const integrationCard = {
-        interactions: [{id: "active-flow"}],
+        interactions: [{id: "active-flow", phase: "form"}, {id: "done-flow", phase: "done"}],
         setSuppressedInteractionIds(ids) { this.suppressed = new Set(ids); },
       };
-      const recoverButton = {hidden: true, textContent: ""};
       const dialog = {open: false};
       const chat = Object.create(setupChatElementClass.prototype);
       Object.assign(chat, {
@@ -712,16 +698,15 @@ test("setup suppression survives reconnect only for its owner and current conver
         draw() {},
         loadSetup: async () => {},
         startPendingAssist() {},
-        q: (selector) => ({".setup-recover": recoverButton, dialog})[selector],
+        q: (selector) => ({dialog})[selector],
       });
-      return {chat, setupCard, integrationCard, recoverButton};
+      return {chat, setupCard, integrationCard};
     };
 
     const first = makeChat();
     first.chat.captureSetupBaseline();
     assert.equal(first.setupCard.hidden, true);
-    assert.deepEqual([...first.integrationCard.suppressed], ["active-flow"]);
-    assert.equal(first.recoverButton.hidden, false);
+    assert.deepEqual([...first.integrationCard.suppressed], ["done-flow"]);
 
     const reloaded = makeChat();
     await setupChatElementClass.prototype.connect.call(reloaded.chat, false);
@@ -729,16 +714,8 @@ test("setup suppression survives reconnect only for its owner and current conver
     assert.deepEqual(reloaded.chat.messages, []);
     assert.equal(reloaded.chat.suppressedXiaomiSetupId, "xiaomi-old");
     assert.equal(reloaded.setupCard.hidden, true);
-    assert.deepEqual([...reloaded.integrationCard.suppressed], ["active-flow"]);
-    assert.equal(reloaded.recoverButton.hidden, false);
-
-    reloaded.chat.resumePreviousSetup();
-    const afterResumeReload = makeChat();
-    await setupChatElementClass.prototype.connect.call(afterResumeReload.chat, false);
-    assert.equal(afterResumeReload.chat.sessionId, "new-session");
-    assert.deepEqual([...afterResumeReload.chat.suppressedSetupInteractionIds], []);
-    assert.equal(afterResumeReload.setupCard.hidden, false);
-    assert.deepEqual([...afterResumeReload.integrationCard.suppressed], []);
+    assert.deepEqual([...reloaded.integrationCard.suppressed], ["done-flow"]);
+    assert.equal(reloaded.integrationCard.suppressed.has("active-flow"), false, "an active form is never suppressed");
 
     const otherSession = makeChat();
     assert.equal(otherSession.chat.restoreSetupBaseline("different-session"), false);
@@ -762,36 +739,38 @@ test("setup suppression survives reconnect only for its owner and current conver
   }
 });
 
-test("reopened Xiaomi setup returns before the integration card without repeated moves", () => {
-  const order = [];
-  let insertions = 0;
-  const container = {
-    insertBefore(element, reference) {
-      const currentIndex = order.indexOf(element);
-      if (currentIndex >= 0) order.splice(currentIndex, 1);
-      const referenceIndex = order.indexOf(reference);
-      order.splice(referenceIndex, 0, element);
-      element.parentNode = this;
-      element.nextSibling = reference;
-      insertions++;
-    },
+test("legacy saved suppression is removed from active forms after refreshed setup status", () => {
+  const interactionCard = {
+    interactions: [{id: "still-active", phase: "form"}, {id: "finished", phase: "done"}],
+    setSuppressedInteractionIds(ids) { this.suppressed = new Set(ids); },
   };
-  const reopenButton = {hidden: false};
-  const integrationCard = {parentNode: container};
-  const setupCard = {parentNode: container, nextSibling: undefined};
-  order.push(reopenButton, integrationCard, setupCard);
+  const chat = Object.create(setupChatElementClass.prototype);
+  Object.assign(chat, {
+    integrationCard: interactionCard,
+    suppressedSetupInteractionIds: new Set(["still-active", "finished"]),
+    persistSetupBaseline() {},
+  });
+
+  chat.pruneActiveSetupSuppressions();
+  assert.deepEqual([...chat.suppressedSetupInteractionIds], ["finished"]);
+  assert.deepEqual([...interactionCard.suppressed], ["finished"]);
+});
+
+test("a completed Xiaomi setup is removed even when no dismissal preference exists", () => {
+  let removed = 0;
+  const setupCard = {remove() { removed++; }};
   const chat = Object.create(setupChatElementClass.prototype);
   chat.setupCard = setupCard;
-  chat.integrationCard = integrationCard;
-  chat.q = (selector) => selector === ".xiaomi-reopen" ? reopenButton : container;
+  chat.integrationCard = undefined;
+  chat.q = (selector) => {
+    assert.equal(selector, "#setup-cards");
+    return {};
+  };
   chat.getXiaomiSetupDismissed = () => false;
+  chat.isXiaomiSetupSuppressed = () => false;
 
   chat.updateXiaomiSetupPresentation("completed");
-  assert.deepEqual(order, [reopenButton, setupCard, integrationCard]);
-  assert.equal(insertions, 1);
-
-  chat.updateXiaomiSetupPresentation("completed");
-  assert.equal(insertions, 1, "stable card order is not moved again");
+  assert.equal(removed, 1, "completed card contents stay out of the chat history");
 });
 
 test("Xiaomi dismissal preference is origin and authenticated-user scoped with instance-only fallback", () => {

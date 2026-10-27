@@ -1,7 +1,7 @@
 // Independent downstream extension: no dependency on compiled HA internals.
 import { AssistVoice, BrowserGeminiVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js";
 import { strings } from "./strings.js?v=3";
-import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals, writeChatDismissals } from "./chat-dismissal.js";
+import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals } from "./chat-dismissal.js";
 import { createToolCalls } from "./chat-tools.js?v=1";
 export function visibleTextMessages(messages) {
   if (!Array.isArray(messages)) return [];
@@ -127,12 +127,10 @@ export function assistantDiagnosticMessage(diagnostic, copy) {
 }
 
 export function getXiaomiSetupPresentation(phase, dismissed) {
-  const dismissible = phase === "completed" || phase === "error";
-  const showReopen = dismissible && dismissed === true;
+  const dismissible = phase === "error";
   return {
-    showCard: !showReopen,
-    showReopen,
-    clearDismissal: !dismissible && dismissed === true,
+    showCard: phase !== "completed" && !(dismissible && dismissed === true),
+    clearDismissal: phase !== "completed" && !dismissible && dismissed === true,
   };
 }
 
@@ -145,14 +143,12 @@ function installChat() {
       title: "Помощник", open: "Открыть чат с помощником", close: "Закрыть", fresh: "Новый чат",
       intro: "Что подключим к дому? Какое оборудование у вас уже есть?",
       quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Другое",
-      recoverSetup: "Показать активную настройку",
       collapseChat: "Показать панель дома",
       placeholder: "Например: хочу подключить пылесос Xiaomi", send: "Отправить", stop: "Остановить",
       working: "Проверяю и выполняю…", loading: "Подключаю помощника…", you: "Вы", assistant: "Помощник",
       answering: "Готовлю ответ…", rate_limited: "Слишком много запросов. Повторите позже.",
       settings: "Подключить AI", retry: "Повторить подключение",
       setup_ui_unavailable: "Не удалось открыть настройку устройств. Обновите страницу и попробуйте снова.",
-      reopenXiaomiSetup: "Показать подключение Xiaomi",
       deepseek_required: "Сначала подключите DeepSeek в разделе AI.",
       provider_required: "Сначала подключите провайдера ИИ в разделе AI.",
       activatingBeta: "Подключаем бесплатную бету Habab…",
@@ -192,7 +188,6 @@ function installChat() {
       voiceModeHabab: "Habab",
       voiceModeAssist: "Assist",
       hideChatBlock: "Скрыть блок",
-      restoreChatBlocks: "Показать скрытые блоки",
       nativeAssistTitle: "Обработка идёт через выбранный pipeline Home Assistant Assist; он может использовать облачные сервисы. Если TTS не настроен, ответ появится только текстом.",
       assistPipelineLabel: "Голосовой помощник Home Assistant",
       assistPipelineDefault: "Использовать выбранный в Home Assistant",
@@ -212,14 +207,12 @@ function installChat() {
       title: "Assistant", open: "Open assistant chat", close: "Close", fresh: "New chat",
       intro: "What should we connect to your home? What equipment do you already have?",
       quickXiaomi: "Xiaomi Home", quickZigbee: "Zigbee", quickOther: "Other",
-      recoverSetup: "Show active setup",
       collapseChat: "Show home dashboard",
       placeholder: "For example: I want to connect a Xiaomi vacuum", send: "Send", stop: "Stop",
       working: "Checking and working…", loading: "Connecting…", you: "You", assistant: "Assistant",
       answering: "Preparing an answer…", rate_limited: "Too many requests. Try again later.",
       settings: "Connect AI", retry: "Reconnect",
       setup_ui_unavailable: "Device setup could not open. Refresh the page and try again.",
-      reopenXiaomiSetup: "Show Xiaomi setup",
       deepseek_required: "Connect DeepSeek in AI settings first.",
       provider_required: "Connect an AI provider in AI settings first.",
       activatingBeta: "Connecting to the free Habab beta…",
@@ -259,7 +252,6 @@ function installChat() {
       voiceModeHabab: "Habab",
       voiceModeAssist: "Assist",
       hideChatBlock: "Hide block",
-      restoreChatBlocks: "Show hidden blocks",
       nativeAssistTitle: "Uses the selected Home Assistant Assist pipeline, which may use cloud services. If TTS is not configured, the response appears as text only.",
       assistPipelineLabel: "Home Assistant voice assistant",
       assistPipelineDefault: "Use the Home Assistant selection",
@@ -422,8 +414,6 @@ function installChat() {
     updateXiaomiSetupPresentation(phase) {
       const presentation = getXiaomiSetupPresentation(phase, this.getXiaomiSetupDismissed());
       if (presentation.clearDismissal) this.setXiaomiSetupDismissed(false);
-      const reopenButton = this.q(".xiaomi-reopen");
-      if (reopenButton) reopenButton.hidden = this.isXiaomiSetupSuppressed() || !presentation.showReopen;
       const container = this.q("#setup-cards");
       if (presentation.showCard) {
         if (this.integrationCard?.parentNode === container) {
@@ -435,7 +425,6 @@ function installChat() {
         }
       } else this.setupCard.remove();
       this.setupCard.hidden = this.isXiaomiSetupSuppressed();
-      this.updateSetupRecoveryButton();
     }
 
     isXiaomiSetupSuppressed() {
@@ -465,7 +454,7 @@ function installChat() {
       const key = this.setupScopeStorageKey();
       if (!key || typeof this.sessionId !== "string" || !this.sessionId || this.sessionId.length > 128) return false;
       const value = JSON.stringify({
-        version: 1,
+        version: 2,
         session_id: this.sessionId,
         interaction_ids: [...this.suppressedSetupInteractionIds]
           .filter((id) => typeof id === "string" && id.length > 0 && id.length <= 128).slice(0, 256),
@@ -497,7 +486,7 @@ function installChat() {
         }
         try {
           const saved = JSON.parse(raw);
-          if (saved?.version !== 1 || saved.session_id !== sessionId ||
+          if (![1, 2].includes(saved?.version) || saved.session_id !== sessionId ||
               !Array.isArray(saved.interaction_ids) || saved.interaction_ids.length > 256 ||
               (saved.xiaomi_setup_id !== null && saved.xiaomi_setup_id !== undefined &&
                 (typeof saved.xiaomi_setup_id !== "string" || saved.xiaomi_setup_id.length > 128))) continue;
@@ -507,51 +496,41 @@ function installChat() {
           this.suppressedXiaomiSetupId = saved.xiaomi_setup_id || undefined;
           this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
           if (this.setupCard) this.setupCard.hidden = this.isXiaomiSetupSuppressed();
-          this.updateSetupRecoveryButton();
           return true;
         } catch (_) {
           try { storage.removeItem(key); } catch (_) {}
         }
       }
       this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
-      this.updateSetupRecoveryButton();
       return false;
     }
 
     captureSetupBaseline() {
       this.suppressedSetupInteractionIds = new Set(
-        (this.integrationCard?.interactions || []).map(({id}) => id).filter((id) => typeof id === "string")
+        (this.integrationCard?.interactions || [])
+          .filter(({phase}) => ["done", "abort", "error", "expired"].includes(phase))
+          .map(({id}) => id).filter((id) => typeof id === "string")
       );
       this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
-      this.suppressedXiaomiSetupId = this.setupCard?.state?.setup_id;
+      this.suppressedXiaomiSetupId = ["completed", "error"].includes(this.setupCard?.state?.phase)
+        ? this.setupCard?.state?.setup_id : undefined;
       if (this.setupCard) this.setupCard.hidden = this.isXiaomiSetupSuppressed();
       this.pendingSetupInteraction = undefined;
       const jump = this.q(".setup-jump");
       if (jump) jump.hidden = true;
-      this.updateSetupRecoveryButton();
       this.persistSetupBaseline();
     }
 
-    resumePreviousSetup() {
-      this.suppressedSetupInteractionIds.clear();
+    pruneActiveSetupSuppressions() {
+      const phases = new Map((this.integrationCard?.interactions || []).map(({id, phase}) => [id, phase]));
+      for (const id of this.suppressedSetupInteractionIds) {
+        const phase = phases.get(id);
+        if (phase && !["done", "abort", "error", "expired"].includes(phase)) {
+          this.suppressedSetupInteractionIds.delete(id);
+        }
+      }
       this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
-      this.suppressedXiaomiSetupId = undefined;
-      if (this.setupCard) this.setupCard.hidden = false;
-      const recoverButton = this.q(".setup-recover");
-      if (recoverButton) recoverButton.hidden = true;
       this.persistSetupBaseline();
-    }
-
-    updateSetupRecoveryButton() {
-      const recoverButton = this.q(".setup-recover");
-      if (!recoverButton) return;
-      const xiaomiPhase = this.setupCard?.state?.phase;
-      const xiaomiHidden = this.isXiaomiSetupSuppressed() && xiaomiPhase !== "idle";
-      const integrationHidden = (this.integrationCard?.interactions || []).some(({id}) =>
-        this.suppressedSetupInteractionIds?.has(id)
-      );
-      recoverButton.hidden = !xiaomiHidden && !integrationHidden;
-      recoverButton.textContent = this.t.recoverSetup;
     }
 
     setContextAvailable(available) {
@@ -617,7 +596,10 @@ function installChat() {
 
     setupFormReady(detail) {
       if (typeof detail?.interaction_id !== "string") return;
-      if (this.suppressedSetupInteractionIds?.has(detail.interaction_id)) return;
+      if (this.suppressedSetupInteractionIds?.delete(detail.interaction_id)) {
+        this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+        this.persistSetupBaseline();
+      }
       this.pendingSetupInteraction = detail.interaction_id;
       if (this.followSetupForms !== false && this.revealSetupForm()) return;
       const jump = this.q(".setup-jump");
@@ -658,7 +640,7 @@ function installChat() {
       try {
         await import("/habab-home/xiaomi-setup.js?v=4");
         await import("/habab-home/integration-setup.js?v=1");
-        await import("/habab-home/automation-setup.js?v=3");
+        await import("/habab-home/automation-setup.js?v=4");
         if (!this.setupCard) {
           this.setupCard = document.createElement("habab-xiaomi-setup");
           this.setupCard.addEventListener("habab-setup-dismiss", () => {
@@ -713,13 +695,13 @@ function installChat() {
         this.setupCard.hidden = this.isXiaomiSetupSuppressed();
         await this.setupCard.load();
         this.updateXiaomiSetupPresentation(this.setupCard.state?.phase || "idle");
-        this.updateSetupRecoveryButton();
         this.integrationCard.hass = this.hass;
         this.integrationCard.active = this.q("dialog").open;
         mountStableElement(this.q("#setup-cards"), this.integrationCard);
         this.integrationCard.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
         if (afterTurn && typeof this.integrationCard.refresh === "function") await this.integrationCard.refresh();
         else await this.integrationCard.load();
+        this.pruneActiveSetupSuppressions();
         if (!this.automationCard) {
           this.automationCard = document.createElement("habab-automation-setup");
           this.automationCard.isCurrentContext = () => this.isCurrentOwnerContext() && this.sessionId === this.automationCard.sessionId;
@@ -728,7 +710,6 @@ function installChat() {
         this.automationCard.sessionId = this.sessionId;
         mountStableElement(this.q("#setup-cards"), this.automationCard);
         await this.automationCard.refresh();
-        this.updateSetupRecoveryButton();
       } catch (_) { this.status(this.t.setup_ui_unavailable, true); }
     }
 
@@ -759,9 +740,8 @@ function installChat() {
         dialog::backdrop{background:transparent}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}.collapse{display:none}
         #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:24px;line-height:1.3;font-weight:500;margin:0 0 16px}
         .tool-calls{margin-block:12px 4px;border:1px solid var(--divider-color,#c8cccf);border-radius:10px;padding:8px 12px;max-inline-size:100%;font-size:13px;white-space:normal}.tool-calls summary{cursor:pointer;min-height:32px;align-content:center;overflow-wrap:anywhere}.tool-calls summary:focus-visible{outline:2px solid var(--primary-color,#007a9e);outline-offset:2px}.tool-call{margin-block-start:8px;padding-block-start:4px;border-block-start:1px solid var(--divider-color,#c8cccf)}.tool-calls .tool-caption{margin-block:8px 4px;color:var(--secondary-text-color,#5f6368);font-size:12px}.tool-calls pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-block-size:18rem;max-inline-size:100%;margin:0;padding:8px;border-radius:6px;background:var(--secondary-background-color,#f0f2f4);font:12px/1.5 ui-monospace,monospace}.tool-calls a{color:var(--primary-color,#007a9e)}
-        .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}.restore-chat-blocks{min-height:32px;margin-block:4px 16px;padding:4px 8px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--secondary-text-color,#5f6368);background:var(--card-background-color,#fff);font:inherit;font-size:12px;cursor:pointer}.restore-chat-blocks:focus-visible{outline:2px solid var(--primary-color,#007a9e);outline-offset:2px}
+        .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
         .quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
-        .xiaomi-reopen{display:block;margin:8px 0;padding:6px 12px;min-height:36px;border:1px solid var(--divider-color,#c8cccf);border-radius:18px;background:transparent;color:var(--secondary-text-color,#5f6368);font-size:13px}
         footer{padding:12px 20px 20px}.assist-pipeline-control{display:block;margin:0 0 8px;font-size:12px;color:var(--secondary-text-color,#5f6368)}.assist-pipeline{display:block;width:100%;min-height:40px;margin-block-start:4px;padding:6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff)}#voice-mode-help{font-size:12px;color:var(--secondary-text-color,#5f6368);margin:0 0 8px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
         :host([data-assistant-open]){inset:0;z-index:10;pointer-events:none}:host([data-assistant-open]) .launcher{display:none}:host([data-assistant-open]) dialog{inset:0 0 0 auto;width:var(--habab-assistant-chat-width,50vw);height:100dvh;border-radius:0;border-block:0;border-inline-end:0;box-shadow:-8px 0 28px #0002}:host([data-assistant-open]) dialog:not([open]){display:none}:host([data-assistant-open]) dialog::backdrop{background:transparent}
@@ -771,20 +751,10 @@ function installChat() {
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
         <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><select class="voice-mode" aria-label="${t.voiceModeLabel}" title="${t.nativeAssistTitle}"><option value="habab">${t.voiceModeHabab}</option><option value="assist">${t.voiceModeAssist}</option></select><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
-      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"><button class="xiaomi-reopen" type="button" hidden>${t.reopenXiaomiSetup}</button><button class="setup-recover" type="button" hidden>${t.recoverSetup}</button></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
+      <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
-      this.q(".xiaomi-reopen").onclick = () => {
-        if (!this.isCurrentOwnerContext()) return;
-        this.setXiaomiSetupDismissed(false);
-        void this.loadSetup();
-      };
-      this.q(".setup-recover").onclick = () => {
-        if (!this.isCurrentOwnerContext()) return;
-        this.resumePreviousSetup();
-        void this.loadSetup();
-      };
       this.q("dialog").addEventListener("close", () => {
         this.setAssistantOpen(false);
         this.onClose();
@@ -951,7 +921,6 @@ function installChat() {
       if (setupKind === "xiaomi") {
         this.suppressedXiaomiSetupId = undefined;
         if (this.setupCard) this.setupCard.hidden = false;
-        this.updateSetupRecoveryButton();
         this.setXiaomiSetupDismissed(false);
         void this.loadSetup();
       }
@@ -995,8 +964,6 @@ function installChat() {
       textarea.setAttribute("aria-label", t.placeholder);
       this.q(".recovery a").textContent = t.settings;
       this.q(".retry").textContent = t.retry;
-      this.q(".xiaomi-reopen").textContent = t.reopenXiaomiSetup;
-      this.q(".setup-recover").textContent = t.recoverSetup;
       if (this.q(".setup-jump")) this.q(".setup-jump").textContent = t.showSetupForm;
       this.q(".send").title = t.send;
       this.q(".send").setAttribute("aria-label", t.send);
@@ -1547,40 +1514,21 @@ function installChat() {
           let storage;
           try { storage = globalThis.localStorage; } catch (_) { storage = undefined; }
           const dismissed = readChatDismissals(storage, dismissalKey);
-          let detailCount = 0;
-          let restore;
           visibleMessages.forEach((message) => {
             if (message.role !== "assistant") return;
             const messageIndex = this.messages.indexOf(message);
             const row = messageContainer.querySelector(`[data-message-index="${messageIndex}"]`);
             const markdown = row?.querySelector("ha-markdown");
             if (!markdown) return;
-            detailCount += decorateChatDetails(markdown, {
+            decorateChatDetails(markdown, {
               messageIndex,
               messageText: message.text,
               dismissalKey,
               dismissed,
               storage,
               hideLabel: this.t.hideChatBlock,
-              onDismiss: (count) => {
-                if (!restore) return;
-                restore.hidden = false;
-                restore.textContent = `${this.t.restoreChatBlocks} (${count})`;
-              },
             });
           });
-          if (detailCount) {
-            restore = document.createElement("button");
-            restore.type = "button";
-            restore.className = "restore-chat-blocks";
-            restore.textContent = `${this.t.restoreChatBlocks} (${dismissed.size})`;
-            restore.hidden = dismissed.size === 0;
-            restore.addEventListener("click", () => {
-              writeChatDismissals(storage, dismissalKey, new Set());
-              this.draw({preserveScroll: true});
-            });
-            messageContainer.append(restore);
-          }
         }
         if (visibleMessages.length) log.scrollTop = keepScrollPosition ? previousScrollTop : log.scrollHeight;
       });
