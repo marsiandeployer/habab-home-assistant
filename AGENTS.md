@@ -1,96 +1,29 @@
-# Home Assistant Frontend Agent Guide
+# Habab Home: правила работы
 
-You are helping develop the Home Assistant frontend. This repository is a TypeScript application built from Lit-based Web Components for the Home Assistant web UI.
+Соблюдай `/root/AGENTS.md`. При работе в `habab/` читай также `habab/AGENTS.md`; для сайта — `/root/hababru/AGENTS.md`. Указания пользователя имеют приоритет над проектными правилами.
 
-## Essential Commands
+## Продукт и выпуск
 
-```bash
-pnpm lint          # ESLint + Prettier + TypeScript + Lit
-pnpm format        # Auto-fix ESLint + Prettier
-pnpm lint:types    # TypeScript compiler, run without file arguments
-pnpm test          # Vitest
-pnpm dev           # App dev server, supports --background/--status/--stop/--logs
-pnpm dev:serve     # Local serving dev server, supports -c core URL, -p port, and dev flags
-```
+- Habab Home — бета. Быстро доводи основные сценарии до работающего результата: подключение устройства, настройка через чат, управление и диагностика. Сначала используй существующие возможности Home Assistant и простое решение; не создавай лишние сервисы, абстракции и проверки ради процесса.
+- В начале определи целевую среду и нужный результат: исходники, сборка, публикация или установленное приложение. Продолжай с первого незавершённого этапа, не повторяя успешную проверку без причины. Разрешённые пользователем действия не требуют повторного подтверждения.
+- Доводи согласованный выпуск до пользователя: исправление → подходящая проверка → сборка из зафиксированного source SHA → публикация и проверка целевого стенда или устройства. Коммить и отправляй изменения, когда это поручено. Не задерживай релиз ради несвязанных улучшений. Если препятствие реально блокирует этап, сообщи о нём и продолжай независимую работу.
+- Различай результаты исходников, тестов, сборки, живого стенда и физического устройства. Не объявляй сценарий работающим на устройстве по одному успешному unit-тесту. Проверяй основной пользовательский путь; дополнительные тесты добавляй при конкретном риске или ошибке.
+- У выпуска один владелец, который фиксирует SHA, состав и версии. Перед публикацией сверяй manifest и хеши; публикуй проверенный артефакт без повторной сборки. При делегировании указывай файлы, задачу, критерии проверки и ресурсные ограничения; исполнитель сам исправляет ошибки в своём участке. Не перезаписывай чужую работу.
+- Не вводи дополнительные барьеры и сложные защитные механизмы без необходимости для задачи. Не выводи и не коммить реальные секреты, особенно в публичный репозиторий.
 
-Never run `tsc` or `pnpm lint:types` with file arguments. When `tsc` receives file arguments, it ignores `tsconfig.json` and can emit `.js` files into `src/`. Always run `pnpm lint:types` without arguments. For individual file type checking, rely on editor diagnostics.
+## Ресурсы и стенды
 
-## Architecture
+- Перед тяжёлой сборкой или загрузкой проверяй диск, RAM и работающие процессы. При свободном месте менее 10 ГиБ выполняй правило `/root/AGENTS.md`; тяжёлые сборки запускай последовательно, если общий бюджет ресурсов заранее не рассчитан.
+- Переиспользуй настроенный тестовый Home Assistant, предварительно проверив его владельца. Временным Docker-стендам задавай лимиты памяти, CPU и процессов; после проверки убирай свои временные контейнеры и файлы. Не останавливай чужие процессы и не удаляй чужие данные.
+- Для Huawei P30 используй `/opt/android-sdk/platform-tools/adb -H 127.0.0.1 -P 18537 devices -l` и выбирай устройство по актуальному списку. ADB и HTTP-мост проверяй отдельно. Громкие проверки и запуск физических устройств проводи только днём.
 
-- The frontend uses custom elements built with Lit and TypeScript strict mode.
-- Components communicate with the backend through the Home Assistant WebSocket API.
-- Use `ha-` for Home Assistant components, `hui-` for Lovelace UI components, and `dialog-` for dialogs.
-- Prefer `ha-*` components and current Web Awesome wrappers. Avoid adding new legacy `mwc-*` usage.
-- Leaf components should consume narrow Lit contexts instead of taking the broad `hass` object unless they are containers that own and provide `hass`.
+## Android-релиз
 
-## Приоритеты беты Habab Home
+- Для каждого Android-релиза заново собирай native frontend из того же source SHA, включай его в подписанный runtime и APK. Сверяй source SHA, manifest, хеш frontend и runtime, версию APK и фактический URL runtime. Не выдавай APK со старым runtime за полный релиз. Команды и требования подписи — `habab/docs/RELEASE-CANDIDATE.md`.
 
-- Это бета: главный приоритет — чтобы работали основные пользовательские сценарии. Выбирай минимальное простое решение, не оверинженерь.
-- Проверяй основной сквозной сценарий. Пограничные случаи, дополнительные абстракции, инфраструктуру и расширенные матрицы тестов добавляй только для конкретной воспроизведённой проблемы или по прямому поручению пользователя.
-- Функциональность важнее дополнительного усиления безопасности. Не расширяй задачу отдельными механизмами маскирования секретов, аудитами безопасности и многослойными защитами без конкретной необходимости или отдельного поручения. Такие улучшения не должны задерживать рабочую основную функцию.
+## Frontend и документация
 
-## Development Standards
-
-- Use strict TypeScript, proper interfaces, and `import type` for type-only imports.
-- Avoid `any`; model data with existing Home Assistant types or narrow new types.
-- Keep imports organized and remove unused imports.
-- Do not use `console`; use existing logging or user-visible error patterns.
-- Use `@state()` for internal Lit state and `@property()` for public API.
-- Do not query or manipulate DOM manually when Lit decorators, component refs, or render state are appropriate.
-- Scope styles to components, use theme custom properties, and keep layouts mobile-first and RTL-safe.
-- All user-facing text must be localized through the translation system.
-- Do not write tests just because you changed some code. Write a test when there is real logic that could break without anyone noticing, and explain what the test protects.
-
-## Habab Home product documentation
-
-- Every new user-facing Habab Home feature or integration must have corresponding user documentation on **habab.ru**. A README or technical note in this repository alone does not satisfy this requirement. Create or update the relevant page under `/root/hababru/content/products/ai_home_server/` (or the owning product source), using the existing Telegram setup material as a reference.
-- Explain how a user enables and uses the feature, its prerequisites, and material limits or privacy implications. Write clear, appealing product copy, while keeping availability and behavior consistent with the code and verified acceptance; label preview or unverified behavior plainly.
-- Before changing the habab.ru source, read `/root/hababru/AGENTS.md` and follow that project's source/build/publish workflow. Edit source content, never generated `static_build/` output by hand.
-
-## Выпуск Android Habab Home
-
-- Каждый релиз Android должен сначала заново компилировать native frontend из того же проверенного source SHA, затем включать этот wheel в подписанный runtime и собирать APK. Не подставлять ранее опубликованный frontend только по номеру версии. Передавать `--frontend-candidate` упаковщику; сверять SHA wheel, source SHA и producer manifest с подписанным runtime и извлечёнными данными APK. В workflow задавать явные `android_version_code`/`android_version_name` для нового проверенного выпуска; не использовать старые Gradle defaults. Проверять версию подписанного APK через `aapt` и его фактический URL нового runtime. Подготовка APK со старым runtime для отдельной проверки не является полным релизом. Команды и signing prerequisites — `habab/docs/RELEASE-CANDIDATE.md`.
-
-## ADB для пользовательского Huawei P30
-
-- Используй выделенный ADB-сервер: `/opt/android-sdk/platform-tools/adb -H 127.0.0.1 -P 18537 devices -l`. Serial выбирай по свежему списку. Пустой результат стандартного `adb devices` не означает, что телефон отключён.
-- Проверяй ADB и HTTP-мост отдельно: состояние `device` подтверждает ADB, а HTTP 503 на `127.0.0.1:18124` относится к мосту/доступности Home Assistant. Не выдавай одно за состояние другого.
-
-## Временные Docker-стенды Habab
-
-- Перед запуском тестового HA/Core проверь `docker ps -a`, `free -h` и текущую нагрузку. Найди существующий стенд и его владельца; согласуй использование общего стенда с владельцем.
-- По умолчанию используй один временный QA-контейнер на серию совместимых проверок, в том числе нескольких фич одного HA/Core образа. Проверяй фичи последовательно и сбрасывай их синтетическое состояние между сценариями; сохраняй нужные результаты до сброса. Не создавай отдельный контейнер на каждую фичу и не накапливай работающие копии `retry2`, `retry3` и далее: переиспользуй свой стенд или сначала останови и удали предыдущую попытку. Отдельный стенд допустим только при несовместимых версиях/зависимостях или доказанной изоляционной необходимости; параллельные стенды — только для конкретного сравнения с заранее рассчитанным общим бюджетом ресурсов.
-- Каждый временный контейнер запускай с явными лимитами `--memory`, `--memory-swap`, `--cpus` и `--pids-limit`. Выбирай значения под проверку и доступный запас хоста; не запускай стенд без лимитов.
-- Записывай ID контейнера и владельца сессии. На успехе, ошибке, timeout и отмене выполняй очистку в `finally` или shell `trap`; после неё проверь, что собственный контейнер и его дочерние тестовые процессы завершены. Постоянный QA-стенд оставляй работающим только с назначенным владельцем и явной причиной.
-- Чужие контейнеры, общие стенды и их данные не останавливай и не удаляй без согласования с владельцем. При нехватке RAM сначала заверши свои временные попытки; новый retry до освобождения ресурсов не запускай.
-- Каталоги сборки и runtime-cache в `/dev/shm` занимают RAM. Учитывай их в бюджете памяти и убирай свои промежуточные копии после проверки; крупные сборки по умолчанию размещай на диске с проверенным запасом места.
-
-## Project Skills
-
-Detailed guidance lives in `.agents/skills/<name>/SKILL.md`. Load every matching skill before detailed implementation or review. For reviews, load `ha-frontend-review` alongside all companions that apply to the changed code or behavior:
-
-- `ha-frontend-contexts`: Lit contexts, `hass` migration, and rerender-sensitive state access.
-- `ha-frontend-components`: dialogs, forms, alerts, shortcuts, tooltips, panels, and Lovelace cards.
-- `ha-frontend-events`: event handler typing, custom event dispatch, and event-map declarations.
-- `ha-frontend-types`: backend data contracts, optional schemas, shared types, assertions, and lifecycle types.
-- `ha-frontend-lit`: reactive fields, DOM queries, lifecycle behavior, and render-derived state.
-- `ha-frontend-styling`: theme variables, spacing tokens, responsive layout, RTL, and view transitions.
-- `ha-frontend-testing`: lint, typecheck, Vitest, Playwright e2e dev servers, and benchmarks.
-- `ha-frontend-query-params`: typed URL query params, `QueryParamsController`, data table URL sync, in-app links, and My Home Assistant redirect params.
-- `ha-frontend-user-facing-text`: localization, terminology, sentence case, and Home Assistant text style.
-- `ha-frontend-review`: PR template use, existing review feedback, review checklist, recurring issues, and UI/UX evidence including gallery specifications.
-- `ha-frontend-ux-readiness`: UI/UX routing that complements frontend review for new user experiences.
-- `ha-frontend-gallery`: gallery pages, demos, sidebar structure, content, and verification.
-- `ha-frontend-demo`: standalone demo structure, configurations, navigation, shared stubs, and verification.
-
-## Pull Requests
-
-When creating a pull request, use `.github/PULL_REQUEST_TEMPLATE.md` as the PR body. Preserve template sections, check only the appropriate type-of-change boxes, and do not check checklist items on behalf of the user. If the PR includes UI changes, remind the user to add screenshots or a short video.
-
-## AI policy
-
-This project follows the [Open Home Foundation AI Policy](AI_POLICY.md).
-Autonomous contributions are not accepted: a human must review, understand,
-and be able to explain every change before it is submitted. Do not open
-issues or pull requests autonomously, and do not post comments on behalf of
-a user without their review.
+- Frontend использует TypeScript, Lit и WebSocket API Home Assistant. Следуй существующим компонентам `ha-` и соглашениям проекта, сохраняй адаптивность и локализацию пользовательского текста. Применяй профильные инструкции из `.agents/skills/` по фактической задаче.
+- Для каждой новой пользовательской возможности или интеграции обновляй документацию на habab.ru: включение, использование, необходимые условия и существенные ограничения. README в этом репозитории её не заменяет. Меняй исходники сайта, а не сгенерированный `static_build/`.
+- Основные команды: `pnpm lint`, `pnpm lint:types`, `pnpm test`, `pnpm dev`. Не передавай имена файлов в `tsc` или `pnpm lint:types`: это обходит `tsconfig.json` и может создать `.js` в `src/`.
+- При создании PR используй `.github/PULL_REQUEST_TEMPLATE.md`; для UI-изменений приложи скриншот или видео, если это требуется для проверки.
