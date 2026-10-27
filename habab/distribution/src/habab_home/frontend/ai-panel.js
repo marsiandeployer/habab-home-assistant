@@ -46,7 +46,23 @@ export function assistantProviderPresentation(entry) {
     : { key: "currentAssistantModelUnavailable" };
 }
 
-export function assistantRoutingSummary(entry, pipelines, language) {
+function assistantCheckStatusKey(entry, isChecking) {
+  if (isChecking) return entry?.managed_model ? "apiCheckingManaged" : "apiChecking";
+  const status = entry?.api_check_status || "unknown";
+  if (status === "verified") return entry?.managed_model ? "apiVerifiedManaged" : "apiVerified";
+  if (status === "rejected") return "apiRejected";
+  return ({
+    invalid_provider: "apiInvalidProvider",
+    quota: "apiQuota",
+    invalid_model: entry?.managed_model ? "apiInvalidManagedModel" : "apiInvalidModel",
+    cannot_connect: "apiUnavailable",
+    timeout: "apiUnavailable",
+    invalid_response: "apiInvalidResponse",
+    tools_unsupported: "apiToolsUnsupported",
+  })[entry?.api_check_reason] || "apiUnknown";
+}
+
+export function assistantRoutingSummary(entry, pipelines, language, isChecking = false) {
   const copy = strings[language === "ru" ? "ru" : "en"];
   const presentation = assistantProviderPresentation(entry);
   const textProvider = providers[entry?.provider]?.name || entry?.provider || "";
@@ -70,6 +86,7 @@ export function assistantRoutingSummary(entry, pipelines, language) {
   }
 
   lines.push(copy.androidWakeDetection);
+  lines.push(copy.assistantCheckStatusLabel, copy[assistantCheckStatusKey(entry, isChecking)]);
   const ttsEngines = [...new Set((Array.isArray(pipelines) ? pipelines : [])
     .map((pipeline) => pipeline?.tts_engine)
     .filter((engine) => typeof engine === "string" && engine.trim()))];
@@ -368,7 +385,12 @@ class HababAIPanel extends HTMLElement {
     this.q("#assistant-provider-status").textContent = !this.connectionsLoaded
       ? this.t("assistantProviderUnavailable")
       : currentProvider
-        ? assistantRoutingSummary(currentProvider, this.pipelines, this.language).join("\n")
+        ? assistantRoutingSummary(
+          currentProvider,
+          this.pipelines,
+          this.language,
+          this.connectionCheckStates.get(this.checkStateKey(currentProvider)) === "checking",
+        ).join("\n")
         : this.t(selected.length ? "assistantProviderAmbiguous" : "noAssistantProvider");
     this.shadowRoot.querySelectorAll("button,input,textarea").forEach((item) => { item.disabled = !!this.busy; });
     this.q("#check").disabled = !!this.busy || !this.connectionsLoaded || !entry;

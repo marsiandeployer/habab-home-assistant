@@ -338,11 +338,13 @@ test("routing summary separates managed text, default voice, Android wake detect
     voice_ready: true,
   };
   const withoutTTS = assistantRoutingSummary(entry, [{ tts_engine: null }], "en");
-  assert.equal(withoutTTS.length, 3);
+  assert.equal(withoutTTS.length, 5);
   assert.match(withoutTTS[0], /Text chat: OpenCode → Habab → DeepSeek \(deepseek-flash\)/);
   assert.doesNotMatch(withoutTTS[0], /habab-chat|gemini-3\.1-flash-lite/);
   assert.match(withoutTTS[1], /Voice conversation: Habab → Gemini Live, default model gemini-3\.8-live/);
   assert.match(withoutTTS[2], /Android wake phrase: local, Vosk/);
+  assert.equal(withoutTTS[3], strings.en.assistantCheckStatusLabel);
+  assert.equal(withoutTTS[4], strings.en.apiUnknown);
   assert.doesNotMatch(withoutTTS.join(" "), /gemini-3\.1-flash-lite/i);
 
   const unreportedRoute = assistantRoutingSummary({ ...entry, configured_upstream_provider: null }, [], "en");
@@ -350,20 +352,20 @@ test("routing summary separates managed text, default voice, Android wake detect
   assert.doesNotMatch(unreportedRoute[0], /DeepSeek|habab-chat/);
 
   const withTTS = assistantRoutingSummary(entry, [{ tts_engine: "tts.google_translate_say" }], "en");
-  assert.equal(withTTS.length, 4);
-  assert.match(withTTS[3], /Separate TTS in Assist: tts\.google_translate_say/);
+  assert.equal(withTTS.length, 6);
+  assert.match(withTTS[5], /Separate TTS in Assist: tts\.google_translate_say/);
 });
 
 test("managed Habab API status describes the route, while direct provider status stays specific", () => {
   const nodes = new Map();
   const makeNode = () => ({ textContent: "", disabled: false, dataset: {}, value: "" });
-  const run = (entry) => {
+  const run = (entry, { connections = [entry], checkStates = new Map() } = {}) => {
     const panel = Object.create(HababAIPanel.prototype);
     Object.assign(panel, {
       provider: entry.provider,
-      connections: [entry],
+      connections,
       connectionsLoaded: true,
-      connectionCheckStates: new Map(),
+      connectionCheckStates: checkStates,
       busy: false,
       feedbackDeliveryState: { enabled: false, credential_configured: false, ready: false },
       q: (selector) => {
@@ -371,7 +373,7 @@ test("managed Habab API status describes the route, while direct provider status
         return nodes.get(selector);
       },
       entry: () => entry,
-      checkStateKey: () => "synthetic-entry:model",
+      checkStateKey: (item) => item.entry_id,
       checkTime: () => null,
       t: (key) => strings.en[key],
       applyFeedbackDeliveryControls: () => undefined,
@@ -409,6 +411,30 @@ test("managed Habab API status describes the route, while direct provider status
   });
   assert.match(direct.assistantStatus, /Text chat: OpenCode → OpenAI, model gpt-4\.1-mini/);
   assert.equal(direct.apiStatus, strings.en.apiVerified);
+
+  nodes.clear();
+  const activeHabab = {
+    provider: "habab", assistant_selected: true, entry_id: "active-habab", model: "gemini-3.1-flash-lite",
+    managed_model: "habab-chat", effective_model: null, text_ready: true,
+    configured_upstream_provider: "deepseek", configured_upstream_model: "deepseek-flash",
+    api_check_status: "verified",
+  };
+  const editOpenAI = {
+    provider: "openai", assistant_selected: false, entry_id: "edit-openai", model: "gpt-4.1-mini",
+    managed_model: null, effective_model: "gpt-4.1-mini", api_check_status: "rejected",
+  };
+  const splitSelection = run(editOpenAI, { connections: [activeHabab, editOpenAI] });
+  assert.match(splitSelection.assistantStatus, /OpenCode → Habab → DeepSeek \(deepseek-flash\)/);
+  assert.match(splitSelection.assistantStatus, /saved key and Habab route passed the API check/i);
+  assert.equal(splitSelection.apiStatus, strings.en.apiRejected);
+
+  nodes.clear();
+  const activeCheckPending = run(editOpenAI, {
+    connections: [activeHabab, editOpenAI],
+    checkStates: new Map([["active-habab", "checking"]]),
+  });
+  assert.match(activeCheckPending.assistantStatus, /Checking the saved key and Habab route/i);
+  assert.equal(activeCheckPending.apiStatus, strings.en.apiRejected);
 });
 
 test("an explicit hide preference survives a same-provider saved-key refresh", async () => {
