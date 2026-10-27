@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.config_entries import ConfigEntryChange
 from homeassistant.components.habab_telegram import TelegramManager
+from homeassistant.components.habab_telegram.inbox import TelegramInbox
 from homeassistant.components.habab_telegram.config_flow import get_bot
 from homeassistant.components.habab_telegram.const import (
     BOT_ONBOARDING_MESSAGE, OWNER_PAIRING_COMPLETE_MESSAGE, UNKNOWN_MEMBER_MESSAGE,
@@ -49,7 +50,6 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.group_pairing = {}
         manager.group_candidates = {}
         manager.group_candidate_tasks = {}
-        manager.overflow_tasks = {}
         manager.group_bindings_store = SimpleNamespace(async_save=AsyncMock())
         manager.group_member_chats = {}
         manager.pending_members = {}
@@ -62,7 +62,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.dedupe_order = []
         manager.store = SimpleNamespace(async_save=AsyncMock())
         manager.send = AsyncMock()
-        manager._write = AsyncMock()
+        manager._write = AsyncMock(return_value=True)
         manager.queues = {}
         manager.tasks = {}
         manager.turn_tasks = {}
@@ -73,6 +73,9 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.cancel_epochs = {}
         manager.pending_group_cancels = {}
         manager.pending_sends = {}
+        manager.inbox = TelegramInbox(SimpleNamespace(async_load=AsyncMock(return_value={}), async_save=AsyncMock()))
+        manager.inbox_dispatched = set()
+        manager.waiting_updates = {}
         manager.provider_config_epoch = 0
         manager.provider_entry_unsubscribers = {}
         manager.unavailable_provider_entries = set()
@@ -343,7 +346,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
 
     async def dispatch_worker_update(self, manager, entry, message):
         manager.queues.setdefault(entry.entry_id, asyncio.Queue(maxsize=3))
-        line = (json.dumps({"type": "message", **message}) + "\n").encode()
+        line = (json.dumps({"type": "message", "update_id": message["message_id"], **message}) + "\n").encode()
         received = asyncio.Event()
 
         class Stdout:
@@ -373,7 +376,8 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         reader = await self.dispatch_worker_update(manager, entry, message)
         try:
             tasks = tuple(manager.control_tasks.get(entry.entry_id, ()))
-            self.assertTrue(tasks)
+            if not tasks:
+                self.assertTrue(any(record["phase"] == "done" for record in manager.inbox.records.values()))
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=1)
         finally:
             reader.cancel()
@@ -624,7 +628,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         consumer = asyncio.create_task(manager._consume(entry))
 
         process.stdout.feed_data((json.dumps({
-            "type": "message", "chat_id": -200, "user_id": 20, "message_id": 1,
+            "type": "message", "update_id": 1, "chat_id": -200, "user_id": 20, "message_id": 1,
             "chat_type": "supergroup", "text": f"/start@testbot {nonce}",
             "chat_title": "Home",
         }) + "\n").encode())
@@ -1471,7 +1475,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_identity_and_private_chat_are_enforced(self):
         manager = self.manager()
-        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_username": "testbot"})
+        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_username": "testbot", "bot_id": 99})
         await manager.handle_one(entry, {"chat_type": "group", "chat_id": 10, "user_id": 20, "message_id": 1, "text": "hello"})
         await manager.handle_one(entry, {"chat_type": "private", "chat_id": 11, "user_id": 20, "message_id": 2, "text": "hello"})
         manager.hass.auth.async_get_user.assert_awaited()
@@ -1553,7 +1557,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_inactive_owner_cannot_create_or_complete_pairing(self):
         manager = self.manager()
         manager.hass.auth.async_get_user.return_value = SimpleNamespace(is_active=False, is_admin=True)
-        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_username": "testbot"})
+        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_username": "testbot", "bot_id": 99})
         manager.hass.config_entries = SimpleNamespace(async_entries=lambda domain: [entry])
         with self.assertRaisesRegex(ValueError, "^not_allowed$"):
             await manager.pair("alice")
@@ -1645,7 +1649,7 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ready_worker_is_connected_and_can_be_paired_after_restart(self):
         manager = self.manager()
-        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_username": "testbot"})
+        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice", "bot_username": "testbot", "bot_id": 99})
         manager.hass.config_entries = SimpleNamespace(async_entries=lambda domain: [entry])
         manager.entries["entry"]["ready"] = True
         manager.entries["entry"].update(chat_id="10", user_id="20")
@@ -1729,9 +1733,9 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         control_gate = asyncio.Event()
         finish_gate = asyncio.Event()
         manager.entries["entry"]["process"] = Process([
-            b'{"type":"message","chat_id":10,"user_id":20,"message_id":8,"chat_type":"private","text":"do work"}\n',
-            b'{"type":"message","chat_id":10,"user_id":20,"message_id":9,"chat_type":"private","text":"/cancel"}\n',
-            b'{"type":"message","chat_id":10,"user_id":20,"message_id":10,"chat_type":"private","text":"next work"}\n',
+            b'{"type":"message","update_id":8,"chat_id":10,"user_id":20,"message_id":8,"chat_type":"private","text":"do work"}\n',
+            b'{"type":"message","update_id":9,"chat_id":10,"user_id":20,"message_id":9,"chat_type":"private","text":"/cancel"}\n',
+            b'{"type":"message","update_id":10,"chat_id":10,"user_id":20,"message_id":10,"chat_type":"private","text":"next work"}\n',
         ], control_gate, finish_gate)
         manager.queues["entry"] = asyncio.Queue(maxsize=5)
         agent = Agent()
@@ -1761,47 +1765,22 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
         consumer.cancel()
         await asyncio.gather(consumer, return_exceptions=True)
 
-    async def test_queue_overflow_ack_is_private_bound_and_admin_only(self):
-        class Stdout:
-            def __init__(self, lines):
-                self.lines = list(lines)
-
-            async def readline(self):
-                return self.lines.pop(0) if self.lines else b""
-
-        class Process:
-            def __init__(self, lines):
-                self.stdout = Stdout(lines)
-                self.returncode = 0
-                self.wait = AsyncMock(return_value=0)
-
-        entry = SimpleNamespace(entry_id="entry", data={"owner_id": "alice"})
+    async def test_full_ram_queue_retains_updates_in_durable_inbox_without_sending(self):
         manager = self.manager()
+        entry = self.group_entry()
         manager.queues["entry"] = asyncio.Queue(maxsize=1)
         manager.queues["entry"].put_nowait({"already": "queued"})
-        manager.entries["entry"]["process"] = Process([
-            b'{"type":"message","chat_id":10,"user_id":20,"message_id":1,"chat_type":"group","text":"hello"}\n',
-            b'{"type":"message","chat_id":99,"user_id":20,"message_id":2,"chat_type":"private","text":"hello"}\n',
-            b'{"type":"message","chat_id":10,"user_id":21,"message_id":3,"chat_type":"private","text":"hello"}\n',
-            b'{"type":"message","chat_id":10,"user_id":20,"message_id":4,"chat_type":"private","text":"hello"}\n',
-        ])
-        await manager._reader(entry, manager.entries["entry"])
-        await manager.overflow_tasks["entry"]
-        manager.send.assert_any_await("entry", 10, "Очередь занята. Попробуйте позже.")
-        self.assertEqual(manager.send.await_count, 1)
-        self.assertEqual(manager.dedupe, set())
-
-        inactive = self.manager()
-        inactive.hass.auth.async_get_user.return_value = SimpleNamespace(is_active=False, is_admin=True)
-        inactive.queues["entry"] = asyncio.Queue(maxsize=1)
-        inactive.queues["entry"].put_nowait({"already": "queued"})
-        inactive.entries["entry"]["process"] = Process([
-            b'{"type":"message","chat_id":10,"user_id":20,"message_id":5,"chat_type":"private","text":"hello"}\n',
-        ])
-        await inactive._reader(entry, inactive.entries["entry"])
-        await inactive.overflow_tasks["entry"]
-        inactive.send.assert_not_awaited()
-        self.assertIsNone(inactive.entries["entry"]["chat_id"])
+        reader = await self.dispatch_worker_update(manager, entry, {
+            "chat_id": 10, "user_id": 20, "message_id": 4,
+            "chat_type": "private", "text": "hello",
+        })
+        try:
+            self.assertEqual(manager.inbox.counts(entry)["queued"], 1)
+            manager.send.assert_not_awaited()
+            manager._write.assert_awaited_once_with("entry", {"type": "ack_update", "update_id": 4})
+        finally:
+            reader.cancel()
+            await asyncio.gather(reader, return_exceptions=True)
 
     async def test_pairing_nonce_is_single_use_and_private_only(self):
         manager = self.manager()

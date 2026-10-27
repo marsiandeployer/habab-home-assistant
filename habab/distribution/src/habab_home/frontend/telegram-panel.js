@@ -22,12 +22,21 @@ class HababTelegramPanel extends HTMLElement {
     this.group = { phase: "unsupported" };
     this.groupPairingUrl = "";
     this.pendingGroupAction = "";
+    this.pendingRecovery = null;
+    this.recoveryFeedback = "";
     this.busy = false;
   }
 
   set hass(value) {
     const firstHass = !this._hass;
+    const ownerChanged = this._hass && this._hass.user?.id !== value?.user?.id;
     this._hass = value;
+    if (ownerChanged) {
+      this.pendingRecovery = null;
+      this.recoveryFeedback = "";
+      this.state = { phase: "not_configured" };
+      this.group = { phase: "unsupported" };
+    }
     const language = value?.locale?.language?.startsWith("ru") ? "ru" : "en";
     if (language !== this.language) {
       this.language = language;
@@ -35,7 +44,7 @@ class HababTelegramPanel extends HTMLElement {
     }
     const menu = this.q("ha-menu-button");
     if (menu) menu.hass = value;
-    if (firstHass && this.shadowRoot.firstChild) this.refresh();
+    if ((firstHass || ownerChanged) && this.shadowRoot.firstChild) this.refresh();
   }
 
   connectedCallback() {
@@ -46,6 +55,7 @@ class HababTelegramPanel extends HTMLElement {
 
   disconnectedCallback() {
     clearTimeout(this.statusTimer);
+    this.pendingRecovery = null;
     this.q("video")?.pause();
     const token = this.q("#token");
     if (token) token.value = "";
@@ -85,6 +95,16 @@ class HababTelegramPanel extends HTMLElement {
     <header><ha-menu-button></ha-menu-button><h1>${this.t("telegramTitle")}</h1></header>
     <main>
       <p class="intro">${this.t("telegramIntro")}</p>
+      <section id="inbox-recovery" aria-labelledby="inbox-recovery-title" hidden>
+        <h2 id="inbox-recovery-title">${this.t("telegramRecoveryTitle")}</h2>
+        <p id="inbox-recovery-copy"></p>
+        <button type="button" id="inbox-recovery-ask">${this.t("telegramRecoveryAction")}</button>
+        <div class="confirmation" id="inbox-recovery-confirmation" role="group" aria-labelledby="inbox-recovery-confirm-copy" hidden>
+          <p id="inbox-recovery-confirm-copy">${this.t("telegramRecoveryConfirm")}</p>
+          <div class="actions"><button class="danger" type="button" id="inbox-recovery-confirm">${this.t("telegramRecoveryDiscard")}</button><button type="button" id="inbox-recovery-cancel">${this.t("telegramCancel")}</button></div>
+        </div>
+        <p class="status" id="inbox-recovery-feedback" role="status" aria-live="polite"></p>
+      </section>
       <section class="video-guide" aria-labelledby="telegram-video-title">
         <h2 id="telegram-video-title">${this.t("telegramVideoTitle")}</h2>
         <p class="help" id="telegram-video-description">${this.t("telegramVideoDescription")}</p>
@@ -166,6 +186,9 @@ class HababTelegramPanel extends HTMLElement {
     this.q("#owner-unlink").addEventListener("click", () => this.askOwnerConfirmation());
     this.q("#owner-confirm-action").addEventListener("click", () => this.unlinkOwner());
     this.q("#owner-cancel-action").addEventListener("click", () => this.cancelOwnerConfirmation());
+    this.q("#inbox-recovery-ask").addEventListener("click", () => this.askInboxRecovery());
+    this.q("#inbox-recovery-confirm").addEventListener("click", () => this.confirmInboxRecovery());
+    this.q("#inbox-recovery-cancel").addEventListener("click", () => this.cancelInboxRecovery());
     this.applyState();
   }
 
@@ -206,8 +229,80 @@ class HababTelegramPanel extends HTMLElement {
     if (!canEditBot) this.editingBot = false;
 
     this.applyGroupState();
+    this.applyRecoveryState();
     this.updateControls();
     this.scheduleStatusPoll();
+  }
+
+  ownerContext() {
+    return { ownerId: this._hass?.user?.id, connection: this._hass?.connection };
+  }
+
+  sameOwnerContext(context) {
+    return context.ownerId === this._hass?.user?.id && context.connection === this._hass?.connection;
+  }
+
+  applyRecoveryState() {
+    const inbox = this.state.inbox;
+    const required = Boolean(inbox?.recovery_required && inbox.recovery_id);
+    if (this.pendingRecovery && (!required || inbox.recovery_id !== this.pendingRecovery.recoveryId)) {
+      this.pendingRecovery = null;
+      this.recoveryFeedback = this.t("telegramRecoveryStale");
+    }
+    this.q("#inbox-recovery").hidden = !required && !this.recoveryFeedback;
+    this.q("#inbox-recovery-copy").hidden = !required;
+    this.q("#inbox-recovery-copy").textContent = required
+      ? this.t("telegramRecoveryDescription", { count: inbox.processing + inbox.queued }) : "";
+    this.q("#inbox-recovery-ask").hidden = !required || Boolean(this.pendingRecovery);
+    this.q("#inbox-recovery-confirmation").hidden = !this.pendingRecovery;
+    this.q("#inbox-recovery-feedback").textContent = this.recoveryFeedback;
+  }
+
+  askInboxRecovery() {
+    const inbox = this.state.inbox;
+    if (this.busy || !this.isConnected || !this._hass?.user?.is_admin
+        || !inbox?.recovery_required || !inbox.recovery_id) return;
+    this.pendingRecovery = { ...this.ownerContext(), recoveryId: inbox.recovery_id };
+    this.recoveryFeedback = "";
+    this.applyRecoveryState();
+    this.q("#inbox-recovery-confirm").focus();
+  }
+
+  cancelInboxRecovery() {
+    this.pendingRecovery = null;
+    this.applyRecoveryState();
+    this.q("#inbox-recovery-ask").focus();
+  }
+
+  async confirmInboxRecovery() {
+    const approval = this.pendingRecovery;
+    if (!approval || this.busy || !this.isConnected || !this._hass?.user?.is_admin
+        || !this.sameOwnerContext(approval)
+        || approval.recoveryId !== this.state.inbox?.recovery_id) return;
+    this.pendingRecovery = null;
+    this.busy = true;
+    this.updateControls();
+    try {
+      const result = await this.request("recover_inbox", { recovery_id: approval.recoveryId });
+      if (!this.sameOwnerContext(approval)) return;
+      if (result?.recovered !== true) throw new Error("telegram_recovery_unavailable");
+      await this.loadStatus();
+      if (this.sameOwnerContext(approval)) this.recoveryFeedback = this.t("telegramRecoveryDone");
+    } catch (error) {
+      if (!this.sameOwnerContext(approval)) return;
+      this.recoveryFeedback = this.t(error?.code === "telegram_recovery_stale"
+        ? "telegramRecoveryStale" : "telegramRecoveryFailed");
+      try {
+        await this.loadStatus();
+        if (this.sameOwnerContext(approval) && !this.state.inbox?.recovery_required) {
+          this.recoveryFeedback = this.t("telegramRecoveryStatusClear");
+        }
+      } catch { /* Keep the explicit failure visible. */ }
+    } finally {
+      this.busy = false;
+      if (this.sameOwnerContext(approval)) this.applyState();
+      else this.refresh();
+    }
   }
 
   applyGroupState() {
@@ -324,9 +419,11 @@ class HababTelegramPanel extends HTMLElement {
   async refresh() {
     if (!this._hass || this.busy || this.refreshing) return;
     this.refreshing = true;
+    const context = this.ownerContext();
     this.ownerFeedback = "";
     try {
       const result = await this.request("status");
+      if (!this.sameOwnerContext(context)) return;
       if (!OWNER_PHASES.includes(result.phase)) throw new Error("status");
       this.state = result;
       this.group = result.group && GROUP_PHASES.includes(result.group.phase)
@@ -335,17 +432,19 @@ class HababTelegramPanel extends HTMLElement {
       if (this.group.phase === "connected") this.groupPairingUrl = "";
       this.applyState();
     } catch (error) {
+      if (!this.sameOwnerContext(context)) return;
       this.state = { phase: "error", error: error?.code || "unknown" };
       this.group = { phase: "unsupported" };
       this.applyState();
     } finally {
       this.refreshing = false;
+      if (!this.sameOwnerContext(context) && this.isConnected) this.refresh();
     }
   }
 
   scheduleStatusPoll() {
     clearTimeout(this.statusTimer);
-    const ownerPending = this.state.phase === "pairing";
+    const ownerPending = this.state.phase === "pairing" || this.state.inbox?.recovery_required;
     const groupPending = ["pairing", "awaiting_admin"].includes(this.group.phase)
       || Boolean(this.group.pairing_pending);
     if (this.isConnected && (ownerPending || groupPending)) {
@@ -372,7 +471,9 @@ class HababTelegramPanel extends HTMLElement {
   }
 
   async loadStatus() {
+    const context = this.ownerContext();
     const result = await this.request("status");
+    if (!this.sameOwnerContext(context)) return;
     if (!OWNER_PHASES.includes(result.phase)) throw new Error("status");
     this.state = result;
     this.group = result.group && GROUP_PHASES.includes(result.group.phase)

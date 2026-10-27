@@ -98,10 +98,10 @@ export class TelegramTransport {
           allowed_updates: ['message', 'my_chat_member', 'chat_member'] }, { attempts: 2 });
         if (!Array.isArray(result.result)) throw new Error('telegram_api_error');
         for (const update of result.result) {
-          this.offset = Math.max(this.offset, Number(update.update_id) + 1);
           const message = update.message;
           if (message && typeof message.text === 'string' && message.chat && message.from) {
-            this.emit({ type: 'message', chat_id: Number(message.chat.id), user_id: Number(message.from.id),
+            await this.emit({ type: 'message', update_id: Number(update.update_id),
+              chat_id: Number(message.chat.id), user_id: Number(message.from.id),
               message_id: Number(message.message_id), chat_type: String(message.chat.type),
               ...(typeof message.chat.title === 'string' ? { chat_title: message.chat.title.slice(0, 256) } : {}),
               text: message.text });
@@ -120,6 +120,8 @@ export class TelegramTransport {
               status: String(botMember.new_chat_member.status),
               chat_type: String(botMember.chat.type) });
           }
+          // The bridge's async emit resolves only after native inbox persistence.
+          this.offset = Math.max(this.offset, Number(update.update_id) + 1);
         }
       } catch (error) {
         if (!this.running) break;

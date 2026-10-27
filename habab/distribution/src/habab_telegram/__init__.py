@@ -19,6 +19,7 @@ from .const import (
     OWNER_PAIRING_COMPLETE_MESSAGE, PAIR_TTL, UNKNOWN_MEMBER_MESSAGE,
 )
 from .websocket import async_register_commands
+from .inbox import InboxStore, TelegramInbox
 from .transport import (
     TransportError, resolve_telegram_transport, telegram_transport_identity,
     worker_proxy_env,
@@ -52,11 +53,13 @@ class TelegramManager:
         self.cancel_epochs = {}
         self.pending_group_cancels = {}
         self.pending_sends = {}
+        self.inbox = TelegramInbox(InboxStore(hass))
+        self.inbox_dispatched = set()
+        self.waiting_updates = {}
         self.pending_members = {}
         self.group_pairing = {}
         self.group_candidates = {}
         self.group_candidate_tasks = {}
-        self.overflow_tasks = {}
         self.group_bindings_store = Store(hass, 1, "habab_telegram.group_bindings", private=True)
         self.group_bindings = {}
         self.group_member_chats = {}
@@ -70,6 +73,7 @@ class TelegramManager:
         self._closed = False
 
     async def setup(self):
+        await self.inbox.load()
         self.dedupe_order = await self.store.async_load() or []
         self.dedupe_order = self.dedupe_order[-2000:]
         self.dedupe = set(self.dedupe_order)
@@ -237,7 +241,7 @@ class TelegramManager:
                 await self.pair(owner)
                 pair = self.pairing[entry.entry_id]
             phase = "pairing"
-        result = {"phase": phase}
+        result = {"phase": phase, "inbox": self.inbox.counts(entry, self._waiting_payload(entry))}
         result["group"] = await self.group_status(owner, entry)
         if state and state.get("username"):
             result["bot_username"] = state["username"]
@@ -248,6 +252,25 @@ class TelegramManager:
         elif self.transport_errors.get(entry.entry_id):
             result["error"] = self.transport_errors[entry.entry_id]
         return result
+
+    async def recover_inbox(self, owner, recovery_id):
+        if not await self._owner_is_active_admin(owner):
+            raise ValueError("not_allowed")
+        entry = self.entry_for_owner(owner)
+        if entry is None:
+            raise ValueError("not_configured")
+        active_turns = (task for key, task in self.turn_tasks.items()
+                        if key == entry.entry_id or key.startswith(entry.entry_id + ":"))
+        if any(not task.done() for task in (*active_turns, *self.control_tasks.get(entry.entry_id, ()))):
+            raise ValueError("telegram_recovery_unavailable")
+        discarded = await self.inbox.recover(
+            entry, recovery_id, lambda: self._waiting_payload(entry))
+        scope = self.inbox.scope(entry)
+        self.inbox_dispatched = {key for key in self.inbox_dispatched
+                                 if not key.startswith(scope + ":")}
+        await self._retry_waiting_update(entry)
+        self._pump_inbox(entry)
+        return {"recovered": True, "discarded": discarded}
 
     async def configure(self, owner, token, proxy_url=""):
         if not token.strip() or len(token) > 256:
@@ -812,23 +835,6 @@ class TelegramManager:
 
         task.add_done_callback(done)
 
-    def _schedule_queue_overflow(self, entry, msg):
-        entry_id = entry.entry_id
-        current = self.overflow_tasks.get(entry_id)
-        if current and not current.done():
-            return
-        task = self.hass.async_create_task(self._send_queue_overflow(entry, msg))
-        self.overflow_tasks[entry_id] = task
-        tasks = self.control_tasks.setdefault(entry_id, set())
-        tasks.add(task)
-
-        def done(completed):
-            tasks.discard(completed)
-            if self.overflow_tasks.get(entry_id) is completed:
-                self.overflow_tasks.pop(entry_id, None)
-
-        task.add_done_callback(done)
-
     def _schedule_control(self, entry, msg):
         entry_id = entry.entry_id
         chat_id = str(msg.get("chat_id"))
@@ -866,21 +872,8 @@ class TelegramManager:
                     check.set_result(None)
 
         task.add_done_callback(done)
-
-    async def _send_queue_overflow(self, entry, msg):
-        state = self.entries.get(entry.entry_id, {})
-        if (msg.get("chat_type") != "private"
-                or str(msg.get("chat_id")) != str(state.get("chat_id"))
-                or str(msg.get("user_id")) != str(state.get("user_id"))):
-            return
-        if not await self._owner_is_active_admin(entry.data["owner_id"]):
-            if state.get("chat_id") is not None:
-                await self._clear_binding(entry)
-            else:
-                self.pairing.pop(entry.entry_id, None)
-            return
-        await self.send(entry.entry_id, msg["chat_id"],
-                        "Очередь занята. Попробуйте позже.")
+        task.add_done_callback(lambda _completed: self._pump_inbox(entry))
+        return task
 
     async def async_setup_entry(self, entry):
         proxy = entry.data.get("proxy_url")
@@ -924,6 +917,10 @@ class TelegramManager:
         self.transport_errors.pop(entry.entry_id, None)
         self.entries[entry.entry_id] = state
         self.queues[entry.entry_id] = asyncio.Queue(maxsize=5)
+        if any(record["scope"] == self.inbox.scope(entry) and record["phase"] == "processing"
+               for record in self.inbox.records.values()):
+            self.inbox.recovery_scopes.add(self.inbox.scope(entry))
+        self._pump_inbox(entry)
         self.tasks[entry.entry_id] = self.hass.async_create_background_task(
             self._reader(entry, state), f"Habab Telegram reader {entry.entry_id}")
         self.consumer_tasks[entry.entry_id] = self.hass.async_create_background_task(
@@ -1026,6 +1023,7 @@ class TelegramManager:
                     state["username"] = payload.get("username", state["username"])
                     state["ready"] = True
                     state.pop("error", None)
+                    self._pump_inbox(entry)
                     self.hass.async_create_task(self._retry_setup_notifications())
                 elif kind == "member":
                     request_id = payload.get("request_id")
@@ -1075,36 +1073,8 @@ class TelegramManager:
                             and payload.get("status") in ("administrator", "creator")):
                         self._schedule_candidate_verification(entry, candidate)
                 elif kind == "message":
-                    state.pop("error", None)
-                    queue = self.queues[entry.entry_id]
-                    group_binding = self.group_bindings.get(entry.entry_id)
-                    if (
-                        payload.get("chat_type") == "private"
-                        and isinstance(payload.get("text"), str)
-                        and payload["text"].strip() == "/cancel"
-                        and all(type(payload.get(field)) is int
-                                for field in ("chat_id", "user_id", "message_id"))
-                    ):
-                        self._advance_cancel_epoch(entry, payload)
-                    payload.setdefault("_habab_cancel_epoch", self.cancel_epochs.get(
-                        entry.entry_id, {}).get(str(payload.get("chat_id")), 0))
-                    route_control = self._should_route_control(entry, state, payload)
-                    if route_control:
-                        self._schedule_control(entry, payload)
-                    elif queue.full():
-                        if (payload.get("chat_type") == "private"
-                                and str(payload.get("chat_id")) == str(state.get("chat_id"))
-                                and str(payload.get("user_id")) == str(state.get("user_id"))):
-                            self._schedule_queue_overflow(entry, payload)
-                    else:
-                        if payload.get("chat_type") == "private":
-                            pending = self.pending_message_ids.setdefault(
-                                entry.entry_id, {}).setdefault(str(payload["chat_id"]), set())
-                            pending.add(payload["message_id"])
-                        queue.put_nowait(payload)
-                        # Let the FIFO consumer begin this item before polling
-                        # another update that may be a direct /cancel.
-                        await asyncio.sleep(0)
+                    await self._receive_update(entry, payload)
+                    await asyncio.sleep(0)
             try:
                 await asyncio.wait_for(state["process"].wait(), timeout=1)
             except TimeoutError:
@@ -1120,6 +1090,91 @@ class TelegramManager:
         except Exception:
             state["error"] = "worker_error"
             state["ready"] = False
+
+    def _waiting_payload(self, entry):
+        waiting = self.waiting_updates.get(entry.entry_id)
+        if waiting and waiting["scope"] == self.inbox.scope(entry):
+            return waiting["payload"]
+        return None
+
+    async def _receive_update(self, entry, payload):
+        # At capacity, retain one unACKed update while still reading send/member
+        # replies. The worker cannot advance its offset or deliver the next one.
+        waiting = self._waiting_payload(entry)
+        if waiting is not None and waiting != payload:
+            _, key, digest = self.inbox.identity(entry, waiting)
+            committed = self.inbox.records.get(key)
+            if not committed or committed["digest"] != digest:
+                raise ValueError("worker_delivery_protocol_error")
+            # A new update proves the worker consumed the previous ACK, even
+            # if the caller was cancelled before drain returned locally.
+            self.waiting_updates.pop(entry.entry_id, None)
+        try:
+            await self.inbox.accept(entry, payload)
+        except (OSError, ValueError) as error:
+            if isinstance(error, ValueError) and str(error) != "telegram_inbox_full":
+                raise
+            if isinstance(error, OSError):
+                self.inbox.recovery_scopes.add(self.inbox.scope(entry))
+            self.waiting_updates[entry.entry_id] = {
+                "scope": self.inbox.scope(entry), "payload": dict(payload),
+            }
+            return False
+        if not await self._write(entry.entry_id, {
+            "type": "ack_update", "update_id": payload["update_id"],
+        }):
+            raise ValueError("worker_delivery_ack_failed")
+        self.waiting_updates.pop(entry.entry_id, None)
+        self._pump_inbox(entry)
+        return True
+
+    async def _retry_waiting_update(self, entry):
+        waiting = self._waiting_payload(entry)
+        if waiting is not None and entry.entry_id in self.entries:
+            await self._receive_update(entry, waiting)
+
+    def _pump_inbox(self, entry):
+        state = self.entries.get(entry.entry_id)
+        queue = self.queues.get(entry.entry_id)
+        if state is None or queue is None or not state.get("ready"):
+            return
+        for key, raw in self.inbox.queued(entry):
+            if key in self.inbox_dispatched:
+                continue
+            payload = dict(raw)
+            payload["_habab_inbox_key"] = key
+            route_control = self._should_route_control(entry, state, payload)
+            if not route_control and queue.full():
+                continue
+            lanes = self.control_lanes.get(entry.entry_id, {})
+            lane = lanes.get(str(payload.get("chat_id")))
+            if route_control and ((lane and not lane.done()) or len(lanes) >= self.CONTROL_TASK_LIMIT):
+                continue
+            if payload.get("chat_type") == "private" and payload.get("text", "").strip() == "/cancel":
+                self._advance_cancel_epoch(entry, payload)
+            payload.setdefault("_habab_cancel_epoch", self.cancel_epochs.get(
+                entry.entry_id, {}).get(str(payload.get("chat_id")), 0))
+            self.inbox_dispatched.add(key)
+            if route_control:
+                if self._schedule_control(entry, payload) is None:
+                    self.inbox_dispatched.discard(key)
+            else:
+                if payload.get("chat_type") == "private":
+                    self.pending_message_ids.setdefault(entry.entry_id, {}).setdefault(
+                        str(payload["chat_id"]), set()).add(payload["message_id"])
+                queue.put_nowait(payload)
+
+    async def _begin_incoming(self, msg):
+        key = msg.get("_habab_inbox_key")
+        return await self.inbox.begin(key) if key else True
+
+    async def _finish_incoming(self, entry, msg):
+        key = msg.get("_habab_inbox_key")
+        if key:
+            await self.inbox.finish(key, msg)
+            self.inbox_dispatched.discard(key)
+        await self._retry_waiting_update(entry)
+        self._pump_inbox(entry)
 
     def _should_route_control(self, entry, state, msg):
         value = msg.get("text")
@@ -1146,7 +1201,14 @@ class TelegramManager:
         return True
 
     async def _handle_control(self, entry, msg):
-        await self.handle_one(entry, msg)
+        try:
+            if await self._begin_incoming(msg):
+                await self.handle_one(entry, msg)
+                await self._finish_incoming(entry, msg)
+            elif key := msg.get("_habab_inbox_key"):
+                self.inbox_dispatched.discard(key)
+        except OSError:
+            self.inbox.recovery_scopes.add(self.inbox.scope(entry))
 
     async def _claim_message(self, entry, msg):
         """Persist a trusted owner/member update before any command can be queued."""
@@ -1442,49 +1504,64 @@ class TelegramManager:
         while True:
             msg = await queue.get()
             try:
-                chat_id = str(msg.get("chat_id"))
-                message_id = msg.get("message_id", -1)
-                cutoff = self.cancelled_through.get(entry.entry_id, {}).get(chat_id, -1)
-                epoch = msg.get("_habab_cancel_epoch",
-                                self.cancel_epochs.get(entry.entry_id, {}).get(chat_id, 0))
-                if (message_id <= cutoff
-                        or not self._message_epoch_is_current(entry.entry_id, chat_id, epoch)):
-                    continue
-                if not await self._claim_message(entry, msg):
-                    continue
-                await self.handle_one(entry, msg)
-                self.pending_message_ids.get(entry.entry_id, {}).get(chat_id, set()).discard(message_id)
-                turn = self.turn_tasks.get(self._turn_key(entry.entry_id, chat_id))
-                if turn and not turn.done():
-                    # The reader handles acknowledgments and direct controls independently.
-                    await asyncio.gather(turn, return_exceptions=True)
-            except Exception:
-                # Provider and HA errors are intentionally reduced to a stable user message.
-                state = self.entries.get(entry.entry_id)
-                reply_chat_id = None
-                is_group_message = msg.get("chat_type") in ("group", "supergroup")
-                if is_group_message:
-                    binding = self.group_bindings.get(entry.entry_id)
-                    if (msg.get("_habab_group_message") is True and binding
-                            and type(msg.get("chat_id")) is int
-                            and type(msg.get("user_id")) is int
-                            and str(msg["chat_id"]) == binding.get("chat_id")):
-                        try:
-                            member_is_current = await self._is_group_member(
-                                entry, msg["chat_id"], msg["user_id"], binding)
-                        except Exception:
-                            member_is_current = False
-                        if member_is_current:
-                            reply_chat_id = msg["chat_id"]
-                elif state and state.get("chat_id"):
-                    reply_chat_id = state["chat_id"]
-                if (reply_chat_id
-                        and self._message_epoch_is_current(entry.entry_id, chat_id, epoch)):
-                    await self.send(entry.entry_id, reply_chat_id,
-                                    "Не удалось обработать сообщение.")
+                if await self._begin_incoming(msg):
+                    await self._consume_message(entry, msg)
+                    await self._finish_incoming(entry, msg)
+            except OSError:
+                # A failed begin must not run; a failed finish may already have
+                # acted. Preserve both for explicit recovery, never auto-retry.
+                self.inbox.recovery_scopes.add(self.inbox.scope(entry))
             finally:
-                self.pending_message_ids.get(entry.entry_id, {}).get(chat_id, set()).discard(message_id)
+                self.pending_message_ids.get(entry.entry_id, {}).get(
+                    str(msg.get("chat_id")), set()).discard(msg.get("message_id"))
                 queue.task_done()
+                key = msg.get("_habab_inbox_key")
+                if key and self.inbox.records.get(key, {}).get("phase") != "processing":
+                    self.inbox_dispatched.discard(key)
+                self._pump_inbox(entry)
+
+    async def _consume_message(self, entry, msg):
+        try:
+            chat_id = str(msg.get("chat_id"))
+            message_id = msg.get("message_id", -1)
+            cutoff = self.cancelled_through.get(entry.entry_id, {}).get(chat_id, -1)
+            epoch = msg.get("_habab_cancel_epoch",
+                            self.cancel_epochs.get(entry.entry_id, {}).get(chat_id, 0))
+            if (message_id <= cutoff
+                    or not self._message_epoch_is_current(entry.entry_id, chat_id, epoch)):
+                return
+            if not await self._claim_message(entry, msg):
+                return
+            await self.handle_one(entry, msg)
+            self.pending_message_ids.get(entry.entry_id, {}).get(chat_id, set()).discard(message_id)
+            turn = self.turn_tasks.get(self._turn_key(entry.entry_id, chat_id))
+            if turn and not turn.done():
+                # The reader handles acknowledgments and direct controls independently.
+                await asyncio.gather(turn, return_exceptions=True)
+        except Exception:
+            # Provider and HA errors are intentionally reduced to a stable user message.
+            state = self.entries.get(entry.entry_id)
+            reply_chat_id = None
+            is_group_message = msg.get("chat_type") in ("group", "supergroup")
+            if is_group_message:
+                binding = self.group_bindings.get(entry.entry_id)
+                if (msg.get("_habab_group_message") is True and binding
+                        and type(msg.get("chat_id")) is int
+                        and type(msg.get("user_id")) is int
+                        and str(msg["chat_id"]) == binding.get("chat_id")):
+                    try:
+                        member_is_current = await self._is_group_member(
+                            entry, msg["chat_id"], msg["user_id"], binding)
+                    except Exception:
+                        member_is_current = False
+                    if member_is_current:
+                        reply_chat_id = msg["chat_id"]
+            elif state and state.get("chat_id"):
+                reply_chat_id = state["chat_id"]
+            if (reply_chat_id
+                    and self._message_epoch_is_current(entry.entry_id, chat_id, epoch)):
+                await self.send(entry.entry_id, reply_chat_id,
+                                "Не удалось обработать сообщение.")
 
     async def close_entry(self, entry_id):
         state = self.entries.pop(entry_id, None)
@@ -1512,6 +1589,9 @@ class TelegramManager:
                     future.set_result(None)
                 self.pending_members.pop(request_id, None)
         self.queues.pop(entry_id, None)
+        self.waiting_updates.pop(entry_id, None)
+        self.inbox_dispatched = {key for key in self.inbox_dispatched
+                                 if not key.startswith(entry_id + ":")}
         self.pending_message_ids.pop(entry_id, None)
         self.cancelled_through.pop(entry_id, None)
         self.cancel_epochs.pop(entry_id, None)
@@ -1530,7 +1610,6 @@ class TelegramManager:
         self.group_pairing.pop(entry_id, None)
         self.group_candidates.pop(entry_id, None)
         self.group_candidate_tasks.pop(entry_id, None)
-        self.overflow_tasks.pop(entry_id, None)
 
     async def unlink(self, owner):
         entry = self.entry_for_owner(owner)

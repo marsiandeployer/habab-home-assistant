@@ -2,12 +2,25 @@ import { createInterface } from 'node:readline';
 import { TelegramTransport } from 'noxon-telegram';
 import { createTelegramRelayFetch, telegramTransportConfig } from './relay-fetch.mjs';
 
-const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
+const pendingUpdates = new Map();
+const emit = (event) => {
+  if (event.type !== 'message') return process.stdout.write(`${JSON.stringify(event)}\n`);
+  return new Promise((resolve, reject) => {
+    pendingUpdates.set(event.update_id, { resolve, reject });
+    process.stdout.write(`${JSON.stringify(event)}\n`);
+  });
+};
 let relay;
 const transport = new TelegramTransport({ emit, fetchImpl: (...args) => {
   if (!relay) throw new Error('configure_required');
   return relay.fetch(...args);
 } });
+const shutdown = () => {
+  const stopped = transport.shutdown();
+  for (const pending of pendingUpdates.values()) pending.reject(new Error('shutdown'));
+  pendingUpdates.clear();
+  return stopped;
+};
 let configured = false;
 let configuring = false;
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -24,6 +37,10 @@ input.on('line', async (line) => {
       await relay.withOperation('configure', () => transport.configure(command.token));
       configured = true;
       configuring = false;
+    } else if (command?.type === 'ack_update' && Number.isSafeInteger(command.update_id)) {
+      const pending = pendingUpdates.get(command.update_id);
+      pendingUpdates.delete(command.update_id);
+      pending?.resolve();
     } else if (command?.type === 'send') {
       await relay.withOperation('send', () => transport.send(command.chat_id, command.text, command.request_id));
     } else if (command?.type === 'typing') {
@@ -32,7 +49,7 @@ input.on('line', async (line) => {
       await relay.withOperation('member', () => transport.getChatMember(
         command.chat_id, command.user_id, command.request_id));
     } else if (command?.type === 'shutdown') {
-      await transport.shutdown();
+      await shutdown();
       input.close();
     } else {
       emit({ type: 'error', code: configured ? 'invalid_command' : 'configure_required' });
@@ -45,10 +62,10 @@ input.on('line', async (line) => {
         ? { request_id: command.request_id.slice(0, 128) } : {}) });
     if (operation === 'configure') {
       configuring = false;
-      await transport.shutdown();
+      await shutdown();
       input.close();
     }
   }
 });
 
-input.on('close', () => { void transport.shutdown().finally(() => process.exit(0)); });
+input.on('close', () => { void shutdown().finally(() => process.exit(0)); });

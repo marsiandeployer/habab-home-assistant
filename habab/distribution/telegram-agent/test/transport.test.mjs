@@ -38,7 +38,7 @@ test('preserves command text in updates and sends bounded chunks through Bot API
 
   assert.deepEqual(events.find((event) => event.type === 'ready'), { type: 'ready', username: 'habab_test_bot' });
   assert.deepEqual(events.find((event) => event.type === 'message'), {
-    type: 'message', chat_id: 7, user_id: 9, message_id: 8, chat_type: 'private', text: '/start nonce',
+    type: 'message', update_id: 41, chat_id: 7, user_id: 9, message_id: 8, chat_type: 'private', text: '/start nonce',
   });
   const sends = calls.filter((call) => call.method === 'sendMessage');
   assert.equal(sends.length, 2);
@@ -75,7 +75,7 @@ test('polls group membership changes and emits only bounded member metadata', as
   await transport.shutdown();
   assert.deepEqual(allowedUpdates, ['message', 'my_chat_member', 'chat_member']);
   assert.deepEqual(events.find((event) => event.type === 'message'), {
-    type: 'message', chat_id: -100, user_id: 9, message_id: 2, chat_type: 'supergroup', chat_title: 'Home', text: '/start nonce',
+    type: 'message', update_id: 1, chat_id: -100, user_id: 9, message_id: 2, chat_type: 'supergroup', chat_title: 'Home', text: '/start nonce',
   });
   assert.ok(events.some((event) => event.type === 'member_update'
     && event.chat_id === -100 && event.user_id === 9 && event.status === 'left'));
@@ -174,4 +174,40 @@ test('reports rate limiting as a bounded error and retries only once', async () 
   assert.equal(sends, 2);
   assert.ok(events.some((event) => event.type === 'error' && event.code === 'telegram_rate_limited'));
   assert.ok(!JSON.stringify(events).includes('secret provider detail'));
+});
+
+
+test('does not advance polling offset until emission commits', async () => {
+  const offsets = [];
+  let accept;
+  let emitted;
+  const received = new Promise((resolve) => { emitted = resolve; });
+  const update = { update_id: 41, message: { message_id: 8, text: 'fixture', chat: { id: 7, type: 'private' }, from: { id: 9 } } };
+  const fetchImpl = async (url, init) => {
+    const method = url.split('/').at(-1);
+    if (method === 'getMe') return response({ username: 'fixture_bot' });
+    const body = JSON.parse(init.body);
+    offsets.push(body.offset);
+    if (body.offset === 0) return response([update]);
+    return new Promise((resolve) => init.signal.addEventListener('abort', () => resolve(response([])), { once: true }));
+  };
+  const transport = new TelegramTransport({ fetchImpl, emit: (event) => {
+    if (event.type === 'message') {
+      emitted(event);
+      return new Promise((resolve) => { accept = resolve; });
+    }
+  } });
+  await transport.configure('12345678901234567890:fixture');
+  try {
+    assert.equal((await received).message_id, 8);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(offsets, [0]);
+    assert.equal(transport.offset, 0);
+    accept();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(offsets, [0, 42]);
+  } finally {
+    accept?.();
+    await transport.shutdown();
+  }
 });
