@@ -531,6 +531,8 @@ public final class VoiceService extends Service {
             }
         }
         audioRouteInitialized = true;
+        RealtimeVoice currentVoice = realtime;
+        if (currentVoice != null) currentVoice.refreshDuplicateOutputDevices(manager, duplicateOutputRequested());
         AudioRecord current = recorder;
         AudioDeviceInfo input = current == null ? null : current.getRoutedDevice();
         inputDeviceType = input == null ? -1 : input.getType();

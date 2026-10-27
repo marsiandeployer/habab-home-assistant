@@ -171,6 +171,20 @@ final class RealtimeVoice implements AutoCloseable {
                 .setBufferSizeInBytes(bufferSize).setTransferMode(AudioTrack.MODE_STREAM).build();
     }
 
+    // Refresh track-specific preferences when AudioManager reports a replacement endpoint.
+    void refreshDuplicateOutputDevices(AudioManager audioManager, boolean duplicateRouteAvailable) {
+        if (!duplicateOutput || !duplicateRouteAvailable || audioManager == null) return;
+        AudioDeviceInfo bluetooth = VoiceAudioRoute.bluetoothCommunicationOutput(audioManager);
+        AudioDeviceInfo speaker = VoiceAudioRoute.phoneSpeaker(audioManager);
+        if (bluetooth == null || speaker == null) return;
+        synchronized (outputLock) {
+            if (closed || track == null || secondaryTrack == null) return;
+            VoiceAudioRoute.refreshDuplicateOutputs(duplicateOutput, duplicateRouteAvailable,
+                    track::setPreferredDevice,
+                    secondaryTrack::setPreferredDevice, bluetooth, speaker);
+        }
+    }
+
     boolean ready() { return ready && socket != null && !closed; }
     boolean finishing() { return ending; }
     boolean audioLimitReached(long now) { return gemini != null && toolSession.audioLimitReached(now); }

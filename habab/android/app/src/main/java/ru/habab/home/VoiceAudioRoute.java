@@ -9,6 +9,8 @@ import java.util.List;
 
 /** Selects a Bluetooth communication endpoint without scanning or opening its microphone. */
 final class VoiceAudioRoute {
+    interface PreferredOutput<T> { boolean setPreferredDevice(T device); }
+
     static final String PHONE = "phone";
     static final String BLUETOOTH = "bluetooth";
     static final String DUPLICATE = "duplicate";
@@ -20,6 +22,16 @@ final class VoiceAudioRoute {
         if (PHONE.equals(configuredRoute) || BLUETOOTH.equals(configuredRoute) || DUPLICATE.equals(configuredRoute))
             return configuredRoute;
         return PHONE;
+    }
+
+    static <T> boolean refreshDuplicateOutputs(boolean duplicateOutput, boolean routeAvailable,
+                                                PreferredOutput<T> primary, PreferredOutput<T> secondary,
+                                                T bluetooth, T speaker) {
+        if (!duplicateOutput || !routeAvailable || primary == null || secondary == null
+                || bluetooth == null || speaker == null)
+            return false;
+        if (!secondary.setPreferredDevice(speaker)) return false;
+        return primary.setPreferredDevice(bluetooth);
     }
 
     static List<AudioDeviceInfo> bluetoothCommunicationOutputs(AudioManager manager) {
