@@ -3,13 +3,20 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
+import time
 from datetime import datetime, timezone
 
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .agent_diagnostics import AgentDiagnostics
 from .assist_adapter import AssistAdapter
+from .const import DOMAIN
+from .effective_provider import effective_provider_entry
+from .fast_dialog import MAX_USER_CHARS, complete_dialogue, dialogue_part
+from .providers import ProviderError
 from .diagnostics_sessions import (
     normalize_telegram_session_index,
     normalize_web_session_index,
@@ -31,6 +38,7 @@ from .voice_history import (
 )
 
 VOICE_EVENT_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
+_LOGGER = logging.getLogger(__name__)
 
 
 class AssistantService:
@@ -59,6 +67,7 @@ class AssistantService:
         self.web_history_cache = {}
         self.voice_journal_lock = asyncio.Lock()
         self.web_lifecycle_lock = asyncio.Lock()
+        self.dialogue_tasks = {}
         self.diagnostics = runtime.diagnostics
 
     async def setup(self):
@@ -303,7 +312,7 @@ class AssistantService:
                 "entry_id": entry_id, "chat_id": chat_id, "bot_id": bot_id}
 
     async def run(self, owner, channel, session_id, text, entry_id=None, chat_id=None,
-                  expected_history_epoch=None):
+                  expected_history_epoch=None, *, executor_only=False):
         await self._require_active_admin(owner)
         if not self._mapped_session(owner, channel, session_id, entry_id, chat_id):
             raise AgentError("not_found")
@@ -321,7 +330,8 @@ class AssistantService:
                                      or expected_history_epoch != epoch))):
                         raise AgentError("not_found")
                 await self._materialize_pending_voice(owner, session_id, epoch)
-                result = await self.runtime.run(owner, session_id, text)
+                result = await self._run_text(
+                    owner, channel, session_id, text, executor_only=executor_only)
                 async with self.voice_journal_lock:
                     if self._mapped_session(owner, channel, session_id):
                         canonical_messages = result.get("messages", [])
@@ -330,7 +340,109 @@ class AssistantService:
                             self._web_context(owner)["epoch"])
                         self.web_history_cache[(owner, session_id)] = list(canonical_messages)
                 return result
-        return await self.runtime.run(owner, session_id, text)
+        return await self._run_text(
+            owner, channel, session_id, text, entry_id, chat_id, executor_only=executor_only)
+
+    async def _run_text(self, owner, channel, session_id, text, entry_id=None, chat_id=None,
+                        *, executor_only=False):
+        """Select a visible product mode; model errors never fall back to OpenCode."""
+        entry = effective_provider_entry(self.hass.config_entries.async_entries(DOMAIN))
+        if entry is None:
+            raise AgentError("provider_required")
+        if executor_only or entry.options.get("fast_dialog", True) is False:
+            started = time.monotonic()
+            result = await self.runtime.run(owner, session_id, text)
+            result["dialogue"] = {"mode": "opencode", "route": "opencode",
+                                  "total_ms": round((time.monotonic() - started) * 1000)}
+            return result
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_USER_CHARS:
+            raise AgentError("invalid_request")
+        started = time.monotonic()
+        trace = {"mode": "fast_dialog", "route": "pending"}
+
+        async def require_scope():
+            if state["aborted"]:
+                raise AgentError("aborted")
+            await self._require_active_admin(owner)
+            if not self._mapped_session(owner, channel, session_id, entry_id, chat_id):
+                raise AgentError("not_found")
+            current = effective_provider_entry(self.hass.config_entries.async_entries(DOMAIN))
+            if current is not entry or dict(current.data) != settings or dict(current.options) != options:
+                raise AgentError("not_found")
+
+        settings, options = dict(entry.data), dict(entry.options)
+        if self.runtime.lock.locked():
+            raise AgentError("busy")
+        task_key = (owner, session_id)
+        state = {"task": asyncio.current_task(), "aborted": False}
+        self.dialogue_tasks[task_key] = state
+        try:
+            async with self.runtime.lock:
+                await require_scope()
+                contract = await self.runtime.ensure(settings)
+                await require_scope()
+                messages = await self.runtime.request(
+                    "GET", f"session/{session_id}/message?limit=60")
+                if not isinstance(messages, list):
+                    raise AgentError("runtime_error")
+                history = self.runtime.visible(messages)
+                await require_scope()
+                model_started = time.monotonic()
+                try:
+                    route, answer = await complete_dialogue(
+                        self.hass, async_get_clientsession(self.hass), settings, history, text,
+                        contract=contract)
+                finally:
+                    trace["provider_ms"] = round((time.monotonic() - model_started) * 1000)
+                    await require_scope()
+                trace["route"] = route
+                if route == "direct":
+                    part = dialogue_part(text, answer)
+                    previous_ids = {message.get("info", {}).get("id") for message in messages}
+                    await self.runtime.request("POST", f"session/{session_id}/message", {
+                        "noReply": True, "parts": [part],
+                    })
+                    stored = await self.runtime.request(
+                        "GET", f"session/{session_id}/message?limit=60")
+                    await require_scope()
+                    if (not isinstance(stored, list) or not any(
+                            message.get("info", {}).get("id") not in previous_ids
+                            and any(isinstance(saved, dict) and all(
+                                saved.get(key) == value for key, value in part.items())
+                                for saved in message.get("parts", [])) for message in stored)):
+                        raise AgentError("runtime_error")
+                    result = {"session_id": session_id, "messages": self.runtime.visible(stored)}
+            if route == "opencode":
+                await require_scope()
+                result = await self.runtime.run(owner, session_id, text)
+                await require_scope()
+            trace["total_ms"] = round((time.monotonic() - started) * 1000)
+            self.diagnostics.clear(owner, session_id)
+            result["dialogue"] = trace
+            return result
+        except asyncio.CancelledError:
+            trace["route"] = "cancelled"
+            if state["aborted"]:
+                raise AgentError("aborted") from None
+            raise
+        except ProviderError as error:
+            # Provider codes are internal enums. Never retain provider response text.
+            safe_code = error.code if error.code in {
+                "timeout", "quota", "invalid_auth", "invalid_model", "invalid_response",
+                "cannot_connect", "provider_not_ready", "tools_unsupported",
+            } else "invalid_response"
+            self.diagnostics.record(owner, session_id, {"name": "ProviderError", "code": safe_code})
+            trace.update(route="model_error", error=safe_code)
+            raise AgentError(safe_code) from None
+        except AgentError as error:
+            trace["route"] = "cancelled" if error.code == "aborted" else "error"
+            raise
+        finally:
+            if self.dialogue_tasks.get(task_key) is state:
+                self.dialogue_tasks.pop(task_key, None)
+            trace["total_ms"] = round((time.monotonic() - started) * 1000)
+            _LOGGER.info("Assistant dialogue route=%s error=%s provider_ms=%s total_ms=%s",
+                         trace["route"], trace.get("error"), trace.get("provider_ms"), trace["total_ms"])
 
     async def record_voice_turn(self, owner, session_id, event_id, user_text,
                                 assistant_text, *, history_epoch=None):
@@ -581,6 +693,16 @@ class AssistantService:
         await self._require_active_admin(owner)
         if not self._mapped_session(owner, channel, session_id, entry_id, chat_id):
             raise AgentError("not_found")
+        state = self.dialogue_tasks.get((owner, session_id))
+        if state is not None:
+            if state["aborted"]:
+                return True
+            state["aborted"] = True
+            # Keep cancellation ownership through executor startup. Once its
+            # remote request is active, SetupAgent.run's cancellation handler
+            # aborts this exact owner/session and releases the runtime lock.
+            state["task"].cancel()
+            return True
         return await self.runtime.abort(owner, session_id)
 
     async def diagnostics_for_web(self, owner, session_id):

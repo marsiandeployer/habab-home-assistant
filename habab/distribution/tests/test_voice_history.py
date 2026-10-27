@@ -40,6 +40,7 @@ class VoiceHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.agent = object.__new__(SetupAgent)
         self.agent.hass = self.hass
+        self.agent._runtime_secrets = set()
         self.agent.password = "runtime-password-fixture"
         self.agent.control_token = "control-token-fixture"
         self.runtime = SimpleNamespace(

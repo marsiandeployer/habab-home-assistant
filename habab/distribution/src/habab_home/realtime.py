@@ -629,7 +629,8 @@ class RealtimeTurnView(HomeAssistantView):
                         if lease.get("history_session") != canonical_id:
                             raise AgentError("invalid_session")
                     result = await assistant.run(owner.id, "web", canonical_id, text,
-                                                 expected_history_epoch=lease["history_epoch"])
+                                                 expected_history_epoch=lease["history_epoch"],
+                                                 executor_only=True)
                     if browser:
                         await validate_browser_lease_history(hass, assistant, owner.id, session_id)
                 finally:
@@ -637,7 +638,7 @@ class RealtimeTurnView(HomeAssistantView):
                         untrack_browser_task(hass, tracked_session, tracked_task)
                         tracked_session = tracked_task = None
             else:
-                result = await assistant.run(owner.id, "web", canonical_id, text)
+                result = await assistant.run(owner.id, "web", canonical_id, text, executor_only=True)
             async_dispatcher_send(hass, "habab_voice_history_" + owner.id, result)
         except (ValueError, AttributeError):
             return self.json_message("invalid_voice_turn", status_code=400)

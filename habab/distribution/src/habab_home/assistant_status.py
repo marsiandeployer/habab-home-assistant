@@ -3,6 +3,7 @@ from collections.abc import Mapping
 import os
 
 from .const import DOMAIN, VERSION
+from .effective_provider import effective_provider_entry
 from .gemini_live import DEFAULT_MODEL
 from .runtime_context import DOCKER_RUNTIME_KIND, RUNTIME_KIND_ENV
 from .voice_context import build_voice_context
@@ -42,6 +43,15 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
         except AgentError:
             settings = {}
     voice_route = voice_route_metadata(settings)
+    config_entries = getattr(hass, "config_entries", None)
+    selected_entry = (
+        effective_provider_entry(config_entries.async_entries(DOMAIN))
+        if config_entries is not None else None
+    )
+    fast_dialog = (
+        selected_entry.options.get("fast_dialog", True) is not False
+        if selected_entry is not None else True
+    )
     gemini_live_provider = settings.get("provider") in {"habab", "gemini"}
     realtime_supported = voice_route["voice_supported"]
     telegram = hass.data.get("habab_telegram")
@@ -59,6 +69,7 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
         "home_snapshot": home_snapshot,
         "selected_provider": settings.get("provider"),
         "selected_text_model": settings.get("model"),
+        "fast_dialog": fast_dialog,
         "voice": {
             "realtime_api_registered": True,
             "selected_provider_supports_realtime": realtime_supported,

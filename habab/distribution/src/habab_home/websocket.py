@@ -74,6 +74,7 @@ def _record_api_check(hass, entry, fingerprint, status, reason=None):
 @callback
 def async_register_commands(hass):
     websocket_api.async_register_command(hass, list_connections)
+    websocket_api.async_register_command(hass, set_fast_dialog)
     websocket_api.async_register_command(hass, get_connection_key)
     websocket_api.async_register_command(hass, save_connection)
     websocket_api.async_register_command(hass, check_connection)
@@ -271,9 +272,32 @@ async def list_connections(hass, connection, msg):
             "entry_id": entry.entry_id, "provider": entry.data["provider"],
             "model": entry.data["model"], "state": entry.state.value,
             "assistant_selected": entry is selected_entry,
+            "fast_dialog": entry.options.get("fast_dialog", True) is not False,
             "entities": entities, **_api_check_readback(entry), **text_metadata, **voice_metadata,
         })
     connection.send_result(msg["id"], {"connections": entries})
+
+
+@websocket_api.websocket_command({
+    probatio.Required("type"): "habab_home/fast_dialog",
+    probatio.Required("enabled"): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def set_fast_dialog(hass, connection, msg):
+    """Persist the fast-dialog choice on the currently selected provider entry."""
+    lock = hass.data[DOMAIN]["settings_lock"]
+    if lock.locked():
+        connection.send_error(msg["id"], "busy", "busy")
+        return
+    async with lock:
+        entry = effective_provider_entry(hass.config_entries.async_entries(DOMAIN))
+        if entry is None:
+            connection.send_error(msg["id"], "provider_required", "provider_required")
+            return
+        options = {**entry.options, "fast_dialog": msg["enabled"]}
+        hass.config_entries.async_update_entry(entry, options=options)
+    connection.send_result(msg["id"], {"enabled": msg["enabled"]})
 
 
 @websocket_api.websocket_command({

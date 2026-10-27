@@ -23,7 +23,12 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.store_patch.start()
         self.addCleanup(self.store_patch.stop)
         self.user = SimpleNamespace(is_active=True, is_admin=True)
-        self.hass = SimpleNamespace(auth=SimpleNamespace(async_get_user=AsyncMock(return_value=self.user)))
+        # These legacy runtime/voice tests select the explicit OpenCode-only mode.
+        provider = SimpleNamespace(data={"provider": "habab"}, options={"fast_dialog": False})
+        self.hass = SimpleNamespace(
+            auth=SimpleNamespace(async_get_user=AsyncMock(return_value=self.user)),
+            config_entries=SimpleNamespace(async_entries=lambda _domain: [provider]),
+        )
         self.runtime = SimpleNamespace(
             lock=asyncio.Lock(), ensure=AsyncMock(), request=AsyncMock(), visible=Mock(return_value=[]),
             run=AsyncMock(return_value={"session_id": "s", "messages": []}),
@@ -31,6 +36,8 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
             diagnostics=AgentDiagnostics(),
         )
         self.service = AssistantService(self.hass, self.runtime)
+        self.voice_store = next(store for args, _kwargs, store in self.stores
+                                if args[2] == "habab_home.voice_turn_receipts")
 
     async def test_existing_web_and_telegram_history_maps_are_loaded_unchanged(self):
         self.stores[0][2].async_load.return_value = {"alice": "web-existing"}
@@ -95,7 +102,7 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.ensure.assert_not_awaited()
         self.runtime.request.assert_not_awaited()
         self.runtime.run.assert_not_awaited()
-        self.stores[3][2].async_save.assert_awaited_once()
+        self.voice_store.async_save.assert_awaited_once()
 
     async def test_voice_event_dedupe_conflict_and_receipt_namespace(self):
         await self.service.setup()
@@ -153,7 +160,7 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.service.record_voice_event(
                 "alice", "canonical-session", "valid-id", "user", "Question", history_epoch=4)
         self.assertEqual(self.service.voice_receipts, {})
-        self.stores[3][2].async_save.assert_not_awaited()
+        self.voice_store.async_save.assert_not_awaited()
 
     async def test_pending_voice_projects_mixed_events_and_legacy_pairs_in_receipt_order(self):
         await self.service.setup()
@@ -264,7 +271,7 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.stores[2][2].async_load.return_value = {
             "alice": {"session_id": None, "epoch": 5},
         }
-        self.stores[3][2].async_load.return_value = saved_receipts
+        self.voice_store.async_load.return_value = saved_receipts
         await self.service.setup()
         self.service.web_sessions = {"alice": "new-canonical-session"}
         self.service.web_contexts = {

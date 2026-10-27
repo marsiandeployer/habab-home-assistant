@@ -101,6 +101,39 @@ class AssistantStatusTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(deepseek["voice"]["selected_provider_protocol"])
         self.assertIsNone(deepseek["voice"]["default_voice_model"])
 
+    async def test_fast_dialog_status_defaults_on_and_reads_the_selected_entry_option(self):
+        default = await self.status({"provider": "openai", "api_key": "fixture-key"})
+        self.assertTrue(default["fast_dialog"])
+
+        selected_entry = SimpleNamespace(
+            data={"provider": "openai"},
+            options={"assistant_selected": True, "fast_dialog": False},
+        )
+        hass = SimpleNamespace(
+            data={},
+            config_entries=SimpleNamespace(async_entries=lambda _domain: [selected_entry]),
+        )
+        with patch.object(assistant_status, "build_voice_context", return_value={"web_access": {}}):
+            result = await get_assistant_status(
+                hass, "alice", {"provider": "openai", "api_key": "fixture-key"},
+                verify_telegram=False,
+            )
+        self.assertFalse(result["fast_dialog"])
+
+    async def test_fresh_install_without_provider_defaults_fast_dialog_to_enabled(self):
+        hass = SimpleNamespace(
+            data={DOMAIN: {
+                "setup_agent": SimpleNamespace(
+                    settings=lambda: (_ for _ in ()).throw(AgentError("provider_required"))
+                )
+            }},
+            config_entries=SimpleNamespace(async_entries=lambda _domain: []),
+        )
+        with patch.object(assistant_status, "build_voice_context", return_value={"web_access": {}}):
+            result = await get_assistant_status(hass, "alice", verify_telegram=False)
+        self.assertIsNone(result["selected_provider"])
+        self.assertTrue(result["fast_dialog"])
+
     async def test_android_web_access_is_in_text_runtime_status(self):
         web_access = {
             "status": "available", "phone_url": "http://127.0.0.1:8123",

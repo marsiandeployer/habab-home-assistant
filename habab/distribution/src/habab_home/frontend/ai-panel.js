@@ -1,4 +1,4 @@
-import { strings } from "./strings.js";
+import { strings } from "./strings.js?v=2";
 import "./telemetry-panel.js";
 
 const providers = {
@@ -26,6 +26,7 @@ const modelCopy = {
 };
 
 export function assistantProviderPresentation(entry) {
+  const fastDialog = entry?.fast_dialog === true;
   if (
     entry?.provider === "habab" &&
     typeof entry.managed_model === "string" &&
@@ -36,14 +37,17 @@ export function assistantProviderPresentation(entry) {
     const upstreamModel = typeof entry.configured_upstream_model === "string"
       ? entry.configured_upstream_model.trim() : "";
     if (entry.text_ready === true && upstreamProvider && upstreamModel) {
-      return { key: "currentAssistantManagedRoute", provider: upstreamProvider, model: upstreamModel };
+      return {
+        key: fastDialog ? "currentAssistantFastDialogManagedRoute" : "currentAssistantManagedRoute",
+        provider: upstreamProvider, model: upstreamModel,
+      };
     }
-    return { key: "currentAssistantManaged" };
+    return { key: fastDialog ? "currentAssistantFastDialogManaged" : "currentAssistantManaged" };
   }
   const model = typeof entry?.effective_model === "string" ? entry.effective_model.trim() : "";
   return model
-    ? { key: "currentAssistant", model }
-    : { key: "currentAssistantModelUnavailable" };
+    ? { key: fastDialog ? "currentAssistantFastDialog" : "currentAssistant", model }
+    : { key: fastDialog ? "currentAssistantFastDialogModelUnavailable" : "currentAssistantModelUnavailable" };
 }
 
 function assistantCheckStatusKey(entry, isChecking) {
@@ -132,6 +136,8 @@ class HababAIPanel extends HTMLElement {
     this.feedbackCredentialDraft = "";
     this.feedbackDeliveryState = { enabled: false, credential_configured: false, ready: false };
     this.feedbackDeliveryBusy = false;
+    this.fastDialogBusy = false;
+    this.fastDialogSaveFailed = false;
     this.onAssistantAvailability = () => this.updateControls();
   }
 
@@ -216,6 +222,9 @@ class HababAIPanel extends HTMLElement {
       <div id="feedback" role="status" aria-live="polite" hidden></div></section></div>
       <section class="assistant" aria-labelledby="assistant-title"><h2 id="assistant-title">${this.t("assistantTitle")}</h2><p>${this.t("assistantHelp")}</p>
       <p class="status routing-summary" id="assistant-provider-status" role="status" aria-live="polite"></p>
+      <label><input id="fast-dialog" type="checkbox"> ${this.t("fastDialogLabel")}</label>
+      <p class="help" id="fast-dialog-help">${this.t("fastDialogHelp")}</p>
+      <p class="help status" id="fast-dialog-status" role="status" aria-live="polite"></p>
       <div class="actions"><button type="button" id="open-assistant" class="primary">${this.t("openAssistant")}</button></div><p class="help status" id="assistant-status" role="status" aria-live="polite"></p>
       <div class="links"><a href="/config/voice-assistants/expose">${this.t("expose")}</a><a href="/config/voice-assistants/assistants">${this.t("pipelineSettings")}</a></div>
       <p class="help" id="pipeline-status"></p></section>
@@ -262,6 +271,7 @@ class HababAIPanel extends HTMLElement {
     });
     this.q("#check").addEventListener("click", () => this.check());
     this.q("#open-assistant").addEventListener("click", () => this.openAssistant());
+    this.q("#fast-dialog").addEventListener("change", (event) => this.setFastDialog(event.target.checked));
     this.q("#feedback-delivery-token").addEventListener("input", (event) => {
       this.feedbackCredentialDraft = event.target.value;
       this.applyFeedbackDeliveryControls();
@@ -393,7 +403,14 @@ class HababAIPanel extends HTMLElement {
           this.connectionCheckStates.get(this.checkStateKey(currentProvider)) === "checking",
         ).join("\n")
         : this.t(selected.length ? "assistantProviderAmbiguous" : "noAssistantProvider");
+    const fastDialog = this.q("#fast-dialog");
+    fastDialog.checked = currentProvider?.fast_dialog !== false;
+    this.q("#fast-dialog-status").textContent = this.fastDialogBusy
+      ? this.t("fastDialogSaving")
+      : this.fastDialogSaveFailed ? this.t("fastDialogSaveFailed") : this.t("fastDialogSaved");
+    this.q("#fast-dialog-status").dataset.error = String(!!this.fastDialogSaveFailed);
     this.shadowRoot.querySelectorAll("button,input,textarea").forEach((item) => { item.disabled = !!this.busy; });
+    fastDialog.disabled = !!this.busy || !!this.fastDialogBusy || !this.connectionsLoaded || !currentProvider;
     this.q("#check").disabled = !!this.busy || !this.connectionsLoaded || !entry;
     if (!this.connectionsLoaded) {
       this.q("#connection-status").textContent = this.t("connectionStatusUnavailable");
@@ -568,6 +585,28 @@ class HababAIPanel extends HTMLElement {
     const opened = window.hababAssistant?.open({}, this.q("#open-assistant")) === true;
     this.q("#assistant-status").textContent = opened ? "" : this.t("assistantUnavailable");
     return opened;
+  }
+
+  async setFastDialog(enabled) {
+    if (this.fastDialogBusy) return;
+    const selected = this.connections.filter((item) => item.assistant_selected);
+    if (!this.connectionsLoaded || selected.length !== 1) return;
+    this.fastDialogBusy = true;
+    this.fastDialogSaveFailed = false;
+    this.updateControls();
+    try {
+      const result = await this._hass.callWS({ type: "habab_home/fast_dialog", enabled });
+      if (result?.enabled !== enabled) throw new Error("readback_mismatch");
+      await this.refresh();
+      const readback = this.connections.find((item) => item.assistant_selected);
+      if (!this.connectionsLoaded || readback?.fast_dialog !== enabled) throw new Error("readback_mismatch");
+    } catch (_error) {
+      this.fastDialogSaveFailed = true;
+      await this.refresh();
+    } finally {
+      this.fastDialogBusy = false;
+      this.updateControls();
+    }
   }
 }
 

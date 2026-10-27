@@ -327,7 +327,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(realtime, 'async_dispatcher_send') as dispatch:
             result = await realtime.RealtimeTurnView().post(request)
         self.assertEqual(result.status, 400)
-        assistant.run.assert_awaited_once_with('alice', 'web', 'new-session', 'Включи свет', expected_history_epoch=0)
+        assistant.run.assert_awaited_once_with('alice', 'web', 'new-session', 'Включи свет', expected_history_epoch=0, executor_only=True)
         dispatch.assert_not_called()
 
     async def test_native_bootstrap_does_not_start_or_query_opencode(self):
@@ -486,7 +486,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             result = await realtime.RealtimeTurnView().post(request)
         self.assertEqual(result.status, 200)
         assistant.web_session.assert_awaited_once_with('alice')
-        assistant.run.assert_awaited_once_with('alice', 'web', 'ses_alice', 'Проверь свет', expected_history_epoch=0)
+        assistant.run.assert_awaited_once_with('alice', 'web', 'ses_alice', 'Проверь свет', expected_history_epoch=0, executor_only=True)
 
     async def test_realtime_feedback_uses_shared_local_save_and_current_owner_mapping(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
@@ -520,7 +520,8 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         setup_agent = SimpleNamespace(active=('alice', 'web-alice'))
         action_results = []
 
-        async def shared_run(run_owner, channel, session_id, text, expected_history_epoch=None):
+        async def shared_run(run_owner, channel, session_id, text, expected_history_epoch=None, *, executor_only=False):
+            self.assertTrue(executor_only)
             self.assertEqual((run_owner, channel, session_id, text, expected_history_epoch),
                              ('alice', 'web', 'web-alice', utterance, 9))
             result = await execute_setup_action(hass, setup_agent, run_owner, {
@@ -866,7 +867,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         with patch.object(realtime, 'async_dispatcher_send') as dispatch:
             response = await realtime.RealtimeTurnView().post(Request(owner, {'session_id': 'ses_alice', 'text': 'Check lights'}, assistant))
-        assistant.run.assert_awaited_once_with('alice', 'web', 'ses_alice', 'Check lights')
+        assistant.run.assert_awaited_once_with('alice', 'web', 'ses_alice', 'Check lights', executor_only=True)
         self.assertEqual(json.loads(response.body)['text'], 'Real answer')
         self.assertEqual(dispatch.call_args.args[1:], ('habab_voice_history_alice', result))
 

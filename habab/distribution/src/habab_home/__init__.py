@@ -127,7 +127,7 @@ async def async_setup(hass, config):
     await async_register_panel(
         hass, frontend_url_path="habab-ai", webcomponent_name="habab-ai-panel",
         sidebar_title="AI", sidebar_icon="mdi:assistant", require_admin=True,
-        module_url="/habab-home/ai-panel.js?v=3",
+        module_url="/habab-home/ai-panel.js?v=4",
     )
     await async_register_panel(
         hass, frontend_url_path="habab-telegram", webcomponent_name="habab-telegram-panel",

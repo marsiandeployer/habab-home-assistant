@@ -221,7 +221,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         agent.diagnostics = SimpleNamespace(record=Mock(), clear=Mock())
         entry = SimpleNamespace(data={
             "provider": "deepseek", "api_key": "private-provider-key", "model": "deepseek-flash",
-        })
+        }, options={})
         agent.hass = SimpleNamespace(data={}, config_entries=SimpleNamespace(async_entries=lambda _: [entry]))
         return agent
 

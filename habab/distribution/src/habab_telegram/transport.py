@@ -1,5 +1,6 @@
 """Resolve Telegram Bot API transport from the selected HA provider."""
 
+from collections.abc import Mapping
 import json
 import os
 from urllib.parse import urlsplit
@@ -116,7 +117,7 @@ def _selected_settings(hass):
         if getattr(error, "code", None) == "provider_required":
             return None
         raise TransportError("selected_provider_unavailable") from None
-    if not isinstance(settings, dict):
+    if not isinstance(settings, Mapping):
         raise TransportError("selected_provider_unavailable")
     return settings
 

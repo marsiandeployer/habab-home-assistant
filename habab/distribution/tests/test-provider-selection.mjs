@@ -272,6 +272,12 @@ test("managed Habab presentation never presents a saved model as the current mod
   assert.deepEqual(assistantProviderPresentation({
     provider: "openai", managed_model: null, effective_model: "gpt-4.1-mini",
   }), { key: "currentAssistant", model: "gpt-4.1-mini" });
+  const fastDialog = assistantProviderPresentation({
+    provider: "openai", managed_model: null, effective_model: "gpt-4.1-mini", fast_dialog: true,
+  });
+  assert.deepEqual(fastDialog, { key: "currentAssistantFastDialog", model: "gpt-4.1-mini" });
+  assert.match(strings.en[fastDialog.key].replace("{provider}", "OpenAI"), /directly to OpenAI/);
+  assert.doesNotMatch(strings.en[fastDialog.key], /OpenCode/);
   assert.deepEqual(providerModelPresentation("deepseek", { model: "deepseek-flash" }, "en"), {
     readOnly: false,
     label: null,
@@ -354,6 +360,47 @@ test("routing summary separates managed text, default voice, Android wake detect
   const withTTS = assistantRoutingSummary(entry, [{ tts_engine: "tts.google_translate_say" }], "en");
   assert.equal(withTTS.length, 6);
   assert.match(withTTS[5], /Separate TTS in Assist: tts\.google_translate_say/);
+
+  const fastDialog = assistantRoutingSummary({ ...entry, fast_dialog: true }, [], "en");
+  assert.match(fastDialog[0], /Text chat: directly to Habab/);
+  assert.doesNotMatch(fastDialog[0], /OpenCode/);
+});
+
+test("fast dialog toggle stays disabled while its setting is being saved", () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { hababAssistant: { available: false } },
+  });
+  try {
+    const entry = {
+      provider: "openai", assistant_selected: true, entry_id: "selected-entry",
+      model: "gpt-4.1-mini", effective_model: "gpt-4.1-mini", api_check_status: "verified",
+    };
+    const nodes = new Map();
+    const panel = Object.create(HababAIPanel.prototype);
+    const q = (selector) => {
+      if (!nodes.has(selector)) {
+        nodes.set(selector, { textContent: "", disabled: false, checked: false, dataset: {} });
+      }
+      return nodes.get(selector);
+    };
+    Object.assign(panel, {
+      provider: "openai", connections: [entry], connectionsLoaded: true,
+      busy: false, fastDialogBusy: true, fastDialogSaveFailed: false,
+      connectionCheckStates: new Map(), pipelines: [], language: "en",
+      q, entry: () => entry, checkStateKey: (value) => value.entry_id,
+      checkTime: () => null, t: (key) => strings.en[key],
+      applyFeedbackDeliveryControls: () => undefined,
+      shadowRoot: { querySelectorAll: () => [q("#fast-dialog")] },
+    });
+
+    panel.updateControls();
+    assert.equal(q("#fast-dialog").disabled, true);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+    else delete globalThis.window;
+  }
 });
 
 test("managed Habab API status describes the route, while direct provider status stays specific", () => {

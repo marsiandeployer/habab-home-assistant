@@ -35,6 +35,7 @@ from .assistant_identity import ASSISTANT_IDENTITY
 from .assistant_status import get_assistant_status
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
+from .fast_dialog import DIALOGUE_METADATA_KEY, decode_dialogue_part
 from .providers import (
     PROVIDERS,
     ProviderContract,
@@ -541,6 +542,10 @@ class SetupAgent:
                 if part.get("type") != "text":
                     continue
                 metadata = part.get("metadata")
+                if isinstance(metadata, dict) and DIALOGUE_METADATA_KEY in metadata:
+                    for turn in decode_dialogue_part(part) or []:
+                        result.append({"role": turn["role"], "text": self.clean(turn["text"])})
+                    continue
                 if (isinstance(metadata, dict)
                         and metadata.get(VOICE_EVENT_PROTOCOL_KEY) == VOICE_EVENT_PROTOCOL):
                     event = decode_voice_event_part(part)

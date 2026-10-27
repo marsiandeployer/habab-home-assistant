@@ -17,6 +17,7 @@ from homeassistant.components.habab_home.providers import (
 )
 from homeassistant.components.habab_home.websocket import (
     feedback_delivery_save, feedback_delivery_status, get_connection_key, save_connection,
+    set_fast_dialog,
 )
 from homeassistant.components.habab_home import websocket
 
@@ -229,6 +230,7 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
         result = connection.send_result.call_args.args[1]["connections"][0]
         self.assertEqual(result["assistant_selected"], True)
+        self.assertTrue(result["fast_dialog"])
         self.assertEqual(result["api_check_status"], "unknown")
         self.assertEqual(result["api_check_at"], "2026-10-24T12:00:00+00:00")
         self.assertEqual(result["api_check_reason"], "quota")
@@ -344,6 +346,33 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                     [row["provider"] for row in listed if row["assistant_selected"]],
                     [expected],
                 )
+
+    async def test_fast_dialog_command_is_admin_only_and_preserves_provider_options(self):
+        from homeassistant.components.habab_home.const import DOMAIN
+        from homeassistant.exceptions import Unauthorized
+
+        entry = SimpleNamespace(
+            entry_id="selected-entry", data={"provider": "openai"},
+            options={"assistant_selected": True, "habab_api_check": {"status": "unknown"}},
+        )
+        config_entries = SimpleNamespace(
+            async_entries=Mock(return_value=[entry]),
+            async_update_entry=Mock(side_effect=lambda current, options: setattr(current, "options", options)),
+        )
+        hass = SimpleNamespace(
+            data={DOMAIN: {"settings_lock": asyncio.Lock()}}, config_entries=config_entries,
+        )
+        non_admin = Mock(user=SimpleNamespace(is_admin=False))
+        with self.assertRaises(Unauthorized):
+            await set_fast_dialog(hass, non_admin, {"id": 10, "enabled": False})
+        config_entries.async_update_entry.assert_not_called()
+
+        admin = Mock(user=SimpleNamespace(is_admin=True))
+        await inspect.unwrap(set_fast_dialog)(hass, admin, {"id": 11, "enabled": False})
+        self.assertEqual(entry.options, {
+            "assistant_selected": True, "habab_api_check": {"status": "unknown"}, "fast_dialog": False,
+        })
+        admin.send_result.assert_called_once_with(11, {"enabled": False})
 
     async def test_successful_save_selects_provider_without_returning_flow_credentials(self):
         from homeassistant.components.habab_home.const import DOMAIN
