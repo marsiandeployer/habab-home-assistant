@@ -15,4 +15,11 @@ final class VoiceFinishTrigger {
     static String fromFailureCode(String code) {
         return code != null && code.endsWith("_timeout") ? TIMEOUT : ERROR;
     }
+
+    static String logLine(String value) {
+        if (!TOOL.equals(value) && !IDLE_20S.equals(value) && !AUDIO_LIMIT.equals(value)
+                && !TIMEOUT.equals(value) && !ERROR.equals(value)
+                && !SERVICE_STOP.equals(value) && !NORMAL.equals(value)) return null;
+        return "finish_trigger=" + value;
+    }
 }

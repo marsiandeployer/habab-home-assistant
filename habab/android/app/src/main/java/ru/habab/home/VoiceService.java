@@ -384,7 +384,7 @@ public final class VoiceService extends Service {
                     } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.DRAIN_RESULT) {
                         pending.clear(); client.awaitToolResult(); detector.reset();
                     } else if (client.ready() && !status.equals("thinking") && now - lastActivity > 20000) {
-                        finishTrigger = VoiceFinishTrigger.IDLE_20S;
+                        recordFinishTrigger(VoiceFinishTrigger.IDLE_20S);
                         timings.put("end_idle_elapsed_ms", now - lastActivity);
                         client.finish(VoiceFinishTrigger.IDLE_20S); pending.clear(); detector.reset();
                     } else if (!signals.allowsAudio()) {
@@ -439,7 +439,9 @@ public final class VoiceService extends Service {
             @Override public void failed(String code) { if (generation == attempt) failure = VoiceFailure.normalize(code); }
             @Override public void ended() { if (running && generation == attempt) endRequested = true; }
             @Override public void timing(String name, long value) { if (generation == attempt) timings.put(name, value); }
-            @Override public void finishTrigger(String value) { if (generation == attempt) { finishTrigger = value; writeStatus(true); } }
+            @Override public void finishTrigger(String value) {
+                if (generation == attempt) { recordFinishTrigger(value); writeStatus(true); }
+            }
             @Override public void routed(int type, String name) {
                 if (generation == attempt) { outputDeviceType = type; outputDeviceName = name; writeStatus(true); }
             }
@@ -465,9 +467,9 @@ public final class VoiceService extends Service {
         generation++;
         RealtimeVoice client = realtime; realtime = null;
         if (client != null && finishTrigger == null) {
-            finishTrigger = reason == VoiceSessionSignals.EndReason.ERROR ? VoiceFinishTrigger.ERROR
+            recordFinishTrigger(reason == VoiceSessionSignals.EndReason.ERROR ? VoiceFinishTrigger.ERROR
                     : reason == VoiceSessionSignals.EndReason.STOP ? VoiceFinishTrigger.SERVICE_STOP
-                    : VoiceFinishTrigger.NORMAL;
+                    : VoiceFinishTrigger.NORMAL);
         }
         if (client != null) client.close();
         synchronized (cueLock) {
@@ -488,6 +490,14 @@ public final class VoiceService extends Service {
 
     private synchronized void releaseAudioFocus() {
         manager.abandonAudioFocusRequest(audioFocus); hasAudioFocus = false; releasingFocus = false;
+    }
+
+    private synchronized void recordFinishTrigger(String value) {
+        boolean changed = value == null ? finishTrigger != null : !value.equals(finishTrigger);
+        finishTrigger = value;
+        if (!changed) return;
+        String logLine = VoiceFinishTrigger.logLine(value);
+        if (logLine != null) android.util.Log.i("HababVoiceTiming", logLine);
     }
 
     private void refreshAudioRoute() {
