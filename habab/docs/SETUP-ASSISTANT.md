@@ -67,14 +67,14 @@ HTTP-запросы не выполняются. Адрес и код не вх�
 
 ```sh
 docker compose -f compose.yaml build homeassistant
-python3 prepare-opencode.py --image habab-home:0.3.4
+python3 prepare-opencode.py --image habab-home:0.3.6
 docker compose --env-file .env.opencode -f compose.yaml -f compose.opencode.yaml up -d homeassistant
 ```
 
 Если пакет находится в другом месте:
 
 ```sh
-python3 prepare-opencode.py --binary /absolute/path/to/musl/opencode --image habab-home:0.3.4
+python3 prepare-opencode.py --binary /absolute/path/to/musl/opencode --image habab-home:0.3.6
 ```
 
 Откройте Home Assistant, войдите администратором и подключите DeepSeek в разделе **AI**. Чат появится после авторизованной загрузки; можно попросить: «Проверь, какие устройства обнаружил Home Assistant».
