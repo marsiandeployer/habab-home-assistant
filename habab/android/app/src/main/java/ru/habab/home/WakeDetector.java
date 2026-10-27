@@ -19,6 +19,7 @@ final class WakeDetector implements AutoCloseable {
     private final ArrayDeque<short[]> preRoll = new ArrayDeque<>();
     private boolean wasSpeech;
     private long utteranceStarted;
+    private WakeMatchGate.MatchSource lastMatchSource;
 
     static String normalize(String value) {
         return WakeMatchGate.normalize(value);
@@ -40,6 +41,7 @@ final class WakeDetector implements AutoCloseable {
     }
 
     boolean accept(short[] samples, int count, long now) throws Exception {
+        lastMatchSource = null;
         boolean speech = gate.speech(samples, count);
         boolean detected = false;
         if (speech) {
@@ -56,9 +58,10 @@ final class WakeDetector implements AutoCloseable {
             // frames before resetting, otherwise a final wake phrase can be discarded.
             JSONObject result = new JSONObject(recognizer.getFinalResult());
             detected = matchGate.accept(result.optString("text"), WakeMatchGate.ResultKind.VAD_END);
-            reset();
+            if (detected) lastMatchSource = matchGate.matchSource();
+            resetRecognizer();
         }
-        if (detected) { reset(); return true; }
+        if (detected) { resetRecognizer(); return true; }
         preRoll.add(java.util.Arrays.copyOf(samples, count));
         while (preRoll.size() > 15) preRoll.removeFirst();
         wasSpeech = speech;
@@ -69,6 +72,7 @@ final class WakeDetector implements AutoCloseable {
         if (!recognizer.acceptWaveForm(samples, count)) return false;
         JSONObject result = new JSONObject(recognizer.getResult());
         boolean detected = matchGate.accept(result.optString("text"), WakeMatchGate.ResultKind.ENDPOINT);
+        if (detected) lastMatchSource = matchGate.matchSource();
         resetRecognizer();
         utteranceStarted = now;
         return detected;
@@ -76,6 +80,8 @@ final class WakeDetector implements AutoCloseable {
 
     private void resetRecognizer() { recognizer.reset(); matchGate.reset(); }
 
-    void reset() { resetRecognizer(); preRoll.clear(); wasSpeech = false; }
+    WakeMatchGate.MatchSource lastMatchSource() { return lastMatchSource; }
+
+    void reset() { lastMatchSource = null; resetRecognizer(); preRoll.clear(); wasSpeech = false; }
     @Override public void close() { recognizer.close(); model.close(); }
 }

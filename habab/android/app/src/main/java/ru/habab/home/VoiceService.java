@@ -98,6 +98,7 @@ public final class VoiceService extends Service {
         }
     };
     private long frames, wakeCount, replies, statusWritten;
+    private String lastWakeSource = "none";
     private volatile long audioUploaded;
 
     @Override public IBinder onBind(Intent intent) { return null; }
@@ -295,6 +296,7 @@ public final class VoiceService extends Service {
             JSONObject result = new JSONObject().put("phase", status).put("active", running)
                     .put("serviceGeneration", serviceGeneration).put("lifecycleCleanupFailed", lifecycleCleanupFailed)
                     .put("captureFrames", frames).put("wakeCount", wakeCount).put("replies", replies)
+                    .put("lastWakeSource", lastWakeSource)
                     .put("uploadedPcmBytes", audioUploaded).put("screenOn", getSystemService(PowerManager.class).isInteractive())
                     .put("timingsMs", new JSONObject(timings))
                     .put("audio", new JSONObject().put("echoAvailable", echoAvailable).put("echoEnabled", echoEnabled)
@@ -366,7 +368,11 @@ public final class VoiceService extends Service {
                         endRequested = false;
                         endSession(VoiceSessionSignals.EndReason.NORMAL); pending.clear(); detector.reset(); phase("wake");
                     } else if (client == null && now >= wakeSuppressedUntil) {
-                        if (detector.accept(samples, count, now)) { wakeCount++; started = now; lastActivity = now; beginSession(now); }
+                        if (detector.accept(samples, count, now)) {
+                            WakeMatchGate.MatchSource source = detector.lastMatchSource();
+                            lastWakeSource = source == null ? "unknown" : source.statusValue();
+                            wakeCount++; started = now; lastActivity = now; beginSession(now);
+                        }
                     } else if (client == null) {
                         pending.clear(); // The END cue and its acoustic tail cannot activate the next session.
                     } else if (client.finishing()) {

@@ -14,7 +14,10 @@ public class WakeMatchGateTest {
     @Test public void partialExactThenMatchingEndpointFinalMatchesOnce() {
         WakeMatchGate gate = new WakeMatchGate("эй дом");
         assertFalse(gate.accept("эй дом", WakeMatchGate.ResultKind.PARTIAL));
+        assertNull(gate.matchSource());
         assertTrue(gate.accept("эй дом", WakeMatchGate.ResultKind.ENDPOINT));
+        assertEquals(WakeMatchGate.MatchSource.ENDPOINT_FINAL, gate.matchSource());
+        assertEquals("endpoint_final", gate.matchSource().statusValue());
         assertFalse(gate.accept("эй дом", WakeMatchGate.ResultKind.ENDPOINT));
     }
 
@@ -22,6 +25,8 @@ public class WakeMatchGateTest {
         WakeMatchGate gate = new WakeMatchGate("эй дом");
         assertFalse(gate.accept("эй дом", WakeMatchGate.ResultKind.PARTIAL));
         assertTrue(gate.accept("эй дом", WakeMatchGate.ResultKind.VAD_END));
+        assertEquals(WakeMatchGate.MatchSource.VAD_END_FINAL, gate.matchSource());
+        assertEquals("vad_end_final", gate.matchSource().statusValue());
     }
 
     @Test public void resetAllowsSamePhraseInTheNextUtterance() {
@@ -29,7 +34,18 @@ public class WakeMatchGateTest {
         assertTrue(gate.accept("эй дом", WakeMatchGate.ResultKind.ENDPOINT));
         assertFalse(gate.accept("эй дом", WakeMatchGate.ResultKind.ENDPOINT));
         gate.reset();
+        assertNull(gate.matchSource());
         assertTrue(gate.accept("эй дом", WakeMatchGate.ResultKind.VAD_END));
+        assertEquals(WakeMatchGate.MatchSource.VAD_END_FINAL, gate.matchSource());
+    }
+
+    @Test public void rejectedResultsNeverExposeAWakeSource() {
+        WakeMatchGate gate = new WakeMatchGate("эй дом");
+        assertFalse(gate.accept("эй домик", WakeMatchGate.ResultKind.ENDPOINT));
+        assertNull(gate.matchSource());
+        gate.reset();
+        assertFalse(gate.accept("эй дом", WakeMatchGate.ResultKind.PARTIAL));
+        assertNull(gate.matchSource());
     }
 
     @Test public void userPhraseUsesWholeNormalizedTextAndKeepsWordBoundaries() {
