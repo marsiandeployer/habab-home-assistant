@@ -74,7 +74,7 @@ def copy_sources(rootfs):
     for name in ('habab_home', 'habab_telegram', 'habab_yandex_speech', 'idigital_sms'):
         sources.append((DIST / 'src' / name, rootfs / 'usr/src/homeassistant/homeassistant/components' / name))
     sources.append((DIST / 'telegram-agent', rootfs / 'opt/habab-telegram'))
-    allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css', '.vtt'}
+    allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css', '.vtt', '.LICENSE'}
     for directory, destination in sources:
         if not directory.exists():
             continue
@@ -82,7 +82,7 @@ def copy_sources(rootfs):
             shutil.rmtree(destination)
         for source in sorted(directory.rglob('*')):
             relative = source.relative_to(DIST)
-            include_services = relative.as_posix() == 'src/idigital_sms/services.yaml'
+            include_services = source.name == 'services.yaml'
             if not source.is_file() or (source.suffix not in allowed and not include_services):
                 continue
             if {'__pycache__', 'node_modules', 'tests', 'test', '.git'}.intersection(source.relative_to(directory).parts):
