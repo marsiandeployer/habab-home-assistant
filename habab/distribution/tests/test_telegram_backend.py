@@ -44,6 +44,8 @@ class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
             }},
             async_create_task=asyncio.create_task,
         )
+        manager.maintenance = False
+        manager.hass.config = SimpleNamespace(path=lambda name: "/fixture-config/" + name)
         manager.entries = {"entry": {"chat_id": "10", "user_id": "20", "username": "testbot"}}
         manager.entries["entry"]["ready"] = True
         manager.group_bindings = {}

@@ -15,7 +15,7 @@ from homeassistant.components.habab_telegram.transport import (
 
 
 def provider_hass(provider, api_key):
-    return SimpleNamespace(data={"habab_home": {
+    return SimpleNamespace(data={"habab_telegram": SimpleNamespace(maintenance=False), "habab_home": {
         "setup_agent": SimpleNamespace(
             settings=lambda: {"provider": provider, "api_key": api_key}),
     }})

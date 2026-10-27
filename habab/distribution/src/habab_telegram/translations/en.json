@@ -12,6 +12,9 @@
     },
     "error": {
       "bot_already_configured": "This bot is already connected to another Home Assistant account. Use a different bot."
+    },
+    "abort": {
+      "telegram_maintenance": "Telegram is paused for server maintenance. Resume it through the server maintenance procedure."
     }
   }
 }

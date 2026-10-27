@@ -20,6 +20,7 @@ from .const import (
 )
 from .websocket import async_register_commands
 from .inbox import InboxStore, TelegramInbox
+from .maintenance import maintenance_enabled, maintenance_path
 from .transport import (
     TransportError, resolve_telegram_transport, telegram_transport_identity,
     worker_proxy_env,
@@ -34,6 +35,7 @@ class TelegramManager:
 
     def __init__(self, hass):
         self.hass = hass
+        self.maintenance = maintenance_enabled(hass)
         self.entries = {}
         self.pairing = {}
         self.pair_locks = {}
@@ -73,6 +75,10 @@ class TelegramManager:
         self._closed = False
 
     async def setup(self):
+        if self.maintenance:
+            async_register_commands(self.hass)
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self.close)
+            return
         await self.inbox.load()
         self.dedupe_order = await self.store.async_load() or []
         self.dedupe_order = self.dedupe_order[-2000:]
@@ -151,6 +157,8 @@ class TelegramManager:
 
     @callback
     def _provider_config_changed(self):
+        if self.maintenance:
+            return
         self.provider_config_epoch += 1
         if (self._closed or self.provider_refresh_task
                 and not self.provider_refresh_task.done()):
@@ -159,6 +167,8 @@ class TelegramManager:
             self._reload_telegram_for_provider_change())
 
     async def _reload_telegram_for_provider_change(self):
+        if self.maintenance:
+            return
         epoch = self.provider_config_epoch
         try:
             await asyncio.sleep(0.2)
@@ -220,6 +230,9 @@ class TelegramManager:
                      if entry.data.get("owner_id") == owner), None)
 
     async def status(self, owner):
+        if self.maintenance:
+            return {"phase": "error", "error": "telegram_maintenance", "maintenance": True,
+                    "group": {"phase": "error", "error": "telegram_maintenance"}}
         entry = self.entry_for_owner(owner)
         if not entry:
             return {"phase": "not_configured", "group": {"phase": "not_configured"}}
@@ -254,6 +267,8 @@ class TelegramManager:
         return result
 
     async def recover_inbox(self, owner, recovery_id):
+        if self.maintenance:
+            raise ValueError("telegram_maintenance")
         if not await self._owner_is_active_admin(owner):
             raise ValueError("not_allowed")
         entry = self.entry_for_owner(owner)
@@ -273,6 +288,8 @@ class TelegramManager:
         return {"recovered": True, "discarded": discarded}
 
     async def configure(self, owner, token, proxy_url=""):
+        if self.maintenance:
+            raise ValueError("telegram_maintenance")
         if not token.strip() or len(token) > 256:
             raise ValueError("invalid_token")
         from homeassistant.config_entries import SOURCE_USER
@@ -291,6 +308,8 @@ class TelegramManager:
             await self.pair(owner)
 
     async def pair(self, owner):
+        if self.maintenance:
+            raise ValueError("telegram_maintenance")
         entry = self.entry_for_owner(owner)
         if not entry:
             raise ValueError("not_configured")
@@ -311,6 +330,8 @@ class TelegramManager:
             return {"pairing_url": self.pairing[entry.entry_id]["url"]}
 
     async def group_pair(self, owner):
+        if self.maintenance:
+            raise ValueError("telegram_maintenance")
         """Issue a one-time group-start link to the already paired owner."""
         entry = self.entry_for_owner(owner)
         if not entry:
@@ -384,6 +405,8 @@ class TelegramManager:
         return {"phase": "not_configured"}
 
     async def unlink_group(self, owner):
+        if self.maintenance:
+            raise ValueError("telegram_maintenance")
         if not await self._owner_is_active_admin(owner):
             raise ValueError("not_allowed")
         entry = self.entry_for_owner(owner)
@@ -403,6 +426,8 @@ class TelegramManager:
 
     async def notify_setup_complete(self, origin, domain):
         """Send a completion only to the exact currently bound private origin."""
+        if self.maintenance:
+            return False
         if not isinstance(origin, dict) or origin.get("channel") != "telegram":
             return False
         owner, entry_id, chat_id = (origin.get("owner"), origin.get("entry_id"),
@@ -461,6 +486,8 @@ class TelegramManager:
         return True
 
     async def _retry_setup_notifications(self):
+        if self.maintenance:
+            return
         data = self.hass.data.get("habab_home", {})
         integration_setup = data.get("integration_setup")
         xiaomi_setup = data.get("xiaomi_setup")
@@ -494,6 +521,8 @@ class TelegramManager:
 
     async def get_chat_member(self, entry_id, chat_id, user_id):
         """Fail-closed Bot API membership lookup through the existing worker."""
+        if self.maintenance:
+            return None
         if (type(chat_id) is not int or type(user_id) is not int
                 or not 0 < user_id <= 2**53 - 1 or not -2**53 < chat_id < 0):
             return None
@@ -876,6 +905,8 @@ class TelegramManager:
         return task
 
     async def async_setup_entry(self, entry):
+        if self.maintenance:
+            return
         proxy = entry.data.get("proxy_url")
         try:
             route_identity = telegram_transport_identity(self.hass, proxy)
@@ -888,6 +919,7 @@ class TelegramManager:
             raise
         env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ", "SSL_CERT_FILE") if k in os.environ}
         env.update({"HOME": "/config/.habab-telegram", "NODE_NO_WARNINGS": "1"})
+        env["HABAB_TELEGRAM_MAINTENANCE_FILE"] = maintenance_path(self.hass)
         proxy_env = worker_proxy_env(entry.data.get("proxy_url"))
         if proxy_env:
             env.update(proxy_env)
@@ -927,6 +959,8 @@ class TelegramManager:
             self._consume(entry), f"Habab Telegram consumer {entry.entry_id}")
 
     async def _write(self, entry_id, payload):
+        if self.maintenance:
+            return False
         state = self.entries.get(entry_id)
         if not state:
             return False
@@ -962,6 +996,8 @@ class TelegramManager:
         return chunks
 
     async def send(self, entry_id, chat_id, text):
+        if self.maintenance:
+            return False
         try:
             chunks = self._split_send_text(chat_id, str(text))
         except (UnicodeEncodeError, ValueError):
@@ -999,6 +1035,8 @@ class TelegramManager:
                 self.pending_sends.pop(request_id, None)
 
     async def typing(self, entry_id, chat_id):
+        if self.maintenance:
+            return False
         try:
             await self._write(entry_id, {"type": "typing", "chat_id": int(chat_id)})
         except (ValueError, BrokenPipeError, ConnectionError):
@@ -1006,6 +1044,8 @@ class TelegramManager:
         return True
 
     async def _reader(self, entry, state):
+        if self.maintenance:
+            return
         try:
             while line := await state["process"].stdout.readline():
                 if len(line) > MAX_LINE:
@@ -1098,6 +1138,8 @@ class TelegramManager:
         return None
 
     async def _receive_update(self, entry, payload):
+        if self.maintenance:
+            return False
         # At capacity, retain one unACKed update while still reading send/member
         # replies. The worker cannot advance its offset or deliver the next one.
         waiting = self._waiting_payload(entry)
@@ -1134,6 +1176,8 @@ class TelegramManager:
             await self._receive_update(entry, waiting)
 
     def _pump_inbox(self, entry):
+        if self.maintenance:
+            return
         state = self.entries.get(entry.entry_id)
         queue = self.queues.get(entry.entry_id)
         if state is None or queue is None or not state.get("ready"):
@@ -1201,6 +1245,8 @@ class TelegramManager:
         return True
 
     async def _handle_control(self, entry, msg):
+        if self.maintenance:
+            return
         try:
             if await self._begin_incoming(msg):
                 await self.handle_one(entry, msg)
@@ -1283,6 +1329,8 @@ class TelegramManager:
         return True
 
     async def handle_one(self, entry, msg):
+        if self.maintenance:
+            return
         if msg.get("_habab_handled"):
             return
         state = self.entries.get(entry.entry_id)
@@ -1500,6 +1548,8 @@ class TelegramManager:
                 await asyncio.gather(monitor, return_exceptions=True)
 
     async def _consume(self, entry):
+        if self.maintenance:
+            return
         queue = self.queues[entry.entry_id]
         while True:
             msg = await queue.get()
@@ -1612,6 +1662,8 @@ class TelegramManager:
         self.group_candidate_tasks.pop(entry_id, None)
 
     async def unlink(self, owner):
+        if self.maintenance:
+            raise ValueError("telegram_maintenance")
         entry = self.entry_for_owner(owner)
         if entry:
             lock = self.pair_locks.setdefault(entry.entry_id, asyncio.Lock())

@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import { existsSync } from 'node:fs';
 import { TelegramTransport } from 'noxon-telegram';
 import { createTelegramRelayFetch, telegramTransportConfig } from './relay-fetch.mjs';
 
@@ -23,6 +24,8 @@ const shutdown = () => {
 };
 let configured = false;
 let configuring = false;
+const maintenance = existsSync(process.env.HABAB_TELEGRAM_MAINTENANCE_FILE
+  || '/config/.habab-telegram-maintenance');
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const validCode = (error, fallback) => error instanceof Error && /^[a-z0-9_]{1,64}$/i.test(error.message) ? error.message : fallback;
 
@@ -31,6 +34,10 @@ input.on('line', async (line) => {
   let command;
   try { command = JSON.parse(line); } catch { emit({ type: 'error', operation: configured ? 'send' : 'configure', code: 'invalid_input', fatal: !configured }); return; }
   try {
+    if (maintenance && command?.type !== 'shutdown') {
+      emit({ type: 'error', operation: 'configure', code: 'telegram_maintenance', fatal: true });
+      return;
+    }
     if (!configured && !configuring && command?.type === 'configure') {
       configuring = true;
       relay = createTelegramRelayFetch({ config: telegramTransportConfig(command) });

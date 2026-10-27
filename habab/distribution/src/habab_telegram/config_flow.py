@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
+from .maintenance import maintenance_enabled
 from .transport import (
     get_me_request, proxy_url, resolve_telegram_transport,
 )
@@ -63,6 +64,8 @@ class HababTelegramConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
+        if maintenance_enabled(self.hass):
+            return self.async_abort(reason="telegram_maintenance")
         owner_id = self.context.get("habab_owner_id")
         if not isinstance(owner_id, str) or not owner_id:
             return self.async_abort(reason="not_allowed")
