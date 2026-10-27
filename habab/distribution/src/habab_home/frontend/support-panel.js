@@ -5,13 +5,13 @@ const copy = {
     title: "Habab Home support (beta)",
     intro: "Questions about installation, devices, or setup are welcome. Beta feedback is welcome too.",
     open: "Open “Habab Home — поддержка (бета)” in Telegram",
-    safety: "Group messages are visible to all members. Do not post passwords, API keys, or verification codes.",
+    safety: "Group messages are visible to all members. Do not share passwords, API keys, tokens, Wi-Fi access codes, or other private details about your home.",
   },
   ru: {
     title: "Поддержка Habab Home (бета)",
     intro: "Здесь можно задать вопрос об установке, устройствах и настройке. Будем рады отзывам о бета-версии.",
     open: "Открыть «Habab Home — поддержка (бета)» в Telegram",
-    safety: "Сообщения группы видны всем её участникам. Не публикуйте пароли, API-ключи и коды подтверждения.",
+    safety: "Сообщения группы видны всем её участникам. Не публикуйте пароли, API-ключи, токены, коды доступа к Wi-Fi или другие личные данные о доме.",
   },
 };
 
