@@ -1,4 +1,5 @@
-import {strings} from "./strings.js";
+import {strings} from "./strings.js?v=2";
+import {automationDismissalStorageKey, readAutomationDismissals, writeAutomationDismissals} from "./automation-dismissal.js";
 
 // A protected web card owns native configuration writes. The model's local CLI
 // can only draft/status; neither a model boolean nor a message confirms a draft.
@@ -7,6 +8,7 @@ export class HababAutomationSetup extends HTMLElement {
     super();
     this.attachShadow({mode: "open"});
     this.records = [];
+    this.dismissedRecords = new Set();
     this.generation = 0;
     this.busy = false;
   }
@@ -33,12 +35,38 @@ export class HababAutomationSetup extends HTMLElement {
     this.records = [];
     this.busy = false;
     this.error = false;
+    this.dismissedRecords = this._readDismissedRecords();
     clearTimeout(this.pollTimer);
     this.render();
   }
 
   disconnectedCallback() { this._reset(); }
   _t(key) { return (strings[this._hass?.language?.startsWith("ru") ? "ru" : "en"])[key]; }
+  _dismissalKey() { return automationDismissalStorageKey(this.owner, this._sessionId); }
+  _readDismissedRecords() {
+    let storage;
+    try { storage = globalThis.localStorage; } catch (_) { storage = undefined; }
+    return readAutomationDismissals(storage, this._dismissalKey());
+  }
+  _writeDismissedRecords() {
+    let storage;
+    try { storage = globalThis.localStorage; } catch (_) { storage = undefined; }
+    return writeAutomationDismissals(storage, this._dismissalKey(), this.dismissedRecords);
+  }
+  _visibleRecords() { return this.records.filter((record) => !this.dismissedRecords.has(record.draft_id)); }
+  dismissCard(record) {
+    if (!this._valid(this._scope()) || ["saving", "deleting", "error"].includes(record.phase) ||
+        typeof record.draft_id !== "string" || !record.draft_id) return;
+    this.dismissedRecords.add(record.draft_id);
+    this._writeDismissedRecords();
+    this.render();
+  }
+  restoreCards() {
+    if (!this._valid(this._scope())) return;
+    this.dismissedRecords.clear();
+    this._writeDismissedRecords();
+    this.render();
+  }
   _scope() { return {generation: this.generation, hass: this._hass, sessionId: this._sessionId, owner: this.owner}; }
   _valid(scope) {
     return this.isConnected && scope.generation === this.generation &&
@@ -178,7 +206,14 @@ export class HababAutomationSetup extends HTMLElement {
       button:disabled{opacity:.5;cursor:default}button:focus-visible,summary:focus-visible{outline:3px solid var(--primary-color);outline-offset:2px}
       [role=alert]{color:var(--error-color)}
     </style>`;
-    for (const record of this.records) {
+    const restore = document.createElement("button");
+    restore.className = "restore-hidden";
+    restore.textContent = `${this._t("automationRestoreCards")} (${this.dismissedRecords.size})`;
+    restore.hidden = this.dismissedRecords.size === 0;
+    restore.disabled = this.busy;
+    restore.addEventListener("click", () => this.restoreCards());
+    this.shadowRoot.append(restore);
+    for (const record of this._visibleRecords()) {
       const article = document.createElement("article");
       const heading = document.createElement("h3");
       heading.textContent = record.kind === "automation" ? this._t("automationDraft") : record.config.name;
@@ -207,6 +242,9 @@ export class HababAutomationSetup extends HTMLElement {
       if (["saving", "deleting", "error"].includes(record.phase)) button("automationCheck", () => this.refresh());
       if (record.phase === "saving" && record.can_dismiss) button("automationDismiss", () => this.dismissAbsent(record));
       if (record.phase === "saved") button("automationDelete", () => this.cleanup(record));
+      if (!["saving", "deleting", "error"].includes(record.phase)) {
+        button("automationHideCard", () => this.dismissCard(record));
+      }
       if (record.entity_id) {
         const entity = document.createElement("p"); entity.textContent = record.entity_id; article.append(entity);
       }

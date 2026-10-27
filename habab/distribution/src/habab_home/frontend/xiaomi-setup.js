@@ -16,7 +16,7 @@ const copy = {
     callbackLabel: 'Адрес страницы после входа', callbackSubmit: 'Завершить вход',
     homes: 'Выберите дома для подключения.', selectHomes: 'Подключить выбранные дома',
     configuring: 'Home Assistant добавляет устройства…', completed: 'Xiaomi Home подключён.',
-    dismissCompleted: 'Скрыть подключение Xiaomi',
+    dismissCompleted: 'Скрыть карточку подключения Xiaomi',
     counts: 'Устройств: {devices}. Сущностей в реестре: {entities}.', verify: 'Проверить с помощником', openDevices: 'Показать пылесос на главной',
     error: 'Подключение не завершено.', retry: 'Повторить подключение',
     installation_failed: 'Не удалось скачать или проверить интеграцию. Повторите установку.',
@@ -44,7 +44,7 @@ const copy = {
     callbackLabel: 'Page address after sign-in', callbackSubmit: 'Complete sign-in',
     homes: 'Choose the homes to connect.', selectHomes: 'Connect selected homes',
     configuring: 'Home Assistant is adding devices…', completed: 'Xiaomi Home is connected.',
-    dismissCompleted: 'Hide Xiaomi setup',
+    dismissCompleted: 'Hide Xiaomi setup card',
     counts: 'Devices: {devices}. Registered entities: {entities}.', verify: 'Check with the assistant', openDevices: 'Show vacuum on Home',
     error: 'Setup is incomplete.', retry: 'Retry sign-in',
     installation_failed: 'The integration could not be downloaded or verified. Retry installation.',
@@ -171,5 +171,5 @@ class HababXiaomiSetup extends HTMLElement {
     this.dispatchEvent(new CustomEvent('habab-setup-dismiss', {bubbles: true, composed: true}));
   }
 }
-export function canDismissXiaomiSetup(phase) { return phase === 'completed'; }
+export function canDismissXiaomiSetup(phase) { return phase === 'completed' || phase === 'error'; }
 if (!customElements.get('habab-xiaomi-setup')) customElements.define('habab-xiaomi-setup', HababXiaomiSetup);

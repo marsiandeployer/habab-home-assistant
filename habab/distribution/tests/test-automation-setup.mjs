@@ -150,3 +150,40 @@ test("previous-chat recovery receipts cannot authorize saving", async () => {
   await card.save(card.records[0]);
   assert.deepEqual(calls, []);
 });
+
+test("card dismissal survives refresh but stays scoped to its owner and chat", () => {
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map();
+  Object.defineProperty(globalThis, "localStorage", {configurable: true, value: {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  }});
+  try {
+    const {card, hass} = fixture();
+    const stale = record();
+    const other = {...record(), draft_id: "e".repeat(32)};
+    card.records = [stale, other];
+    card.dismissCard(stale);
+    assert.deepEqual(card._visibleRecords().map(({draft_id}) => draft_id), [other.draft_id]);
+
+    const refreshed = new HababAutomationSetup();
+    refreshed.render = () => {};
+    refreshed.hass = hass;
+    refreshed.sessionId = "web-one";
+    refreshed.records = [stale, other];
+    assert.deepEqual(refreshed._visibleRecords().map(({draft_id}) => draft_id), [other.draft_id]);
+
+    refreshed.sessionId = "new-web";
+    refreshed.records = [stale, other];
+    assert.deepEqual(refreshed._visibleRecords().map(({draft_id}) => draft_id), [stale.draft_id, other.draft_id]);
+
+    refreshed.sessionId = "web-one";
+    refreshed.records = [stale, other];
+    refreshed.restoreCards();
+    assert.deepEqual(refreshed._visibleRecords().map(({draft_id}) => draft_id), [stale.draft_id, other.draft_id]);
+  } finally {
+    if (previousStorage) Object.defineProperty(globalThis, "localStorage", previousStorage);
+    else delete globalThis.localStorage;
+  }
+});

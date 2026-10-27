@@ -573,7 +573,7 @@ test("private chat registers its own reload provider and releases it on disconne
   }
 });
 
-test("completed Xiaomi card dismissal stays hidden across loads and resets for reopen or a new setup phase", () => {
+test("completed or failed Xiaomi card dismissal stays hidden and resets for reopen or a new setup phase", () => {
   const presentation = setupChatModule.getXiaomiSetupPresentation;
   assert.deepEqual(presentation("completed", false), {
     showCard: true, showReopen: false, clearDismissal: false,
@@ -586,6 +586,12 @@ test("completed Xiaomi card dismissal stays hidden across loads and resets for r
   assert.deepEqual(presentation("completed", false), {
     showCard: true, showReopen: false, clearDismissal: false,
   }, "explicit reopen clears the local dismissal");
+  assert.deepEqual(presentation("error", false), {
+    showCard: true, showReopen: false, clearDismissal: false,
+  });
+  assert.deepEqual(presentation("error", true), {
+    showCard: false, showReopen: true, clearDismissal: false,
+  }, "a stale failed setup stays hidden but can be reopened");
   assert.deepEqual(presentation("oauth", true), {
     showCard: true, showReopen: false, clearDismissal: true,
   }, "a pending setup remains visible and clears an old completed dismissal");

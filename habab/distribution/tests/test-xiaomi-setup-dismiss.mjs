@@ -3,7 +3,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
-test("Xiaomi dismiss event is composed and available only after setup completes", async () => {
+test("Xiaomi dismiss event is composed for completed or failed setup, not active setup", async () => {
   const keys = ["HTMLElement", "customElements", "CustomEvent"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const definitions = new Map();
@@ -37,12 +37,16 @@ test("Xiaomi dismiss event is composed and available only after setup completes"
     assert.equal(dispatched[0].bubbles, true);
     assert.equal(dispatched[0].composed, true);
 
+    setup.state = { phase: "error" };
+    setup.dismissCompleted();
+    assert.equal(dispatched.length, 2, "a failed stale setup can be hidden and reopened");
+
     setup.state = { phase: "oauth" };
     setup.dismissCompleted();
-    assert.equal(dispatched.length, 1, "pending authorization cannot be dismissed");
+    assert.equal(dispatched.length, 2, "pending authorization cannot be dismissed");
     setup.state = { phase: "configuring" };
     setup.dismissCompleted();
-    assert.equal(dispatched.length, 1, "an in-progress setup cannot be dismissed");
+    assert.equal(dispatched.length, 2, "an in-progress setup cannot be dismissed");
   } finally {
     for (const key of keys) {
       const descriptor = descriptors.get(key);
