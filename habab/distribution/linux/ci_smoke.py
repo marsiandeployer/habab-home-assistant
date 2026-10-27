@@ -91,7 +91,13 @@ def main():
         frontend = command("sudo", "-u", "habab", python, "-c", "from importlib.metadata import version; print(version('home-assistant-frontend'))").stdout.strip()
         if frontend != args.frontend_version:
             raise RuntimeError("Installed frontend differs from the freshly compiled wheel")
-        opencode = command("sudo", "-u", "habab", str(current / "bin/opencode"), "--version").stdout.strip()
+        opencode = command(
+            "sudo", "-u", "habab", "env", "HOME=/var/lib/habab-home",
+            "XDG_CONFIG_HOME=/var/lib/habab-home/.config",
+            "XDG_CACHE_HOME=/var/lib/habab-home/.cache",
+            "XDG_DATA_HOME=/var/lib/habab-home/.local/share",
+            str(current / "bin/opencode"), "--version",
+        ).stdout.strip()
         marker = "/var/lib/habab-home/config/.native-release-smoke"
         command("sudo", "touch", marker)
         command("sudo", "systemctl", "restart", "habab-home.service")

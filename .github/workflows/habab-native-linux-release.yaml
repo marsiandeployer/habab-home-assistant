@@ -11,9 +11,15 @@ on:
         description: Fresh Habab frontend version (20260930.4+habab.N)
         required: true
         type: string
+      frontend_run_id:
+        description: Optional existing exact-source frontend artifact run, to retry installation without rebuilding the wheel
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: habab-native-linux-package
@@ -45,6 +51,7 @@ jobs:
 
   frontend:
     needs: source
+    if: ${{ inputs.frontend_run_id == '' }}
     uses: ./.github/workflows/habab-native-frontend-candidate.yaml
     with:
       source_ref: ${{ needs.source.outputs.revision }}
@@ -52,6 +59,7 @@ jobs:
 
   package:
     needs: [source, frontend]
+    if: ${{ always() && needs.source.result == 'success' && (needs.frontend.result == 'success' || (needs.frontend.result == 'skipped' && inputs.frontend_run_id != '')) }}
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 45
     env:
@@ -66,8 +74,18 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: ${{ needs.frontend.outputs.artifact_name }}
+          name: ${{ needs.frontend.outputs.artifact_name || format('habab-native-frontend-{0}', inputs.wheel_version) }}
           path: frontend-candidate
+          run-id: ${{ inputs.frontend_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Check out the current CI smoke runner separately from product source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: smoke-runner
+          persist-credentials: false
+          sparse-checkout: /habab/distribution/linux/ci_smoke.py
+          sparse-checkout-cone-mode: false
       - name: Validate fresh frontend identity
         run: |
           set -euo pipefail
@@ -98,7 +116,8 @@ jobs:
       - name: Install and exercise the native systemd service without Docker
         run: |
           set -euo pipefail
-          python3 habab/distribution/linux/ci_smoke.py \
+          PYTHONPATH="$GITHUB_WORKSPACE/habab/distribution/linux" \
+          python3 smoke-runner/habab/distribution/linux/ci_smoke.py \
             --package "dist/habab-home-linux-arm64-${SOURCE_SHA:0:12}.tar.gz" \
             --source-sha "$SOURCE_SHA" \
             --frontend-version "${{ inputs.wheel_version }}" \
