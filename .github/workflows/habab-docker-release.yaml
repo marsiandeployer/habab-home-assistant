@@ -238,7 +238,7 @@ jobs:
             --build-arg "HABAB_SOURCE_REVISION=$SOURCE_REVISION" \
             --build-arg "HABAB_FRONTEND_VERSION=$FRONTEND_VERSION" \
             --build-arg "HABAB_FRONTEND_SHA256=$FRONTEND_SHA256" \
-            --output "type=oci,dest=$archive" \
+            --output "type=oci,dest=$archive,compression=gzip,force-compression=true" \
             habab/distribution
           for platform in linux/amd64 linux/arm64; do
             filename=${platform//\//-}
@@ -330,7 +330,7 @@ jobs:
           printf '%s %s:%s\n' "$digest" "$IMAGE_NAME" "$IMAGE_TAG" | tee candidate/registry-image.txt
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        if: ${{ !inputs.publish }}
+        if: ${{ always() && !inputs.publish }}
         with:
           name: habab-docker-candidate-${{ inputs.image_tag }}
           path: candidate
