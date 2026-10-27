@@ -98,6 +98,9 @@ export class TelegramTransport {
           allowed_updates: ['message', 'my_chat_member', 'chat_member'] }, { attempts: 2 });
         if (!Array.isArray(result.result)) throw new Error('telegram_api_error');
         for (const update of result.result) {
+          // A response body can finish after abort; do not open a new ACK wait
+          // once the worker has already rejected its pending updates on shutdown.
+          if (!this.running) break;
           const message = update.message;
           if (message && typeof message.text === 'string' && message.chat && message.from) {
             await this.emit({ type: 'message', update_id: Number(update.update_id),

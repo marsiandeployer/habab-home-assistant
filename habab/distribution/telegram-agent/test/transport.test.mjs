@@ -211,3 +211,39 @@ test('does not advance polling offset until emission commits', async () => {
     await transport.shutdown();
   }
 });
+
+test('shutdown ignores a late poll body without creating a new ACK wait', async () => {
+  const events = [];
+  let finishBody;
+  let bodyStarted;
+  let accept;
+  const started = new Promise((resolve) => { bodyStarted = resolve; });
+  const transport = new TelegramTransport({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/getMe')) return response({ username: 'fixture_bot' });
+      return { ok: true, status: 200, json: () => {
+        bodyStarted();
+        return new Promise((resolve) => { finishBody = resolve; });
+      } };
+    },
+    emit: (event) => {
+      events.push(event);
+      if (event.type === 'message') return new Promise((resolve) => { accept = resolve; });
+    },
+  });
+  await transport.configure('12345678901234567890:fixture');
+  await started;
+  const stopped = transport.shutdown();
+  finishBody({ ok: true, result: [{ update_id: 41, message: {
+    message_id: 8, text: 'fixture', chat: { id: 7, type: 'private' }, from: { id: 9 },
+  } }] });
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(events.some((event) => event.type === 'message'), false);
+    assert.equal(transport.offset, 0);
+    await stopped;
+  } finally {
+    accept?.(); // Release the pre-fix regression's ACK wait even on assertion failure.
+    await stopped;
+  }
+});
