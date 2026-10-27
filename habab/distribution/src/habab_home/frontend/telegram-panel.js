@@ -94,7 +94,12 @@ class HababTelegramPanel extends HTMLElement {
     </style>
     <header><ha-menu-button></ha-menu-button><h1>${this.t("telegramTitle")}</h1></header>
     <main>
-      <p class="intro">${this.t("telegramIntro")}</p>
+      <p class="intro" id="telegram-intro">${this.t("telegramIntro")}</p>
+      <section id="maintenance-notice" aria-labelledby="maintenance-title" hidden>
+        <h2 id="maintenance-title">${this.t("telegramMaintenanceTitle")}</h2>
+        <p id="maintenance-copy" role="status" aria-live="polite">${this.t("telegramMaintenanceDescription")}</p>
+        <button type="button" id="maintenance-refresh">${this.t("telegramRefresh")}</button>
+      </section>
       <section id="inbox-recovery" aria-labelledby="inbox-recovery-title" hidden>
         <h2 id="inbox-recovery-title">${this.t("telegramRecoveryTitle")}</h2>
         <p id="inbox-recovery-copy"></p>
@@ -167,6 +172,7 @@ class HababTelegramPanel extends HTMLElement {
     });
     this.q("#owner-pair-action").addEventListener("click", () => this.pair());
     this.q("#refresh").addEventListener("click", () => this.refresh());
+    this.q("#maintenance-refresh").addEventListener("click", () => this.refresh());
     this.q("#edit-bot").addEventListener("click", () => {
       this.editingBot = true;
       this.applyState();
@@ -194,6 +200,19 @@ class HababTelegramPanel extends HTMLElement {
 
   applyState() {
     if (!this.shadowRoot.firstChild) return;
+    const maintenance = this.state.maintenance === true;
+    this.q("#maintenance-notice").hidden = !maintenance;
+    for (const selector of ["#telegram-intro", "#bot-step", "#group-step", "#owner-management", ".video-guide"]) {
+      this.q(selector).hidden = maintenance;
+    }
+    if (maintenance) {
+      this.pendingGroupAction = "";
+      this.groupPairingUrl = "";
+      this.pendingRecovery = null;
+      this.recoveryFeedback = "";
+      this.q("#owner-confirmation").hidden = true;
+      this.q("video")?.pause();
+    }
     const ownerStatus = this.q("#owner-status");
     const ownerPhaseKey = {
       not_configured: "telegramNotConfigured",
@@ -204,7 +223,7 @@ class HababTelegramPanel extends HTMLElement {
     ownerStatus.textContent = this.ownerFeedback || (this.state.phase === "error"
       ? this.ownerErrorText(this.state.error)
       : this.t(ownerPhaseKey));
-    ownerStatus.dataset.error = String(this.state.phase === "error");
+    ownerStatus.dataset.error = String(this.state.phase === "error" && !maintenance);
 
     const username = this.q("#username");
     username.hidden = !this.state.bot_username;
@@ -215,7 +234,7 @@ class HababTelegramPanel extends HTMLElement {
     ownerPairingAction.hidden = !this.state.pairing_url;
     ownerPairingAction.href = this.state.pairing_url || "#";
     const ownerCanPair = this.state.phase === "pairing";
-    this.q("#owner-step").hidden = this.state.phase === "not_configured" || this.state.phase === "error";
+    this.q("#owner-step").hidden = maintenance || this.state.phase === "not_configured" || this.state.phase === "error";
     this.q("#owner-pair-action").hidden = !ownerCanPair;
     this.q("#owner-pair-status").textContent = this.t(
       this.state.phase === "connected" ? "telegramOwnerConnected"
@@ -244,7 +263,7 @@ class HababTelegramPanel extends HTMLElement {
 
   applyRecoveryState() {
     const inbox = this.state.inbox;
-    const required = Boolean(inbox?.recovery_required && inbox.recovery_id);
+    const required = this.state.maintenance !== true && Boolean(inbox?.recovery_required && inbox.recovery_id);
     if (this.pendingRecovery && (!required || inbox.recovery_id !== this.pendingRecovery.recoveryId)) {
       this.pendingRecovery = null;
       this.recoveryFeedback = this.t("telegramRecoveryStale");
@@ -365,6 +384,7 @@ class HababTelegramPanel extends HTMLElement {
       invalid_proxy: "telegramInvalidProxy",
       cannot_validate: "telegramCannotValidate",
       setup_failed: "telegramWorkerFailed",
+      telegram_maintenance: "telegramMaintenanceDescription",
       relay_auth_failed: "telegramHababAuthFailed",
       relay_auth_unavailable: "telegramHababAuthUnavailable",
       selected_provider_unavailable: "telegramProviderSettings",
@@ -403,16 +423,22 @@ class HababTelegramPanel extends HTMLElement {
 
   updateControls() {
     if (!this.shadowRoot.firstChild) return;
+    const maintenance = this.state.maintenance === true;
     this.shadowRoot.querySelectorAll("button,input").forEach((element) => {
-      element.disabled = this.busy;
+      element.disabled = this.busy || (maintenance && element.id !== "maintenance-refresh");
     });
     const confirmButton = this.q("#group-confirm-action");
-    if (confirmButton) confirmButton.disabled = this.busy;
+    if (confirmButton) confirmButton.disabled = this.busy || maintenance;
     const ownerConfirmButton = this.q("#owner-confirm-action");
-    if (ownerConfirmButton) ownerConfirmButton.disabled = this.busy;
+    if (ownerConfirmButton) ownerConfirmButton.disabled = this.busy || maintenance;
   }
 
   async request(message, payload = {}) {
+    if (this.state.maintenance === true && message !== "status") {
+      const error = new Error("telegram_maintenance");
+      error.code = "telegram_maintenance";
+      throw error;
+    }
     return this._hass.callWS({ type: `habab_telegram/${message}`, ...payload });
   }
 
@@ -453,7 +479,7 @@ class HababTelegramPanel extends HTMLElement {
   }
 
   async run(action, successText) {
-    if (!this._hass || this.busy) return;
+    if (!this._hass || this.busy || this.state.maintenance === true) return;
     this.busy = true;
     this.ownerFeedback = "";
     this.updateControls();

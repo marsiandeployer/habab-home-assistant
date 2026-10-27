@@ -97,3 +97,21 @@ test('an old owner status response cannot arm recovery for the new owner', async
   panel.askInboxRecovery();
   assert.equal(panel.pendingRecovery, null);
 });
+
+
+test('maintenance allows status only and preserves normal request behavior after exit', async () => {
+  const { panel, calls } = fixture();
+  panel.state = { phase: 'error', maintenance: true, error: 'telegram_maintenance' };
+  await assert.rejects(panel.request('configure', { token: 'fixture' }),
+    (error) => error.code === 'telegram_maintenance');
+  let ran = false;
+  await panel.run(async () => { ran = true; });
+  assert.equal(ran, false);
+  assert.equal(panel.state.maintenance, true);
+  assert.equal(calls.length, 0);
+  await panel.request('status');
+  assert.deepEqual(calls.map((call) => call.type), ['habab_telegram/status']);
+  panel.state = { phase: 'connected' };
+  await panel.request('pair');
+  assert.equal(calls.at(-1).type, 'habab_telegram/pair');
+});
