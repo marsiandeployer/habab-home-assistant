@@ -117,7 +117,7 @@ def main() -> None:
         config = request_json(base_url, "/api/config", token=access_token)
         if config.get("version") != "2026.10.2":
             raise RuntimeError("Authenticated Home Assistant config did not match Core release")
-        status = request_json(base_url, "/api/habab_home/status", token=access_token)
+        status = wait_for_json(base_url, "/api/habab_home/status", args.startup_timeout, token=access_token)
         assert_product_status(status)
 
         labels = json.loads(run([

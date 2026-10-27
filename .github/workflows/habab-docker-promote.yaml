@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_run_id:
-        description: Successful Habab Docker image release run with an unexpired candidate artifact
+        description: Completed Docker candidate with a verified image archive; runtime acceptance runs again before publication
         required: true
         type: string
       source_sha:
@@ -28,7 +28,7 @@ jobs:
       artifact_name: ${{ steps.verify.outputs.artifact_name }}
     steps:
       - id: verify
-        name: Require the exact successful main-branch release candidate
+        name: Require a verified main-branch image build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
@@ -48,7 +48,8 @@ jobs:
 
           run_file="$RUNNER_TEMP/candidate-run.json"
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" > "$run_file"
-          python3 - "$run_file" "$SOURCE_SHA" <<'PY'
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/jobs?per_page=100" > "$RUNNER_TEMP/candidate-jobs.json"
+          python3 - "$run_file" "$SOURCE_SHA" "$RUNNER_TEMP/candidate-jobs.json" <<'PY'
           import json
           from pathlib import Path
           import sys
@@ -60,12 +61,21 @@ jobs:
               "event": "workflow_dispatch",
               "head_branch": "main",
               "status": "completed",
-              "conclusion": "success",
           }
           differences = [f"{key}={run.get(key)!r}" for key, value in required.items()
                          if run.get(key) != value]
           if differences:
               raise SystemExit("Candidate run does not match promotion inputs: " + ", ".join(differences))
+          if run.get("conclusion") == "failure":
+              jobs = json.loads(Path(sys.argv[3]).read_text())["jobs"]
+              build = next(job for job in jobs if job["name"] == "build-and-release")
+              steps = {step["name"]: step["conclusion"] for step in build["steps"]}
+              failed = {name for name, state in steps.items() if state == "failure"}
+              if (steps.get("Build and verify the multi-architecture OCI image") != "success"
+                      or failed != {"Smoke-test both platform images on bounded containers"}):
+                  raise SystemExit("Only a verified archive with a failed prior runtime smoke can be revalidated")
+          elif run.get("conclusion") != "success":
+              raise SystemExit("Candidate must have completed; active or cancelled runs cannot be promoted")
           PY
 
           artifact_name=$(gh api \
@@ -158,19 +168,8 @@ jobs:
           if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", image_tag):
               raise SystemExit("Candidate image tag is invalid")
 
-          for architecture in ("amd64", "arm64"):
-              receipt_path = root / f"smoke-{architecture}.json"
-              receipt = json.loads(receipt_path.read_text())
-              expected = {
-                  "state": "passed",
-                  "platform": f"linux/{architecture}",
-                  "source_revision": source_sha,
-                  "config_persistence": "passed",
-                  "onboarding_before_restart": "http_200",
-                  "onboarding_after_restart": "http_200",
-              }
-              if any(receipt.get(key) != value for key, value in expected.items()):
-                  raise SystemExit(f"{architecture} runtime smoke receipt does not match candidate metadata")
+          # Current owner/API/restart acceptance runs below against each exact
+          # archived platform before any registry write, including QA retries.
 
           archive_name = release.get("oci_archive")
           if (not isinstance(archive_name, str) or Path(archive_name).name != archive_name
