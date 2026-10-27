@@ -164,6 +164,10 @@ jobs:
         with:
           target: build-demo
 
+      - name: Install and verify Habab brand assets
+        shell: bash
+        run: python3 habab/build/prepare_demo_candidate_branding.py demo/dist
+
       - name: Write candidate manifest
         env:
           SOURCE_SHA: ${{ steps.resolve.outputs.source_revision }}
