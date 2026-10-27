@@ -1,4 +1,4 @@
-import { strings } from "./strings.js?v=2";
+import { strings } from "./strings.js?v=4";
 import "./telemetry-panel.js";
 
 const providers = {
@@ -120,7 +120,7 @@ class HababAIPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this.provider = "openai";
+    this.provider = "habab";
     this.providerSelectionExplicit = false;
     this.initialProviderSelectionApplied = false;
     this.connections = [];
@@ -214,11 +214,11 @@ class HababAIPanel extends HTMLElement {
     <main><p class="intro">${this.t("intro")}</p><div class="workspace">
       <nav aria-label="${this.t("provider")}">${Object.entries(providers).map(([id, item]) => `<button type="button" data-provider="${id}" aria-pressed="${id === this.provider}">${item.name}</button>`).join("")}</nav>
       <section aria-labelledby="provider-title"><h2 id="provider-title"></h2><p class="status" id="connection-status"></p><p class="status" id="api-status" role="status" aria-live="polite"></p>
-      <a id="key-link" target="_blank" rel="noopener noreferrer">${this.t("getKey")}</a>
+      <p class="help" id="provider-mode-help"></p><a id="key-link" target="_blank" rel="noopener noreferrer">${this.t("getKey")}</a>
       <h3>${this.t("guide")}</h3><ol id="guide"></ol>
-      <form><label id="model-label" for="model">${this.t("model")}</label><input id="model" name="model" required maxlength="128" autocomplete="off" aria-describedby="model-help"><p class="help" id="model-help">${this.t("modelHelp")}</p>
+      <form><div id="credential-fields"><label id="model-label" for="model">${this.t("model")}</label><input id="model" name="model" required maxlength="128" autocomplete="off" aria-describedby="model-help"><p class="help" id="model-help">${this.t("modelHelp")}</p>
       <label for="key">${this.t("key")}</label><div class="key-row"><input id="key" name="api_key" type="password" required maxlength="512" autocomplete="off" spellcheck="false" autocapitalize="off" aria-describedby="key-help"><button type="button" id="reveal" aria-label="${this.t("show")}" aria-pressed="false"><ha-icon icon="mdi:eye"></ha-icon></button></div>
-      <p class="help" id="key-help">${this.t("keyHelp")}</p><div class="actions"><button class="primary" type="submit">${this.t("save")}</button><button type="button" id="check">${this.t("check")}</button></div><p class="help">${this.t("cost")}</p></form>
+      <p class="help" id="key-help">${this.t("keyHelp")}</p></div><div class="actions"><button class="primary" type="submit">${this.t("save")}</button><button type="button" id="check">${this.t("check")}</button></div><p class="help" id="cost-help">${this.t("cost")}</p></form>
       <div id="feedback" role="status" aria-live="polite" hidden></div></section></div>
       <section class="assistant" aria-labelledby="assistant-title"><h2 id="assistant-title">${this.t("assistantTitle")}</h2><p>${this.t("assistantHelp")}</p>
       <p class="status routing-summary" id="assistant-provider-status" role="status" aria-live="polite"></p>
@@ -295,6 +295,12 @@ class HababAIPanel extends HTMLElement {
     this.q("#provider-title").textContent = provider.name;
     this.q("#key-link").href = provider.keyUrl;
     this.q("#key-link").textContent = this.t(this.provider === "habab" ? "hababOpen" : "getKey");
+    this.q("#provider-mode-help").textContent = this.t(this.provider === "habab" ? "hababManagedHelp" : "directProviderHelp");
+    const firstHababConnection = this.provider === "habab" && this.connectionsLoaded && !this.entry();
+    this.q("#credential-fields").hidden = firstHababConnection;
+    this.q("#key-link").hidden = firstHababConnection;
+    this.q("#cost-help").hidden = firstHababConnection;
+    this.q("form button[type=submit]").textContent = this.t(firstHababConnection ? "hababConnect" : "save");
     const modelPresentation = providerModelPresentation(this.provider, this.entry(), this.language);
     if (this.provider === "habab") {
       // This saved field is only a compatibility value; never present it as Habab's current model.
@@ -305,7 +311,8 @@ class HababAIPanel extends HTMLElement {
       this.modelEdited = false;
     }
     this.q("#model").readOnly = modelPresentation.readOnly;
-    this.q("#model").required = modelPresentation.required ?? true;
+    this.q("#model").required = (modelPresentation.required ?? true) && !firstHababConnection;
+    this.q("#key").required = !firstHababConnection;
     this.q("#model").placeholder = modelPresentation.placeholder || "";
     this.q("#model-label").textContent = modelPresentation.label || this.t("model");
     this.q("#model-help").textContent = modelPresentation.help || this.t("modelHelp");
@@ -412,12 +419,14 @@ class HababAIPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("button,input,textarea").forEach((item) => { item.disabled = !!this.busy; });
     fastDialog.disabled = !!this.busy || !!this.fastDialogBusy || !this.connectionsLoaded || !currentProvider;
     this.q("#check").disabled = !!this.busy || !this.connectionsLoaded || !entry;
+    const firstHababConnection = this.provider === "habab" && this.connectionsLoaded && !entry;
+    this.q("form button[type=submit]").disabled = !!this.busy || (!this.connectionsLoaded && !firstHababConnection);
     if (!this.connectionsLoaded) {
       this.q("#connection-status").textContent = this.t("connectionStatusUnavailable");
       this.q("#api-status").textContent = "";
     } else if (!entry) {
       this.q("#connection-status").textContent = this.t("disconnected");
-      this.q("#api-status").textContent = this.t("apiNotConfigured");
+      this.q("#api-status").textContent = this.t(this.provider === "habab" ? "hababNotConfigured" : "apiNotConfigured");
     } else {
       this.q("#connection-status").textContent = this.t(entry.assistant_selected ? "savedForAssistant" : "saved");
       const pending = this.connectionCheckStates.get(this.checkStateKey(entry)) === "checking";
@@ -534,6 +543,43 @@ class HababAIPanel extends HTMLElement {
   }
 
   async save() {
+    if (this.provider === "habab" && this.connectionsLoaded && !this.entry()) {
+      await this.action(async () => {
+        let activation;
+        try {
+          activation = await this._hass.callWS({ type: "habab_home/beta/activate" });
+        } catch (error) {
+          await this.refresh();
+          throw error;
+        }
+        await this.refresh();
+        const existing = activation?.status === "existing" && providers[activation.provider]
+          ? this.connections.find((item) => item.provider === activation.provider) : null;
+        const enrolled = activation?.status === "ready" && activation.provider === "habab" &&
+          typeof activation.entry_id === "string" && activation.state === "loaded" &&
+          this.connectionsLoaded && this.connections.find((item) =>
+            item.entry_id === activation.entry_id && item.provider === "habab" &&
+            item.state === activation.state && item.state === "loaded" &&
+            item.assistant_selected === true && item.text_ready !== false);
+        if (enrolled) {
+          this.feedback(this.t("hababConnected"));
+          return;
+        }
+        if (existing) {
+          this.provider = activation.provider;
+          this.providerSelectionExplicit = true;
+          this.selectProvider({ preserveDraft: true });
+          this.feedback(this.t("hababExistingProvider").replace("{provider}", providers[activation.provider].name));
+          return;
+        }
+        if (activation?.status === "existing" && providers[activation.provider]) {
+          this.feedback(this.t("hababExistingProviderUnconfirmed").replace("{provider}", providers[activation.provider].name), true);
+          return;
+        }
+        this.feedback(this.t("habab_beta_invalid_response"), true);
+      });
+      return;
+    }
     if (!this.q("form").reportValidity()) return;
     await this.action(async () => {
       const model = this.provider === "habab"

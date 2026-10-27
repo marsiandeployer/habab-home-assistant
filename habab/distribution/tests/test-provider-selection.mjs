@@ -4,7 +4,9 @@ import test from "node:test";
 const originalHTMLElement = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
 const originalCustomElements = Object.getOwnPropertyDescriptor(globalThis, "customElements");
 const definitions = new Map();
-Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: class HTMLElementStub {} });
+Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: class HTMLElementStub {
+  attachShadow() { return {}; }
+} });
 Object.defineProperty(globalThis, "customElements", {
   configurable: true,
   value: { get: (name) => definitions.get(name), define: (name, value) => definitions.set(name, value) },
@@ -30,6 +32,149 @@ function deferred() {
   const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
   return { promise, resolve, reject };
 }
+
+test("first Habab connection enrolls without a personal key and confirms refreshed state", async () => {
+  const nodes = new Map();
+  const panel = Object.create(HababAIPanel.prototype);
+  const calls = [];
+  const q = (selector) => {
+    if (!nodes.has(selector)) nodes.set(selector, {value: "", textContent: "", dataset: {}, hidden: false});
+    return nodes.get(selector);
+  };
+  Object.assign(panel, {
+    provider: "habab", connections: [], connectionsLoaded: true, providerSelectionExplicit: false,
+    _hass: {callWS: async (request) => {
+      calls.push(request);
+      return {status: "ready", provider: "habab", entry_id: "managed", state: "loaded"};
+    }},
+    q, entry() { return this.connections.find((item) => item.provider === this.provider); },
+    action: async (fn) => fn(), t: (key) => strings.en[key] || key,
+    feedback(text, error = false) { this.result = {text, error}; },
+    refresh: async () => {
+      panel.connectionsLoaded = true;
+      panel.connections = [{
+        provider: "habab", entry_id: "managed", state: "loaded",
+        assistant_selected: true, text_ready: true,
+      }];
+    },
+  });
+
+  await panel.save();
+  assert.deepEqual(calls, [{type: "habab_home/beta/activate"}]);
+  assert.equal(panel.entry().entry_id, "managed");
+  assert.equal(panel.result.text, strings.en.hababConnected);
+  assert.equal(panel.result.error, false);
+});
+
+test("beta activation does not report connected when refreshed Habab entry id differs", async () => {
+  const nodes = new Map();
+  const panel = Object.create(HababAIPanel.prototype);
+  Object.assign(panel, {
+    provider: "habab", connections: [], connectionsLoaded: true,
+    _hass: {callWS: async () => ({
+      status: "ready", provider: "habab", entry_id: "new-entry", state: "loaded",
+    })},
+    q: (selector) => {
+      if (!nodes.has(selector)) nodes.set(selector, {textContent: "", hidden: true, dataset: {}});
+      return nodes.get(selector);
+    },
+    entry() { return this.connections.find((item) => item.provider === this.provider); },
+    action: async (fn) => fn(), t: (key) => strings.en[key] || key,
+    feedback(text, error = false) { this.result = {text, error}; },
+    refresh: async () => {
+      panel.connectionsLoaded = true;
+      panel.connections = [{
+        provider: "habab", entry_id: "stale-entry", state: "loaded",
+        assistant_selected: true, text_ready: true,
+      }];
+    },
+  });
+
+  await panel.save();
+  assert.equal(panel.result.text, strings.en.habab_beta_invalid_response);
+  assert.equal(panel.result.error, true);
+});
+
+test("beta activation preserves an existing direct provider without claiming Habab connected", async () => {
+  const nodes = new Map();
+  const panel = Object.create(HababAIPanel.prototype);
+  const calls = [];
+  Object.assign(panel, {
+    provider: "habab", connections: [], connectionsLoaded: true,
+    _hass: {callWS: async (request) => {
+      calls.push(request);
+      return {status: "existing", provider: "openai"};
+    }},
+    q: (selector) => {
+      if (!nodes.has(selector)) nodes.set(selector, {value: "", textContent: "", dataset: {}, hidden: false});
+      return nodes.get(selector);
+    },
+    entry() { return this.connections.find((item) => item.provider === this.provider); },
+    action: async (fn) => fn(), t: (key) => strings.en[key] || key,
+    feedback(text, error = false) { this.result = {text, error}; },
+    selectProvider() {},
+    refresh: async () => {
+      panel.connections = [{provider: "openai", entry_id: "native", assistant_selected: true}];
+    },
+  });
+
+  await panel.save();
+  assert.deepEqual(calls, [{type: "habab_home/beta/activate"}]);
+  assert.equal(panel.provider, "openai");
+  assert.equal(panel.connections[0].entry_id, "native");
+  assert.equal(panel.result.text, "A OpenAI connection is already configured. It was left unchanged.");
+  assert.notEqual(panel.result.text, strings.en.hababConnected);
+});
+
+test("beta activation failure refreshes state and displays the localized server error", async () => {
+  const nodes = new Map();
+  const panel = Object.create(HababAIPanel.prototype);
+  let refreshed = false;
+  Object.assign(panel, {
+    provider: "habab", connections: [], connectionsLoaded: true, busy: false,
+    _hass: {callWS: async () => { throw {code: "habab_beta_issuance_disabled"}; }},
+    q: (selector) => {
+      if (!nodes.has(selector)) nodes.set(selector, {textContent: "", hidden: true, dataset: {}});
+      return nodes.get(selector);
+    },
+    entry() { return this.connections.find((item) => item.provider === this.provider); },
+    updateControls() {}, t: (key) => strings.en[key] || key,
+    feedback(text, error = false) { this.result = {text, error}; },
+    refresh: async () => { refreshed = true; },
+  });
+
+  await panel.save();
+  assert.equal(refreshed, true);
+  assert.equal(panel.result.text, strings.en.habab_beta_issuance_disabled);
+  assert.equal(panel.result.error, true);
+});
+
+test("direct OpenAI save still sends the supplied personal key and model", async () => {
+  const nodes = new Map();
+  const panel = Object.create(HababAIPanel.prototype);
+  const calls = [];
+  const entry = {provider: "openai", entry_id: "direct", model: "gpt-4.1-mini", api_check_status: "verified"};
+  Object.assign(panel, {
+    provider: "openai", connections: [], connectionsLoaded: true,
+    _hass: {callWS: async (request) => { calls.push(request); return {}; }},
+    q: (selector) => {
+      if (!nodes.has(selector)) nodes.set(selector, {
+        value: selector === "#model" ? "gpt-4.1-mini" : "personal-openai-key",
+        reportValidity: () => true,
+      });
+      return nodes.get(selector);
+    },
+    entry() { return this.connections.find((item) => item.provider === this.provider); },
+    action: async (fn) => fn(), t: (key) => strings.en[key] || key,
+    feedback() {}, refresh: async () => { panel.connections = [entry]; },
+  });
+
+  await panel.save();
+  assert.deepEqual(calls, [{
+    type: "habab_home/providers/save", provider: "openai",
+    model: "gpt-4.1-mini", api_key: "personal-openai-key",
+  }]);
+});
 
 function panelForKeyFetch(provider, entry, keyRequests) {
   const nodes = new Map();
@@ -239,8 +384,8 @@ test("managed Habab presentation never presents a saved model as the current mod
   assert.doesNotMatch(managed.help, /Gateway alias|OpenAI-compatible API/i);
   assert.doesNotMatch(managed.help, /gemini-3\.1-flash-lite/i);
   assert.doesNotMatch(managed.help, /current model is habab-chat/i);
-  assert.doesNotMatch(strings.ru.hababGuide[2], /модель/i);
-  assert.doesNotMatch(strings.en.hababGuide[2], /model/i);
+  assert.doesNotMatch(strings.ru.hababGuide.join(" "), /введите выданный ключ|нажмите.*проверить/i);
+  assert.doesNotMatch(strings.en.hababGuide.join(" "), /enter the issued key|select check and save/i);
 
   const managedSelected = assistantProviderPresentation({
     provider: "habab",
