@@ -59,7 +59,6 @@ jobs:
               "path": ".github/workflows/habab-docker-release.yaml",
               "event": "workflow_dispatch",
               "head_branch": "main",
-              "head_sha": source_sha,
               "status": "completed",
               "conclusion": "success",
           }
@@ -90,10 +89,10 @@ jobs:
       DOCKERHUB_IMAGE: docker.io/hababer/habab-home
       DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
     steps:
-      - name: Check out the exact source for its OCI validator
+      - name: Check out the current release verifier for the candidate OCI archive
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ github.sha }}
           path: release-source
           persist-credentials: false
           sparse-checkout: |
@@ -220,7 +219,7 @@ jobs:
           print(f"::notice::Verified candidate run archive {archive_name} ({expected_sha})")
           PY
 
-      - name: Re-run the existing OCI identity validator for both platforms
+      - name: Re-run the current OCI identity validator for both platforms
         shell: bash
         run: |
           set -euo pipefail

@@ -127,6 +127,66 @@ def _valid_oci_digest(value: object) -> bool:
     return isinstance(value, str) and _OCI_DIGEST.fullmatch(value) is not None
 
 
+def _read_oci_descriptor(archive: tarfile.TarFile, descriptor: object) -> tuple[str, bytes, dict]:
+    """Read and verify a JSON blob referenced by an OCI index descriptor."""
+    if not isinstance(descriptor, dict):
+        raise ValueError("OCI index has an invalid manifest descriptor")
+    digest = descriptor.get("digest")
+    size = descriptor.get("size")
+    if not _valid_oci_digest(digest) or type(size) is not int or size < 0:
+        raise ValueError("OCI index descriptor has an invalid digest or size")
+    raw = _read_oci_blob(archive, digest)
+    if len(raw) != size:
+        raise ValueError("OCI manifest size does not match index descriptor")
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("OCI referenced manifest has invalid JSON") from error
+    if not isinstance(value, dict) or value.get("schemaVersion") != 2:
+        raise ValueError("OCI referenced manifest has an invalid schema")
+    return digest, raw, value
+
+
+def _platform_matches(value: object, architecture: str) -> bool:
+    return (isinstance(value, dict) and value.get("os") == "linux"
+            and value.get("architecture") == architecture)
+
+
+def _find_oci_platform_manifests(
+    archive: tarfile.TarFile, index: dict, architecture: str
+) -> list[tuple[str, bytes, dict]]:
+    """Walk nested OCI/Docker indexes and return matching image manifests."""
+    if index.get("schemaVersion") != 2 or not isinstance(index.get("manifests"), list):
+        raise ValueError("OCI image index is invalid")
+    matches: list[tuple[str, bytes, dict]] = []
+    visited: set[str] = set()
+
+    def visit(current: dict, inherited_platform: object = None, depth: int = 0) -> None:
+        if depth > 8:
+            raise ValueError("OCI manifest index nesting is too deep")
+        descriptors = current.get("manifests")
+        if not isinstance(descriptors, list):
+            raise ValueError("OCI nested image index is invalid")
+        for descriptor in descriptors:
+            digest, raw, value = _read_oci_descriptor(archive, descriptor)
+            # An index descriptor's platform can apply to its descendants when
+            # the nested index omits platform metadata on its image manifests.
+            descriptor_platform = descriptor.get("platform")
+            effective_platform = descriptor_platform if isinstance(descriptor_platform, dict) else inherited_platform
+            if isinstance(value.get("manifests"), list):
+                if digest in visited:
+                    raise ValueError("OCI image index contains a cycle or duplicate nested index")
+                visited.add(digest)
+                visit(value, effective_platform, depth + 1)
+            elif _platform_matches(descriptor_platform, architecture) or (
+                descriptor_platform is None and _platform_matches(inherited_platform, architecture)
+            ):
+                matches.append((digest, raw, value))
+
+    visit(index)
+    return matches
+
+
 def verify_linux_image(image_path: Path, platform: str, source_revision: str) -> dict:
     """Read the selected OCI platform manifest and prove its provenance labels."""
     if platform not in {"linux/amd64", "linux/arm64"}:
@@ -141,24 +201,10 @@ def verify_linux_image(image_path: Path, platform: str, source_revision: str) ->
             if layout.get("imageLayoutVersion") != "1.0.0":
                 raise ValueError("OCI image layout version is unsupported")
             _, index = _read_oci_json(archive, "index.json")
-            descriptors = index.get("manifests")
-            if index.get("schemaVersion") != 2 or not isinstance(descriptors, list):
-                raise ValueError("OCI image index is invalid")
-            matching = [descriptor for descriptor in descriptors
-                        if isinstance(descriptor, dict)
-                        and isinstance(descriptor.get("platform"), dict)
-                        and descriptor["platform"].get("os") == "linux"
-                        and descriptor["platform"].get("architecture") == architecture]
+            matching = _find_oci_platform_manifests(archive, index, architecture)
             if len(matching) != 1:
                 raise ValueError(f"OCI index must contain one {platform} manifest")
-
-            manifest_digest = matching[0].get("digest")
-            manifest_raw = _read_oci_blob(archive, manifest_digest)
-            if matching[0].get("size") != len(manifest_raw):
-                raise ValueError("OCI manifest size does not match index descriptor")
-            manifest = json.loads(manifest_raw)
-            if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 2:
-                raise ValueError("OCI platform manifest is invalid")
+            manifest_digest, _, manifest = matching[0]
             layers = manifest.get("layers")
             if not isinstance(layers, list) or not layers:
                 raise ValueError("OCI platform manifest has no layers")

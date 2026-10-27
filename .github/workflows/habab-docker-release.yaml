@@ -15,6 +15,10 @@ on:
         description: New Core-matched wheel version, for example 20260930.4+habab.19
         required: true
         type: string
+      frontend_run_id:
+        description: Optional successful frontend job run ID to reuse an exact-source wheel
+        required: false
+        type: string
       publish:
         description: Push the verified image to GHCR (requires package write access)
         required: true
@@ -74,6 +78,7 @@ jobs:
           echo "source_revision=$resolved" >> "$GITHUB_OUTPUT"
 
   frontend:
+    if: ${{ inputs.frontend_run_id == '' }}
     needs: resolve-source
     uses: ./.github/workflows/habab-native-frontend-candidate.yaml
     with:
@@ -82,9 +87,11 @@ jobs:
 
   build-and-release:
     needs: [resolve-source, frontend]
+    if: ${{ always() && needs.resolve-source.result == 'success' && (needs.frontend.result == 'success' || needs.frontend.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
+      actions: read
       contents: read
       packages: write
     env:
@@ -110,11 +117,81 @@ jobs:
           git diff --quiet && git diff --cached --quiet
           [[ -z "$(git status --porcelain --untracked-files=all)" ]]
 
+      - name: Check out current release verification helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+          persist-credentials: false
+          sparse-checkout: |
+            habab/distribution
+            habab/scripts
+          sparse-checkout-cone-mode: true
+
       - name: Download fresh frontend wheel built from the selected source
+        if: ${{ inputs.frontend_run_id == '' }}
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: ${{ needs.frontend.outputs.artifact_name }}
           path: habab/distribution/frontend-candidate
+
+      - name: Verify and download a frontend wheel from an earlier run
+        if: ${{ inputs.frontend_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FRONTEND_RUN_ID: ${{ inputs.frontend_run_id }}
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+          FRONTEND_VERSION: ${{ inputs.frontend_wheel_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$FRONTEND_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]] || {
+            echo '::error::frontend_run_id must be a numeric Actions run ID'; exit 1;
+          }
+          run_file="$RUNNER_TEMP/frontend-run.json"
+          jobs_file="$RUNNER_TEMP/frontend-jobs.json"
+          artifacts_file="$RUNNER_TEMP/frontend-artifacts.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${FRONTEND_RUN_ID}" > "$run_file"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${FRONTEND_RUN_ID}/jobs?per_page=100" > "$jobs_file"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${FRONTEND_RUN_ID}/artifacts?per_page=100" > "$artifacts_file"
+          artifact_name="habab-native-frontend-${FRONTEND_VERSION}"
+          python3 - "$run_file" "$jobs_file" "$artifacts_file" "$SOURCE_REVISION" "$artifact_name" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          run_path, jobs_path, artifacts_path, source_revision, artifact_name = sys.argv[1:]
+          run = json.loads(Path(run_path).read_text())
+          expected = {
+              "name": "Habab Docker image release",
+              "path": ".github/workflows/habab-docker-release.yaml",
+              "event": "workflow_dispatch",
+              "head_branch": "main",
+              "status": "completed",
+          }
+          if any(run.get(key) != value for key, value in expected.items()):
+              raise SystemExit("Frontend reuse run is not the completed Docker release run for this exact source")
+          jobs = json.loads(Path(jobs_path).read_text()).get("jobs", [])
+          if not any((job.get("name") == "frontend" or job.get("name", "").startswith("frontend / "))
+                     and job.get("conclusion") == "success" for job in jobs):
+              raise SystemExit("Selected run does not contain a successful reusable frontend job")
+          artifacts = json.loads(Path(artifacts_path).read_text()).get("artifacts", [])
+          matches = [artifact for artifact in artifacts
+                     if artifact.get("name") == artifact_name and not artifact.get("expired")]
+          if len(matches) != 1:
+              raise SystemExit("Selected run does not contain exactly one unexpired matching frontend artifact")
+          PY
+          mkdir -p habab/distribution/frontend-candidate
+          echo "FRONTEND_REUSE_RUN_ID=$FRONTEND_RUN_ID" >> "$GITHUB_ENV"
+
+      - name: Download the verified frontend artifact from the earlier run
+        if: ${{ inputs.frontend_run_id != '' }}
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: habab-native-frontend-${{ inputs.frontend_wheel_version }}
+          path: habab/distribution/frontend-candidate
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.frontend_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify frontend candidate provenance and prepare image metadata
         shell: bash
@@ -165,7 +242,7 @@ jobs:
             habab/distribution
           for platform in linux/amd64 linux/arm64; do
             filename=${platform//\//-}
-            python3 habab/scripts/release-candidate.py \
+            python3 release-tools/habab/scripts/release-candidate.py \
               --verify-linux-image "$archive" --platform "$platform" \
               --source-revision "$SOURCE_REVISION" \
               --status-output "candidate/${filename}.json"
@@ -217,7 +294,7 @@ jobs:
             smoke_image="habab-home:smoke-$architecture"
             skopeo copy --override-os linux --override-arch "$architecture" \
               "oci-archive:${archive}:latest" "docker-daemon:${smoke_image}"
-            python3 habab/scripts/docker-release-smoke.py \
+            python3 release-tools/habab/scripts/docker-release-smoke.py \
               --image "$smoke_image" --platform "$platform" \
               --source-revision "$SOURCE_REVISION" \
               --frontend-version "$FRONTEND_VERSION" \
