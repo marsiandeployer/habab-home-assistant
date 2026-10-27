@@ -30,6 +30,12 @@ def main() -> int:
         "test_feedback_transport",
         "test_assistant_status",
         "test_provider_transport",
+        "test_beta",
+        "test_tool_history",
+        "test_diagnostic_redaction",
+        "test_telegram_voice",
+        "test_telegram_group_invocation",
+        "test_voice_route_hooks",
         "test_voice",
         "test_xiaomi_setup",
     )

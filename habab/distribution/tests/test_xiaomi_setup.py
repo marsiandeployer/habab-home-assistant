@@ -337,6 +337,7 @@ class XiaomiSetupTests(unittest.IsolatedAsyncioTestCase):
             "owner_id": "alice", "bot_username": "testbot", "bot_id": 99,
         })
         telegram = object.__new__(TelegramManager)
+        telegram.maintenance = False
         telegram.hass = SimpleNamespace(
             auth=SimpleNamespace(async_get_user=AsyncMock(
                 return_value=SimpleNamespace(is_active=True, is_admin=True))),

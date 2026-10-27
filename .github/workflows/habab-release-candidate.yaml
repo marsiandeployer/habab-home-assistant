@@ -125,6 +125,10 @@ jobs:
           habab/distribution/tests/test-chat-lifecycle.mjs
           habab/distribution/tests/test-integration-setup.mjs
           habab/distribution/tests/test-provider-selection.mjs
+          habab/distribution/tests/test-beta-session.mjs
+          habab/distribution/tests/test-chat-tools.mjs
+          habab/distribution/tests/telegram-panel-qr.test.mjs
+          habab/distribution/tests/telegram-qr.test.mjs
       - name: Run focused backend tests in isolated Home Assistant image
         run: |
           set -euo pipefail
