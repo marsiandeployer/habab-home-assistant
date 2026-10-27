@@ -46,10 +46,12 @@ gh workflow run habab-docker-promote.yaml \
 ```
 
 Native packages are separate GitHub prereleases. Docker images go to
-`ghcr.io/marsiandeployer/habab-home-assistant`; package visibility must permit
-anonymous pulls before the site offers the image as a public download. Publishing
-uses the workflow's `GITHUB_TOKEN`, with `contents: write` for native releases and
-`packages: write` for images.
+`ghcr.io/marsiandeployer/habab-home-assistant` and `docker.io/hababer/habab-home`.
+Registry readback records each digest and checks anonymous access before the site
+offers a public download. Publishing uses `GITHUB_TOKEN`, with `contents: write`
+for native releases and `packages: write` for GHCR. Docker Hub uses the
+`DOCKERHUB_TOKEN` Actions secret and `DOCKERHUB_USERNAME` repository variable.
+Its public description is maintained in `habab/distribution/docker-hub-description.md`.
 
 After public readback, update the matching entry in habab.ru's
 `content/products/ai_home_server/downloads.yaml` and the installation articles.

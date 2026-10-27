@@ -87,6 +87,8 @@ jobs:
       CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
       SOURCE_SHA: ${{ inputs.source_sha }}
       IMAGE_NAME: ghcr.io/marsiandeployer/habab-home-assistant
+      DOCKERHUB_IMAGE: docker.io/hababer/habab-home
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
     steps:
       - name: Check out the exact source for its OCI validator
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -210,6 +212,7 @@ jobs:
               raise SystemExit("Candidate OCI source reference is not a valid archive tag")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
               output.write(f"CANDIDATE_IMAGE={image}\n")
+              output.write(f"CANDIDATE_TAG={image_tag}\n")
               output.write(f"CANDIDATE_OCI_REFERENCE={oci_reference}\n")
               output.write(f"CANDIDATE_ARCHIVE={archive}\n")
               output.write(f"CANDIDATE_FRONTEND_VERSION={frontend_version}\n")
@@ -257,9 +260,10 @@ jobs:
             docker image rm "$smoke_image"
           done
 
-      - name: Promote the exact verified archive to GHCR
+      - name: Promote the exact verified archive to GHCR and Docker Hub
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -306,8 +310,54 @@ jobs:
             anonymous_pull=false
           fi
 
+          printf '%s' "$DOCKERHUB_TOKEN" | skopeo login docker.io \
+            --username "$DOCKERHUB_USERNAME" --password-stdin
+          hub_tag_image="${DOCKERHUB_IMAGE}:${CANDIDATE_TAG}"
+          hub_sha_image="${DOCKERHUB_IMAGE}:sha-${SOURCE_SHA}"
+          skopeo copy --all "$source" "docker://${hub_tag_image}"
+          skopeo copy --all "$source" "docker://${hub_sha_image}"
+
+          skopeo inspect --raw "docker://${hub_tag_image}" \
+            > "$RUNNER_TEMP/dockerhub-manifest.json"
+          hub_digest="sha256:$(sha256sum "$RUNNER_TEMP/dockerhub-manifest.json" | cut -d' ' -f1)"
+          skopeo inspect --raw "docker://${hub_sha_image}" \
+            > "$RUNNER_TEMP/dockerhub-source-sha-manifest.json"
+          hub_sha_digest="sha256:$(sha256sum "$RUNNER_TEMP/dockerhub-source-sha-manifest.json" | cut -d' ' -f1)"
+          [[ "$hub_sha_digest" == "$hub_digest" ]] || {
+            echo '::error::Docker Hub release and source SHA tags do not resolve to the same manifest'; exit 1;
+          }
+          python3 - "$RUNNER_TEMP/dockerhub-manifest.json" "$hub_digest" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          manifest = json.loads(Path(sys.argv[1]).read_text())
+          if manifest.get("schemaVersion") != 2 or not isinstance(manifest.get("manifests"), list):
+              raise SystemExit("Docker Hub readback is not a multi-architecture manifest list")
+          platforms = {
+              f"{entry.get('platform', {}).get('os')}/{entry.get('platform', {}).get('architecture')}"
+              for entry in manifest["manifests"] if isinstance(entry, dict)
+          }
+          if not {"linux/amd64", "linux/arm64"}.issubset(platforms):
+              raise SystemExit("Docker Hub readback is missing an expected platform")
+          print(f"::notice::Docker Hub manifest list read back at {sys.argv[2]}")
+          PY
+
+          hub_anonymous_pull=true
+          if skopeo inspect --raw --no-creds \
+            "docker://${DOCKERHUB_IMAGE}@${hub_digest}" \
+            > "$RUNNER_TEMP/dockerhub-anonymous-manifest.json" 2>/dev/null; then
+            hub_anonymous_digest="sha256:$(sha256sum "$RUNNER_TEMP/dockerhub-anonymous-manifest.json" | cut -d' ' -f1)"
+            if [[ "$hub_anonymous_digest" != "$hub_digest" ]]; then
+              hub_anonymous_pull=false
+            fi
+          else
+            hub_anonymous_pull=false
+          fi
+
           python3 - "$RUNNER_TEMP/registry-manifest.json" "$registry_digest" \
-            "$anonymous_pull" "$CANDIDATE_RUN_ID" "$SOURCE_SHA" "$CANDIDATE_IMAGE" \
+            "$anonymous_pull" "$RUNNER_TEMP/dockerhub-manifest.json" "$hub_digest" \
+            "$hub_anonymous_pull" "$CANDIDATE_RUN_ID" "$SOURCE_SHA" "$CANDIDATE_IMAGE" \
+            "$hub_tag_image" "https://hub.docker.com/r/hababer/habab-home" \
             > promotion.json <<'PY'
           import hashlib
           import json
@@ -315,8 +365,10 @@ jobs:
           from datetime import datetime, timezone
           from pathlib import Path
           import sys
-          manifest_path, digest, anonymous, run_id, source_sha, image = sys.argv[1:]
+          (manifest_path, digest, anonymous, hub_manifest_path, hub_digest, hub_anonymous,
+           run_id, source_sha, image, hub_image, hub_url) = sys.argv[1:]
           manifest_bytes = Path(manifest_path).read_bytes()
+          hub_manifest_bytes = Path(hub_manifest_path).read_bytes()
           release = {
               "state": "promoted",
               "candidate_run_id": run_id,
@@ -326,6 +378,11 @@ jobs:
               "source_sha_tag": f"ghcr.io/marsiandeployer/habab-home-assistant:sha-{source_sha}",
               "registry_digest": digest,
               "registry_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+              "hub_image": hub_image,
+              "hub_digest": hub_digest,
+              "hub_url": hub_url,
+              "hub_anonymous_pull": hub_anonymous == "true",
+              "hub_manifest_sha256": hashlib.sha256(hub_manifest_bytes).hexdigest(),
               "platforms": ["linux/amd64", "linux/arm64"],
               "anonymous_pull": anonymous == "true",
               "promoted_at": datetime.now(timezone.utc).isoformat(),
@@ -336,7 +393,10 @@ jobs:
           if [[ "$anonymous_pull" != true ]]; then
             echo '::warning::Image was copied to GHCR, but anonymous pull by digest was not confirmed.'
           fi
-          printf '%s\n' "$registry_digest" > promotion-digest.txt
+          if [[ "$hub_anonymous_pull" != true ]]; then
+            echo '::warning::Image was copied to Docker Hub, but anonymous pull by digest was not confirmed.'
+          fi
+          printf 'GHCR %s\nDocker Hub %s\n' "$registry_digest" "$hub_digest" > promotion-digest.txt
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
