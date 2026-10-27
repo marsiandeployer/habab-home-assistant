@@ -1,0 +1,13 @@
+{
+  "node": {
+    "version": "24.22.1",
+    "url": "https://nodejs.org/download/release/v24.22.1/node-v24.22.1-linux-arm64.tar.xz",
+    "sha256": "dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e"
+  },
+  "opencode": {
+    "package": "opencode-linux-arm64",
+    "version": "1.14.21",
+    "url": "https://registry.npmjs.org/opencode-linux-arm64/-/opencode-linux-arm64-1.14.21.tgz",
+    "integrity": "sha512-zYCM352wYp0rOxB6w2JHMbtSv8KI6RnWNVNv2mGUKSBSk4aBLDYWWxhfJil/pyk0lVM6V8YstVhStwvONCBuhA=="
+  }
+}

@@ -1,0 +1,276 @@
+name: Habab Docker image release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Full commit SHA or existing tag that is an ancestor of main
+        required: true
+        type: string
+      image_tag:
+        description: Registry tag to build, for example 0.3.6-r1
+        required: true
+        type: string
+      frontend_wheel_version:
+        description: New Core-matched wheel version, for example 20260930.4+habab.19
+        required: true
+        type: string
+      publish:
+        description: Push the verified image to GHCR (requires package write access)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: habab-docker-release-${{ inputs.image_tag }}
+  queue: max
+
+jobs:
+  resolve-source:
+    runs-on: ubuntu-24.04
+    outputs:
+      source_revision: ${{ steps.resolve.outputs.source_revision }}
+    steps:
+      - id: resolve
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          FRONTEND_VERSION: ${{ inputs.frontend_wheel_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || {
+            echo '::error::Image tag contains unsupported characters'; exit 1;
+          }
+          [[ "$FRONTEND_VERSION" =~ ^20260930\.4\+habab\.[0-9]+$ ]] || {
+            echo '::error::Frontend version must use 20260930.4+habab.N'; exit 1;
+          }
+          git init --quiet "$RUNNER_TEMP/source-resolution"
+          git -C "$RUNNER_TEMP/source-resolution" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -C "$RUNNER_TEMP/source-resolution" config extensions.partialClone origin
+          git -C "$RUNNER_TEMP/source-resolution" config remote.origin.promisor true
+          git -C "$RUNNER_TEMP/source-resolution" config remote.origin.partialclonefilter blob:none
+          if [[ "$SOURCE_REF" =~ ^[0-9a-f]{40,64}$ ]]; then
+            git -C "$RUNNER_TEMP/source-resolution" fetch --filter=blob:none --no-tags origin "$SOURCE_REF"
+            resolved=$(git -C "$RUNNER_TEMP/source-resolution" rev-parse --verify "$SOURCE_REF^{commit}")
+            [[ "$resolved" == "$SOURCE_REF" ]] || { echo '::error::Commit SHA did not resolve exactly'; exit 1; }
+          else
+            [[ "$SOURCE_REF" != refs/* && "$SOURCE_REF" != -* ]] && git check-ref-format "refs/tags/$SOURCE_REF" || {
+              echo '::error::Pass a valid tag name or full SHA, not a branch/ref path'; exit 1;
+            }
+            git -C "$RUNNER_TEMP/source-resolution" fetch --filter=blob:none --no-tags origin \
+              "refs/tags/$SOURCE_REF:refs/tags/$SOURCE_REF"
+            resolved=$(git -C "$RUNNER_TEMP/source-resolution" rev-parse --verify "refs/tags/$SOURCE_REF^{commit}")
+          fi
+          git -C "$RUNNER_TEMP/source-resolution" fetch --filter=blob:none --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git -C "$RUNNER_TEMP/source-resolution" merge-base --is-ancestor \
+            "$resolved" refs/remotes/origin/main || {
+              echo '::error::Selected source is not an ancestor of current origin/main'; exit 1;
+            }
+          echo "source_revision=$resolved" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    needs: resolve-source
+    uses: ./.github/workflows/habab-native-frontend-candidate.yaml
+    with:
+      source_ref: ${{ needs.resolve-source.outputs.source_revision }}
+      wheel_version: ${{ inputs.frontend_wheel_version }}
+
+  build-and-release:
+    needs: [resolve-source, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+      IMAGE_NAME: ghcr.io/marsiandeployer/habab-home-assistant
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      FRONTEND_VERSION: ${{ inputs.frontend_wheel_version }}
+    steps:
+      - name: Fetch exact distribution source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config extensions.partialClone origin
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git fetch --filter=blob:none --no-tags --depth=1 origin "$SOURCE_REVISION"
+          git sparse-checkout init --cone
+          git sparse-checkout set habab/distribution habab/scripts
+          git checkout --detach FETCH_HEAD
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]]
+          git diff --quiet && git diff --cached --quiet
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]]
+
+      - name: Download fresh frontend wheel built from the selected source
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ${{ needs.frontend.outputs.artifact_name }}
+          path: habab/distribution/frontend-candidate
+
+      - name: Verify frontend candidate provenance and prepare image metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$SOURCE_REVISION" "$FRONTEND_VERSION" habab/distribution/frontend-candidate <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          revision, version, candidate = sys.argv[1:]
+          root = Path(candidate)
+          manifest = json.loads((root / "manifest.json").read_text())
+          wheel_name = f"home_assistant_frontend-{version}-py3-none-any.whl"
+          wheel = root / wheel_name
+          if (manifest.get("source_revision") != revision
+                  or manifest.get("wheel_version") != version
+                  or manifest.get("artifact") != wheel_name
+                  or manifest.get("builder_checks") != "passed"
+                  or manifest.get("source_clean_before_build") is not True
+                  or not wheel.is_file()):
+              raise SystemExit("Fresh frontend candidate does not match the selected source/version")
+          digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+          if digest != manifest.get("artifact_sha256"):
+              raise SystemExit("Frontend candidate SHA-256 does not match its manifest")
+          print(f"::notice::Using {wheel_name} ({digest}) from source {revision}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write(f"FRONTEND_SHA256={digest}\n")
+          PY
+          mkdir -p candidate
+
+      - uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
+      - uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3.6.1
+      - name: Build and verify the multi-architecture OCI image
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="candidate/habab-home-${IMAGE_TAG}.oci.tar"
+          docker buildx build \
+            --tag habab-home:latest \
+            --platform linux/amd64,linux/arm64 \
+            --file habab/distribution/Dockerfile.release \
+            --build-arg "HABAB_SOURCE_REVISION=$SOURCE_REVISION" \
+            --build-arg "HABAB_FRONTEND_VERSION=$FRONTEND_VERSION" \
+            --build-arg "HABAB_FRONTEND_SHA256=$FRONTEND_SHA256" \
+            --output "type=oci,dest=$archive" \
+            habab/distribution
+          for platform in linux/amd64 linux/arm64; do
+            filename=${platform//\//-}
+            python3 habab/scripts/release-candidate.py \
+              --verify-linux-image "$archive" --platform "$platform" \
+              --source-revision "$SOURCE_REVISION" \
+              --status-output "candidate/${filename}.json"
+          done
+          sha256sum "$archive" > candidate/image.oci.tar.sha256
+          python3 - "$archive" "$SOURCE_REVISION" "$IMAGE_TAG" "$FRONTEND_VERSION" "$FRONTEND_SHA256" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          archive, revision, tag, frontend_version, frontend_sha = sys.argv[1:]
+          path = Path(archive)
+          hasher = hashlib.sha256()
+          with path.open("rb") as source:
+              for block in iter(lambda: source.read(1024 * 1024), b""):
+                  hasher.update(block)
+          digest = hasher.hexdigest()
+          metadata = {
+              "state": "verified_candidate",
+              "source_revision": revision,
+              "source_dirty": False,
+              "image": f"ghcr.io/marsiandeployer/habab-home-assistant:{tag}",
+              "platforms": ["linux/amd64", "linux/arm64"],
+              "frontend_version": frontend_version,
+              "frontend_sha256": frontend_sha,
+              "oci_archive": path.name,
+              "oci_archive_sha256": digest,
+              "oci_archive_bytes": path.stat().st_size,
+              "workflow_revision": os.environ["GITHUB_WORKFLOW_SHA"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+          }
+          Path("candidate/release.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+          PY
+      - name: Install OCI archive loader
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+
+      - name: Smoke-test both platform images on bounded containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="candidate/habab-home-${IMAGE_TAG}.oci.tar"
+          for architecture in amd64 arm64; do
+            platform="linux/$architecture"
+            smoke_image="habab-home:smoke-$architecture"
+            skopeo copy --override-os linux --override-arch "$architecture" \
+              "oci-archive:${archive}:latest" "docker-daemon:${smoke_image}"
+            python3 habab/scripts/docker-release-smoke.py \
+              --image "$smoke_image" --platform "$platform" \
+              --source-revision "$SOURCE_REVISION" \
+              --frontend-version "$FRONTEND_VERSION" \
+              --frontend-sha256 "$FRONTEND_SHA256" \
+              --opencode-manifest habab/distribution/opencode-release.json \
+              --output "candidate/smoke-${architecture}.json"
+            docker image rm "$smoke_image"
+          done
+
+      - name: Publish verified image to GHCR
+        if: ${{ inputs.publish }}
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          archive="candidate/habab-home-${IMAGE_TAG}.oci.tar"
+          [[ -f "$archive" ]] || { echo '::error::Verified OCI archive is missing'; exit 1; }
+          skopeo copy --all "oci-archive:${archive}:latest" "docker://${IMAGE_NAME}:${IMAGE_TAG}"
+          skopeo copy --all "oci-archive:${archive}:latest" "docker://${IMAGE_NAME}:sha-${SOURCE_REVISION}"
+          skopeo inspect --raw "docker://${IMAGE_NAME}:${IMAGE_TAG}" > candidate/registry-manifest.json
+          digest="sha256:$(sha256sum candidate/registry-manifest.json | cut -d' ' -f1)"
+          python3 - "$digest" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          path = Path("candidate/release.json")
+          release = json.loads(path.read_text())
+          release.update({"state": "published", "registry_digest": sys.argv[1]})
+          path.write_text(json.dumps(release, indent=2, sort_keys=True) + "\n")
+          PY
+          printf '%s %s:%s\n' "$digest" "$IMAGE_NAME" "$IMAGE_TAG" | tee candidate/registry-image.txt
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: ${{ !inputs.publish }}
+        with:
+          name: habab-docker-candidate-${{ inputs.image_tag }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: ${{ inputs.publish }}
+        with:
+          name: habab-docker-release-${{ inputs.image_tag }}
+          path: |
+            candidate/release.json
+            candidate/registry-image.txt
+            candidate/registry-manifest.json
+            candidate/smoke-*.json
+            candidate/linux-*.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

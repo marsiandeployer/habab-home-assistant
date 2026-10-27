@@ -1,0 +1,14 @@
+name: habab-home
+services:
+  homeassistant:
+    image: ${HABAB_HOME_IMAGE:?Set HABAB_HOME_IMAGE to a published Habab Home release image}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+    ports:
+      - "${HABAB_HOME_BIND:-127.0.0.1}:8123:8123"
+    volumes:
+      - habab_home_data:/config
+
+volumes:
+  habab_home_data:
