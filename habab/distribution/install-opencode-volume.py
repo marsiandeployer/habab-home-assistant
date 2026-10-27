@@ -18,7 +18,12 @@ if not arch:
 release = json.loads(Path('/bootstrap/opencode-release.json').read_text())[arch]
 target = Path('/opt/habab-opencode/opencode')
 stamp = target.parent / 'release.json'
-saved = json.loads(stamp.read_text()) if stamp.is_file() else {}
+try:
+    saved = json.loads(stamp.read_text())
+except (OSError, ValueError):
+    saved = {}
+if not isinstance(saved, dict):
+    saved = {}
 current_digest = hashlib.sha256(target.read_bytes()).hexdigest() if target.is_file() else None
 if not (saved.get('release') == release and current_digest == saved.get('sha256')):
     print(f"Downloading pinned OpenCode {release['version']} ({arch})", flush=True)
@@ -41,5 +46,7 @@ if not (saved.get('release') == release and current_digest == saved.get('sha256'
         temporary.replace(target)
 with target.open('rb') as binary:
     digest = hashlib.file_digest(binary, 'sha256').hexdigest()
-stamp.write_text(json.dumps({'release': release, 'sha256': digest}))
+temporary_stamp = stamp.with_suffix('.next')
+temporary_stamp.write_text(json.dumps({'release': release, 'sha256': digest}))
+temporary_stamp.replace(stamp)
 print('HABAB_OPENCODE_SHA256=' + digest)

@@ -77,6 +77,19 @@ class Arm64OpenCodeBootstrapTests(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), self.binary)
         self.assertEqual(json.loads(self.stamp.read_text())['release'], self.release['arm64'])
 
+    def test_corrupt_receipt_recovers_from_pinned_arm64_archive(self):
+        self.seed_cache('arm64', b'cached-executable')
+        self.stamp.write_text('{truncated')
+
+        request = self.run_installer()
+
+        request.assert_called_once_with(self.arm_url, timeout=90)
+        saved = json.loads(self.stamp.read_text())
+        self.assertEqual(saved['release'], self.release['arm64'])
+        self.assertEqual(saved['sha256'], hashlib.sha256(self.binary).hexdigest())
+        self.assertEqual(self.target.read_bytes(), self.binary)
+        self.assertFalse(self.stamp.with_suffix('.next').exists())
+
     def test_corrupt_download_does_not_replace_existing_executable_or_stamp(self):
         self.seed_cache('amd64', b'keep-existing')
         before = self.stamp.read_bytes()
