@@ -17,6 +17,10 @@ import org.json.JSONObject;
 public final class VoiceService extends Service {
     private static final VoiceLifecycleDrain lifecycle = new VoiceLifecycleDrain();
     private static final VoiceLifecycleTrace lifecycleTrace = new VoiceLifecycleTrace();
+    private static final java.util.concurrent.ThreadPoolExecutor wakeClipWriter =
+            new java.util.concurrent.ThreadPoolExecutor(1, 1, 0, java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.ArrayBlockingQueue<>(2),
+                    new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
     private static volatile Context lifecycleContext;
     private static volatile VoiceService instance;
     private final java.util.concurrent.CompletableFuture<Void> captureCleaned = new java.util.concurrent.CompletableFuture<>();
@@ -514,6 +518,8 @@ public final class VoiceService extends Service {
                 short[] inputSamples = new short[inputRate / 50];
                 PcmRateConverter inputResampler = legacyScoSampleRate ? new PcmRateConverter(8000, 16000) : null;
                 ArrayDeque<short[]> pending = new ArrayDeque<>();
+                WakeClipBuffer wakeClip = new WakeClipBuffer(8);
+                boolean wakeClipActive = false;
                 long started = 0;
                 phase("wake");
                 traceWake(VoiceLifecycleTrace.Event.AUDIO_CAPTURE_READY, VoiceLifecycleTrace.Reason.ROUTE,
@@ -536,15 +542,42 @@ public final class VoiceService extends Service {
                         endSession(VoiceSessionSignals.EndReason.NORMAL); pending.clear();
                         detector.reset(now, VoiceLifecycleTrace.Reason.SESSION_RESET); phase("wake");
                     } else if (client == null && now >= wakeSuppressedUntil) {
+                        boolean recordWake = getSharedPreferences("voice", 0).getBoolean("record_wake_clips", false);
+                        if (recordWake) wakeClip.append(samples, count);
+                        else if (wakeClipActive) wakeClip.clear();
+                        wakeClipActive = recordWake;
                         if (detector.accept(samples, count, now)) {
+                            if (recordWake) {
+                                File external = getExternalFilesDir(null);
+                                if (external != null) {
+                                    short[] clip = wakeClip.snapshot();
+                                    long capturedAt = System.currentTimeMillis();
+                                    long capturedAttempt = detector.lastMatchAttempt();
+                                    try {
+                                        wakeClipWriter.execute(() -> {
+                                            try { WakeClipBuffer.save(new File(external, "wake-clips"), clip, capturedAt, capturedAttempt); }
+                                            catch (java.io.IOException error) { android.util.Log.w("HababWakeClip", "Failed to save wake clip", error); }
+                                            finally { java.util.Arrays.fill(clip, (short) 0); }
+                                        });
+                                    } catch (java.util.concurrent.RejectedExecutionException full) {
+                                        java.util.Arrays.fill(clip, (short) 0);
+                                        android.util.Log.w("HababWakeClip", "Wake clip queue full");
+                                    }
+                                }
+                            }
+                            wakeClip.clear();
                             WakeMatchGate.MatchSource source = detector.lastMatchSource();
                             lastWakeSource = source == null ? "unknown" : source.statusValue();
                             wakeCount++; started = now; lastActivity = now;
                             beginSession(now, detector.lastMatchAttempt());
                         }
                     } else if (client == null) {
+                        if (wakeClipActive) wakeClip.clear();
+                        wakeClipActive = false;
                         pending.clear(); // The END cue and its acoustic tail cannot activate the next session.
                     } else if (client.finishing()) {
+                        if (wakeClipActive) wakeClip.clear();
+                        wakeClipActive = false;
                         pending.clear();
                     } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.TIMEOUT) {
                         client.timeoutToolGrace(); pending.clear();

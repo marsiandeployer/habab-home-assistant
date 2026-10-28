@@ -328,12 +328,16 @@ public final class MainActivity extends Activity {
         phrase.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)}); form.addView(phrase);
         CheckBox enabled = new CheckBox(this); enabled.setText(R.string.voice_enable);
         enabled.setChecked(getSharedPreferences("voice", 0).getBoolean("enabled", false)); form.addView(enabled);
-        AlertDialog voiceDialog = new AlertDialog.Builder(this).setTitle(R.string.voice_title).setView(form)
+        CheckBox wakeClips = new CheckBox(this); wakeClips.setText(R.string.voice_record_wake_clips);
+        wakeClips.setChecked(getSharedPreferences("voice", 0).getBoolean("record_wake_clips", false)); form.addView(wakeClips);
+        ScrollView voiceScroll = new ScrollView(this); voiceScroll.addView(form);
+        AlertDialog voiceDialog = new AlertDialog.Builder(this).setTitle(R.string.voice_title).setView(voiceScroll)
                 .setPositiveButton(R.string.configure, (dialog, which) -> {
                     String value = WakeDetector.normalize(phrase.getText().toString());
                     if (value.isEmpty()) { message(getString(R.string.voice_invalid_phrase)); return; }
                     getSharedPreferences("voice", 0).edit().putString("phrase", value)
                             .putBoolean("enabled", enabled.isChecked())
+                            .putBoolean("record_wake_clips", wakeClips.isChecked())
                             .putString("audio_route_mode", audioRouteGroup.findViewById(audioRouteGroup.getCheckedRadioButtonId()).getTag().toString())
                             .remove("bluetooth_audio").apply();
                     if (enabled.isChecked()) {

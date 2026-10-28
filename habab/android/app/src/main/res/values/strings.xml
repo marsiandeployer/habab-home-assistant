@@ -102,4 +102,5 @@
     <string name="voice_error_audio_focus">Звук занят другим приложением. Голосовой сеанс остановлен.</string>
     <string name="voice_error_update">Для этого голосового режима обновите серверный пакет Habab.</string>
     <string name="voice_error_history">Не удалось сохранить разговор в общем чате. Проверьте домашний сервер.</string>
+    <string name="voice_record_wake_clips">Сохранять локально до 8 секунд перед срабатыванием «эй дом» для диагностики (до 50 записей). Файлы не отправляются автоматически.</string>
 </resources>
