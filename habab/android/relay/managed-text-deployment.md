@@ -16,6 +16,14 @@ on `127.0.0.1:8327`.
 Bootstrap accepts up to 512 KiB of JSON wire data to account for escaped
 Unicode; the normalized setup itself remains limited to 64 KiB.
 
+The managed `habab-chat` alias fixes DeepSeek requests to non-thinking mode,
+including ordinary chat, automatic or forced tools, and tool continuations.
+It overrides `thinking` to `disabled` and any supplied `reasoning_effort` to
+`none`, so the short, fast alias does not depend on forwarding
+`reasoning_content`. Upstream errors are returned as errors; the relay does not
+retry in thinking mode or fall back to a direct provider. Explicit OpenAI,
+DeepSeek, and Google Gemini connections are unchanged.
+
 `ecosystem.managed-text.config.cjs` starts a separate instance of the existing
 frozen `openai_gateway.py` implementation with its existing `--config <path>`
 interface. The config may include the optional `voice_service_key` field for

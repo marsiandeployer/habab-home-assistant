@@ -603,18 +603,11 @@ class Gateway:
             return web.json_response({'error': {'code': 'relay_invalid_request'}}, status=400)
         if self.inflight >= 6:
             return web.json_response({'error': {'code': 'relay_busy'}}, status=429)
-        tool_choice = payload.get('tool_choice')
-        named_tool = (isinstance(tool_choice, dict) and tool_choice.get('type') == 'function'
-                      and isinstance(tool_choice.get('function'), dict)
-                      and isinstance(tool_choice['function'].get('name'), str)
-                      and bool(tool_choice['function']['name']))
-        if (isinstance(payload.get('tools'), list) and payload['tools']
-                and (tool_choice == 'required' or named_tool)):
-            # This fixed DeepSeek upstream rejects forced tools in thinking mode.
-            # Keep its compatibility policy behind the managed alias.
-            payload['thinking'] = {'type': 'disabled'}
-            if 'reasoning_effort' in payload:
-                payload['reasoning_effort'] = 'none'
+        # This alias intentionally uses DeepSeek's non-thinking mode for fast
+        # replies and tool continuations; the direct provider path is untouched.
+        payload['thinking'] = {'type': 'disabled'}
+        if 'reasoning_effort' in payload:
+            payload['reasoning_effort'] = 'none'
         payload['model'] = DEEPSEEK_TEXT_MODEL
         upstream_body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.inflight += 1

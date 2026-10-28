@@ -1010,7 +1010,7 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers['Content-Type'], 'text/event-stream')
         self.assertEqual(self.gateway.inflight, 0)
 
-    async def test_managed_text_forced_tool_choices_disable_upstream_thinking(self):
+    async def test_managed_text_alias_always_uses_nonthinking_mode(self):
         headers = {'Authorization': 'Bearer synthetic-owner'}
         tool = {'type': 'function', 'function': {
             'name': 'StructuredOutput',
@@ -1018,35 +1018,29 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
                            'properties': {'kind': {'type': 'string', 'enum': ['answer']}},
                            'required': ['kind']},
         }}
-        for choice in ('required', {'type': 'function', 'function': {'name': 'StructuredOutput'}}):
-            for conflict in ({}, {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'}):
-                with self.subTest(choice=choice, conflict=conflict):
-                    request = {'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}],
-                               'tools': [tool], 'tool_choice': choice, 'temperature': 0.2, **conflict}
-                    original = json.loads(json.dumps(request))
-                    response = await self.client.post('/v1/chat/completions', headers=headers, json=request)
-                    self.assertEqual(response.status, 200)
-                    await response.read()
-                    expected = {**original, 'model': 'deepseek-flash', 'thinking': {'type': 'disabled'}}
-                    if 'reasoning_effort' in original:
-                        expected['reasoning_effort'] = 'none'
-                    self.assertEqual(json.loads(self.deepseek_calls[-1][5]), expected)
-                    self.assertEqual(request, original)
-        self.assertEqual(self.calls, [])
-
-    async def test_managed_text_nonforced_and_toolless_options_remain_unchanged(self):
-        headers = {'Authorization': 'Bearer synthetic-owner'}
-        tool = {'type': 'function', 'function': {'name': 'fixture', 'parameters': {'type': 'object'}}}
-        for extra in ({}, {'tools': [tool], 'tool_choice': 'auto'},
-                      {'tools': [tool], 'tool_choice': 'none'}, {'tool_choice': 'required'}):
+        cases = (
+            {},
+            {'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'},
+            {'tools': [tool], 'tool_choice': 'auto'},
+            {'tools': [tool], 'tool_choice': 'none'},
+            {'tools': [tool], 'tool_choice': 'required'},
+            {'tools': [tool], 'tool_choice': {'type': 'function',
+                                              'function': {'name': 'StructuredOutput'}}},
+            {'tools': [tool], 'tool_choice': 'auto',
+             'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high'},
+        )
+        for extra in cases:
             with self.subTest(extra=extra):
                 request = {'model': 'habab-chat', 'messages': [{'role': 'user', 'content': 'hello'}],
-                           'thinking': {'type': 'enabled'}, 'reasoning_effort': 'high', **extra}
+                           'temperature': 0.2, **extra}
                 original = json.loads(json.dumps(request))
                 response = await self.client.post('/v1/chat/completions', headers=headers, json=request)
                 self.assertEqual(response.status, 200)
                 await response.read()
-                self.assertEqual(json.loads(self.deepseek_calls[-1][5]), {**original, 'model': 'deepseek-flash'})
+                expected = {**original, 'model': 'deepseek-flash', 'thinking': {'type': 'disabled'}}
+                if 'reasoning_effort' in original:
+                    expected['reasoning_effort'] = 'none'
+                self.assertEqual(json.loads(self.deepseek_calls[-1][5]), expected)
                 self.assertEqual(request, original)
         self.assertEqual(self.calls, [])
 
