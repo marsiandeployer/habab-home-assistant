@@ -49,7 +49,29 @@ Runtime работает в PRoot от имени приложения. UID 0 в
 ```sh
 python3 habab/android/tools/prepare_native.py
 python3 habab/android/tools/prepare_voice.py
+```
 
+Обычный `prepare_native.py` скачивает закреплённые `.deb` из Termux, когда их
+нет в `habab/android/build/native/`, и проверяет SHA-256 каждого пакета перед
+распаковкой. Если закреплённый файл недоступен по сети, оператор может явно
+передать каталог `.deb` в offline-режиме. Этот режим ничего не скачивает,
+завершается ошибкой при отсутствии пакета и применяет те же SHA-256 из
+`native-packages.json` до распаковки:
+
+```sh
+native_spec_sha=$(sha256sum habab/android/native-packages.json | awk '{print $1}')
+native_package_cache="$HOME/.local/share/habab-android/native-inputs/$native_spec_sha"
+python3 habab/android/tools/prepare_native.py --package-cache "$native_package_cache"
+```
+
+Каталог должен содержать файл `<имя-пакета>.deb` для каждого пакета из текущего
+`native-packages.json`. Сохраняйте рядом `manifest.json` с источником и SHA-256
+пакетов; выполнение сверяет сами `.deb` со спецификацией перед распаковкой.
+Удобно держать эти входы в read-only каталоге с именем, равным SHA-256
+спецификации. Не подменяйте недоступный сетевой URL другим пакетом без
+обновления и проверки спецификации.
+
+```sh
 # Один постоянный ключ выпуска. Хранить вне репозитория и каталога downloads.
 umask 077
 mkdir -p "$HOME/.local/share/habab-android"
