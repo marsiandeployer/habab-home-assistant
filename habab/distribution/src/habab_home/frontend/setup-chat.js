@@ -1,6 +1,6 @@
 // Independent downstream extension: no dependency on compiled HA internals.
 import { AssistVoice, BrowserGeminiVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js";
-import { strings } from "./strings.js?v=3";
+import { strings } from "./strings.js?v=5";
 import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals } from "./chat-dismissal.js";
 import { createToolCalls } from "./chat-tools.js?v=1";
 export function visibleTextMessages(messages) {
@@ -9,6 +9,31 @@ export function visibleTextMessages(messages) {
     (typeof message?.text === "string" && message.text.trim().length > 0) ||
     (message?.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0)
   );
+}
+
+export function assistantFeedbackContext(messages, answerIndex) {
+  if (!Array.isArray(messages) || !Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= messages.length) return null;
+  const answer = messages[answerIndex];
+  if (answer?.role !== "assistant" || typeof answer.text !== "string" || !answer.text.trim()) return null;
+  let promptText = "";
+  for (let index = answerIndex - 1; index >= 0; index--) {
+    if (messages[index]?.role === "user" && typeof messages[index].text === "string" && messages[index].text.trim()) {
+      promptText = messages[index].text;
+      break;
+    }
+  }
+  return {answer_index: answerIndex, answer_text: answer.text, prompt_text: promptText.slice(0, 4000)};
+}
+
+function createFeedbackIdempotencyKey() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === "function") globalThis.crypto.getRandomValues(bytes);
+  else bytes.forEach((_byte, index) => { bytes[index] = Math.floor(Math.random() * 256); });
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export async function requestAssistantSession(hass, {fresh = false, isCurrent, onActivating}) {
@@ -316,6 +341,7 @@ function installChat() {
       super();
       this.attachShadow({mode: "open"});
       this.messages = [];
+      this.feedbackStates = new Map();
       this.busy = false;
       this.voiceBusy = false;
       this.voiceGeneration = 0;
@@ -740,7 +766,7 @@ function installChat() {
         dialog::backdrop{background:transparent}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}.collapse{display:none}
         #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:24px;line-height:1.3;font-weight:500;margin:0 0 16px}
         .tool-calls{margin-block:12px 4px;border:1px solid var(--divider-color,#c8cccf);border-radius:10px;padding:8px 12px;max-inline-size:100%;font-size:13px;white-space:normal}.tool-calls summary{cursor:pointer;min-height:32px;align-content:center;overflow-wrap:anywhere}.tool-calls summary:focus-visible{outline:2px solid var(--primary-color,#007a9e);outline-offset:2px}.tool-call{margin-block-start:8px;padding-block-start:4px;border-block-start:1px solid var(--divider-color,#c8cccf)}.tool-calls .tool-caption{margin-block:8px 4px;color:var(--secondary-text-color,#5f6368);font-size:12px}.tool-calls pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-block-size:18rem;max-inline-size:100%;margin:0;padding:8px;border-radius:6px;background:var(--secondary-background-color,#f0f2f4);font:12px/1.5 ui-monospace,monospace}.tool-calls a{color:var(--primary-color,#007a9e)}
-        .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}
+        .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}.answer-feedback{display:flex;align-items:center;gap:6px;margin-block-start:8px;color:var(--secondary-text-color,#5f6368);font-size:12px}.answer-feedback button{min-width:40px;min-height:36px;padding:4px 8px;border:1px solid var(--divider-color,#c8cccf);border-radius:18px}.answer-feedback button[aria-pressed="true"]{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}.answer-feedback [role="status"]{margin:0;white-space:normal}
         .quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
         footer{padding:12px 20px 20px}.assist-pipeline-control{display:block;margin:0 0 8px;font-size:12px;color:var(--secondary-text-color,#5f6368)}.assist-pipeline{display:block;width:100%;min-height:40px;margin-block-start:4px;padding:6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff)}#voice-mode-help{font-size:12px;color:var(--secondary-text-color,#5f6368);margin:0 0 8px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
@@ -1499,6 +1525,7 @@ function installChat() {
         if (message.role === "assistant") {
           const tools = createToolCalls(document, message.tool_calls, strings[this.language]);
           if (tools) row.append(tools);
+          if (typeof message.text === "string" && message.text.trim()) row.append(this.renderAnswerFeedback(this.messages.indexOf(message)));
         }
         messageContainer.append(row);
       }
@@ -1532,6 +1559,88 @@ function installChat() {
         }
         if (visibleMessages.length) log.scrollTop = keepScrollPosition ? previousScrollTop : log.scrollHeight;
       });
+    }
+
+    renderAnswerFeedback(messageIndex) {
+      const context = assistantFeedbackContext(this.messages, messageIndex);
+      const key = this.answerFeedbackKey(messageIndex);
+      const state = this.feedbackStates.get(key);
+      const controls = document.createElement("div");
+      controls.className = "answer-feedback";
+      controls.dataset.answerIndex = String(messageIndex);
+      for (const [rating, label, value] of [
+        ["positive", this.t.feedbackPositiveLabel, this.t.feedbackPositive],
+        ["negative", this.t.feedbackNegativeLabel, this.t.feedbackNegative],
+      ]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = rating === "positive" ? "👍" : "👎";
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.setAttribute("aria-pressed", String(state?.rating === rating && state?.status === "success"));
+        button.disabled = !context || state?.status === "pending" || state?.status === "success";
+        button.onclick = () => this.submitAnswerFeedback(messageIndex, rating, value);
+        controls.append(button);
+      }
+      if (state?.status === "pending") {
+        const status = document.createElement("span");
+        status.setAttribute("role", "status");
+        status.textContent = this.t.feedbackSending;
+        controls.append(status);
+      } else if (state?.status === "success" || state?.status === "error") {
+        const status = document.createElement("span");
+        status.setAttribute("role", "status");
+        status.textContent = state.text;
+        controls.append(status);
+      }
+      return controls;
+    }
+
+    answerFeedbackKey(messageIndex) {
+      const answerText = this.messages?.[messageIndex]?.text;
+      return `${this.sessionId}:${messageIndex}:${typeof answerText === "string" ? answerText : ""}`;
+    }
+
+    async submitAnswerFeedback(messageIndex, rating, feedback) {
+      if (!this.isCurrentOwnerContext() || !this.sessionId) return;
+      const context = assistantFeedbackContext(this.messages, messageIndex);
+      if (!context) return;
+      const key = this.answerFeedbackKey(messageIndex);
+      const previous = this.feedbackStates.get(key);
+      if (previous?.status === "pending" || previous?.status === "success") return;
+      const attempt = previous?.idempotencyKey || createFeedbackIdempotencyKey();
+      this.feedbackStates.set(key, {status: "pending", rating, idempotencyKey: attempt});
+      this.draw({preserveScroll: true});
+      try {
+        const response = await this.hass.fetchWithAuth("/api/habab_home/feedback", {
+          method: "POST", cache: "no-store",
+          headers: {"Content-Type": "application/json", Accept: "application/json"},
+          body: JSON.stringify({
+            session_id: this.sessionId, feedback, consent: true,
+            idempotency_key: attempt, ...context,
+          }),
+        });
+        let receipt;
+        try { receipt = await response.json(); } catch (_) { receipt = undefined; }
+        if (!response.ok || receipt?.state !== "saved_locally") {
+          throw new Error(receipt?.message || "feedback_failed");
+        }
+        if (receipt.delivery_status !== "saved_on_server") {
+          throw new Error(receipt.delivery_status === "not_configured" || receipt.delivery_status === "rejected"
+            ? "feedback_not_configured" : "feedback_pending");
+        }
+        this.feedbackStates.set(key, {
+          status: "success", rating, idempotencyKey: attempt,
+          text: receipt.trace_status === "unavailable" ? this.t.feedbackSentWithoutTrace
+            : receipt.trace_status === "truncated" ? this.t.feedbackSentTruncated : this.t.feedbackSent,
+        });
+      } catch (error) {
+        const code = error?.message;
+        const text = code === "feedback_not_configured" ? this.t.feedbackNotConfigured
+          : code === "feedback_pending" ? this.t.feedbackPending : this.t.feedbackFailed;
+        this.feedbackStates.set(key, {status: "error", rating, idempotencyKey: attempt, text});
+      }
+      this.draw({preserveScroll: true});
     }
 
     async send(textValue, {voiceReply = false, clearDraft = false} = {}) {

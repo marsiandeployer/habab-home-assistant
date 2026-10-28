@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.habab_home import feedback
+from homeassistant.components.habab_home import feedback_transport
+from homeassistant.components.habab_home.feedback_transport import FeedbackDeliveryResult
 
 
 class Request(dict):
@@ -138,6 +140,203 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
             {"provider": "habab-deepseek", "model": "deepseek-chat"}])
         self.assertIn("vendor docs", package)
         self.assertIn("[redacted]", package)
+
+    async def test_per_answer_feedback_sends_only_selected_turn_trace(self):
+        hass, _assistant, runtime = make_runtime(text="The selected answer", output="selected tool result")
+        runtime.visible.return_value = [
+            {"role": "user", "text": "Selected question"},
+            {"role": "assistant", "text": "The selected answer"},
+        ]
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="This answer helped")
+        request_body.update({
+            "answer_index": 1,
+            "answer_text": "The selected answer",
+            "prompt_text": "Selected question",
+        })
+
+        response = await feedback.FeedbackSubmitView().post(Request(
+            SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+
+        self.assertEqual(response.status, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["trace_status"], "available")
+        self.assertEqual(payload["delivery_status"], "not_configured")
+        record = next(iter(manager.records.values()))
+        events = record["context"]["events"]
+        self.assertEqual([event["kind"] for event in events], [
+            "tool_invocation", "tool_output", "assistant_text",
+        ])
+        self.assertEqual(events[-1]["text"], "The selected answer")
+        self.assertIn("selected tool result", json.dumps(events, ensure_ascii=False))
+        self.assertEqual(record["context"]["source"]["kind"], "owner_mapped_current_session")
+
+    async def test_per_answer_action_explicitly_delivers_saved_package_to_receiver(self):
+        hass, _assistant, runtime = make_runtime(text="The selected answer", output="tool result")
+        runtime.visible.return_value = [{"role": "assistant", "text": "The selected answer"}]
+
+        async def run_executor(function, *args):
+            return function(*args)
+
+        hass.async_add_executor_job = run_executor
+        manager, _store = self.make_manager(hass)
+        await manager.async_set_feedback_delivery_credential("r" * 32)
+        await manager.async_set_feedback_delivery_enabled(True)
+        receiver_receipt = FeedbackDeliveryResult(
+            status="saved_on_server", receipt_id=str(uuid.uuid4()),
+            issue_state="pending_issue", duplicate=False,
+        )
+        request_body = body(feedback_text="This answer helped")
+        request_body.update({"answer_index": 0, "answer_text": "The selected answer", "prompt_text": ""})
+
+        with patch.object(feedback, "send_feedback", return_value=receiver_receipt) as sender:
+            response = await feedback.FeedbackSubmitView().post(Request(
+                SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+
+        payload = json.loads(response.body)
+        self.assertEqual(payload["delivery_status"], "saved_on_server")
+        package = sender.call_args.args[0]
+        self.assertEqual(package["feedback"], "This answer helped")
+        self.assertEqual(package["context"]["events"][-1]["text"], "The selected answer")
+        self.assertNotIn("correlation_id", json.dumps(package["context"]))
+
+    async def test_native_answer_feedback_marks_missing_runtime_trace(self):
+        hass, _assistant, runtime = make_runtime(text="Different OpenCode answer")
+        runtime.visible.return_value = [
+            {"role": "user", "text": "Native question with token=private-native-token"},
+            {"role": "assistant", "text": "Native answer with password=private-native-password"},
+        ]
+        runtime.visible.side_effect = lambda messages: (
+            [{"role": "assistant", "text": "Different OpenCode answer"}] if messages else []
+        )
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="This answer did not help")
+        request_body.update({
+            "answer_index": 1,
+            "answer_text": "Native answer with password=private-native-password",
+            "prompt_text": "Native question with token=private-native-token",
+        })
+
+        response = await feedback.FeedbackSubmitView().post(Request(
+            SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+
+        payload = json.loads(response.body)
+        self.assertEqual(payload["trace_status"], "unavailable")
+        self.assertEqual(payload["delivery_status"], "not_configured")
+        record = next(iter(manager.records.values()))
+        rendered = json.dumps(record["context"], ensure_ascii=False)
+        for secret in ("private-native-token", "private-native-password"):
+            self.assertNotIn(secret, rendered)
+        self.assertIn("trace_not_recorded_by_runtime", rendered)
+        self.assertIn("Native answer", rendered)
+
+    async def test_native_answer_feedback_still_saves_when_opencode_history_is_unavailable(self):
+        hass, _assistant, _runtime = make_runtime()
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="This answer helped")
+        request_body.update({"answer_index": 0, "answer_text": "Native answer", "prompt_text": "Native question"})
+
+        with patch.object(feedback, "_load_session_messages", side_effect=OSError("runtime offline")):
+            response = await feedback.FeedbackSubmitView().post(Request(
+                SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+
+        self.assertEqual(response.status, 200)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["trace_status"], "unavailable")
+        record = next(iter(manager.records.values()))
+        self.assertIn("Native answer", json.dumps(record["context"], ensure_ascii=False))
+
+    async def test_selected_older_answer_is_scoped_before_projection_and_answer_survives_truncation(self):
+        hass, _assistant, runtime = make_runtime()
+
+        def message(role, text, *, tool_output=None):
+            parts = [{"type": "text", "text": text}]
+            if tool_output is not None:
+                parts.append({"type": "tool", "tool": "habab-ha", "callID": "scoped-call", "state": {
+                    "status": "completed", "input": {"action": "states"}, "output": tool_output,
+                }})
+            return {"info": {"role": role, "providerID": "habab-deepseek", "modelID": "deepseek-chat",
+                              "time": {"created": 1792933200000, "completed": 1792933201000}},
+                    "parts": parts}
+
+        raw = [
+            message("user", "Old question"),
+            message("assistant", "Old answer", tool_output="old private trace"),
+            message("user", "Selected question"),
+            message("assistant", "The selected answer explains how to connect the device. " * 300,
+                    tool_output="selected tool result"),
+        ]
+
+        def visible(messages):
+            return [{"role": item["info"]["role"], "text": "\n".join(
+                part.get("text", "") for part in item.get("parts", []) if part.get("type") == "text"
+            )} for item in messages]
+
+        runtime.visible.side_effect = visible
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="This answer helped")
+        request_body.update({"answer_index": 3, "answer_text": visible(raw)[3]["text"], "prompt_text": "Selected question"})
+
+        with patch.object(feedback, "_load_session_messages", return_value=(runtime, raw, False)):
+            response = await feedback.FeedbackSubmitView().post(Request(
+                SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+
+        payload = json.loads(response.body)
+        self.assertEqual(payload["trace_status"], "truncated")
+        record = next(iter(manager.records.values()))
+        context = record["context"]
+        self.assertLessEqual(len(json.dumps(context, ensure_ascii=False).encode()), feedback.MAX_CONTEXT_BYTES)
+        events = context["events"]
+        self.assertTrue(events[-1]["text"].startswith("The selected answer"))
+        rendered = json.dumps(events, ensure_ascii=False)
+        self.assertIn("selected tool result", rendered)
+        self.assertNotIn("old private trace", rendered)
+
+    async def test_selected_quoted_answer_is_clipped_to_receiver_serialized_context_budget(self):
+        hass, _assistant, runtime = make_runtime()
+        answer = ('Quoted "value" with newline\n' * 850)
+
+        def message(role, text, *, tool_output=None):
+            parts = [{"type": "text", "text": text}]
+            if tool_output is not None:
+                parts.append({"type": "tool", "tool": "habab-ha", "callID": "quoted-call", "state": {
+                    "status": "completed", "input": {"action": "states"}, "output": tool_output,
+                }})
+            return {"info": {"role": role, "providerID": "habab-deepseek", "modelID": "deepseek-chat",
+                              "time": {"created": 1792933200000, "completed": 1792933201000}},
+                    "parts": parts}
+
+        raw = [
+            message("user", "Quoted answer question"),
+            message("assistant", answer, tool_output=('Tool "trace"\n' * 3000)),
+        ]
+
+        def visible(messages):
+            return [{"role": item["info"]["role"], "text": "\n".join(
+                part.get("text", "") for part in item.get("parts", []) if part.get("type") == "text"
+            )} for item in messages]
+
+        runtime.visible.side_effect = visible
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="This answer helped")
+        request_body.update({"answer_index": 1, "answer_text": answer, "prompt_text": "Quoted answer question"})
+
+        with patch.object(feedback, "_load_session_messages", return_value=(runtime, raw, False)):
+            response = await feedback.FeedbackSubmitView().post(Request(
+                SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.body)["trace_status"], "truncated")
+        record = next(iter(manager.records.values()))
+        context = record["context"]
+        self.assertTrue(context["events"][-1]["text"].startswith('Quoted "value" with newline\n'))
+        self.assertLessEqual(len(feedback_transport._context_bytes(context)), feedback_transport.MAX_CONTEXT_BYTES)
+        package = {
+            "feedback": record["feedback"],
+            "context": context,
+            "idempotency_key": record["idempotency_key"],
+        }
+        self.assertIsNotNone(feedback_transport._request_body(package))
 
     async def test_idempotency_returns_existing_receipt_and_rejects_changed_content(self):
         hass, _assistant, runtime = make_runtime()

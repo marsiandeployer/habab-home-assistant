@@ -108,9 +108,54 @@ test("global chat launcher follows the authenticated main element across routes"
       { role: "assistant", text: "The setup card is ready." },
     ];
     assert.deepEqual(setupChatModule.visibleTextMessages(history), [history[0], history[3]]);
+    assert.deepEqual(setupChatModule.assistantFeedbackContext(history, 3), {
+      answer_index: 3,
+      answer_text: "The setup card is ready.",
+      prompt_text: "Connect Xiaomi Home",
+    });
+    assert.equal(setupChatModule.assistantFeedbackContext(history, 0), null, "user messages do not get answer feedback controls");
+    assert.equal(setupChatModule.assistantFeedbackContext(history, 8), null, "out-of-range answers are rejected");
     const toolOnly = {role: "assistant", text: "", tool_calls: [{name: "bash", status: "error"}]};
     assert.deepEqual(setupChatModule.visibleTextMessages([toolOnly, {role: "user", text: ""}]), [toolOnly]);
     assert.equal(history.length, 4, "filtering display messages must retain session history");
+
+    const createElement = document.createElement;
+    const previousCurrentContext = launcher.isCurrentOwnerContext;
+    const previousDraw = launcher.draw;
+    class FeedbackElement {
+      constructor(name) { this.localName = name; this.children = []; this.dataset = {}; this.attributes = {}; }
+      append(...items) { this.children.push(...items); }
+      setAttribute(name, value) { this.attributes[name] = value; }
+    }
+    document.createElement = (name) => new FeedbackElement(name);
+    launcher.isCurrentOwnerContext = () => true;
+    launcher.draw = () => {};
+    launcher.messages = [{role: "user", text: "Question"}, {role: "assistant", text: "Answer"}];
+    launcher.sessionId = "feedback-session";
+    launcher.feedbackStates = new Map();
+    let feedbackRequests = 0;
+    let finishFeedbackRequest;
+    launcher.hass.fetchWithAuth = () => {
+      feedbackRequests++;
+      return new Promise((resolve) => { finishFeedbackRequest = resolve; });
+    };
+    const controls = launcher.renderAnswerFeedback(1);
+    assert.equal(controls.children.length, 2, "each assistant answer has positive and negative buttons");
+    const submission = controls.children[0].onclick();
+    await Promise.resolve();
+    assert.equal(launcher.renderAnswerFeedback(1).children[0].disabled, true, "both ratings lock while one is pending");
+    await launcher.renderAnswerFeedback(1).children[1].onclick();
+    assert.equal(feedbackRequests, 1, "a second click cannot submit the same answer twice");
+    finishFeedbackRequest({ok: true, json: async () => ({
+      receipt_id: "receipt", state: "saved_locally", delivery_status: "saved_on_server", trace_status: "available",
+    })});
+    await submission;
+    const completedFeedback = launcher.renderAnswerFeedback(1);
+    assert.equal(completedFeedback.children[0].disabled, true);
+    assert.equal(completedFeedback.children[2].textContent, launcher.t.feedbackSent);
+    document.createElement = createElement;
+    launcher.isCurrentOwnerContext = previousCurrentContext;
+    launcher.draw = previousDraw;
 
     main.route = { path: "/config/areas" };
     intervals[1]();

@@ -15,6 +15,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
 from .feedback_transport import (
+    EVENT_KEYS,
     TOKEN_PATTERN,
     get_feedback_status,
     send_feedback,
@@ -22,10 +23,17 @@ from .feedback_transport import (
 )
 from .diagnostics import (
     MAX_MESSAGES,
+    MAX_TEXT_SCAN_CHARS,
     ProjectionBudget,
+    _duration_ms,
+    _iso,
+    _load_session_messages,
     _mapped_sessions,
     _redact_text,
+    _session_status,
+    _session_time_bounds,
     _session_data,
+    project_messages,
 )
 
 MAX_FEEDBACK_CHARS = 2000
@@ -37,6 +45,7 @@ STORE_KEY = "habab_home.feedback_receipts"
 IDEMPOTENCY_KEY = re.compile(r"[0-9a-fA-F-]{36}\Z")
 FEEDBACK_VERSION = 1
 DELIVERY_STORE_KEY = "feedback_delivery"
+MAX_FEEDBACK_REQUEST_BYTES = 160 * 1024
 
 
 class FeedbackError(Exception):
@@ -67,9 +76,12 @@ def _is_uuid(value: str) -> bool:
         return False
 
 
-def _digest(session_id: str, feedback: str) -> str:
+def _digest(session_id: str, feedback: str, answer_index: int | None = None) -> str:
+    identity = {"session_id": session_id, "feedback": feedback, "version": FEEDBACK_VERSION}
+    if answer_index is not None:
+        identity["answer_index"] = answer_index
     canonical = json.dumps(
-        {"session_id": session_id, "feedback": feedback, "version": FEEDBACK_VERSION},
+        identity,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -395,7 +407,8 @@ class FeedbackManager:
             return existing
 
     async def async_save(self, *, owner_id: str, key: str, digest: str,
-                         feedback: str, context: dict) -> tuple[dict, bool]:
+                         feedback: str, context: dict,
+                         trace_status: str | None = None) -> tuple[dict, bool]:
         async with self._lock:
             await self._load()
             await self._prune_and_save()
@@ -421,6 +434,8 @@ class FeedbackManager:
                 "feedback": feedback,
                 "context": context,
             }
+            if trace_status in {"available", "truncated", "unavailable"}:
+                record["trace_status"] = trace_status
             updated = {**self.records, receipt_id: record}
             await self._save_store(updated)
             self.records = updated
@@ -437,13 +452,52 @@ class FeedbackManager:
 
 
 def _public_receipt(record: dict, duplicate: bool = False) -> dict:
-    return {
+    receipt = {
         "receipt_id": record["receipt_id"],
         "state": record["state"],
         "issue_state": record["issue_state"],
         "created_at": record["created_at"],
         "duplicate": duplicate,
     }
+    if record.get("trace_status") in {"available", "truncated", "unavailable"}:
+        receipt["trace_status"] = record["trace_status"]
+    return receipt
+
+
+def _selected_runtime_answer(runtime, messages: list, answer_index: int,
+                             answer_text: str) -> tuple[str, int] | None:
+    """Map a clicked visible answer back to its raw OpenCode message, if recorded."""
+    visible = runtime.visible(messages)
+    if (not isinstance(visible, list) or answer_index >= len(visible)
+            or not isinstance(visible[answer_index], dict)
+            or visible[answer_index].get("role") != "assistant"
+            or visible[answer_index].get("text") != answer_text):
+        return None
+    selected = visible[answer_index]
+    for raw_index in range(len(messages)):
+        prefix = runtime.visible(messages[:raw_index + 1])
+        if (isinstance(prefix, list) and answer_index < len(prefix)
+                and prefix[answer_index] == selected):
+            return selected["text"], raw_index
+    return None
+
+
+def _bounded_redacted_text(runtime, value: str, byte_limit: int) -> tuple[str, bool]:
+    text = _redact_text(runtime, value, limit=MAX_TEXT_SCAN_CHARS)
+
+    def encoded_size(candidate: str) -> int:
+        return len(json.dumps(candidate, ensure_ascii=False).encode("utf-8"))
+
+    if encoded_size(text) <= byte_limit:
+        return text, False
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if encoded_size(text[:middle]) <= byte_limit:
+            low = middle
+        else:
+            high = middle - 1
+    return text[:low], True
 
 
 class FeedbackSubmitView(HomeAssistantView):
@@ -455,20 +509,30 @@ class FeedbackSubmitView(HomeAssistantView):
         owner = _active_admin(request)
         if owner is None:
             return self.json_message("not_allowed", status_code=403)
-        if getattr(request, "content_length", None) is not None and request.content_length > 8192:
+        if getattr(request, "content_length", None) is not None and request.content_length > MAX_FEEDBACK_REQUEST_BYTES:
             return self.json_message("invalid_feedback", status_code=413)
         try:
             body = await request.json()
-            if not isinstance(body, dict) or set(body) != {
-                    "session_id", "feedback", "consent", "idempotency_key"}:
+            legacy_fields = {"session_id", "feedback", "consent", "idempotency_key"}
+            answer_fields = legacy_fields | {"answer_index", "answer_text", "prompt_text"}
+            if not isinstance(body, dict) or set(body) not in (legacy_fields, answer_fields):
                 raise ValueError("invalid_request")
             session_id = body["session_id"]
             feedback = body["feedback"]
             key = body["idempotency_key"]
+            answer_index = body.get("answer_index")
+            answer_text = body.get("answer_text")
+            prompt_text = body.get("prompt_text")
             if (not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id)
                     or not isinstance(feedback, str) or not 1 <= len(feedback.strip()) <= MAX_FEEDBACK_CHARS
                     or body["consent"] is not True
-                    or not isinstance(key, str) or not IDEMPOTENCY_KEY.fullmatch(key)):
+                    or not isinstance(key, str) or not IDEMPOTENCY_KEY.fullmatch(key)
+                    or ("answer_index" in body and (
+                        type(answer_index) is not int or not 0 <= answer_index < 4096
+                        or not isinstance(answer_text, str)
+                        or not 1 <= len(answer_text.strip()) <= MAX_TEXT_SCAN_CHARS
+                        or not isinstance(prompt_text, str) or len(prompt_text) > 4000
+                    ))):
                 raise ValueError("invalid_request")
             key = str(uuid.UUID(key))
         except (ValueError, TypeError, KeyError):
@@ -486,18 +550,70 @@ class FeedbackSubmitView(HomeAssistantView):
             return self.json_message("session_not_found", status_code=404)
 
         normalized_feedback = feedback.strip()
-        digest = _digest(session_id, normalized_feedback)
+        digest = _digest(session_id, normalized_feedback, answer_index)
         try:
             existing = await manager.idempotent_record(owner.id, key, digest)
             if existing is not None:
+                if answer_index is not None:
+                    delivery = await manager._async_deliver_record(existing)
+                    response = self.json({**_public_receipt(existing, duplicate=True), **delivery})
+                    response.headers["Cache-Control"] = "no-store"
+                    return response
                 response = self.json(_public_receipt(existing, duplicate=True))
                 response.headers["Cache-Control"] = "no-store"
                 return response
-            budget = ProjectionBudget(max_bytes=MAX_CONTEXT_BYTES, max_events=MAX_CONTEXT_EVENTS)
-            session, events, _messages = await _session_data(
-                hass, owner.id, mappings[0], budget=budget)
             runtime = assistant.runtime
             safe_feedback = _redact_text(runtime, normalized_feedback, limit=MAX_FEEDBACK_CHARS)
+            if answer_index is None:
+                budget = ProjectionBudget(max_bytes=MAX_CONTEXT_BYTES, max_events=MAX_CONTEXT_EVENTS)
+                session, events, _messages = await _session_data(
+                    hass, owner.id, mappings[0], budget=budget)
+            else:
+                session = None
+                events = []
+                _messages = []
+                try:
+                    runtime, _messages, history_truncated = await _load_session_messages(
+                        hass, owner.id, mappings[0],
+                    )
+                    visible = runtime.visible(_messages)
+                    if not isinstance(visible, list):
+                        visible = []
+                    created_at, updated_at = _session_time_bounds(_messages)
+                    status, _error = _session_status(runtime, owner.id, session_id, _messages)
+                    session = {
+                        "session_id": session_id,
+                        "channel": mappings[0]["channel"],
+                        "modes": [mappings[0]["channel"]],
+                        "status": status,
+                        "provider_models": [],
+                        "created_at": _iso(created_at),
+                        "updated_at": _iso(updated_at),
+                        "processing_duration_ms": sum(
+                            _duration_ms(message) or 0 for message in _messages
+                            if isinstance(message, dict)
+                            and isinstance(message.get("info"), dict)
+                            and message["info"].get("role") == "assistant"
+                        ) or None,
+                        "message_count": min(len(visible), MAX_MESSAGES),
+                        "events_truncated": history_truncated,
+                    }
+                except Exception:
+                    # A click can still report a visible native Assist answer after
+                    # OpenCode history is unavailable. The submitted text is redacted
+                    # below and the package explicitly marks the trace unavailable.
+                    session = {
+                        "session_id": session_id,
+                        "channel": mappings[0]["channel"],
+                        "modes": [mappings[0]["channel"]],
+                        "status": "unknown",
+                        "provider_models": [],
+                        "created_at": None,
+                        "updated_at": None,
+                        "processing_duration_ms": None,
+                        "message_count": 0,
+                        "events_truncated": False,
+                    }
             context = {
                 "channel": session["channel"],
                 "session": {
@@ -516,9 +632,91 @@ class FeedbackSubmitView(HomeAssistantView):
                     "truncated": session["events_truncated"],
                 },
             }
+            if answer_index is not None:
+                selected_answer = _selected_runtime_answer(runtime, _messages, answer_index, answer_text)
+                safe_answer, answer_truncated = _bounded_redacted_text(
+                    runtime, selected_answer[0] if selected_answer else answer_text, 5000,
+                )
+                safe_prompt, prompt_truncated = _bounded_redacted_text(runtime, prompt_text, 1500)
+                if selected_answer is not None:
+                    _canonical_answer, answer_raw_index = selected_answer
+                    start_index = answer_raw_index
+                    turn_has_user = False
+                    for raw_index in range(answer_raw_index, -1, -1):
+                        info = _messages[raw_index].get("info") if isinstance(_messages[raw_index], dict) else None
+                        if isinstance(info, dict) and info.get("role") == "user":
+                            start_index = raw_index
+                            turn_has_user = True
+                            break
+                    answer_budget = ProjectionBudget(
+                        max_bytes=6 * 1024,
+                        max_events=16,
+                    )
+                    turn_messages = []
+                    for message in _messages[start_index:answer_raw_index + 1]:
+                        if (isinstance(message, dict)
+                                and isinstance(message.get("info"), dict)
+                                and message["info"].get("role") == "assistant"
+                                and isinstance(message.get("parts"), list)):
+                            message = {
+                                **message,
+                                "parts": [part for part in message["parts"]
+                                          if not isinstance(part, dict) or part.get("type") != "text"],
+                            }
+                        turn_messages.append(message)
+                    scoped_events = project_messages(
+                        runtime, turn_messages,
+                        mappings[0]["channel"], budget=answer_budget,
+                    )
+                    context["events"] = [
+                        {key: value for key, value in event.items() if key in EVENT_KEYS}
+                        for event in scoped_events
+                        if not (event.get("role") == "assistant" and event.get("kind") == "assistant_text")
+                    ]
+                    context["events"].append({
+                        "id": "selected.answer", "at": None, "channel": mappings[0]["channel"],
+                        "stage": "model_text", "kind": "assistant_text", "role": "assistant",
+                        "text": safe_answer, "confirmation": "runtime_answer_recorded", "available": True,
+                    })
+                    truncated = (
+                        answer_budget.truncation_count > 0 or answer_truncated
+                        or (session["events_truncated"] and not turn_has_user)
+                    )
+                    context["session"]["events_truncated"] = truncated
+                    context["source"]["truncated"] = truncated
+                    trace_status = "truncated" if truncated else "available"
+                else:
+                    # Some visible replies (notably native Assist) are not part of
+                    # the OpenCode runtime history. Keep only the clicked exchange.
+                    context["events"] = ([{
+                        "id": "selected.prompt", "at": None, "channel": "voice",
+                        "stage": "conversation_message", "kind": "user_message",
+                        "role": "user", "text": safe_prompt or None,
+                        "confirmation": "unconfirmed", "available": True,
+                    }] if safe_prompt else []) + [{
+                        "id": "selected.answer", "at": None, "channel": "voice",
+                        "stage": "model_text", "kind": "assistant_text",
+                        "role": "assistant", "text": safe_answer,
+                        "confirmation": "not_recorded_by_habab", "available": True,
+                    }, {
+                        "id": "selected.trace", "at": None, "channel": "voice",
+                        "stage": "trace_unavailable", "kind": "stage_unavailable",
+                        "role": "assistant", "text": None,
+                        "confirmation": "not_recorded_by_habab", "available": False,
+                        "reason": "trace_not_recorded_by_runtime",
+                    }]
+                    trace_status = "unavailable"
+                    context["source"]["truncated"] = answer_truncated or prompt_truncated
+                    context["session"]["events_truncated"] = context["source"]["truncated"]
             record, _created = await manager.async_save(
                 owner_id=owner.id, key=key, digest=digest,
-                feedback=safe_feedback, context=context)
+                feedback=safe_feedback, context=context,
+                trace_status=trace_status if answer_index is not None else None)
+            if answer_index is not None:
+                delivery = await manager._async_deliver_record(record)
+                response = self.json({**_public_receipt(record), **delivery})
+                response.headers["Cache-Control"] = "no-store"
+                return response
         except FeedbackError as error:
             status = 409 if error.code == "idempotency_conflict" else 507
             return self.json_message(error.code, status_code=status)
