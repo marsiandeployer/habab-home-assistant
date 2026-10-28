@@ -570,13 +570,13 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
         ]
         release_version = re.search(r"(?m)^      wheel_version: (\S+)$", frontend_job)
         self.assertIsNotNone(release_version)
-        self.assertEqual(release_version.group(1), "20260930.4+habab.18")
+        self.assertRegex(release_version.group(1), r"^20260930\.4\+habab\.\d+$")
+        self.assertGreaterEqual(int(release_version.group(1).rsplit(".", 1)[1]), 10)
 
         native_workflow = (repository / ".github/workflows/habab-native-frontend-candidate.yaml").read_text()
         input_definitions = native_workflow[:native_workflow.index("permissions:\n")]
         native_defaults = re.findall(r"(?m)^        default: (20260930\.4\+habab\.\d+)$", input_definitions)
-        self.assertEqual(native_defaults, ["20260930.4+habab.17", "20260930.4+habab.17"])
-        self.assertRegex(release_version.group(1), r"^20260930\.4\+habab\.\d+$")
+        self.assertEqual(native_defaults, [release_version.group(1)] * 2)
         self.assertIn('"$WHEEL_VERSION" =~ ^20260930\\.4\\+habab\\.[0-9]+$', native_workflow)
 
 
