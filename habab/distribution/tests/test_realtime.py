@@ -822,8 +822,10 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
 
         browser = realtime.session_config('gpt-realtime-mini', client='browser_v1', context=snapshot,
                                           selected_provider='habab')
-        self.assertEqual(browser['instructions'], config['instructions'])
-        self.assertEqual(browser['tools'], config['tools'])
+        self.assertTrue(config['instructions'].endswith(browser['instructions']))
+        self.assertIn('ПОМОЩЬ В ОТЛАДКЕ ПРОБУЖДЕНИЯ', config['instructions'])
+        self.assertEqual(browser['tools'][0], config['tools'][0])
+        self.assertEqual(browser['tools'][1]['parameters']['properties'], {})
         self.assertEqual(browser['tool_choice'], config['tool_choice'])
 
     def test_end_session_policy_and_tool_metadata_are_shared_across_voice_clients(self):
