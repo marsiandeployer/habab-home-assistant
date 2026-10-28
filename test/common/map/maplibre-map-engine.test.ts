@@ -10,6 +10,7 @@ import {
   CLUSTER_REBUILD_DELAY,
   MapLibreMapEngine,
 } from "../../../src/common/map/engines/maplibre-map-engine";
+import { YANDEX_TILE_SOURCE_ID } from "../../../src/common/map/yandex-map";
 import type {
   MapBaseMapConfig,
   MapEngineEvents,
@@ -538,6 +539,40 @@ describe("MapLibreMapEngine", () => {
     expect(
       map.requestTransform!("https://example.invalid/map.png")
     ).toMatchObject({ referrerPolicy: undefined });
+  });
+
+  it("reports only confirmed successful Yandex tile events", async () => {
+    const baseMapTileLoaded = vi.fn();
+    const { map, ready } = await createEngine(
+      { baseMapTileLoaded },
+      {
+        provider: "yandex",
+        apiKey: "synthetic-test-key",
+        language: "ru_RU",
+      }
+    );
+    await ready;
+
+    map.fire("sourcedata", {
+      sourceId: YANDEX_TILE_SOURCE_ID,
+      sourceDataType: "metadata",
+      isSourceLoaded: true,
+    });
+    map.fire("sourcedata", {
+      sourceId: YANDEX_TILE_SOURCE_ID,
+      tile: { state: "errored" },
+    });
+    map.fire("sourcedata", {
+      sourceId: "another-source",
+      tile: { state: "loaded" },
+    });
+    expect(baseMapTileLoaded).not.toHaveBeenCalled();
+
+    map.fire("sourcedata", {
+      sourceId: YANDEX_TILE_SOURCE_ID,
+      tile: { state: "loaded" },
+    });
+    expect(baseMapTileLoaded).toHaveBeenCalledOnce();
   });
 
   afterEach(() => {

@@ -93,7 +93,8 @@ export class LeafletMapEngine implements MapEngine {
       options.token,
       options.rasterOnly ?? false,
       options.baseMap ?? { provider: "osm" },
-      options.events.baseMapError
+      options.events.baseMapError,
+      options.events.baseMapTileLoaded
     );
     this.leafletMap = map;
     this.Leaflet = Leaflet;

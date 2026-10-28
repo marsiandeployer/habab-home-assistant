@@ -47,6 +47,8 @@ export interface MapEngineEvents {
   drawn(): void;
   /** A basemap request failed; no request URL or credential is exposed. */
   baseMapError?(error: MapBaseMapError): void;
+  /** A Yandex raster tile loaded successfully after a transient tile error. */
+  baseMapTileLoaded?(): void;
 }
 
 export interface MapEngineOptions {

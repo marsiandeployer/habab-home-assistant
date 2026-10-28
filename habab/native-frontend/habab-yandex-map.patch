@@ -211,7 +211,7 @@ literal 0
 HcmV?d00001
 
 diff --git a/src/common/map/base-layer.ts b/src/common/map/base-layer.ts
-index d2cb0659e..25a43cdfa 100644
+index d2cb065..9d264af 100644
 --- a/src/common/map/base-layer.ts
 +++ b/src/common/map/base-layer.ts
 @@ -1,13 +1,18 @@
@@ -303,7 +303,7 @@ index d2cb0659e..25a43cdfa 100644
    const shipped = mapStyle.shipped && SHIPPED_STYLES[mapStyle.shipped];
  
    // Anything that does not ship is built here, from the same builder: its own
-@@ -162,39 +177,29 @@ export const ensureWorkerUrl = (setUrl: typeof setWorkerUrl) => {
+@@ -162,39 +177,30 @@ export const ensureWorkerUrl = (setUrl: typeof setWorkerUrl) => {
    setUrl(new URL(__MAPLIBRE_WORKER_URL__, location.href).href);
  };
  
@@ -329,7 +329,8 @@ index d2cb0659e..25a43cdfa 100644
 -  token: string | undefined
 +  token: string | undefined,
 +  baseMap: MapBaseMapConfig,
-+  onBaseMapError?: (error: MapBaseMapError) => void
++  onBaseMapError?: (error: MapBaseMapError) => void,
++  onBaseMapTileLoaded?: () => void
  ): Promise<MapBaseLayer | undefined> => {
    let layer: ReturnType<typeof maplibreGL> | undefined;
  
@@ -355,7 +356,7 @@ index d2cb0659e..25a43cdfa 100644
      });
      // The plugin builds the MapLibre map in `onAdd`, so a refused WebGL
      // context throws here. Keep it guarded or that loses the fallback. The
-@@ -223,6 +228,8 @@ const createVectorLayer = async (
+@@ -223,6 +229,8 @@ const createVectorLayer = async (
    // A fallback hands this to the raster layer, and a rotation that already
    // happened is not announced again.
    let currentToken = token;
@@ -364,7 +365,7 @@ index d2cb0659e..25a43cdfa 100644
  
    const glMap = layer.getMaplibreMap();
    let fallbackTimeout: number | undefined;
-@@ -243,7 +250,13 @@ const createVectorLayer = async (
+@@ -243,7 +251,14 @@ const createVectorLayer = async (
      } catch {
        // Nothing left to detach.
      }
@@ -374,12 +375,13 @@ index d2cb0659e..25a43cdfa 100644
 +      map,
 +      currentToken,
 +      currentBaseMap,
-+      onBaseMapError
++      onBaseMapError,
++      onBaseMapTileLoaded
 +    );
    };
  
    const scheduleSwap = () => {
-@@ -274,7 +287,7 @@ const createVectorLayer = async (
+@@ -274,7 +289,7 @@ const createVectorLayer = async (
    const applyStyle = (newStyle: ResolvedMapStyle) => {
      const request = ++latestRequest;
  
@@ -388,7 +390,7 @@ index d2cb0659e..25a43cdfa 100644
        .then((style) => {
          if (request === latestRequest) {
            appliedStyle = newStyle;
-@@ -293,7 +306,16 @@ const createVectorLayer = async (
+@@ -293,7 +308,16 @@ const createVectorLayer = async (
    // token. Throttled, or a proxy refusing for another reason loops.
    let lastRecovery = 0;
    glMap.on("error", (event) => {
@@ -405,7 +407,7 @@ index d2cb0659e..25a43cdfa 100644
      // 403 is a stale token, 404 the proxy not registered yet during a restart,
      // and no status at all a network failure. All three recover the same way,
      // and a token that comes back unchanged costs nothing.
-@@ -312,7 +334,7 @@ const createVectorLayer = async (
+@@ -312,7 +336,7 @@ const createVectorLayer = async (
    // style that is refused just as the last one was, so it proves nothing.
    const unsubscribeToken = subscribeMapTilesToken((newToken) => {
      currentToken = newToken;
@@ -414,7 +416,7 @@ index d2cb0659e..25a43cdfa 100644
        refused = false;
        applyStyle(requestedStyle);
      }
-@@ -325,44 +347,95 @@ const createVectorLayer = async (
+@@ -325,44 +349,99 @@ const createVectorLayer = async (
          return;
        }
        requestedStyle = newStyle;
@@ -446,7 +448,8 @@ index d2cb0659e..25a43cdfa 100644
 -  token: string | undefined
 +  token: string | undefined,
 +  baseMap: MapBaseMapConfig,
-+  onBaseMapError?: (error: MapBaseMapError) => void
++  onBaseMapError?: (error: MapBaseMapError) => void,
++  onBaseMapTileLoaded?: () => void
  ): MapBaseLayer => {
 -  const layer = leaflet
 -    .tileLayer(__DEMO__ ? DEMO_RASTER_TILE_URL : mapTilesUrl(RASTER_TILE_URL), {
@@ -518,6 +521,9 @@ index d2cb0659e..25a43cdfa 100644
 +      refreshMapTilesToken();
 +    });
 +    created.on("tileload", () => {
++      if (currentBaseMap.provider === "yandex" && !__DEMO__) {
++        onBaseMapTileLoaded?.();
++      }
 +      hasReportedYandexError = false;
 +    });
 +    return created;
@@ -535,7 +541,7 @@ index d2cb0659e..25a43cdfa 100644
      (layer.options as TokenTileLayerOptions).token = newToken;
      if (refused) {
        refused = false;
-@@ -371,7 +444,19 @@ const createRasterLayer = (
+@@ -371,7 +450,19 @@ const createRasterLayer = (
    });
    map.on("unload", unsubscribe);
  
@@ -556,18 +562,19 @@ index d2cb0659e..25a43cdfa 100644
  };
  
  export const createBaseLayer = async (
-@@ -380,7 +465,9 @@ export const createBaseLayer = async (
+@@ -380,7 +471,10 @@ export const createBaseLayer = async (
    mapStyle: ResolvedMapStyle,
    token: string | undefined,
    // Skip the vector layer, e.g. after a permanent WebGL context loss
 -  rasterOnly = false
 +  rasterOnly = false,
 +  baseMap: MapBaseMapConfig = { provider: "osm" },
-+  onBaseMapError?: (error: MapBaseMapError) => void
++  onBaseMapError?: (error: MapBaseMapError) => void,
++  onBaseMapTileLoaded?: () => void
  ): Promise<MapBaseLayer> => {
    if (!rasterOnly && supportsVectorMaps()) {
      let vectorLayer: MapBaseLayer | undefined;
-@@ -390,13 +477,14 @@ export const createBaseLayer = async (
+@@ -390,13 +484,15 @@ export const createBaseLayer = async (
          import("maplibre-gl"),
        ]);
        ensureWorkerUrl(maplibre.setWorkerUrl);
@@ -580,19 +587,27 @@ index d2cb0659e..25a43cdfa 100644
 -        token
 +        token,
 +        baseMap,
-+        onBaseMapError
++        onBaseMapError,
++        onBaseMapTileLoaded
        );
      } catch {
        // No chunk, no vector map - but still a map.
-@@ -405,5 +493,5 @@ export const createBaseLayer = async (
+@@ -405,5 +501,12 @@ export const createBaseLayer = async (
        return vectorLayer;
      }
    }
 -  return createRasterLayer(leaflet, map, token);
-+  return createRasterLayer(leaflet, map, token, baseMap, onBaseMapError);
++  return createRasterLayer(
++    leaflet,
++    map,
++    token,
++    baseMap,
++    onBaseMapError,
++    onBaseMapTileLoaded
++  );
  };
 diff --git a/src/common/map/engines/leaflet-map-engine.ts b/src/common/map/engines/leaflet-map-engine.ts
-index 3c5db8d50..e61fb538d 100644
+index 3c5db8d..fa87cef 100644
 --- a/src/common/map/engines/leaflet-map-engine.ts
 +++ b/src/common/map/engines/leaflet-map-engine.ts
 @@ -13,6 +13,7 @@ import { DecoratedMarker } from "../decorated_marker";
@@ -603,18 +618,19 @@ index 3c5db8d50..e61fb538d 100644
    MapCircleHandle,
    MapCircleOptions,
    MapControlPosition,
-@@ -90,7 +91,9 @@ export class LeafletMapEngine implements MapEngine {
+@@ -90,7 +91,10 @@ export class LeafletMapEngine implements MapEngine {
        map,
        options.mapStyle,
        options.token,
 -      options.rasterOnly ?? false
 +      options.rasterOnly ?? false,
 +      options.baseMap ?? { provider: "osm" },
-+      options.events.baseMapError
++      options.events.baseMapError,
++      options.events.baseMapTileLoaded
      );
      this.leafletMap = map;
      this.Leaflet = Leaflet;
-@@ -148,6 +151,10 @@ export class LeafletMapEngine implements MapEngine {
+@@ -148,6 +152,10 @@ export class LeafletMapEngine implements MapEngine {
      this._baseLayer?.setMapStyle(style);
    }
  
@@ -626,7 +642,7 @@ index 3c5db8d50..e61fb538d 100644
      this.leafletMap?.zoomControl?.setPosition(position);
    }
 diff --git a/src/common/map/engines/maplibre-map-engine.ts b/src/common/map/engines/maplibre-map-engine.ts
-index 251adf4ae..c5077c915 100644
+index 251adf4..6b8626a 100644
 --- a/src/common/map/engines/maplibre-map-engine.ts
 +++ b/src/common/map/engines/maplibre-map-engine.ts
 @@ -16,8 +16,8 @@ import {
@@ -713,8 +729,22 @@ index 251adf4ae..c5077c915 100644
        if (status !== undefined && status !== 403 && status !== 404) {
          return;
        }
-@@ -383,7 +399,7 @@ export class MapLibreMapEngine implements MapEngine {
+@@ -381,9 +397,21 @@ export class MapLibreMapEngine implements MapEngine {
+       this._refused = true;
+       refreshMapTilesToken();
      });
++    // Metadata events and isSourceLoaded do not prove that a raster tile was
++    // fetched. TileManager emits sourcedata with a tile only after loadTile
++    // resolves; RasterTileSource marks successful tiles as loaded first.
++    map.on("sourcedata", (event) => {
++      if (
++        this._baseMap.provider === "yandex" &&
++        event.sourceId === YANDEX_TILE_SOURCE_ID &&
++        event.tile?.state === "loaded"
++      ) {
++        this._events.baseMapTileLoaded?.();
++      }
++    });
      // Only a new token clears a refusal; a style change in between is refused too
      this._unsubscribeToken = subscribeMapTilesToken(() => {
 -      if (this._refused) {
@@ -722,7 +752,7 @@ index 251adf4ae..c5077c915 100644
          this._refused = false;
          this._applyStyle(this._requestedStyle);
        }
-@@ -584,13 +600,27 @@ export class MapLibreMapEngine implements MapEngine {
+@@ -584,13 +612,27 @@ export class MapLibreMapEngine implements MapEngine {
        return;
      }
      this._requestedStyle = mapStyle;
@@ -752,7 +782,7 @@ index 251adf4ae..c5077c915 100644
          if (request === this._latestStyleRequest && this._map) {
            this._map.setStyle(style, {
 diff --git a/src/common/map/map-engine.ts b/src/common/map/map-engine.ts
-index 83deabc68..ec7f5fdca 100644
+index 83deabc..a282f15 100644
 --- a/src/common/map/map-engine.ts
 +++ b/src/common/map/map-engine.ts
 @@ -9,6 +9,18 @@
@@ -774,16 +804,18 @@ index 83deabc68..ec7f5fdca 100644
  export type MapLatLng = [latitude: number, longitude: number];
  
  export interface MapView {
-@@ -33,6 +45,8 @@ export interface MapEngineEvents {
+@@ -33,6 +45,10 @@ export interface MapEngineEvents {
     * layer in place. The host keeps the container hidden until then.
     */
    drawn(): void;
 +  /** A basemap request failed; no request URL or credential is exposed. */
 +  baseMapError?(error: MapBaseMapError): void;
++  /** A Yandex raster tile loaded successfully after a transient tile error. */
++  baseMapTileLoaded?(): void;
  }
  
  export interface MapEngineOptions {
-@@ -40,6 +54,8 @@ export interface MapEngineOptions {
+@@ -40,6 +56,8 @@ export interface MapEngineOptions {
    zoom: number;
    /** Cartography to draw; the host resolves the config and theme mode into one */
    mapStyle: ResolvedMapStyle;
@@ -792,7 +824,7 @@ index 83deabc68..ec7f5fdca 100644
    /** Token for core's tile proxy */
    token?: string;
    zoomControlPosition: MapControlPosition;
-@@ -237,6 +253,8 @@ export interface MapEngine {
+@@ -237,6 +255,8 @@ export interface MapEngine {
  
    setMapStyle(style: ResolvedMapStyle): void;
  
@@ -803,7 +835,7 @@ index 83deabc68..ec7f5fdca 100644
    /** Show a scale ruler (bottom start); null hides it */
 diff --git a/src/common/map/yandex-map.ts b/src/common/map/yandex-map.ts
 new file mode 100644
-index 000000000..c0158da12
+index 0000000..c0158da
 --- /dev/null
 +++ b/src/common/map/yandex-map.ts
 @@ -0,0 +1,134 @@
@@ -942,7 +974,7 @@ index 000000000..c0158da12
 +    ? YANDEX_MAPS_URL
 +    : YANDEX_MAPS_EN_URL;
 diff --git a/src/components/map/ha-map.ts b/src/components/map/ha-map.ts
-index 771af52d5..648e8253d 100644
+index 771af52..d9a6c60 100644
 --- a/src/components/map/ha-map.ts
 +++ b/src/components/map/ha-map.ts
 @@ -23,6 +23,8 @@ import { supportsVectorMaps } from "../../common/map/base-layer";
@@ -1034,7 +1066,7 @@ index 771af52d5..648e8253d 100644
      let autoFitRequired = false;
      const oldStates = changedProps.get("_states") as HassEntities | undefined;
  
-@@ -660,6 +696,108 @@ export class HaMap extends ReactiveElement {
+@@ -660,6 +696,119 @@ export class HaMap extends ReactiveElement {
      );
    }
  
@@ -1063,6 +1095,17 @@ index 771af52d5..648e8253d 100644
 +      return;
 +    }
 +    this._baseMapError = error;
++    this._syncYandexDecorations();
++  }
++
++  private _handleBaseMapTileLoaded(): void {
++    if (
++      this._resolvedBaseMap.provider !== "yandex" ||
++      this._baseMapError !== "unavailable"
++    ) {
++      return;
++    }
++    this._baseMapError = undefined;
 +    this._syncYandexDecorations();
 +  }
 +
@@ -1143,7 +1186,7 @@ index 771af52d5..648e8253d 100644
    private _updateMapAppearance(): void {
      // A theme repaints the map by setting --ha-color-map-* on this element;
      // WebGL cannot read those, so they are collected here and rebuilt into
-@@ -782,6 +920,7 @@ export class HaMap extends ReactiveElement {
+@@ -782,6 +931,7 @@ export class HaMap extends ReactiveElement {
          ],
          zoom: this.zoom,
          mapStyle: this._resolvedMapStyle,
@@ -1151,15 +1194,16 @@ index 771af52d5..648e8253d 100644
          token,
          rasterOnly: this._forceLeaflet,
          zoomControlPosition: this.zoomPosition,
-@@ -798,6 +937,7 @@ export class HaMap extends ReactiveElement {
+@@ -798,6 +948,8 @@ export class HaMap extends ReactiveElement {
              }
            },
            fatal: () => this._handleEngineFatal(),
 +          baseMapError: (error) => this._handleBaseMapError(error),
++          baseMapTileLoaded: () => this._handleBaseMapTileLoaded(),
            drawn: () => this._markDrawn(attempt),
          },
        });
-@@ -810,7 +950,9 @@ export class HaMap extends ReactiveElement {
+@@ -810,7 +962,9 @@ export class HaMap extends ReactiveElement {
          throw new Error("Map engine failed during setup");
        }
        this._engine = engine;
@@ -1169,7 +1213,7 @@ index 771af52d5..648e8253d 100644
        this._loaded = true;
        fireEvent(this, "editing-available-changed", {
          available: !!engine.editing,
-@@ -1743,8 +1885,63 @@ export class HaMap extends ReactiveElement {
+@@ -1743,8 +1897,63 @@ export class HaMap extends ReactiveElement {
    static styles = css`
      :host {
        display: block;
@@ -1234,7 +1278,7 @@ index 771af52d5..648e8253d 100644
        height: 100%;
        /* The map arrives in one piece: the container carries the cartography's
 diff --git a/src/data/frontend.ts b/src/data/frontend.ts
-index ca906897e..1c007807b 100644
+index ca90689..1c00780 100644
 --- a/src/data/frontend.ts
 +++ b/src/data/frontend.ts
 @@ -6,13 +6,25 @@ export interface SurveyInteraction {
@@ -1265,7 +1309,7 @@ index ca906897e..1c007807b 100644
    hiddenPanels?: string[];
 diff --git a/src/panels/map/dialog-yandex-map-settings.ts b/src/panels/map/dialog-yandex-map-settings.ts
 new file mode 100644
-index 000000000..e84f57780
+index 0000000..e84f577
 --- /dev/null
 +++ b/src/panels/map/dialog-yandex-map-settings.ts
 @@ -0,0 +1,281 @@
@@ -1551,7 +1595,7 @@ index 000000000..e84f57780
 +  }
 +}
 diff --git a/src/panels/map/ha-panel-map.ts b/src/panels/map/ha-panel-map.ts
-index f53309e32..2d3fa53a1 100644
+index f53309e..2d3fa53 100644
 --- a/src/panels/map/ha-panel-map.ts
 +++ b/src/panels/map/ha-panel-map.ts
 @@ -1,7 +1,8 @@
@@ -1620,7 +1664,7 @@ index f53309e32..2d3fa53a1 100644
      super.willUpdate(changedProps);
      if (!changedProps.has("hass")) {
 diff --git a/test/common/map/base-layer.test.ts b/test/common/map/base-layer.test.ts
-index 5b58b3264..034ef0351 100644
+index 5b58b32..ac29398 100644
 --- a/test/common/map/base-layer.test.ts
 +++ b/test/common/map/base-layer.test.ts
 @@ -1,5 +1,6 @@
@@ -1659,7 +1703,7 @@ index 5b58b3264..034ef0351 100644
      rasterHandlers[event] = handler;
    }),
    options: {} as Record<string, unknown>,
-@@ -229,16 +229,87 @@ describe("createBaseLayer", () => {
+@@ -229,16 +229,126 @@ describe("createBaseLayer", () => {
      expect(options.referrerPolicy).toBe("origin");
    });
  
@@ -1701,6 +1745,45 @@ index 5b58b3264..034ef0351 100644
 +    expect(vi.mocked(leaflet.tileLayer).mock.calls[1][0]).toContain(
 +      "/api/map_tiles/raster/"
 +    );
++  });
++
++  it("reports loaded Yandex raster tiles but ignores OSM tiles", async () => {
++    const createBaseLayer = await setWebGL2(false);
++    const onBaseMapTileLoaded = vi.fn();
++    await createBaseLayer(
++      leaflet,
++      map,
++      COLORFUL,
++      TOKEN,
++      true,
++      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
++      undefined,
++      onBaseMapTileLoaded
++    );
++
++    rasterHandlers.tileerror({ error: { status: 503 } });
++    rasterHandlers.tileload();
++    expect(onBaseMapTileLoaded).toHaveBeenCalledOnce();
++
++    const baseLayer = await createBaseLayer(
++      leaflet,
++      map,
++      COLORFUL,
++      TOKEN,
++      true,
++      { provider: "osm" },
++      undefined,
++      onBaseMapTileLoaded
++    );
++    rasterHandlers.tileload();
++    expect(onBaseMapTileLoaded).toHaveBeenCalledOnce();
++    baseLayer.setBaseMap({
++      provider: "yandex",
++      apiKey: "synthetic-test-key",
++      language: "ru_RU",
++    });
++    rasterHandlers.tileload();
++    expect(onBaseMapTileLoaded).toHaveBeenCalledTimes(2);
 +  });
 +
 +  it("keeps map_style separate while Yandex Tiles is selected", async () => {
@@ -1754,7 +1837,7 @@ index 5b58b3264..034ef0351 100644
    });
  
    // The worker is an entry of the build, and the build hands over its URL.
-@@ -257,18 +328,6 @@ describe("createBaseLayer", () => {
+@@ -257,18 +367,6 @@ describe("createBaseLayer", () => {
      );
    });
  
@@ -1774,18 +1857,20 @@ index 5b58b3264..034ef0351 100644
      const createBaseLayer = await setWebGL2(true);
  
 diff --git a/test/common/map/maplibre-map-engine.test.ts b/test/common/map/maplibre-map-engine.test.ts
-index 9632d632b..7f2d355e7 100644
+index 9632d63..268fcb2 100644
 --- a/test/common/map/maplibre-map-engine.test.ts
 +++ b/test/common/map/maplibre-map-engine.test.ts
-@@ -11,6 +11,7 @@ import {
+@@ -10,7 +10,9 @@ import {
+   CLUSTER_REBUILD_DELAY,
    MapLibreMapEngine,
  } from "../../../src/common/map/engines/maplibre-map-engine";
++import { YANDEX_TILE_SOURCE_ID } from "../../../src/common/map/yandex-map";
  import type {
 +  MapBaseMapConfig,
    MapEngineEvents,
    MapLatLng,
    MapMarkerHandle,
-@@ -155,6 +156,8 @@ const fakes = vi.hoisted(() => {
+@@ -155,6 +157,8 @@ const fakes = vi.hoisted(() => {
  
      styleLoaded: boolean;
  
@@ -1794,7 +1879,7 @@ index 9632d632b..7f2d355e7 100644
      listeners: Record<string, { layer?: string; handler: Listener }[]> = {};
  
      fitBounds = vi.fn();
-@@ -224,9 +227,11 @@ const fakes = vi.hoisted(() => {
+@@ -224,9 +228,11 @@ const fakes = vi.hoisted(() => {
      constructor(options: {
        container: HTMLElement;
        style: StyleSpecification;
@@ -1806,7 +1891,7 @@ index 9632d632b..7f2d355e7 100644
        this.styleLoaded = FakeMap.startLoaded;
        FakeMap.instances.push(this);
      }
-@@ -370,7 +375,6 @@ vi.mock("maplibre-gl", () => ({
+@@ -370,7 +376,6 @@ vi.mock("maplibre-gl", () => ({
    AttributionControl: fakes.FakeAttributionControl,
    NavigationControl: vi.fn(),
    ScaleControl: vi.fn(),
@@ -1814,7 +1899,7 @@ index 9632d632b..7f2d355e7 100644
    setWorkerUrl: vi.fn(),
  }));
  
-@@ -378,7 +382,6 @@ const loadStyle = vi.hoisted(() => vi.fn());
+@@ -378,7 +383,6 @@ const loadStyle = vi.hoisted(() => vi.fn());
  vi.mock("../../../src/common/map/base-layer", async (importOriginal) => ({
    ...(await importOriginal<Record<string, unknown>>()),
    loadStyle,
@@ -1822,7 +1907,7 @@ index 9632d632b..7f2d355e7 100644
    ensureWorkerUrl: vi.fn(),
  }));
  
-@@ -417,7 +420,10 @@ const viewport = {
+@@ -417,7 +421,10 @@ const viewport = {
    },
  };
  
@@ -1834,7 +1919,7 @@ index 9632d632b..7f2d355e7 100644
    const container = document.createElement("div");
    document.body.appendChild(container);
    const engine = new MapLibreMapEngine();
-@@ -425,6 +431,7 @@ const createEngine = async (events: Partial<MapEngineEvents> = {}) => {
+@@ -425,6 +432,7 @@ const createEngine = async (events: Partial<MapEngineEvents> = {}) => {
      center: [52, 4],
      zoom: 13,
      mapStyle: { palette: "colorful" as const },
@@ -1842,7 +1927,7 @@ index 9632d632b..7f2d355e7 100644
      zoomControlPosition: "topleft",
      events,
    });
-@@ -512,6 +519,27 @@ describe("MapLibreMapEngine", () => {
+@@ -512,6 +520,27 @@ describe("MapLibreMapEngine", () => {
      });
    });
  
@@ -1870,9 +1955,47 @@ index 9632d632b..7f2d355e7 100644
    afterEach(() => {
      document.body.innerHTML = "";
      vi.useRealTimers();
+@@ -666,6 +695,37 @@ describe("MapLibreMapEngine", () => {
+       expect(loadStyle).toHaveBeenCalledTimes(2);
+       expect(map.setStyle).toHaveBeenCalledOnce();
+     });
++
++    it("reports only successfully loaded Yandex raster tiles", async () => {
++      const baseMap = {
++        provider: "yandex",
++        apiKey: "synthetic-test-key",
++        language: "ru_RU",
++      } as const;
++      const baseMapTileLoaded = vi.fn();
++      const { map, ready } = await createEngine({ baseMapTileLoaded }, baseMap);
++      await ready;
++
++      map.fire("sourcedata", {
++        sourceId: YANDEX_TILE_SOURCE_ID,
++        isSourceLoaded: true,
++      });
++      map.fire("sourcedata", {
++        sourceId: YANDEX_TILE_SOURCE_ID,
++        tile: { state: "errored" },
++      });
++      map.fire("sourcedata", {
++        sourceId: "another-source",
++        tile: { state: "loaded" },
++      });
++      expect(baseMapTileLoaded).not.toHaveBeenCalled();
++
++      map.fire("sourcedata", {
++        sourceId: YANDEX_TILE_SOURCE_ID,
++        tile: { state: "loaded" },
++      });
++      expect(baseMapTileLoaded).toHaveBeenCalledOnce();
++    });
+   });
+ 
+   describe("WebGL context loss", () => {
 diff --git a/test/common/map/yandex-map.test.ts b/test/common/map/yandex-map.test.ts
 new file mode 100644
-index 000000000..81e2253e9
+index 0000000..81e2253
 --- /dev/null
 +++ b/test/common/map/yandex-map.test.ts
 @@ -0,0 +1,63 @@
@@ -1940,7 +2063,7 @@ index 000000000..81e2253e9
 +  });
 +});
 diff --git a/test/components/map/ha-map-engine.test.ts b/test/components/map/ha-map-engine.test.ts
-index b3893a197..3bdf3fa8e 100644
+index b3893a1..12f4351 100644
 --- a/test/components/map/ha-map-engine.test.ts
 +++ b/test/components/map/ha-map-engine.test.ts
 @@ -69,6 +69,8 @@ const fakeEngine = vi.hoisted(() => {
@@ -1952,9 +2075,43 @@ index b3893a197..3bdf3fa8e 100644
      setZoomControlPosition = vi.fn();
  
      setScaleRuler = vi.fn();
+@@ -230,6 +232,33 @@ describe("ha-map engine selection", () => {
+     expect(entityHandles(el)).toHaveLength(2);
+   });
+ 
++  it("clears transient Yandex warnings after a tile loads, but retains key and rate errors", async () => {
++    const el = await createMap();
++    Object.defineProperty(el, "_resolvedBaseMap", {
++      configurable: true,
++      value: {
++        provider: "yandex",
++        apiKey: "synthetic-test-key",
++        language: "ru_RU",
++      },
++    });
++    expect((el as any)._resolvedBaseMap.provider).toBe("yandex");
++    const events = fakeEngine.instances[0].options!.events;
++
++    events.baseMapError!("unavailable");
++    expect(el.shadowRoot!.querySelector(".yandex-map-status")).not.toBeNull();
++    events.baseMapTileLoaded!();
++    expect(el.shadowRoot!.querySelector(".yandex-map-status")).toBeNull();
++
++    events.baseMapError!("invalid_key");
++    events.baseMapTileLoaded!();
++    expect(el.shadowRoot!.querySelector(".yandex-map-status")).not.toBeNull();
++
++    events.baseMapError!("rate_limited");
++    events.baseMapTileLoaded!();
++    expect(el.shadowRoot!.querySelector(".yandex-map-status")).not.toBeNull();
++  });
++
+   it("sets up while themes are not loaded yet, as during onboarding", async () => {
+     const el = document.createElement("ha-map");
+     el.themeMode = "auto";
 diff --git a/test/data/frontend.test.ts b/test/data/frontend.test.ts
 new file mode 100644
-index 000000000..946a12e67
+index 0000000..946a12e
 --- /dev/null
 +++ b/test/data/frontend.test.ts
 @@ -0,0 +1,19 @@
@@ -1979,7 +2136,7 @@ index 000000000..946a12e67
 +});
 diff --git a/test/panels/map/dialog-yandex-map-settings.test.ts b/test/panels/map/dialog-yandex-map-settings.test.ts
 new file mode 100644
-index 000000000..6c9418f2a
+index 0000000..6c9418f
 --- /dev/null
 +++ b/test/panels/map/dialog-yandex-map-settings.test.ts
 @@ -0,0 +1,152 @@

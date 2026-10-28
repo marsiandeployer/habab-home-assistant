@@ -742,6 +742,17 @@ export class HaMap extends ReactiveElement {
     this._syncYandexDecorations();
   }
 
+  private _handleBaseMapTileLoaded(): void {
+    if (
+      this._resolvedBaseMap.provider !== "yandex" ||
+      this._baseMapError !== "unavailable"
+    ) {
+      return;
+    }
+    this._baseMapError = undefined;
+    this._syncYandexDecorations();
+  }
+
   private _syncYandexDecorations(): void {
     const root = this.shadowRoot;
     if (!root) {
@@ -956,6 +967,7 @@ export class HaMap extends ReactiveElement {
           },
           fatal: () => this._handleEngineFatal(),
           baseMapError: (error) => this._handleBaseMapError(error),
+          baseMapTileLoaded: () => this._handleBaseMapTileLoaded(),
           drawn: () => this._markDrawn(attempt),
         },
       });

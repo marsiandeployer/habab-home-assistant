@@ -265,6 +265,45 @@ describe("createBaseLayer", () => {
     );
   });
 
+  it("reports successful Yandex raster tiles but ignores OSM tiles", async () => {
+    const createBaseLayer = await setWebGL2(false);
+    const onBaseMapTileLoaded = vi.fn();
+    await createBaseLayer(
+      leaflet,
+      map,
+      COLORFUL,
+      TOKEN,
+      true,
+      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
+      undefined,
+      onBaseMapTileLoaded
+    );
+
+    rasterHandlers.tileerror({ error: { status: 503 } });
+    rasterHandlers.tileload();
+    expect(onBaseMapTileLoaded).toHaveBeenCalledOnce();
+
+    const baseLayer = await createBaseLayer(
+      leaflet,
+      map,
+      COLORFUL,
+      TOKEN,
+      true,
+      { provider: "osm" },
+      undefined,
+      onBaseMapTileLoaded
+    );
+    rasterHandlers.tileload();
+    expect(onBaseMapTileLoaded).toHaveBeenCalledOnce();
+    baseLayer.setBaseMap({
+      provider: "yandex",
+      apiKey: "synthetic-test-key",
+      language: "ru_RU",
+    });
+    rasterHandlers.tileload();
+    expect(onBaseMapTileLoaded).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps map_style separate while Yandex Tiles is selected", async () => {
     const createBaseLayer = await setWebGL2(true);
     const baseLayer = await createBaseLayer(

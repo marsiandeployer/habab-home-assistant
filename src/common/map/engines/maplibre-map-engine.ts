@@ -397,6 +397,18 @@ export class MapLibreMapEngine implements MapEngine {
       this._refused = true;
       refreshMapTilesToken();
     });
+    // Metadata events and isSourceLoaded do not prove that a raster tile was
+    // fetched. TileManager emits sourcedata with a tile only after loadTile
+    // resolves; RasterTileSource marks successful tiles as loaded first.
+    map.on("sourcedata", (event) => {
+      if (
+        this._baseMap.provider === "yandex" &&
+        event.sourceId === YANDEX_TILE_SOURCE_ID &&
+        event.tile?.state === "loaded"
+      ) {
+        this._events.baseMapTileLoaded?.();
+      }
+    });
     // Only a new token clears a refusal; a style change in between is refused too
     this._unsubscribeToken = subscribeMapTilesToken(() => {
       if (this._baseMap.provider === "osm" && this._refused) {

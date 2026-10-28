@@ -125,6 +125,50 @@ describe("ha-map", () => {
     expect(map.getCenter().lng).toBeCloseTo(4.8925, 2);
   });
 
+  it("clears a transient Yandex warning after a tile succeeds", async () => {
+    const el = await createMap();
+    Object.defineProperty(el, "_resolvedBaseMap", {
+      configurable: true,
+      get: () => ({
+        provider: "yandex",
+        apiKey: "synthetic-test-key",
+        language: "en_US",
+      }),
+    });
+    (el as any)._syncYandexDecorations();
+    (el as any)._handleBaseMapError("unavailable");
+    expect(el.shadowRoot!.querySelector(".yandex-map-status")).not.toBeNull();
+
+    (el as any)._handleBaseMapTileLoaded();
+
+    expect(el.shadowRoot!.querySelector(".yandex-map-status")).toBeNull();
+  });
+
+  it.each(["invalid_key", "rate_limited"] as const)(
+    "keeps the explicit %s warning after a tile succeeds",
+    async (error) => {
+      const el = await createMap();
+      Object.defineProperty(el, "_resolvedBaseMap", {
+        configurable: true,
+        get: () => ({
+          provider: "yandex",
+          apiKey: "synthetic-test-key",
+          language: "en_US",
+        }),
+      });
+      (el as any)._syncYandexDecorations();
+      (el as any)._handleBaseMapError(error);
+
+      (el as any)._handleBaseMapTileLoaded();
+
+      expect(
+        el.shadowRoot!.querySelector(".yandex-map-status")?.textContent
+      ).toContain(
+        error === "invalid_key" ? "rejected the key" : "limited requests"
+      );
+    }
+  );
+
   it("fits to the zones when they are all the map shows", async () => {
     const el = await createMap({
       states: {

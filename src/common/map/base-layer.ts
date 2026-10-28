@@ -184,7 +184,8 @@ const createVectorLayer = async (
   mapStyle: ResolvedMapStyle,
   token: string | undefined,
   baseMap: MapBaseMapConfig,
-  onBaseMapError?: (error: MapBaseMapError) => void
+  onBaseMapError?: (error: MapBaseMapError) => void,
+  onBaseMapTileLoaded?: () => void
 ): Promise<MapBaseLayer | undefined> => {
   let layer: ReturnType<typeof maplibreGL> | undefined;
 
@@ -255,7 +256,8 @@ const createVectorLayer = async (
       map,
       currentToken,
       currentBaseMap,
-      onBaseMapError
+      onBaseMapError,
+      onBaseMapTileLoaded
     );
   };
 
@@ -374,7 +376,8 @@ const createRasterLayer = (
   map: LeafletMap,
   token: string | undefined,
   baseMap: MapBaseMapConfig,
-  onBaseMapError?: (error: MapBaseMapError) => void
+  onBaseMapError?: (error: MapBaseMapError) => void,
+  onBaseMapTileLoaded?: () => void
 ): MapBaseLayer => {
   let currentBaseMap = baseMap;
   let refused = false;
@@ -424,6 +427,9 @@ const createRasterLayer = (
       refreshMapTilesToken();
     });
     created.on("tileload", () => {
+      if (currentBaseMap.provider === "yandex" && !__DEMO__) {
+        onBaseMapTileLoaded?.();
+      }
       hasReportedYandexError = false;
     });
     return created;
@@ -467,7 +473,8 @@ export const createBaseLayer = async (
   // Skip the vector layer, e.g. after a permanent WebGL context loss
   rasterOnly = false,
   baseMap: MapBaseMapConfig = { provider: "osm" },
-  onBaseMapError?: (error: MapBaseMapError) => void
+  onBaseMapError?: (error: MapBaseMapError) => void,
+  onBaseMapTileLoaded?: () => void
 ): Promise<MapBaseLayer> => {
   if (!rasterOnly && supportsVectorMaps()) {
     let vectorLayer: MapBaseLayer | undefined;
@@ -484,7 +491,8 @@ export const createBaseLayer = async (
         mapStyle,
         token,
         baseMap,
-        onBaseMapError
+        onBaseMapError,
+        onBaseMapTileLoaded
       );
     } catch {
       // No chunk, no vector map - but still a map.
@@ -493,5 +501,12 @@ export const createBaseLayer = async (
       return vectorLayer;
     }
   }
-  return createRasterLayer(leaflet, map, token, baseMap, onBaseMapError);
+  return createRasterLayer(
+    leaflet,
+    map,
+    token,
+    baseMap,
+    onBaseMapError,
+    onBaseMapTileLoaded
+  );
 };

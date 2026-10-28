@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       frontend_wheel_version:
-        description: New Core-matched wheel version, for example 20260930.4+habab.19
+        description: New Core-matched wheel version, for example 20260930.4+habab.20
         required: true
         type: string
       frontend_run_id:
