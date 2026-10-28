@@ -482,6 +482,18 @@ def _selected_runtime_answer(runtime, messages: list, answer_index: int,
     return None
 
 
+def _selected_runtime_prompt(runtime, messages: list, answer_index: int) -> str | None:
+    """Return the nearest visible user message before this answer."""
+    visible = runtime.visible(messages)
+    if not isinstance(visible, list) or not 0 <= answer_index <= len(visible):
+        return None
+    for message in reversed(visible[:answer_index]):
+        if (isinstance(message, dict) and message.get("role") == "user"
+                and isinstance(message.get("text"), str) and message["text"].strip()):
+            return message["text"]
+    return None
+
+
 def _bounded_redacted_text(runtime, value: str, byte_limit: int) -> tuple[str, bool]:
     text = _redact_text(runtime, value, limit=MAX_TEXT_SCAN_CHARS)
 
@@ -640,6 +652,11 @@ class FeedbackSubmitView(HomeAssistantView):
                 safe_prompt, prompt_truncated = _bounded_redacted_text(runtime, prompt_text, 1500)
                 if selected_answer is not None:
                     _canonical_answer, answer_raw_index = selected_answer
+                    canonical_prompt = _selected_runtime_prompt(runtime, _messages, answer_index)
+                    prompt_source = canonical_prompt if canonical_prompt is not None else prompt_text
+                    safe_prompt, prompt_truncated = _bounded_redacted_text(
+                        runtime, prompt_source, 1500,
+                    )
                     start_index = answer_raw_index
                     turn_has_user = False
                     for raw_index in range(answer_raw_index, -1, -1):
@@ -648,9 +665,28 @@ class FeedbackSubmitView(HomeAssistantView):
                             start_index = raw_index
                             turn_has_user = True
                             break
+                    prompt_event = {
+                        "id": "selected.prompt", "at": None, "channel": mappings[0]["channel"],
+                        "stage": "conversation_message", "kind": "user_message", "role": "user",
+                        "text": safe_prompt or None,
+                        "confirmation": "runtime_message_recorded" if canonical_prompt is not None else "unconfirmed",
+                        "available": bool(safe_prompt),
+                    }
+                    answer_event = {
+                        "id": "selected.answer", "at": None, "channel": mappings[0]["channel"],
+                        "stage": "model_text", "kind": "assistant_text", "role": "assistant",
+                        "text": safe_answer, "confirmation": "runtime_answer_recorded", "available": True,
+                    }
+                    context["events"] = [prompt_event, answer_event]
+                    base_context_bytes = len(json.dumps(
+                        context, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
+                    ).encode("utf-8"))
+                    reserved_context_bytes = max(
+                        0, MAX_CONTEXT_BYTES - base_context_bytes - 256,
+                    )
                     answer_budget = ProjectionBudget(
-                        max_bytes=6 * 1024,
-                        max_events=16,
+                        max_bytes=reserved_context_bytes,
+                        max_events=max(0, MAX_CONTEXT_EVENTS - 2),
                     )
                     turn_messages = []
                     for message in _messages[start_index:answer_raw_index + 1]:
@@ -668,18 +704,26 @@ class FeedbackSubmitView(HomeAssistantView):
                         runtime, turn_messages,
                         mappings[0]["channel"], budget=answer_budget,
                     )
-                    context["events"] = [
+                    trace_events = [
                         {key: value for key, value in event.items() if key in EVENT_KEYS}
                         for event in scoped_events
                         if not (event.get("role") == "assistant" and event.get("kind") == "assistant_text")
+                        and not (event.get("role") == "user" and event.get("kind") == "user_message")
                     ]
-                    context["events"].append({
-                        "id": "selected.answer", "at": None, "channel": mappings[0]["channel"],
-                        "stage": "model_text", "kind": "assistant_text", "role": "assistant",
-                        "text": safe_answer, "confirmation": "runtime_answer_recorded", "available": True,
-                    })
+                    context["events"] = [prompt_event, *trace_events, answer_event]
+                    serialized_context_bytes = len(json.dumps(
+                        context, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
+                    ).encode("utf-8"))
+                    while serialized_context_bytes > MAX_CONTEXT_BYTES and trace_events:
+                        trace_events.pop()
+                        answer_budget.mark_truncated()
+                        context["events"] = [prompt_event, *trace_events, answer_event]
+                        serialized_context_bytes = len(json.dumps(
+                            context, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
+                        ).encode("utf-8"))
                     truncated = (
-                        answer_budget.truncation_count > 0 or answer_truncated
+                        answer_budget.truncation_count > 0 or answer_truncated or prompt_truncated
+                        or canonical_prompt is None
                         or (session["events_truncated"] and not turn_has_user)
                     )
                     context["session"]["events_truncated"] = truncated

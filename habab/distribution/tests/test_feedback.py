@@ -165,8 +165,9 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         record = next(iter(manager.records.values()))
         events = record["context"]["events"]
         self.assertEqual([event["kind"] for event in events], [
-            "tool_invocation", "tool_output", "assistant_text",
+            "user_message", "tool_invocation", "tool_output", "assistant_text",
         ])
+        self.assertEqual(events[0]["text"], "Selected question")
         self.assertEqual(events[-1]["text"], "The selected answer")
         self.assertIn("selected tool result", json.dumps(events, ensure_ascii=False))
         self.assertEqual(record["context"]["source"]["kind"], "owner_mapped_current_session")
@@ -287,10 +288,71 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         context = record["context"]
         self.assertLessEqual(len(json.dumps(context, ensure_ascii=False).encode()), feedback.MAX_CONTEXT_BYTES)
         events = context["events"]
+        self.assertEqual(events[0]["id"], "selected.prompt")
+        self.assertEqual(events[0]["text"], "Selected question")
         self.assertTrue(events[-1]["text"].startswith("The selected answer"))
         rendered = json.dumps(events, ensure_ascii=False)
         self.assertIn("selected tool result", rendered)
         self.assertNotIn("old private trace", rendered)
+
+    async def test_selected_turn_keeps_canonical_prompt_when_large_tool_trace_evicts_it(self):
+        hass, _assistant, runtime = make_runtime()
+        prompt = ('Canonical question "quoted" with newline\n' * 80)
+        answer = ('Selected answer "quoted" with newline\n' * 850)
+        tool_parts = [{
+            "type": "tool", "tool": "habab-ha", "callID": f"large-call-{index}", "state": {
+                "status": "completed", "input": {"action": "states"},
+                "output": (f"Tool trace {index}: " + "trace-value " * 150),
+            },
+        } for index in range(8)]
+        raw = [
+            {"info": {"role": "user", "time": {"created": 1792933200000}},
+             "parts": [{"type": "text", "text": prompt}]},
+            {"info": {"role": "assistant", "providerID": "habab-deepseek", "modelID": "deepseek-chat",
+                       "time": {"created": 1792933201000, "completed": 1792933202000}},
+             "parts": [{"type": "text", "text": answer}, *tool_parts]},
+        ]
+
+        def visible(messages):
+            return [{"role": item["info"]["role"], "text": "\n".join(
+                part.get("text", "") for part in item.get("parts", []) if part.get("type") == "text"
+            )} for item in messages]
+
+        runtime.visible.side_effect = visible
+        old_trace_budget = feedback.ProjectionBudget(max_bytes=6 * 1024, max_events=16)
+        old_trace_projection = feedback.project_messages(
+            runtime, [raw[0], {**raw[1], "parts": tool_parts}], "web", budget=old_trace_budget,
+        )
+        self.assertFalse(any(event.get("kind") == "user_message" for event in old_trace_projection))
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="This answer helped")
+        request_body.update({"answer_index": 1, "answer_text": answer, "prompt_text": prompt})
+
+        with patch.object(feedback, "_load_session_messages", return_value=(runtime, raw, False)):
+            response = await feedback.FeedbackSubmitView().post(Request(
+                SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.body)["trace_status"], "truncated")
+        record = next(iter(manager.records.values()))
+        context = record["context"]
+        events = context["events"]
+        self.assertEqual(events[0]["id"], "selected.prompt")
+        self.assertEqual(events[0]["kind"], "user_message")
+        self.assertTrue(events[0]["text"].startswith('Canonical question "quoted" with newline\n'))
+        self.assertLess(len(events[0]["text"]), len(prompt))
+        self.assertEqual(events[0]["confirmation"], "runtime_message_recorded")
+        self.assertEqual(sum(event.get("kind") == "user_message" for event in events), 1)
+        self.assertTrue(any(event.get("kind") == "tool_invocation" for event in events))
+        self.assertEqual(events[-1]["id"], "selected.answer")
+        self.assertTrue(events[-1]["text"].startswith('Selected answer "quoted" with newline\n'))
+        self.assertLess(len(events[-1]["text"]), len(answer))
+        self.assertLessEqual(len(feedback_transport._context_bytes(context)), feedback_transport.MAX_CONTEXT_BYTES)
+        self.assertIsNotNone(feedback_transport._request_body({
+            "feedback": record["feedback"],
+            "context": context,
+            "idempotency_key": record["idempotency_key"],
+        }))
 
     async def test_selected_quoted_answer_is_clipped_to_receiver_serialized_context_budget(self):
         hass, _assistant, runtime = make_runtime()
