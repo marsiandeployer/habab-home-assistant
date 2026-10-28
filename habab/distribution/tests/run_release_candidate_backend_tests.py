@@ -29,6 +29,8 @@ def main() -> int:
         "test_feedback_action",
         "test_feedback_transport",
         "test_assistant_status",
+        "test_assistant_service",
+        "test_realtime",
         "test_provider_transport",
         "test_beta",
         "test_tool_history",

@@ -15,10 +15,25 @@ from aiohttp import WSMsgType, web
 from aiohttp.client_exceptions import WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer
 
-from openai_gateway import Gateway
+from beta_codes import BetaCodes, create_config
+from openai_gateway import Gateway, load_private_config
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    def test_private_config_accepts_optional_voice_service_key_only_from_private_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'relay.json'
+            path.write_text(json.dumps({
+                'key_sha256': hashlib.sha256(b'synthetic-owner').hexdigest(),
+                'voice_service_key': 'synthetic-voice-service',
+            }), encoding='utf-8')
+            path.chmod(0o600)
+            config = load_private_config(path)
+            self.assertEqual(config['voice_service_key'], 'synthetic-voice-service')
+            path.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, 'private_config_file_required'):
+                load_private_config(path)
+
     async def asyncSetUp(self):
         original_request = ClientSession._request
         async def guarded_request(session, method, url, **kwargs):
@@ -178,10 +193,61 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.openai_patch.start()
         self.client = TestClient(TestServer(self.gateway.app(), handler_cancellation=True))
         await self.client.start_server()
+        self.voice_requests = []
+        self.voice_reply_bodies = []
+        self.voice_status = 200
+        self.voice_response_override = None
+        async def voice_backend(request):
+            body = await request.read()
+            self.voice_requests.append((request.method, request.path,
+                                        request.headers.get('Authorization'), body))
+            if request.path == '/v1/capabilities':
+                return web.json_response({
+                    'provider': 'habab', 'chat': {'provider': 'gemini'},
+                    'realtime': {'provider': 'gemini', 'transport': 'habab',
+                                 'models': ['gemini-3.8-live'], 'default_model': 'gemini-3.8-live',
+                                 'websocket': '/gemini/ws',
+                                 'browser_auth': {'enabled': True, 'mode': 'first_text_frame',
+                                                  'type': 'habab.voice.auth.v1'}},
+                    'telegram': {},
+                })
+            if self.voice_response_override is not None:
+                self.voice_reply_bodies.append(self.voice_response_override)
+                return web.Response(body=self.voice_response_override, content_type='application/json')
+            if request.path == '/v1/realtime/bootstrap':
+                payload = json.loads(body)
+                response = web.json_response({
+                    'provider': 'gemini', 'transport': 'habab', 'model': payload['model'],
+                    'value': 'synthetic-opaque-voice-credential', 'expires_at': 1_900_000_000,
+                    'websocket_url': 'wss://habab-voice.wpmix.net/gemini/ws',
+                    'setup': payload['setup'],
+                }, status=self.voice_status)
+                self.voice_reply_bodies.append(response.body)
+                return response
+            return web.json_response({'error': 'not found'}, status=404)
+        voice_app = web.Application()
+        voice_app.router.add_route('*', '/{path:.*}', voice_backend)
+        self.voice_server = TestServer(voice_app)
+        await self.voice_server.start_server()
+        self.voice_url_patch = patch('openai_gateway.VOICE_RELAY_URL', str(self.voice_server.make_url('/')).rstrip('/'))
+        self.voice_url_patch.start()
+        beta_config_path = Path(self.control_dir.name) / 'beta.json'
+        create_config(beta_config_path)
+        self.beta_codes = BetaCodes(beta_config_path)
+        self.bridge_gateway = Gateway(
+            hashlib.sha256(b'synthetic-owner').hexdigest(),
+            browser_origins=[self.browser_origin], beta_codes=self.beta_codes,
+            voice_service_key='synthetic-voice-service',
+        )
+        self.bridge_client = TestClient(TestServer(self.bridge_gateway.app(), handler_cancellation=True))
+        await self.bridge_client.start_server()
 
     async def asyncTearDown(self):
+        await self.bridge_client.close()
         await self.client.close()
+        await self.voice_server.close()
         await self.upstream.close()
+        self.voice_url_patch.stop()
         self.patch.stop()
         self.gemini_patch.stop()
         self.token_patch.stop()
@@ -190,6 +256,126 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.openai_patch.stop()
         self.outbound_guard.stop()
         self.control_dir.cleanup()
+
+    async def test_voice_capabilities_bridge_uses_only_server_service_credential(self):
+        response = await self.bridge_client.get(
+            '/v1/capabilities', headers={'Authorization': 'Bearer synthetic-owner'})
+        self.assertEqual(response.status, 200)
+        payload = await response.json()
+        self.assertEqual(payload['realtime']['websocket'], '/gemini/ws')
+        setup = {'model': 'models/gemini-3.8-live'}
+        bootstrap = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer synthetic-owner'},
+            json={'model': 'gemini-3.8-live', 'setup': setup})
+        self.assertEqual(bootstrap.status, 200)
+        self.assertEqual(self.voice_requests, [
+            ('GET', '/v1/capabilities', 'Bearer synthetic-voice-service', b''),
+            ('POST', '/v1/realtime/bootstrap', 'Bearer synthetic-voice-service',
+             json.dumps({'model': 'gemini-3.8-live', 'setup': setup},
+                        ensure_ascii=False, separators=(',', ':')).encode()),
+        ])
+        self.assertNotIn('synthetic-voice-service', await response.text())
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+
+    async def test_hb1_bootstrap_bridge_returns_validated_voice_payload_unchanged(self):
+        installation_id = '123e4567-e89b-42d3-a456-426614174000'
+        enrollment = await self.bridge_client.post(
+            '/beta/enroll', json={'installation_id': installation_id})
+        self.assertEqual(enrollment.status, 200)
+        beta_token = (await enrollment.json())['code']
+        setup = {'model': 'models/gemini-3.8-live', 'tools': [{'functionDeclarations': []}]}
+        # Replace only the synthetic backend's bootstrap route for byte-level
+        # equality; this does not alter the production fixed destination.
+        self.voice_response_override = b'{"provider":"gemini","transport":"habab","model":"gemini-3.8-live","value":"synthetic-opaque-voice-credential","expires_at":1900000000,"websocket_url":"wss://habab-voice.wpmix.net/gemini/ws","setup":{"model":"models/gemini-3.8-live","tools":[{"functionDeclarations":[]}]}}'
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer ' + beta_token},
+            json={'model': 'gemini-3.8-live', 'setup': setup})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.read(), self.voice_response_override)
+        self.assertEqual(self.voice_requests[-1][0:3], (
+            'POST', '/v1/realtime/bootstrap', 'Bearer synthetic-voice-service'))
+        self.assertEqual(json.loads(self.voice_requests[-1][3]), {'model': 'gemini-3.8-live', 'setup': setup})
+        self.assertNotIn('synthetic-voice-service', self.voice_requests[-1][3].decode())
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+
+    async def test_voice_bootstrap_accepts_escaped_unicode_wire_over_64k(self):
+        content = 'К' * 8192 + '"' * 8192
+        setup = {'model': 'models/gemini-3.8-live',
+                 'history': [{'role': 'user', 'content': content}]}
+        request_body = json.dumps({'model': 'gemini-3.8-live', 'setup': setup}).encode('utf-8')
+        canonical_setup = json.dumps(setup, ensure_ascii=False, sort_keys=True,
+                                     separators=(',', ':')).encode('utf-8')
+        self.assertGreater(len(request_body), 64 * 1024)
+        self.assertLessEqual(len(canonical_setup), 64 * 1024)
+
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer synthetic-owner',
+                                                'Content-Type': 'application/json'},
+            data=request_body)
+        self.assertEqual(response.status, 200)
+        returned = await response.read()
+        self.assertGreater(len(returned), 64 * 1024)
+        self.assertEqual(returned, self.voice_reply_bodies[-1])
+        self.assertLessEqual(len(self.voice_requests[-1][3]), 64 * 1024)
+        self.assertEqual(json.loads(self.voice_requests[-1][3])['setup'], setup)
+
+    async def test_voice_bootstrap_collects_fragmented_chunked_json_and_rejects_oversize(self):
+        setup = {'model': 'models/gemini-3.8-live', 'history': 'Кириллица'}
+        body = json.dumps({'model': 'gemini-3.8-live', 'setup': setup}).encode()
+
+        async def fragmented_body():
+            for part in (body[:7], body[7:19], body[19:]):
+                yield part
+                await asyncio.sleep(0)
+
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer synthetic-owner',
+                                                'Content-Type': 'application/json'},
+            data=fragmented_body())
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(await response.read())['setup'], setup)
+        forwarded_count = len(self.voice_requests)
+
+        async def oversized_body():
+            yield b' ' * (256 * 1024)
+            await asyncio.sleep(0)
+            yield b' ' * (256 * 1024 + 1)
+
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer synthetic-owner',
+                                                'Content-Type': 'application/json'},
+            data=oversized_body())
+        self.assertEqual(response.status, 413)
+        self.assertEqual((await response.json())['error']['code'], 'relay_request_too_large')
+        self.assertEqual(len(self.voice_requests), forwarded_count)
+
+    async def test_voice_bridge_rejects_invalid_client_and_invalid_backend_payload(self):
+        setup = {'model': 'models/gemini-3.8-live'}
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer wrong'},
+            json={'model': 'gemini-3.8-live', 'setup': setup})
+        self.assertEqual(response.status, 401)
+        self.assertEqual(self.voice_requests, [])
+        self.voice_response_override = b'{"provider":"gemini","transport":"habab","model":"gemini-3.8-live","value":"bad","expires_at":1,"websocket_url":"wss://attacker.example/ws","setup":{"model":"models/gemini-3.8-live"}}'
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer synthetic-owner'},
+            json={'model': 'gemini-3.8-live', 'setup': setup})
+        self.assertEqual(response.status, 502)
+        self.assertEqual((await response.json())['error']['code'], 'relay_invalid_voice_response')
+
+    async def test_voice_bridge_maps_voice_readiness_and_busy_states(self):
+        self.voice_status = 503
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer synthetic-owner'},
+            json={'model': 'gemini-3.8-live', 'setup': {'model': 'models/gemini-3.8-live'}})
+        self.assertEqual(response.status, 503)
+        self.assertEqual((await response.json())['error']['code'], 'habab_upstream_not_ready')
+        self.voice_status = 429
+        response = await self.bridge_client.post(
+            '/v1/realtime/bootstrap', headers={'Authorization': 'Bearer synthetic-owner'},
+            json={'model': 'gemini-3.8-live', 'setup': {'model': 'models/gemini-3.8-live'}})
+        self.assertEqual(response.status, 429)
+        self.assertEqual((await response.json())['error']['code'], 'relay_voice_busy')
 
     async def demo_openai_credential(self, session_hash=None):
         reader, writer = await asyncio.open_unix_connection(self.control_path)

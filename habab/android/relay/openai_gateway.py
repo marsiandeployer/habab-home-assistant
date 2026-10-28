@@ -38,6 +38,10 @@ GEMINI_TEXT_MODELS = (GEMINI_TEXT_MODEL, 'gemini-3.8-flash')
 HABAB_TEXT_MODEL = 'habab-chat'
 DEEPSEEK_TEXT_MODEL = 'deepseek-flash'
 GEMINI_WEBSOCKET = 'wss://habab-voice.wpmix.net/gemini/ws'
+VOICE_RELAY_URL = 'http://127.0.0.1:8326'
+VOICE_RELAY_TIMEOUT = 15
+VOICE_BOOTSTRAP_WIRE_MAX = 512 * 1024
+VOICE_RELAY_RESPONSE_MAX = 512 * 1024
 OPENAI_REALTIME_UPSTREAM = 'wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1'
 OPENAI_DEMO_WEBSOCKET = 'wss://habab-voice.wpmix.net/openai/demo/ws'
 TOKEN_RESPONSE_MAX = 64 * 1024
@@ -99,7 +103,7 @@ async def redacted_stream(content, secret, max_bytes):
 class Gateway:
     def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
                  browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2,
-                 demo_openai_session_window_seconds=86400, beta_codes=None):
+                 demo_openai_session_window_seconds=86400, beta_codes=None, voice_service_key=None):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         if not isinstance(browser_origins, (list, tuple, set, frozenset)):
@@ -114,6 +118,12 @@ class Gateway:
             raise ValueError('Invalid demo Realtime session limits')
         self.key_hash = key_hash
         self.beta_codes = beta_codes or BetaCodes()
+        if (voice_service_key is not None
+                and (not isinstance(voice_service_key, str) or not 1 <= len(voice_service_key) <= 2048
+                     or not voice_service_key.isascii()
+                     or any(not 0x21 <= ord(char) <= 0x7e for char in voice_service_key))):
+            raise ValueError('Invalid voice relay service credential')
+        self.voice_service_key = voice_service_key
         self.upstream_key = upstream_key
         self.text_upstream_key = text_upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
@@ -172,6 +182,92 @@ class Gateway:
             return True
         return (isinstance(token, str) and self.beta_codes.verify(token)
                 and hmac.compare_digest(digest, hashlib.sha256(token.encode()).hexdigest()))
+
+    @staticmethod
+    def _voice_error(code, status):
+        return web.json_response({'error': {'code': code}}, status=status,
+                                 headers={'Cache-Control': 'no-store'})
+
+    async def _voice_relay_request(self, method, path, *, body=None):
+        """Call only the fixed local voice relay with its private client credential."""
+        if self.voice_service_key is None:
+            return None
+        headers = {'Authorization': 'Bearer ' + self.voice_service_key}
+        if body is not None:
+            headers['Content-Type'] = 'application/json'
+        try:
+            async with self.client.request(
+                    method, VOICE_RELAY_URL + path, headers=headers, data=body,
+                    timeout=ClientTimeout(total=VOICE_RELAY_TIMEOUT, connect=3, sock_connect=3,
+                                          sock_read=VOICE_RELAY_TIMEOUT),
+                    allow_redirects=False) as response:
+                if response.status != 200:
+                    if response.status == 429:
+                        return self._voice_error('relay_voice_busy', 429)
+                    if response.status == 503:
+                        return self._voice_error('habab_upstream_not_ready', 503)
+                    return self._voice_error('relay_voice_unavailable', 502)
+                payload = bytearray()
+                async for block in response.content.iter_chunked(16384):
+                    payload.extend(block)
+                    if len(payload) > VOICE_RELAY_RESPONSE_MAX:
+                        return self._voice_error('relay_invalid_voice_response', 502)
+                result = bytes(payload)
+                if self.voice_service_key.encode('ascii') in result:
+                    return self._voice_error('relay_invalid_voice_response', 502)
+                return result
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            return self._voice_error('relay_voice_timeout', 504)
+        except Exception:
+            return self._voice_error('relay_voice_unavailable', 502)
+
+    @staticmethod
+    def _decode_voice_json(payload):
+        def object_without_duplicates(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError('duplicate_json_key')
+                result[key] = value
+            return result
+
+        try:
+            value = json.loads(payload, object_pairs_hook=object_without_duplicates)
+        except (ValueError, UnicodeError, RecursionError, TypeError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _valid_voice_capabilities(self, payload):
+        realtime = payload.get('realtime')
+        auth = realtime.get('browser_auth') if isinstance(realtime, dict) else None
+        models = realtime.get('models') if isinstance(realtime, dict) else None
+        default_model = realtime.get('default_model') if isinstance(realtime, dict) else None
+        return (payload.get('provider') == 'habab'
+                and isinstance(payload.get('chat'), dict)
+                and isinstance(payload.get('telegram'), dict)
+                and ('speech' not in payload or isinstance(payload.get('speech'), dict))
+                and isinstance(realtime, dict)
+                and realtime.get('provider') == 'gemini'
+                and realtime.get('transport') == 'habab'
+                and realtime.get('websocket') == '/gemini/ws'
+                and isinstance(models, list) and 1 <= len(models) <= 8
+                and all(isinstance(model, str) and 1 <= len(model) <= 128 for model in models)
+                and default_model in models
+                and isinstance(auth, dict) and type(auth.get('enabled')) is bool
+                and auth.get('mode') == 'first_text_frame'
+                and auth.get('type') == BROWSER_VOICE_AUTH_TYPE)
+
+    async def proxied_voice_capabilities(self):
+        result = await self._voice_relay_request('GET', '/v1/capabilities')
+        if isinstance(result, web.Response):
+            return result
+        payload = self._decode_voice_json(result)
+        if payload is None or not self._valid_voice_capabilities(payload):
+            return self._voice_error('relay_invalid_voice_response', 502)
+        return web.Response(body=result, content_type='application/json',
+                            headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
 
     async def lifecycle(self, app):
         self.client = ClientSession(timeout=ClientTimeout(total=60), trust_env=False)
@@ -424,6 +520,8 @@ class Gateway:
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.query:
             return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        if self.voice_service_key is not None:
+            return await self.proxied_voice_capabilities()
         return web.json_response({
             'provider': 'habab',
             'chat': {'provider': 'gemini', 'protocol': 'google-generative-language-v1beta',
@@ -663,6 +761,8 @@ class Gateway:
             return web.json_response({'error': {'code': 'relay_not_authorized'}}, status=401)
         if request.query:
             return web.json_response({'error': {'code': 'relay_invalid_query'}}, status=400)
+        if self.voice_service_key is not None:
+            return await self.proxied_gemini_bootstrap(request, service_key)
         if self.upstream_key is None:
             return web.json_response({'error': {'code': 'habab_upstream_not_ready'}}, status=503)
         if self.active_voice >= 2:
@@ -717,6 +817,53 @@ class Gateway:
                                   'value': value, 'expires_at': int(now + 60),
                                   'websocket_url': GEMINI_WEBSOCKET, 'setup': setup},
                                  headers={'Cache-Control': 'no-store'})
+
+    async def proxied_gemini_bootstrap(self, request, service_key):
+        if request.content_type != 'application/json':
+            return self._voice_error('relay_invalid_model_or_setup', 400)
+        if request.content_length is not None and request.content_length > VOICE_BOOTSTRAP_WIRE_MAX:
+            return self._voice_error('relay_request_too_large', 413)
+        try:
+            raw = bytearray()
+            async for block in request.content.iter_chunked(16384):
+                raw.extend(block)
+                if len(raw) > VOICE_BOOTSTRAP_WIRE_MAX:
+                    return self._voice_error('relay_request_too_large', 413)
+            body = self._decode_voice_json(raw)
+            if body is None or set(body) != {'model', 'setup'}:
+                raise ValueError
+            model, setup = body.get('model'), body.get('setup')
+            if (model != GEMINI_MODEL or not isinstance(setup, dict)
+                    or setup.get('model') != 'models/' + GEMINI_MODEL):
+                raise ValueError
+            encoded = json.dumps(setup, ensure_ascii=False, sort_keys=True,
+                                 separators=(',', ':')).encode('utf-8')
+            if (len(encoded) > VOICE_SETUP_MAX_BYTES
+                    or service_key.encode('utf-8') in encoded
+                    or self.voice_service_key.encode('ascii') in encoded):
+                raise ValueError
+            forwarded_body = json.dumps({'model': model, 'setup': setup}, ensure_ascii=False,
+                                        separators=(',', ':')).encode('utf-8')
+        except (ValueError, UnicodeError, TypeError, RecursionError):
+            return self._voice_error('relay_invalid_model_or_setup', 400)
+
+        result = await self._voice_relay_request(
+            'POST', '/v1/realtime/bootstrap', body=forwarded_body)
+        if isinstance(result, web.Response):
+            return result
+        payload = self._decode_voice_json(result)
+        if (payload is None or payload.get('provider') != 'gemini'
+                or payload.get('transport') != 'habab' or payload.get('model') != model
+                or payload.get('setup') != setup
+                or payload.get('websocket_url') != GEMINI_WEBSOCKET
+                or not isinstance(payload.get('value'), str)
+                or not 1 <= len(payload['value']) <= 2048
+                or (type(payload.get('expires_at')) is not int)
+                or self.voice_service_key.encode('ascii') in result
+                or service_key.encode('utf-8') in result):
+            return self._voice_error('relay_invalid_voice_response', 502)
+        return web.Response(body=result, content_type='application/json',
+                            headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
 
     async def gemini_text(self, request):
         service_key, digest = self.authorization(request)
@@ -947,17 +1094,60 @@ class Gateway:
         return app
 
 
+def load_private_config(config_path):
+    path = Path(config_path)
+    try:
+        parent_info = path.parent.lstat()
+        file_info = path.lstat()
+    except OSError as error:
+        raise ValueError('private_config_unavailable') from error
+    if (not stat.S_ISDIR(parent_info.st_mode) or stat.S_ISLNK(parent_info.st_mode)
+            or parent_info.st_uid != os.getuid() or stat.S_IMODE(parent_info.st_mode) != 0o700):
+        raise ValueError('private_config_directory_required')
+    if (not stat.S_ISREG(file_info.st_mode) or stat.S_ISLNK(file_info.st_mode)
+            or file_info.st_uid != os.getuid() or stat.S_IMODE(file_info.st_mode) != 0o600
+            or file_info.st_size > 64 * 1024):
+        raise ValueError('private_config_file_required')
+
+    def object_without_duplicates(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate_json_key')
+            result[key] = value
+        return result
+
+    try:
+        config = json.loads(path.read_text(encoding='utf-8'),
+                            object_pairs_hook=object_without_duplicates)
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError) as error:
+        raise ValueError('private_config_invalid') from error
+    key_hash = config.get('key_sha256') if isinstance(config, dict) else None
+    if not isinstance(key_hash, str) or re.fullmatch(r'[0-9a-f]{64}', key_hash) is None:
+        raise ValueError('private_config_invalid')
+    if 'voice_service_key' in config:
+        key = config['voice_service_key']
+        if (not isinstance(key, str) or not 1 <= len(key) <= 2048 or not key.isascii()
+                or any(not 0x21 <= ord(char) <= 0x7e for char in key)):
+            raise ValueError('private_config_invalid')
+    return config
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=Path, required=True)
     args = parser.parse_args()
-    config = json.loads(args.config.read_text())
+    try:
+        config = load_private_config(args.config)
+    except (OSError, ValueError, TypeError):
+        parser.error('private_config_invalid')
     gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock',
                       beta_codes=BetaCodes(config.get('beta_config') or os.environ.get('HABAB_BETA_CONFIG')),
                       browser_origins=config.get('browser_origins', []),
                       demo_openai_session_limit=config.get('demo_openai_session_limit', 5),
                       demo_openai_sessions_per_session=config.get('demo_openai_sessions_per_session', 2),
-                      demo_openai_session_window_seconds=config.get('demo_openai_session_window_seconds', 86400))
+                      demo_openai_session_window_seconds=config.get('demo_openai_session_window_seconds', 86400),
+                      voice_service_key=config.get('voice_service_key'))
     web.run_app(gateway.app(), host='127.0.0.1', port=config.get('port', 8326), access_log=None, print=None, handler_cancellation=True)
 
 
