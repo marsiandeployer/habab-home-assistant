@@ -153,8 +153,16 @@ the overlay uses the exact 20260930.4 APIs without carrying unrelated changes
 from the newer main source tree. Its SHA-256 is
 `ec8792adef5cc770bdda3af1f0a97c18c8ccbbaf218db47ac8e6e365ad4b54a7`; the full
 five-patch bundle SHA-256 is
-`048241615cb15baceac9df5614c650f569cbeb6ca5fc1f75682f127be38dc661`. It
-downloads the official
+`3b21ede5eccdfdbdf1196c355485a877fecd3a08844c54a9aa113424da36678f`. The
+current native-branding overlay declares `lang="ru"` on the pinned root HTML and
+uses the shared assistant-open size variables to keep the floating chat FAB clear
+of the open assistant panel. Its SHA-256 is
+`12839aba43a543fdd2b53b1cc16f906075d8775545a87e709b1aa558b8813d45`.
+The bridge (`d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`),
+test-fix (`95c2f19010624cf5d9b53157bf5e06e74bedf905bbac79ae417177baa80898f3`),
+Dev Inspector (`05accce46eb2aeafbdfdb64157a07a7ce89af9b01224fa0ae4249a1e4df047b1`),
+and Yandex map (`ec8792adef5cc770bdda3af1f0a97c18c8ccbbaf218db47ac8e6e365ad4b54a7`)
+patch hashes are unchanged. It downloads the official
 [Home Assistant frontend 20260930.4 wheel from PyPI](https://pypi.org/project/home-assistant-frontend/20260930.4/),
 checks SHA-256 `05c207fb6ce6720d1782766b54a67acdf4bab83f133a562204b972d062862fc8`,
 and extracts only its translation tree. The builder checks the extracted

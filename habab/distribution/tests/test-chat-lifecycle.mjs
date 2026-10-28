@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { strings } from "../src/habab_home/frontend/strings.js";
 
 let setupChatModule;
 let setupChatElementClass;
@@ -136,38 +137,160 @@ test("global chat launcher follows the authenticated main element across routes"
     const feedbackCopyKeys = [
       "feedbackPositive", "feedbackNegative", "feedbackPositiveLabel", "feedbackNegativeLabel",
       "feedbackSending", "feedbackSent", "feedbackSentTruncated", "feedbackSentWithoutTrace",
-      "feedbackNotConfigured", "feedbackPending", "feedbackFailed",
+      "feedbackNotConfigured", "feedbackPending", "feedbackFailed", "feedbackCommentLabel",
+      "feedbackCommentPlaceholder", "feedbackSubmit", "feedbackCancel",
     ];
     for (const key of feedbackCopyKeys) {
       assert.equal(typeof launcher.t[key], "string", `${key} must be provided by the real chat getter`);
       assert.notEqual(launcher.t[key].trim(), "", `${key} must not be empty`);
+      for (const locale of ["ru", "en"]) {
+        assert.equal(typeof strings[locale][key], "string", `${locale}.${key} must be localized`);
+        assert.notEqual(strings[locale][key].trim(), "", `${locale}.${key} must not be empty`);
+      }
     }
-    let feedbackRequests = 0;
-    let finishFeedbackRequest;
-    launcher.hass.fetchWithAuth = () => {
-      feedbackRequests++;
-      return new Promise((resolve) => { finishFeedbackRequest = resolve; });
+    const feedbackRequests = [];
+    launcher.hass.fetchWithAuth = (_url, options) => {
+      const request = {body: JSON.parse(options.body)};
+      feedbackRequests.push(request);
+      return new Promise((resolve) => { request.resolve = resolve; });
     };
+    launcher.shadowRoot = {querySelector: () => ({focus() {}})};
+    const findClass = (root, name) => root.children.find((child) => child.className === name);
+    const findTag = (root, name) => root.children.find((child) => child.localName === name);
     const controls = launcher.renderAnswerFeedback(1);
     assert.equal(controls.children.length, 2, "each assistant answer has positive and negative buttons");
     assert.equal(controls.children[0].title, launcher.t.feedbackPositiveLabel);
     assert.equal(controls.children[0].attributes["aria-label"], launcher.t.feedbackPositiveLabel);
     assert.equal(controls.children[1].title, launcher.t.feedbackNegativeLabel);
     assert.equal(controls.children[1].attributes["aria-label"], launcher.t.feedbackNegativeLabel);
-    const submission = controls.children[0].onclick();
+    controls.children[1].onclick();
+    assert.equal(feedbackRequests.length, 0, "choosing a negative rating only opens the comment editor");
+    let editor = findClass(launcher.renderAnswerFeedback(1), "answer-feedback-editor");
+    let comment = findTag(editor, "textarea");
+    assert.equal(comment.value, "", "the comment field starts empty");
+    assert.equal(comment.attributes["aria-label"], launcher.t.feedbackCommentLabel);
+    const feedbackComment = 'The answer skipped the "manual setup" step.\nPlease explain it.';
+    comment.value = feedbackComment;
+    comment.oninput();
+    findClass(editor, "answer-feedback-actions").children[1].onclick();
+    assert.equal(feedbackRequests.length, 0, "cancel does not send a request");
+
+    launcher.renderAnswerFeedback(1).children[0].onclick();
+    assert.equal(feedbackRequests.length, 0, "choosing a positive rating also only opens the editor");
+    editor = findClass(launcher.renderAnswerFeedback(1), "answer-feedback-editor");
+    comment = findTag(editor, "textarea");
+    assert.equal(comment.value, feedbackComment, "cancelling retains the draft");
+    const submitEvent = {preventDefault() { this.prevented = true; }};
+    const submission = editor.onsubmit(submitEvent);
+    const duplicateSubmit = editor.onsubmit({preventDefault() {}});
     await Promise.resolve();
-    assert.equal(launcher.renderAnswerFeedback(1).children[0].disabled, true, "both ratings lock while one is pending");
-    await launcher.renderAnswerFeedback(1).children[1].onclick();
-    assert.equal(feedbackRequests, 1, "a second click cannot submit the same answer twice");
-    finishFeedbackRequest({ok: true, json: async () => ({
+    assert.equal(submitEvent.prevented, true);
+    assert.equal(feedbackRequests.length, 1, "double submit starts only one request");
+    const firstBody = feedbackRequests[0].body;
+    assert.equal(firstBody.feedback, `${launcher.t.feedbackPositive}\n\n${feedbackComment}`);
+    assert.equal(firstBody.answer_index, 1);
+    assert.equal(firstBody.answer_text, "Answer");
+    assert.equal(firstBody.prompt_text, "Question");
+    feedbackRequests[0].resolve({ok: false, json: async () => ({message: "temporary failure"})});
+    await Promise.all([submission, duplicateSubmit]);
+    const retryControls = launcher.renderAnswerFeedback(1);
+    assert.equal(retryControls.children[0].disabled, false);
+    assert.equal(retryControls.children.at(-1).textContent, launcher.t.feedbackFailed);
+    editor = findClass(retryControls, "answer-feedback-editor");
+    comment = findTag(editor, "textarea");
+    assert.equal(comment.value, feedbackComment, "failure keeps the exact comment for retry");
+    const retry = editor.onsubmit({preventDefault() {}});
+    await Promise.resolve();
+    assert.equal(feedbackRequests.length, 2);
+    assert.deepEqual(feedbackRequests[1].body, firstBody, "retry reuses the exact payload and idempotency key");
+    feedbackRequests[1].resolve({ok: true, json: async () => ({
       receipt_id: "receipt", state: "saved_locally", delivery_status: "saved_on_server", trace_status: "available",
     })});
-    await submission;
+    await retry;
     const completedFeedback = launcher.renderAnswerFeedback(1);
     assert.equal(completedFeedback.children[0].disabled, true);
-    assert.equal(completedFeedback.children[2].textContent, launcher.t.feedbackSent);
-    assert.equal(typeof completedFeedback.children[2].textContent, "string");
-    assert.notEqual(completedFeedback.children[2].textContent.trim(), "");
+    const success = completedFeedback.children.at(-1);
+    assert.equal(success.textContent, launcher.t.feedbackSent);
+    assert.equal(typeof success.textContent, "string");
+    assert.notEqual(success.textContent.trim(), "");
+
+    const originalShadowRoot = launcher.shadowRoot;
+    const focusCalls = [];
+    const feedbackCommentFocus = {focus(options) { focusCalls.push({target: "comment", options}); }};
+    const negativeButtonFocus = {focus(options) { focusCalls.push({target: "negative", options}); }};
+    launcher.shadowRoot = {querySelector(selector) {
+      if (selector.endsWith(".answer-feedback-comment")) return feedbackCommentFocus;
+      if (selector.endsWith('button[data-rating="negative"]')) return negativeButtonFocus;
+      return null;
+    }};
+    launcher.feedbackStates = new Map();
+    launcher.openAnswerFeedback(1, "negative");
+    assert.deepEqual(focusCalls, [{target: "comment", options: {preventScroll: true}}],
+      "opening feedback moves focus into its comment field without scrolling");
+    launcher.cancelAnswerFeedback(1);
+    assert.deepEqual(focusCalls.at(-1), {target: "negative", options: {preventScroll: true}},
+      "cancelling returns focus to the selected rating button");
+    launcher.shadowRoot = originalShadowRoot;
+
+    const composer = {value: "main composer draft"};
+    launcher.demo = false;
+    launcher.shadowRoot = {querySelector(selector) {
+      assert.equal(selector, ".composer-textarea", "reload state reads the main composer, not feedback comment fields");
+      return composer;
+    }};
+    let reloadState;
+    launcher.reloadStateProvider = {setDirty(value) { reloadState = value; }};
+    launcher.syncReloadState();
+    assert.equal(reloadState, true, "the main composer draft remains protected from reload");
+    launcher.shadowRoot = originalShadowRoot;
+
+    const composerChat = Object.create(setupChatElementClass.prototype);
+    const composerDraft = {value: "Send this from the main composer"};
+    let sentText;
+    Object.assign(composerChat, {
+      isCurrentOwnerContext: () => true,
+      sessionId: "composer-session",
+      busy: false,
+      demo: true,
+      messages: [],
+      language: "en",
+      q(selector) {
+        if (selector === ".composer-textarea") return composerDraft;
+        if (selector === "dialog") return {open: false};
+        return undefined;
+      },
+      demoRequest: async (_path, _method, text) => {
+        sentText = text;
+        return {messages: [{role: "user", text}, {role: "assistant", text: "sent"}]};
+      },
+      draw() {},
+      status() {},
+      controls() {},
+      startPendingAssist() {},
+    });
+    await composerChat.send();
+    assert.equal(sentText, "Send this from the main composer");
+    assert.equal(composerDraft.value, "", "sending clears only the main composer field");
+
+    launcher.messages = [
+      {role: "user", text: "Second question"},
+      {role: "assistant", text: "Second answer"},
+    ];
+    launcher.feedbackStates = new Map();
+    launcher.hass.fetchWithAuth = async (_url, options) => {
+      feedbackRequests.push({body: JSON.parse(options.body)});
+      return {ok: true, json: async () => ({
+        receipt_id: "empty-comment-receipt", state: "saved_locally",
+        delivery_status: "saved_on_server", trace_status: "available",
+      })};
+    };
+    launcher.renderAnswerFeedback(1).children[0].onclick();
+    editor = findClass(launcher.renderAnswerFeedback(1), "answer-feedback-editor");
+    comment = findTag(editor, "textarea");
+    assert.equal(comment.value, "", "an optional comment is not prefilled with rating text");
+    await editor.onsubmit({preventDefault() {}});
+    assert.equal(feedbackRequests.at(-1).body.feedback, launcher.t.feedbackPositive,
+      "an empty optional comment still submits the selected rating");
     document.createElement = createElement;
     launcher.isCurrentOwnerContext = previousCurrentContext;
     launcher.draw = previousDraw;
@@ -400,7 +523,7 @@ test("real open method preserves startup focus and desktop manual focus", () => 
     }
     instance.sessionId = "existing-session";
     instance.busy = true;
-    instance.q = (selector) => selector === "textarea" ? textarea
+    instance.q = (selector) => selector === ".composer-textarea" ? textarea
       : selector === ".close" ? close
         : selector === ".launcher" ? close
           : selector === "dialog" ? dialog : undefined;
@@ -453,7 +576,7 @@ test("mobile open starts split, textarea focus expands, and collapse restores th
   const dialog = {open: false, show() { this.open = true; }};
   const instance = Object.create(setupChatElementClass.prototype);
   Object.assign(instance, {isConnected: true, demo: true, sessionId: "existing-session", busy: true, mobileExpanded: false});
-  instance.q = (selector) => selector === "textarea" ? textarea
+  instance.q = (selector) => selector === ".composer-textarea" ? textarea
     : selector === ".close" ? close
       : selector === ".launcher" ? close
         : selector === "dialog" ? dialog : undefined;

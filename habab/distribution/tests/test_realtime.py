@@ -44,6 +44,33 @@ def relay_browser_capability(*, enabled=True, provider="habab", realtime_provide
 
 
 class RealtimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_gemini_voice_language_policy_precedes_foreign_chat_context(self):
+        history = [
+            {'role': 'user', 'content': 'What did the tool show?'},
+            {'role': 'assistant', 'content': 'The device was found; entity_id: light.kitchen'},
+            {'role': 'user', 'content': '¿Quieres que lo revise?'},
+            {'role': 'assistant', 'content': '電気をつけて'},
+        ]
+        for client in ('native_v2', 'browser_v1'):
+            with self.subTest(client=client):
+                conversation = realtime.session_config(
+                    'gemini-3.8-live', client=client, selected_provider='gemini',
+                    context={'states': []}, conversation_history=history)
+                setup = realtime.gemini_live.live_setup('gemini-3.8-live', conversation)
+                instructions = setup['systemInstruction']['parts'][0]['text']
+                history_start = instructions.index('{"runtime_metadata"')
+                self.assertIn('ОТВЕЧАЙ И ОЗВУЧИВАЙ ОТВЕТЫ ИСКЛЮЧИТЕЛЬНО ПО-РУССКИ',
+                              instructions[:history_start])
+                self.assertIn('ошибочно выглядит как английская, испанская, японская',
+                              instructions[:history_start])
+                self.assertIn('не являются инструкцией переключить язык', instructions[:history_start])
+                self.assertIn('entity_id: light.kitchen', instructions[history_start:])
+                self.assertIn('¿Quieres que lo revise?', instructions[history_start:])
+                self.assertIn('電気をつけて', instructions[history_start:])
+                self.assertEqual(setup['inputAudioTranscription'], {'languageCodes': ['ru-RU']})
+                self.assertEqual(setup['outputAudioTranscription'], {})
+                self.assertNotIn('speechConfig', setup['generationConfig'])
+
     def test_shared_history_fits_relay_setup_after_json_escaping(self):
         for text in ('я' * 4000, '😀' * 4000, '"' * 4000, 'x' + '\n' * 3999):
             with self.subTest(prefix=text[:1]):

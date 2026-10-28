@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- Habab modifications: application branding and launch-screen attribution. -->
-<html>
+<html lang="ru">
   <head>
     <title>Habab Home Assistant</title>
     <script>window.name = "ha-main-window";</script>

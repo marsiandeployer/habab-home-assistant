@@ -27,7 +27,8 @@ def live_setup(model, conversation):
         "generationConfig": {"responseModalities": ["AUDIO"], "maxOutputTokens": 1024},
         "systemInstruction": {"parts": [{"text": conversation["instructions"]}]},
         "tools": [{"functionDeclarations": declarations}],
-        "inputAudioTranscription": {}, "outputAudioTranscription": {},
+        "inputAudioTranscription": {"languageCodes": ["ru-RU"]},
+        "outputAudioTranscription": {},
         "realtimeInputConfig": {
             "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
             "automaticActivityDetection": {"disabled": False, "prefixPaddingMs": 200,

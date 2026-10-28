@@ -446,10 +446,19 @@ export class HassTabsSubpage extends LitElement {
 
         #fab {
           position: fixed;
-          right: calc(16px + var(--safe-area-inset-right, 0px));
-          inset-inline-end: calc(16px + var(--safe-area-inset-right));
+          right: calc(
+            16px + var(--safe-area-inset-right, 0px) +
+              var(--habab-assistant-open-inline-size, 0px)
+          );
+          inset-inline-end: calc(
+            16px + var(--safe-area-inset-right) +
+              var(--habab-assistant-open-inline-size, 0px)
+          );
           inset-inline-start: initial;
-          bottom: calc(16px + var(--safe-area-inset-bottom, 0px));
+          bottom: calc(
+            16px + var(--safe-area-inset-bottom, 0px) +
+              var(--habab-assistant-open-block-size, 0px)
+          );
           z-index: 1;
           display: flex;
           flex-wrap: wrap;
@@ -458,12 +467,17 @@ export class HassTabsSubpage extends LitElement {
           --ha-button-box-shadow: var(--ha-box-shadow-l);
         }
         :host([narrow][show-tabs]) #fab {
-          bottom: calc(84px + var(--safe-area-inset-bottom, 0px));
+          bottom: calc(
+            84px + var(--safe-area-inset-bottom, 0px) +
+              var(--habab-assistant-open-block-size, 0px)
+          );
         }
         #fab[is-wide] {
-          bottom: 24px;
-          right: 24px;
-          inset-inline-end: 24px;
+          bottom: calc(24px + var(--habab-assistant-open-block-size, 0px));
+          right: calc(24px + var(--habab-assistant-open-inline-size, 0px));
+          inset-inline-end: calc(
+            24px + var(--habab-assistant-open-inline-size, 0px)
+          );
           inset-inline-start: initial;
         }
 

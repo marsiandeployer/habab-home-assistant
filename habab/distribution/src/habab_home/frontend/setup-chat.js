@@ -1,6 +1,6 @@
 // Independent downstream extension: no dependency on compiled HA internals.
 import { AssistVoice, BrowserGeminiVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js";
-import { strings } from "./strings.js?v=5";
+import { strings } from "./strings.js?v=6";
 import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals } from "./chat-dismissal.js";
 import { createToolCalls } from "./chat-tools.js?v=1";
 export function visibleTextMessages(messages) {
@@ -35,6 +35,8 @@ function createFeedbackIdempotencyKey() {
   const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+const MAX_ANSWER_FEEDBACK_COMMENT_CHARS = 1800;
 
 export async function requestAssistantSession(hass, {fresh = false, isCurrent, onActivating}) {
   const request = {type: "habab_home/agent/session", new: fresh};
@@ -303,9 +305,14 @@ function installChat() {
     const style = document.createElement("style");
     style.id = "habab-assistant-split-style";
     style.textContent = `
+      :root {
+        --habab-assistant-open-inline-size: 0px;
+        --habab-assistant-open-block-size: 0px;
+      }
       @media (min-width: 721px) {
         html[data-habab-assistant-open="true"] {
           --habab-assistant-chat-width: max(420px, 50vw);
+          --habab-assistant-open-inline-size: var(--habab-assistant-chat-width);
         }
         html[data-habab-assistant-open="true"] body > ha-demo,
         html[data-habab-assistant-open="true"] body > home-assistant {
@@ -319,6 +326,12 @@ function installChat() {
         }
       }
       @media (max-width: 720px) {
+        html[data-habab-assistant-open="true"] {
+          --habab-assistant-open-block-size: 50dvh;
+        }
+        html[data-habab-assistant-open="true"][data-habab-assistant-expanded="true"] {
+          --habab-assistant-open-block-size: var(--assistant-viewport-height, 100dvh);
+        }
         html[data-habab-assistant-open="true"] body > ha-demo,
         html[data-habab-assistant-open="true"] body > home-assistant {
           display: block !important;
@@ -749,7 +762,7 @@ function installChat() {
           });
           this.setupCard.addEventListener("habab-setup-verify", () => {
             if (this.busy) return;
-            this.q("textarea").value = this.language === "ru"
+            this.q(".composer-textarea").value = this.language === "ru"
               ? "Проверь подключение Xiaomi Home и доступные устройства реальными командами. Не управляй устройствами."
               : "Check Xiaomi Home and available devices using actual commands. Do not control devices.";
             this.send();
@@ -784,7 +797,7 @@ function installChat() {
           this.integrationCard.addEventListener("habab-setup-verify", ({detail}) => {
             const prompt = integrationVerificationPrompt(detail, this.language);
             if (this.busy || !prompt) return;
-            this.q("textarea").value = prompt;
+            this.q(".composer-textarea").value = prompt;
             this.send();
           });
         }
@@ -835,7 +848,7 @@ function installChat() {
       this.language = this.demo || this.hass?.locale.language.startsWith("ru") ? "ru" : "en";
       const t = this.t;
       this.shadowRoot.innerHTML = `<style>
-        :host{position:fixed;z-index:10;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom));display:block;white-space:normal;pointer-events:none;color:var(--primary-text-color,#212121);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
+        :host{position:fixed;z-index:10;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:calc(16px + var(--safe-area-inset-bottom,0px) + 72px);display:block;white-space:normal;pointer-events:none;color:var(--primary-text-color,#212121);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
         :host([data-context-unavailable]){display:none !important;pointer-events:none !important}
         *{box-sizing:border-box}button,textarea,select{font:inherit}button{cursor:pointer;color:inherit;background:transparent;border:0;min-height:44px;border-radius:8px;padding:8px 12px}button:hover{background:var(--secondary-background-color,#f0f2f4)}button:disabled,select:disabled{opacity:.5;cursor:default}.voice-mode{max-width:104px;min-height:44px;padding:5px 6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:inherit;background:var(--card-background-color,#fff);font-size:12px}
         :is(button,textarea,a):focus-visible{outline:3px solid var(--primary-color,#007a9e);outline-offset:2px}::selection{background:var(--primary-color,#007a9e);color:#fff}
@@ -849,14 +862,22 @@ function installChat() {
         footer{padding:12px 20px 20px}.assist-pipeline-control{display:block;margin:0 0 8px;font-size:12px;color:var(--secondary-text-color,#5f6368)}.assist-pipeline{display:block;width:100%;min-height:40px;margin-block-start:4px;padding:6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff)}#voice-mode-help{font-size:12px;color:var(--secondary-text-color,#5f6368);margin:0 0 8px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
         :host([data-assistant-open]){inset:0;z-index:10;pointer-events:none}:host([data-assistant-open]) .launcher{display:none}:host([data-assistant-open]) dialog{inset:0 0 0 auto;width:var(--habab-assistant-chat-width,50vw);height:100dvh;border-radius:0;border-block:0;border-inline-end:0;box-shadow:-8px 0 28px #0002}:host([data-assistant-open]) dialog:not([open]){display:none}:host([data-assistant-open]) dialog::backdrop{background:transparent}
-        @media(max-width:720px){:host{inset:0;z-index:1000}:host([data-assistant-open]) dialog{inset-inline:0;inset-block-start:50dvh;inset-block-end:0;width:100vw;height:50dvh;max-height:50dvh;border-radius:0}:host([data-assistant-open][data-assistant-mobile-expanded]) dialog{inset-block-start:var(--assistant-viewport-offset-top,0px);height:var(--assistant-viewport-height,100dvh);max-height:var(--assistant-viewport-height,100dvh)}:host([data-assistant-mobile-expanded]) .collapse{display:grid}:host(:not([data-assistant-open])) .launcher{position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:max(16px,env(safe-area-inset-bottom))}}
+        @media(max-width:720px){:host{inset:0;z-index:1000}:host([data-assistant-open]) dialog{inset-inline:0;inset-block-start:50dvh;inset-block-end:0;width:100vw;height:50dvh;max-height:50dvh;border-radius:0}:host([data-assistant-open][data-assistant-mobile-expanded]) dialog{inset-block-start:var(--assistant-viewport-offset-top,0px);height:var(--assistant-viewport-height,100dvh);max-height:var(--assistant-viewport-height,100dvh)}:host([data-assistant-mobile-expanded]) .collapse{display:grid}:host(:not([data-assistant-open])) .launcher{position:fixed;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:calc(84px + var(--safe-area-inset-bottom,0px) + 72px)}}
         @media(max-width:720px){header{padding:8px;gap:4px}header .icon{width:44px;height:44px;padding:10px}h2{font-size:16px}.fresh{font-size:12px;padding-inline:6px}#log{padding:16px}.empty h3{font-size:20px;margin-block-end:12px}.quick-replies{margin-block-start:8px}}
         @media(prefers-reduced-motion:no-preference){dialog[open]{animation:arrive 160ms cubic-bezier(.16,1,.3,1)}@keyframes arrive{from{transform:translateY(10px);opacity:.7}to{transform:translateY(0);opacity:1}}}
+      </style>
+      <style>
+        .answer-feedback{flex-wrap:wrap}
+        .answer-feedback-editor{display:grid;gap:8px;inline-size:100%;margin-block-start:8px}
+        .answer-feedback-editor label{font-size:12px;color:var(--secondary-text-color,#5f6368)}
+        .answer-feedback-editor textarea{display:block;inline-size:100%;min-block-size:72px;max-block-size:160px;flex:none;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;background:var(--card-background-color,#fff)}
+        .answer-feedback-actions{display:flex;justify-content:flex-end;gap:8px}
+        .answer-feedback-send{background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff)}
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
         <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><select class="voice-mode" aria-label="${t.voiceModeLabel}" title="${t.nativeAssistTitle}"><option value="habab">${t.voiceModeHabab}</option><option value="assist">${t.voiceModeAssist}</option></select><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
       <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
-      <form><textarea aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
+      <form class="composer-form"><textarea class="composer-textarea" aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
       this.q(".close").onclick = () => this.q("dialog").close();
       this.q("dialog").addEventListener("close", () => {
@@ -903,9 +924,9 @@ function installChat() {
         if (["PageUp", "Home", "ArrowUp"].includes(event.key) &&
             !event.composedPath().some(isEditableFocusTarget)) this.followSetupForms = false;
       });
-      this.q("form").onsubmit = (event) => {event.preventDefault(); this.send();};
-      this.q("textarea").oninput = () => this.syncReloadState();
-      this.q("textarea").onkeydown = (event) => {
+      this.q(".composer-form").onsubmit = (event) => {event.preventDefault(); this.send();};
+      this.q(".composer-textarea").oninput = () => this.syncReloadState();
+      this.q(".composer-textarea").onkeydown = (event) => {
         if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {event.preventDefault(); this.send();}
       };
       this.shadowRoot.addEventListener("focusin", (event) => {
@@ -913,7 +934,7 @@ function installChat() {
         const path = event.composedPath();
         const target = path.find(isEditableFocusTarget);
         if (!target) return;
-        if (target === this.q("textarea") ||
+        if (target === this.q(".composer-textarea") || target?.classList?.contains("answer-feedback-comment") ||
             [...(this.integrationCard?.cards?.values?.() || [])].some((card) => card.form && path.includes(card.form))) {
           this.setMobileExpanded(true);
         }
@@ -1016,7 +1037,7 @@ function installChat() {
     }
 
     collapseMobileChat() {
-      this.q("textarea").blur();
+      this.q(".composer-textarea").blur();
       this.setMobileExpanded(false);
       this.q(".close").focus({preventScroll: true});
     }
@@ -1029,7 +1050,7 @@ function installChat() {
         this.setXiaomiSetupDismissed(false);
         void this.loadSetup();
       }
-      const textarea = this.q("textarea");
+      const textarea = this.q(".composer-textarea");
       const draft = textarea.value;
       if (draft.trim()) {
         textarea.value = appendQuickReplyToDraft(draft, prompt);
@@ -1064,7 +1085,7 @@ function installChat() {
       this.updatePipelineControl();
       this.updateVoiceModeHelp();
       this.q("#messages").setAttribute("aria-label", t.title);
-      const textarea = this.q("textarea");
+      const textarea = this.q(".composer-textarea");
       textarea.placeholder = t.placeholder;
       textarea.setAttribute("aria-label", t.placeholder);
       this.q(".recovery a").textContent = t.settings;
@@ -1089,7 +1110,7 @@ function installChat() {
         initial_prompt: typeof params.prompt === "string" && params.prompt.length <= 4000 ? params.prompt : undefined,
         submit_prompt: params.submit === true && typeof params.prompt === "string" && params.prompt.length <= 4000,
       };
-      if (this.openParams.initial_prompt !== undefined) this.q("textarea").value = this.openParams.initial_prompt;
+      if (this.openParams.initial_prompt !== undefined) this.q(".composer-textarea").value = this.openParams.initial_prompt;
       this.syncReloadState();
       this.returnFocus = opener || this.q(".launcher");
       this.setAssistantOpen(true);
@@ -1097,7 +1118,7 @@ function installChat() {
       if (!dialog.open) dialog.show();
       if (this.voiceMode === "assist") void this.loadPipelineOptions();
       if (this.integrationCard) this.integrationCard.active = true;
-      if (focusComposer) this.q("textarea").focus({preventScroll: true});
+      if (focusComposer) this.q(".composer-textarea").focus({preventScroll: true});
       else this.q(".close").focus({preventScroll: true});
       if (!this.sessionId && !this.busy) void this.connect();
       else if (this.sessionId && !this.busy) this.startPendingAssist();
@@ -1121,7 +1142,7 @@ function installChat() {
     }
 
     controls() {
-      this.q("textarea").disabled = !this.sessionId || this.busy || this.setupRestarting;
+      this.q(".composer-textarea").disabled = !this.sessionId || this.busy || this.setupRestarting;
       this.q(".voice-mode").disabled = this.demo || !this.sessionId || this.busy || this.setupRestarting;
       this.q(".voice-mode").hidden = this.demo;
       this.q(".mic").disabled = this.demo || !this.sessionId || (this.busy && !this.voiceBusy) || this.setupRestarting;
@@ -1184,7 +1205,7 @@ function installChat() {
           typeof window.haRegisterDirtyStateProvider === "function") {
         this.reloadStateProvider = window.haRegisterDirtyStateProvider(this);
       }
-      const textarea = this.shadowRoot?.querySelector?.("textarea");
+      const textarea = this.shadowRoot?.querySelector?.(".composer-textarea");
       this.reloadStateProvider?.setDirty(shouldBlockFrontendReload({
         busy: this.busy,
         voiceBusy: this.voiceBusy,
@@ -1229,7 +1250,7 @@ function installChat() {
       } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
       finally {
         this.busy = false; this.controls();
-        if (this.q("dialog").open && this.focusComposerOnOpen && !matchMedia("(max-width: 720px)").matches) this.q("textarea").focus({preventScroll: true});
+        if (this.q("dialog").open && this.focusComposerOnOpen && !matchMedia("(max-width: 720px)").matches) this.q(".composer-textarea").focus({preventScroll: true});
         this.startPendingAssist();
       }
     }
@@ -1581,6 +1602,15 @@ function installChat() {
       const drawGeneration = ++this.drawGeneration;
       const log = this.q("#log");
       const messageContainer = this.q("#messages");
+      const activeElement = this.shadowRoot.activeElement;
+      const feedbackControls = activeElement?.className === "answer-feedback-comment"
+        ? activeElement.closest(".answer-feedback") : undefined;
+      const focusedFeedbackEditor = feedbackControls ? {
+        answerIndex: feedbackControls.dataset.answerIndex,
+        selectionStart: activeElement.selectionStart,
+        selectionEnd: activeElement.selectionEnd,
+        selectionDirection: activeElement.selectionDirection,
+      } : undefined;
       const previousScrollTop = log.scrollTop;
       const wasAtBottom = log.scrollHeight - log.clientHeight - previousScrollTop <= 1;
       const keepScrollPosition = preserveScroll && !wasAtBottom;
@@ -1609,6 +1639,22 @@ function installChat() {
           if (typeof message.text === "string" && message.text.trim()) row.append(this.renderAnswerFeedback(this.messages.indexOf(message)));
         }
         messageContainer.append(row);
+      }
+      if (focusedFeedbackEditor) {
+        const textarea = messageContainer.querySelector(
+          `[data-message-index="${focusedFeedbackEditor.answerIndex}"] .answer-feedback-comment`,
+        );
+        if (textarea) {
+          textarea.focus({preventScroll: true});
+          if (Number.isInteger(focusedFeedbackEditor.selectionStart) &&
+              Number.isInteger(focusedFeedbackEditor.selectionEnd)) {
+            textarea.setSelectionRange(
+              focusedFeedbackEditor.selectionStart,
+              focusedFeedbackEditor.selectionEnd,
+              focusedFeedbackEditor.selectionDirection || "none",
+            );
+          }
+        }
       }
       log.scrollTop = visibleMessages.length
         ? keepScrollPosition ? previousScrollTop : log.scrollHeight
@@ -1649,19 +1695,61 @@ function installChat() {
       const controls = document.createElement("div");
       controls.className = "answer-feedback";
       controls.dataset.answerIndex = String(messageIndex);
-      for (const [rating, label, value] of [
-        ["positive", this.t.feedbackPositiveLabel, this.t.feedbackPositive],
-        ["negative", this.t.feedbackNegativeLabel, this.t.feedbackNegative],
+      for (const [rating, label] of [
+        ["positive", this.t.feedbackPositiveLabel],
+        ["negative", this.t.feedbackNegativeLabel],
       ]) {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = rating === "positive" ? "👍" : "👎";
+        button.dataset.rating = rating;
         button.title = label;
         button.setAttribute("aria-label", label);
-        button.setAttribute("aria-pressed", String(state?.rating === rating && state?.status === "success"));
+        button.setAttribute("aria-pressed", String(
+          state?.rating === rating && ["editing", "error", "success"].includes(state?.status)
+        ));
         button.disabled = !context || state?.status === "pending" || state?.status === "success";
-        button.onclick = () => this.submitAnswerFeedback(messageIndex, rating, value);
+        button.onclick = () => this.openAnswerFeedback(messageIndex, rating);
         controls.append(button);
+      }
+      if (state && ["editing", "error"].includes(state.status)) {
+        const form = document.createElement("form");
+        form.className = "answer-feedback-editor";
+        form.setAttribute("aria-label", this.t.feedbackCommentLabel);
+        const label = document.createElement("label");
+        const textarea = document.createElement("textarea");
+        textarea.className = "answer-feedback-comment";
+        textarea.id = `answer-feedback-comment-${messageIndex}`;
+        textarea.maxLength = MAX_ANSWER_FEEDBACK_COMMENT_CHARS;
+        textarea.rows = 3;
+        textarea.value = state.comment || "";
+        textarea.placeholder = this.t.feedbackCommentPlaceholder;
+        textarea.setAttribute("aria-label", this.t.feedbackCommentLabel);
+        label.htmlFor = textarea.id;
+        label.textContent = this.t.feedbackCommentLabel;
+        textarea.oninput = () => {
+          const current = this.feedbackStates.get(key);
+          if (!current || current.status === "pending") return;
+          current.comment = textarea.value.slice(0, MAX_ANSWER_FEEDBACK_COMMENT_CHARS);
+          if (current.submittedComment !== current.comment) current.idempotencyKey = undefined;
+        };
+        const actions = document.createElement("div");
+        actions.className = "answer-feedback-actions";
+        const submit = document.createElement("button");
+        submit.type = "submit";
+        submit.className = "answer-feedback-send";
+        submit.textContent = this.t.feedbackSubmit;
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.textContent = this.t.feedbackCancel;
+        cancel.onclick = () => this.cancelAnswerFeedback(messageIndex);
+        actions.append(submit, cancel);
+        form.onsubmit = (event) => {
+          event.preventDefault();
+          return this.submitAnswerFeedback(messageIndex, state.rating, textarea.value);
+        };
+        form.append(label, textarea, actions);
+        controls.append(form);
       }
       if (state?.status === "pending") {
         const status = document.createElement("span");
@@ -1677,20 +1765,62 @@ function installChat() {
       return controls;
     }
 
+    openAnswerFeedback(messageIndex, rating) {
+      if (!this.isCurrentOwnerContext()) return;
+      const context = assistantFeedbackContext(this.messages, messageIndex);
+      if (!context) return;
+      const key = this.answerFeedbackKey(messageIndex);
+      const previous = this.feedbackStates.get(key);
+      if (previous?.status === "pending" || previous?.status === "success") return;
+      this.feedbackStates.set(key, {
+        ...previous,
+        status: "editing",
+        rating,
+        comment: previous?.comment || "",
+        idempotencyKey: previous?.rating === rating ? previous.idempotencyKey : undefined,
+      });
+      this.draw({preserveScroll: true});
+      this.shadowRoot.querySelector(
+        `.answer-feedback[data-answer-index="${messageIndex}"] .answer-feedback-comment`,
+      )?.focus({preventScroll: true});
+    }
+
+    cancelAnswerFeedback(messageIndex) {
+      const key = this.answerFeedbackKey(messageIndex);
+      const previous = this.feedbackStates.get(key);
+      if (!previous || previous.status === "pending" || previous.status === "success") return;
+      this.feedbackStates.set(key, {...previous, status: "draft"});
+      this.draw({preserveScroll: true});
+      this.shadowRoot.querySelector(
+        `.answer-feedback[data-answer-index="${messageIndex}"] > button[data-rating="${previous.rating}"]`,
+      )?.focus({preventScroll: true});
+    }
+
     answerFeedbackKey(messageIndex) {
       const answerText = this.messages?.[messageIndex]?.text;
       return `${this.sessionId}:${messageIndex}:${typeof answerText === "string" ? answerText : ""}`;
     }
 
-    async submitAnswerFeedback(messageIndex, rating, feedback) {
+    async submitAnswerFeedback(messageIndex, rating, commentValue) {
       if (!this.isCurrentOwnerContext() || !this.sessionId) return;
       const context = assistantFeedbackContext(this.messages, messageIndex);
       if (!context) return;
       const key = this.answerFeedbackKey(messageIndex);
       const previous = this.feedbackStates.get(key);
       if (previous?.status === "pending" || previous?.status === "success") return;
-      const attempt = previous?.idempotencyKey || createFeedbackIdempotencyKey();
-      this.feedbackStates.set(key, {status: "pending", rating, idempotencyKey: attempt});
+      const comment = typeof commentValue === "string"
+        ? commentValue.slice(0, MAX_ANSWER_FEEDBACK_COMMENT_CHARS) : "";
+      const feedback = comment
+        ? `${rating === "positive" ? this.t.feedbackPositive : this.t.feedbackNegative}\n\n${comment}`
+        : (rating === "positive" ? this.t.feedbackPositive : this.t.feedbackNegative);
+      const sameAttempt = previous?.rating === rating &&
+        previous?.submittedComment === comment && previous?.idempotencyKey;
+      const attempt = sameAttempt ? previous.idempotencyKey : createFeedbackIdempotencyKey();
+      this.feedbackStates.set(key, {
+        ...previous,
+        status: "pending", rating, comment, submittedComment: comment,
+        submittedFeedback: feedback, idempotencyKey: attempt,
+      });
       this.draw({preserveScroll: true});
       try {
         const response = await this.hass.fetchWithAuth("/api/habab_home/feedback", {
@@ -1711,7 +1841,7 @@ function installChat() {
             ? "feedback_not_configured" : "feedback_pending");
         }
         this.feedbackStates.set(key, {
-          status: "success", rating, idempotencyKey: attempt,
+          ...this.feedbackStates.get(key), status: "success", rating, idempotencyKey: attempt,
           text: receipt.trace_status === "unavailable" ? this.t.feedbackSentWithoutTrace
             : receipt.trace_status === "truncated" ? this.t.feedbackSentTruncated : this.t.feedbackSent,
         });
@@ -1719,19 +1849,21 @@ function installChat() {
         const code = error?.message;
         const text = code === "feedback_not_configured" ? this.t.feedbackNotConfigured
           : code === "feedback_pending" ? this.t.feedbackPending : this.t.feedbackFailed;
-        this.feedbackStates.set(key, {status: "error", rating, idempotencyKey: attempt, text});
+        this.feedbackStates.set(key, {
+          ...this.feedbackStates.get(key), status: "error", rating, idempotencyKey: attempt, text,
+        });
       }
       this.draw({preserveScroll: true});
     }
 
     async send(textValue, {voiceReply = false, clearDraft = false} = {}) {
       if (!this.isCurrentOwnerContext()) return;
-      const text = (typeof textValue === "string" ? textValue : this.q("textarea").value).trim();
+      const text = (typeof textValue === "string" ? textValue : this.q(".composer-textarea").value).trim();
       if (!text || !this.sessionId || this.busy || this.setupRestarting) return;
       this.followSetupForms = true;
       this.busy = true; this.running = true; this.stopped = false;
       this.messages.push({role: "user", text});
-      if (typeof textValue !== "string" || clearDraft) this.q("textarea").value = "";
+      if (typeof textValue !== "string" || clearDraft) this.q(".composer-textarea").value = "";
       this.draw(); this.status(this.t.working); this.controls();
       try {
         const result = this.demo ? await this.demoRequest("", "POST", text)
@@ -1742,7 +1874,7 @@ function installChat() {
       finally {
         if (!this.demo) await this.loadSetup(true);
         this.busy = false; this.running = false; this.controls();
-        if (this.q("dialog").open && this.focusComposerOnOpen && !matchMedia("(max-width: 720px)").matches) this.q("textarea").focus({preventScroll: true});
+        if (this.q("dialog").open && this.focusComposerOnOpen && !matchMedia("(max-width: 720px)").matches) this.q(".composer-textarea").focus({preventScroll: true});
         this.startPendingAssist();
       }
     }

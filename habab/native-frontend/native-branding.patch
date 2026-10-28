@@ -370,14 +370,14 @@ HcmV?d00001
 
 diff --git a/public/static/habab/habab.svg b/public/static/habab/habab.svg
 new file mode 100644
-index 0000000000000000000000000000000000000000..01a0872b8087537b03ae3a47130da4a4403e24a8
+index 0000000000..01a0872b80
 --- /dev/null
 +++ b/public/static/habab/habab.svg
 @@ -0,0 +1 @@
 +<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><title>Habab</title><rect width="64" height="64" rx="14" fill="#155e4b"/><path d="M18 16h8v12h12V16h8v32h-8V36H26v12h-8Z" fill="#f7f8f4"/></svg>
 \ No newline at end of file
 diff --git a/src/components/ha-sidebar.ts b/src/components/ha-sidebar.ts
-index 8787f80b572e69369a88c97b90c0c1cb314ebbb2..97fda45cc121bb905c0b29cfc0da8d757f9a4999 100644
+index 8787f80b57..97fda45cc1 100644
 --- a/src/components/ha-sidebar.ts
 +++ b/src/components/ha-sidebar.ts
 @@ -720,6 +720,8 @@ class HaSidebar extends SubscribeMixin(ScrollableFadeMixin(LitElement)) {
@@ -390,7 +390,7 @@ index 8787f80b572e69369a88c97b90c0c1cb314ebbb2..97fda45cc121bb905c0b29cfc0da8d75
            transition:
              max-width var(--ha-animation-duration-normal) ease,
 diff --git a/src/html/_header.html.template b/src/html/_header.html.template
-index 772bf100503156f35eacee99139f81760b6bca36..321fe66d5f56c84f4bdc7356a69a757887f2b1ba 100644
+index 772bf10050..321fe66d5f 100644
 --- a/src/html/_header.html.template
 +++ b/src/html/_header.html.template
 @@ -1,6 +1,8 @@
@@ -404,7 +404,7 @@ index 772bf100503156f35eacee99139f81760b6bca36..321fe66d5f56c84f4bdc7356a69a7578
    <link rel="modulepreload" href="<%= entry %>" crossorigin="use-credentials" />
  <% } %>
 diff --git a/src/html/authorize.html.template b/src/html/authorize.html.template
-index 1ebf8535e988a2a773922396d80fd3a1ae7b2914..e6a43f4c6ac0ff1c1c96e8a412042b93ed1c0460 100644
+index 1ebf8535e9..e6a43f4c6a 100644
 --- a/src/html/authorize.html.template
 +++ b/src/html/authorize.html.template
 @@ -1,7 +1,7 @@
@@ -426,12 +426,13 @@ index 1ebf8535e988a2a773922396d80fd3a1ae7b2914..e6a43f4c6ac0ff1c1c96e8a412042b93
        <ha-authorize></ha-authorize>
      </div>
 diff --git a/src/html/index.html.template b/src/html/index.html.template
-index 93433e83c5385361da686b922babf0b63ced8263..703c396f0070cf628edaa7a22badf0cd1a732d3d 100644
+index 93433e83c5..7d25e3f0dc 100644
 --- a/src/html/index.html.template
 +++ b/src/html/index.html.template
 @@ -1,21 +1,20 @@
  <!DOCTYPE html>
- <html>
+-<html>
++<html lang="ru">
    <head>
 -    <title>Home Assistant</title>
 +    <title>Habab Home Assistant</title>
@@ -527,7 +528,7 @@ index 93433e83c5385361da686b922babf0b63ced8263..703c396f0070cf628edaa7a22badf0cd
      <home-assistant></home-assistant>
      <%= renderTemplate("_js_base.html.template") %>
 diff --git a/src/html/onboarding.html.template b/src/html/onboarding.html.template
-index cc9855b9ebb1210ccf87ed198258ca1f6fcd53f2..d13ae25464091a44e2db4f3826ca5ac7c5a979b2 100644
+index cc9855b9eb..d13ae25464 100644
 --- a/src/html/onboarding.html.template
 +++ b/src/html/onboarding.html.template
 @@ -1,7 +1,7 @@
@@ -548,8 +549,57 @@ index cc9855b9ebb1210ccf87ed198258ca1f6fcd53f2..d13ae25464091a44e2db4f3826ca5ac7
        </div>
        <ha-onboarding></ha-onboarding>
      </div>
+diff --git a/src/layouts/hass-tabs-subpage.ts b/src/layouts/hass-tabs-subpage.ts
+index b3be2e6adc..0d39a6ee69 100644
+--- a/src/layouts/hass-tabs-subpage.ts
++++ b/src/layouts/hass-tabs-subpage.ts
+@@ -422,10 +422,19 @@ export class HassTabsSubpage extends LitElement {
+ 
+         #fab {
+           position: fixed;
+-          right: calc(16px + var(--safe-area-inset-right, 0px));
+-          inset-inline-end: calc(16px + var(--safe-area-inset-right));
++          right: calc(
++            16px + var(--safe-area-inset-right, 0px) +
++              var(--habab-assistant-open-inline-size, 0px)
++          );
++          inset-inline-end: calc(
++            16px + var(--safe-area-inset-right) +
++              var(--habab-assistant-open-inline-size, 0px)
++          );
+           inset-inline-start: initial;
+-          bottom: calc(16px + var(--safe-area-inset-bottom, 0px));
++          bottom: calc(
++            16px + var(--safe-area-inset-bottom, 0px) +
++              var(--habab-assistant-open-block-size, 0px)
++          );
+           z-index: 1;
+           display: flex;
+           flex-wrap: wrap;
+@@ -434,12 +443,17 @@ export class HassTabsSubpage extends LitElement {
+           --ha-button-box-shadow: var(--ha-box-shadow-l);
+         }
+         :host([narrow][show-tabs]) #fab {
+-          bottom: calc(84px + var(--safe-area-inset-bottom, 0px));
++          bottom: calc(
++            84px + var(--safe-area-inset-bottom, 0px) +
++              var(--habab-assistant-open-block-size, 0px)
++          );
+         }
+         #fab[is-wide] {
+-          bottom: 24px;
+-          right: 24px;
+-          inset-inline-end: 24px;
++          bottom: calc(24px + var(--habab-assistant-open-block-size, 0px));
++          right: calc(24px + var(--habab-assistant-open-inline-size, 0px));
++          inset-inline-end: calc(
++            24px + var(--habab-assistant-open-inline-size, 0px)
++          );
+           inset-inline-start: initial;
+         }
+ 
 diff --git a/src/layouts/home-assistant-main.ts b/src/layouts/home-assistant-main.ts
-index 9904836df17e9108533c15d44e5c4cd59ca95a3c..94b02ec8538678cc6da0088fa867447eb904b353 100644
+index 9904836df1..94b02ec853 100644
 --- a/src/layouts/home-assistant-main.ts
 +++ b/src/layouts/home-assistant-main.ts
 @@ -66,6 +66,7 @@ export class HomeAssistantMain extends LitElement {
@@ -561,7 +611,7 @@ index 9904836df17e9108533c15d44e5c4cd59ca95a3c..94b02ec8538678cc6da0088fa867447e
            .route=${this.route}
            .alwaysExpand=${sidebarNarrow || this.hass.dockedSidebar === "docked"}
 diff --git a/src/state/panel-title-mixin.ts b/src/state/panel-title-mixin.ts
-index e1ff98d9a3a7dcb00f1efc5f9188ebf0f47ee3ec..063c59ea40977329a5c24e77c0a257ca8446a8d2 100644
+index e1ff98d9a3..063c59ea40 100644
 --- a/src/state/panel-title-mixin.ts
 +++ b/src/state/panel-title-mixin.ts
 @@ -5,7 +5,7 @@ import type { Constructor, HomeAssistant } from "../types";

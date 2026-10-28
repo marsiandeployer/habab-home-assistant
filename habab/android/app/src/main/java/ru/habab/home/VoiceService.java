@@ -60,6 +60,10 @@ public final class VoiceService extends Service {
     private volatile boolean echoAvailable, echoEnabled, noiseEnabled;
     private volatile int outputDeviceType = -1;
     private volatile int inputDeviceType = -1;
+    private volatile int traceAudioSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
+    private volatile int traceSampleRate = 16000;
+    private volatile int captureSilenced = -1, recordingEffects = -1;
+    private volatile boolean recordingCallbackRegistered;
     private volatile String inputDeviceName = "";
     private volatile String outputDeviceName = "";
     private volatile String audioRoute = VoiceAudioRoute.PHONE;
@@ -68,6 +72,30 @@ public final class VoiceService extends Service {
     private boolean routeReceiverRegistered;
     private boolean scoReceiverRegistered;
     private boolean audioDeviceCallbackRegistered;
+    private final AudioManager.AudioRecordingCallback recordingCallback = new AudioManager.AudioRecordingCallback() {
+        @Override public void onRecordingConfigChanged(java.util.List<AudioRecordingConfiguration> configurations) {
+            AudioRecord current = recorder;
+            if (current == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+            try {
+                AudioRecordingConfiguration configuration = current.getActiveRecordingConfiguration();
+                if (configuration != null) {
+                    AudioDeviceInfo input = configuration.getAudioDevice();
+                    inputDeviceType = input == null ? -1 : input.getType();
+                    AudioFormat format = configuration.getFormat();
+                    if (format != null) traceSampleRate = format.getSampleRate();
+                    traceAudioSource = configuration.getAudioSource();
+                    captureSilenced = configuration.isClientSilenced() ? 1 : 0;
+                    java.util.List<?> effects = configuration.getEffects();
+                    recordingEffects = effects == null ? 0 : effects.size();
+                }
+                traceWake(VoiceLifecycleTrace.Event.AUDIO_CAPTURE_CONFIG_CHANGED,
+                        VoiceLifecycleTrace.Reason.ROUTE, -1, SystemClock.elapsedRealtime(),
+                        -1, -1, -1, -1, -1, -1);
+            } catch (RuntimeException ignored) {
+                // Route diagnostics must never interrupt capture or application lifecycle.
+            }
+        }
+    };
     private volatile boolean scoConnected;
     private volatile boolean scoConnectFailed;
     private volatile java.util.concurrent.CountDownLatch scoConnection = new java.util.concurrent.CountDownLatch(0);
@@ -208,11 +236,40 @@ public final class VoiceService extends Service {
         int routeCode = "duplicate".equals(route) ? 2 : "bluetooth".equals(route) ? 1 : 0;
         synchronized (lifecycleTrace) {
             lifecycleTrace.record(event, reason, generation, routeCode, System.currentTimeMillis());
-            try {
-                VoiceStatusFile.write(new File(context.getFilesDir(), "voice-lifecycle.json").toPath(),
-                        new org.json.JSONArray(lifecycleTrace.snapshot()).toString().getBytes(StandardCharsets.UTF_8));
-            } catch (Exception ignored) { /* Diagnostics must not interrupt voice cleanup. */ }
+            persistLifecycleTrace(context);
         }
+    }
+
+    private void traceWake(VoiceLifecycleTrace.Event event, VoiceLifecycleTrace.Reason reason,
+            long attempt, long elapsedAt, int rmsPcm16, int vadSpeech, int partialPresent, int phraseMatch,
+            int confidencePermille, long elapsedFromWakeMs) {
+        String requested = getSharedPreferences("voice", 0).getString("audio_route_mode", VoiceAudioRoute.PHONE);
+        int routeCode = "duplicate".equals(requested) ? 2 : "bluetooth".equals(requested) ? 1 : 0;
+        AudioRecord current = recorder;
+        AudioDeviceInfo input = current == null ? null : current.getRoutedDevice();
+        int deviceType = input == null ? inputDeviceType : input.getType();
+        synchronized (lifecycleTrace) {
+            lifecycleTrace.recordWake(event, reason, serviceGeneration, attempt, routeCode,
+                    deviceType, traceAudioSource, traceSampleRate, captureSilenced, recordingEffects,
+                    System.currentTimeMillis(), elapsedAt,
+                    rmsPcm16, vadSpeech, partialPresent, phraseMatch, confidencePermille,
+                    elapsedFromWakeMs);
+            persistLifecycleTrace(this);
+        }
+    }
+
+    private void traceWakeMilestone(VoiceLifecycleTrace.Event event, VoiceLifecycleTrace.Reason reason,
+            long attempt, long wakeAcceptedAt) {
+        long now = SystemClock.elapsedRealtime();
+        traceWake(event, reason, attempt, now, -1, -1, -1, -1, -1,
+                Math.max(0, now - wakeAcceptedAt));
+    }
+
+    private static void persistLifecycleTrace(Context context) {
+        try {
+            VoiceStatusFile.write(new File(context.getFilesDir(), "voice-lifecycle.json").toPath(),
+                    new org.json.JSONArray(lifecycleTrace.snapshot()).toString().getBytes(StandardCharsets.UTF_8));
+        } catch (Exception ignored) { /* Diagnostics must not interrupt voice cleanup. */ }
     }
 
     @Override public void onCreate() {
@@ -404,7 +461,11 @@ public final class VoiceService extends Service {
             phase("preparing"); writeStatus(true);
             File model = VoiceModel.prepare(this);
             String phrase = getSharedPreferences("voice", 0).getString("phrase", "эй дом");
-            try (WakeDetector detector = new WakeDetector(model.toString(), phrase)) {
+            try (WakeDetector detector = new WakeDetector(model.toString(), phrase,
+                    (event, reason, attempt, elapsedAt, rmsPcm16, vadSpeech,
+                            partialPresent, phraseMatch, confidencePermille, elapsedFromWakeMs) ->
+                            traceWake(event, reason, attempt, elapsedAt, rmsPcm16, vadSpeech,
+                                    partialPresent, phraseMatch, confidencePermille, elapsedFromWakeMs))) {
                 awaitBluetoothSco();
                 int inputRate = legacyScoSampleRate ? 8000 : 16000;
                 int size = Math.max(6400, AudioRecord.getMinBufferSize(inputRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT));
@@ -424,6 +485,19 @@ public final class VoiceService extends Service {
                 scoInputEffectsBypassed = VoiceAudioRoute.shouldBypassClientEffects(legacyScoSampleRate);
                 if (!scoInputEffectsBypassed && echoAvailable) { echo = AcousticEchoCanceler.create(recorder.getAudioSessionId()); if (echo != null) { echo.setEnabled(true); echoEnabled = echo.getEnabled(); } }
                 if (!scoInputEffectsBypassed && NoiseSuppressor.isAvailable()) { noise = NoiseSuppressor.create(recorder.getAudioSessionId()); if (noise != null) { noise.setEnabled(true); noiseEnabled = noise.getEnabled(); } }
+                traceSampleRate = inputRate;
+                traceAudioSource = MediaRecorder.AudioSource.VOICE_COMMUNICATION;
+                captureSilenced = -1; recordingEffects = -1;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        recorder.registerAudioRecordingCallback(getMainExecutor(), recordingCallback);
+                        recordingCallbackRegistered = true;
+                    } catch (RuntimeException callbackError) {
+                        traceWake(VoiceLifecycleTrace.Event.AUDIO_CALLBACK_UNAVAILABLE,
+                                VoiceLifecycleTrace.Reason.ROUTE, -1, SystemClock.elapsedRealtime(),
+                                -1, -1, -1, -1, -1, -1);
+                    }
+                }
                 recorder.startRecording();
                 if (legacyScoSampleRate) {
                     AudioDeviceInfo routedInput = awaitRoutedBluetoothScoInput(recorder);
@@ -442,6 +516,8 @@ public final class VoiceService extends Service {
                 ArrayDeque<short[]> pending = new ArrayDeque<>();
                 long started = 0;
                 phase("wake");
+                traceWake(VoiceLifecycleTrace.Event.AUDIO_CAPTURE_READY, VoiceLifecycleTrace.Reason.ROUTE,
+                        -1, SystemClock.elapsedRealtime(), -1, -1, -1, -1, -1, -1);
                 while (running) {
                     int inputCount = recorder.read(inputSamples, 0, inputSamples.length, AudioRecord.READ_BLOCKING);
                     if (inputCount <= 0) throw new IllegalStateException("microphone_read_failed");
@@ -451,32 +527,39 @@ public final class VoiceService extends Service {
                     RealtimeVoice client = realtime;
                     if (failure != null) {
                         recordFailure(failure);
-                        endSession(VoiceSessionSignals.EndReason.ERROR); pending.clear(); detector.reset();
+                        endSession(VoiceSessionSignals.EndReason.ERROR); pending.clear();
+                        detector.reset(now, VoiceLifecycleTrace.Reason.ERROR_RESET);
                         phase("error"); writeStatus(true);
                         Thread.sleep(1200); failure = null; phase("wake");
                     } else if (endRequested) {
                         endRequested = false;
-                        endSession(VoiceSessionSignals.EndReason.NORMAL); pending.clear(); detector.reset(); phase("wake");
+                        endSession(VoiceSessionSignals.EndReason.NORMAL); pending.clear();
+                        detector.reset(now, VoiceLifecycleTrace.Reason.SESSION_RESET); phase("wake");
                     } else if (client == null && now >= wakeSuppressedUntil) {
                         if (detector.accept(samples, count, now)) {
                             WakeMatchGate.MatchSource source = detector.lastMatchSource();
                             lastWakeSource = source == null ? "unknown" : source.statusValue();
-                            wakeCount++; started = now; lastActivity = now; beginSession(now);
+                            wakeCount++; started = now; lastActivity = now;
+                            beginSession(now, detector.lastMatchAttempt());
                         }
                     } else if (client == null) {
                         pending.clear(); // The END cue and its acoustic tail cannot activate the next session.
                     } else if (client.finishing()) {
                         pending.clear();
                     } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.TIMEOUT) {
-                        client.timeoutToolGrace(); pending.clear(); detector.reset();
+                        client.timeoutToolGrace(); pending.clear();
+                        detector.reset(now, VoiceLifecycleTrace.Reason.SESSION_RESET);
                     } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.FINISH) {
-                        client.finish(VoiceFinishTrigger.AUDIO_LIMIT); pending.clear(); detector.reset();
+                        client.finish(VoiceFinishTrigger.AUDIO_LIMIT); pending.clear();
+                        detector.reset(now, VoiceLifecycleTrace.Reason.SESSION_RESET);
                     } else if (client.deadlineAction(now) == VoiceToolSession.DeadlineAction.DRAIN_RESULT) {
-                        pending.clear(); client.awaitToolResult(); detector.reset();
+                        pending.clear(); client.awaitToolResult();
+                        detector.reset(now, VoiceLifecycleTrace.Reason.SESSION_RESET);
                     } else if (client.ready() && !status.equals("thinking") && now - lastActivity > 20000) {
                         recordFinishTrigger(VoiceFinishTrigger.IDLE_20S);
                         timings.put("end_idle_elapsed_ms", now - lastActivity);
-                        client.finish(VoiceFinishTrigger.IDLE_20S); pending.clear(); detector.reset();
+                        client.finish(VoiceFinishTrigger.IDLE_20S); pending.clear();
+                        detector.reset(now, VoiceLifecycleTrace.Reason.SESSION_RESET);
                     } else if (!signals.allowsAudio()) {
                         pending.clear(); // Discard microphone frames while the START cue is still playing.
                     } else if (client.ready()) {
@@ -501,7 +584,16 @@ public final class VoiceService extends Service {
                 silentCallPlayback = null;
                 if (playback != null) playback.close();
                 endSession(failure == null ? VoiceSessionSignals.EndReason.STOP : VoiceSessionSignals.EndReason.ERROR);
-                AudioRecord current = recorder; if (current != null) { try { current.stop(); } catch (IllegalStateException ignored) {} current.release(); recorder = null; }
+                AudioRecord current = recorder;
+                if (current != null) {
+                    if (recordingCallbackRegistered && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        try { current.unregisterAudioRecordingCallback(recordingCallback); }
+                        catch (RuntimeException ignored) { /* Recorder is already stopping. */ }
+                        recordingCallbackRegistered = false;
+                    }
+                    try { current.stop(); } catch (IllegalStateException ignored) {}
+                    current.release(); recorder = null;
+                }
                 if (echo != null) echo.release(); if (noise != null) noise.release(); echoEnabled = noiseEnabled = false;
                 writeStatus(true); stopSelf();
                 trace(this, VoiceLifecycleTrace.Event.CAPTURE_CLEANED, VoiceLifecycleTrace.Reason.SERVICE, serviceGeneration);
@@ -516,7 +608,7 @@ public final class VoiceService extends Service {
         }
     }
 
-    private synchronized void beginSession(long wakeAt) {
+    private synchronized void beginSession(long wakeAt, long wakeAttempt) {
         if (!running || realtime != null) return;
         timings.clear();
         finishTrigger = null;
@@ -526,6 +618,8 @@ public final class VoiceService extends Service {
         hasAudioFocus = manager.requestAudioFocus(audioFocus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
         if (!hasAudioFocus) { failure = "voice_audio_busy"; return; }
         long attempt = ++generation;
+        traceWakeMilestone(VoiceLifecycleTrace.Event.VOICE_SESSION_BEGIN,
+                VoiceLifecycleTrace.Reason.EXACT_FINAL, wakeAttempt, wakeAt);
         phase("connecting");
         RealtimeVoice client = new RealtimeVoice(this, new RealtimeVoice.Listener() {
             @Override public void phase(String value) { if (running && generation == attempt) { lastActivity = SystemClock.elapsedRealtime(); VoiceService.this.phase(value); } }
@@ -545,12 +639,20 @@ public final class VoiceService extends Service {
         }, wakeAt, legacyScoSampleRate, duplicateOutputRequested());
         realtime = client;
         synchronized (cueLock) {
+            traceWakeMilestone(VoiceLifecycleTrace.Event.START_CUE_QUEUED,
+                    VoiceLifecycleTrace.Reason.CUE, wakeAttempt, wakeAt);
             playCue(signals.begin(attempt)).thenAccept(complete -> {
                 if (!running || generation != attempt) return;
                 if (!signals.startCompleted(attempt, complete)) { failure = "voice_signal_unavailable"; return; }
+                traceWakeMilestone(VoiceLifecycleTrace.Event.ASR_GATE_OPEN,
+                        VoiceLifecycleTrace.Reason.CUE, wakeAttempt, wakeAt);
                 new Thread(() -> {
                     if (!running || generation != attempt) { client.close(); return; }
-                    try { client.start(); if (!running || generation != attempt) client.close(); }
+                    try {
+                        traceWakeMilestone(VoiceLifecycleTrace.Event.REALTIME_CONNECT_START,
+                                VoiceLifecycleTrace.Reason.CUE, wakeAttempt, wakeAt);
+                        client.start(); if (!running || generation != attempt) client.close();
+                    }
                     catch (Exception error) { if (generation == attempt) failure = VoiceFailure.code(error); client.close(); }
                 }, "habab-voice-connect").start();
             });
@@ -596,6 +698,8 @@ public final class VoiceService extends Service {
 
     private void refreshAudioRoute() {
         if (manager == null) return;
+        String previousRoute = audioRoute;
+        int previousInputType = inputDeviceType;
         boolean bluetoothRequested = bluetoothAudioRequested();
         if (!bluetoothRequested) {
             if (!audioRouteInitialized || scoRequested || selectedCommunicationDeviceId != -1)
@@ -647,6 +751,10 @@ public final class VoiceService extends Service {
         AudioDeviceInfo input = current == null ? null : current.getRoutedDevice();
         inputDeviceType = input == null ? -1 : input.getType();
         inputDeviceName = input == null ? "" : VoiceAudioRoute.deviceName(input);
+        if (!previousRoute.equals(audioRoute) || previousInputType != inputDeviceType) {
+            traceWake(VoiceLifecycleTrace.Event.ROUTE_CHANGED, VoiceLifecycleTrace.Reason.ROUTE,
+                    -1, SystemClock.elapsedRealtime(), -1, -1, -1, -1, -1, -1);
+        }
         writeStatus(true);
     }
 
