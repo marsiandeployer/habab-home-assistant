@@ -147,10 +147,13 @@ The job checks out only the native frontend producer and font QA files, fetches
 upstream frontend commit `26690e06b0bf64a1487929245c32842ef92c62b5`, and
 verifies the ordered bridge, test-fix, branding, Dev Inspector, and Yandex map
 patches against their recorded hashes. `habab-yandex-map.patch` contains 17 map source, test, and logo paths for the
-selectable Yandex Tiles basemap, its settings, and attribution. Its SHA-256 is
-`d9a6bf53ea38fb41fdc08fe958a2b3896726b063c931ad6dd60f6e8e6dee66e8`; the full
+selectable Yandex Tiles basemap, its settings, and attribution. The pinned native
+frontend receives a small adapter version of `ha-map.ts` and its engine test so
+the overlay uses the exact 20260930.4 APIs without carrying unrelated changes
+from the newer main source tree. Its SHA-256 is
+`ec8792adef5cc770bdda3af1f0a97c18c8ccbbaf218db47ac8e6e365ad4b54a7`; the full
 five-patch bundle SHA-256 is
-`40685c1f7aa7e02ab3869a9dd9b1c79faea2128492ce6b0ff63df9b562e88084`. It
+`048241615cb15baceac9df5614c650f569cbeb6ca5fc1f75682f127be38dc661`. It
 downloads the official
 [Home Assistant frontend 20260930.4 wheel from PyPI](https://pypi.org/project/home-assistant-frontend/20260930.4/),
 checks SHA-256 `05c207fb6ce6720d1782766b54a67acdf4bab83f133a562204b972d062862fc8`,

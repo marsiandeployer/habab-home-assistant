@@ -942,20 +942,10 @@ index 000000000..c0158da12
 +    ? YANDEX_MAPS_URL
 +    : YANDEX_MAPS_EN_URL;
 diff --git a/src/components/map/ha-map.ts b/src/components/map/ha-map.ts
-index 771af52d5..262ec7aee 100644
+index 771af52d5..648e8253d 100644
 --- a/src/components/map/ha-map.ts
 +++ b/src/components/map/ha-map.ts
-@@ -17,12 +17,16 @@ import { UNIT_KM } from "../../common/const";
- import { transform } from "../../common/decorators/transform";
- import { fireEvent } from "../../common/dom/fire_event";
- import { computeStateDomain } from "../../common/entity/compute_state_domain";
--import { computeStateName } from "../../common/entity/compute_state_name";
--import { getEntityLocation } from "../../common/entity/get_entity_location";
-+import {
-+  findFirstActiveZone,
-+  getEntityLocation,
-+} from "../../common/entity/get_entity_location";
- import { supportsVectorMaps } from "../../common/map/base-layer";
+@@ -23,6 +23,8 @@ import { supportsVectorMaps } from "../../common/map/base-layer";
  import type {
    MapCircleHandle,
    MapClusterIcon,
@@ -964,11 +954,9 @@ index 771af52d5..262ec7aee 100644
    MapControlPosition,
    MapEngine,
    MapFitPadding,
-@@ -67,8 +71,15 @@ import {
-   statesContext,
+@@ -68,7 +70,13 @@ import {
    uiContext,
  } from "../../data/context";
-+import { UNAVAILABLE, UNKNOWN } from "../../data/entity/entity";
  import type { EntityRegistryEntry } from "../../data/entity/entity_registry";
 +import type { MapBasemapUserData } from "../../data/frontend";
  import { ensureMapTilesToken } from "../../data/map_tiles";
@@ -980,7 +968,7 @@ index 771af52d5..262ec7aee 100644
  import "../ha-tooltip";
  import type {
    HomeAssistantConfig,
-@@ -332,6 +343,13 @@ export class HaMap extends ReactiveElement {
+@@ -332,6 +340,13 @@ export class HaMap extends ReactiveElement {
    })
    private _config!: HassConfig;
  
@@ -994,7 +982,7 @@ index 771af52d5..262ec7aee 100644
    @state()
    @consume({ context: uiContext, subscribe: true })
    private _ui!: HomeAssistantUI;
-@@ -395,10 +413,16 @@ export class HaMap extends ReactiveElement {
+@@ -395,10 +410,16 @@ export class HaMap extends ReactiveElement {
  
    @state() private _loaded = false;
  
@@ -1011,7 +999,7 @@ index 771af52d5..262ec7aee 100644
    // Reconciled by id, so updates move handles instead of recreating them
    private _editableHandles = new Map<
      string,
-@@ -503,6 +527,10 @@ export class HaMap extends ReactiveElement {
+@@ -503,6 +524,10 @@ export class HaMap extends ReactiveElement {
      this._removeEditableLocations();
      this._focusPoints = [];
      this._focusZonePoints = [];
@@ -1022,7 +1010,7 @@ index 771af52d5..262ec7aee 100644
  
      this._pendingFit = undefined;
      this._hasFitted = false;
-@@ -513,12 +541,23 @@ export class HaMap extends ReactiveElement {
+@@ -513,12 +538,23 @@ export class HaMap extends ReactiveElement {
      }
    }
  
@@ -1046,41 +1034,7 @@ index 771af52d5..262ec7aee 100644
      let autoFitRequired = false;
      const oldStates = changedProps.get("_states") as HassEntities | undefined;
  
-@@ -528,8 +567,19 @@ export class HaMap extends ReactiveElement {
-     } else if (this._loaded && oldStates && this.entities) {
-       // Check if any state has changed
-       for (const entity of this.entities) {
-+        const entityId = getEntityId(entity);
-+        const stateObj = this._states[entityId];
-+        const inZones: string[] | undefined = stateObj?.attributes.in_zones;
-         if (
--          oldStates[getEntityId(entity)] !== this._states[getEntityId(entity)]
-+          oldStates[entityId] !== stateObj ||
-+          (stateObj &&
-+            ["person", "device_tracker"].includes(
-+              computeStateDomain(stateObj)
-+            ) &&
-+            Array.isArray(inZones) &&
-+            inZones.some(
-+              (zoneId) => oldStates[zoneId] !== this._states[zoneId]
-+            ))
-         ) {
-           this._drawEntities();
-           autoFitRequired = !this._pauseAutoFit;
-@@ -538,7 +588,11 @@ export class HaMap extends ReactiveElement {
-       }
-     }
- 
--    if (changedProps.has("clusterMarkers") || changedProps.has("_entityReg")) {
-+    if (
-+      changedProps.has("clusterMarkers") ||
-+      changedProps.has("_entityReg") ||
-+      changedProps.has("_formatters")
-+    ) {
-       this._drawEntities();
-     }
- 
-@@ -660,6 +714,108 @@ export class HaMap extends ReactiveElement {
+@@ -660,6 +696,108 @@ export class HaMap extends ReactiveElement {
      );
    }
  
@@ -1189,7 +1143,7 @@ index 771af52d5..262ec7aee 100644
    private _updateMapAppearance(): void {
      // A theme repaints the map by setting --ha-color-map-* on this element;
      // WebGL cannot read those, so they are collected here and rebuilt into
-@@ -782,6 +938,7 @@ export class HaMap extends ReactiveElement {
+@@ -782,6 +920,7 @@ export class HaMap extends ReactiveElement {
          ],
          zoom: this.zoom,
          mapStyle: this._resolvedMapStyle,
@@ -1197,7 +1151,7 @@ index 771af52d5..262ec7aee 100644
          token,
          rasterOnly: this._forceLeaflet,
          zoomControlPosition: this.zoomPosition,
-@@ -798,6 +955,7 @@ export class HaMap extends ReactiveElement {
+@@ -798,6 +937,7 @@ export class HaMap extends ReactiveElement {
              }
            },
            fatal: () => this._handleEngineFatal(),
@@ -1205,7 +1159,7 @@ index 771af52d5..262ec7aee 100644
            drawn: () => this._markDrawn(attempt),
          },
        });
-@@ -810,7 +968,9 @@ export class HaMap extends ReactiveElement {
+@@ -810,7 +950,9 @@ export class HaMap extends ReactiveElement {
          throw new Error("Map engine failed during setup");
        }
        this._engine = engine;
@@ -1215,112 +1169,7 @@ index 771af52d5..262ec7aee 100644
        this._loaded = true;
        fireEvent(this, "editing-available-changed", {
          available: !!engine.editing,
-@@ -1320,7 +1480,7 @@ export class HaMap extends ReactiveElement {
-     const states = this._states;
-     const engine = this._engine;
- 
--    if (!states || !engine) {
-+    if (!states || !engine || !this._formatters) {
-       return;
-     }
- 
-@@ -1343,8 +1503,6 @@ export class HaMap extends ReactiveElement {
-     this._watchRegistry();
- 
-     const computedStyles = getComputedStyle(this);
--    // A person's state is "home" for the home zone, the zone name otherwise
--    const zoneByState: Record<string, string> = {};
-     this._zonePositions = {};
-     this._zoneRadii = {};
-     for (const entity of this.entities) {
-@@ -1355,11 +1513,6 @@ export class HaMap extends ReactiveElement {
-         computeStateDomain(stateObj) === "zone" &&
-         (this.renderPassive || !stateObj.attributes.passive)
-       ) {
--        zoneByState[
--          stateObj.entity_id === "zone.home"
--            ? "home"
--            : computeStateName(stateObj)
--        ] = stateObj.entity_id;
-         if (
-           typeof stateObj.attributes.latitude === "number" &&
-           typeof stateObj.attributes.longitude === "number"
-@@ -1382,7 +1535,7 @@ export class HaMap extends ReactiveElement {
-         continue;
-       }
-       const customTitle = typeof entity !== "string" ? entity.name : undefined;
--      const title = customTitle ?? computeStateName(stateObj);
-+      const title = customTitle ?? this._formatters.formatEntityName(stateObj);
-       const {
-         passive,
-         icon,
-@@ -1518,6 +1671,22 @@ export class HaMap extends ReactiveElement {
-         typeof entity !== "string" && (entity.selected ?? false);
-       entityMarker.floating = true;
- 
-+      let zoneId: string | undefined;
-+      if (["person", "device_tracker"].includes(computeStateDomain(stateObj))) {
-+        const inZones: string[] | undefined = stateObj.attributes.in_zones;
-+        if (Array.isArray(inZones) && inZones.length > 0) {
-+          const activeZone = findFirstActiveZone(inZones, states);
-+          if (activeZone && this._zonePositions[activeZone.entity_id]) {
-+            zoneId = activeZone.entity_id;
-+          }
-+        } else if (
-+          !Array.isArray(inZones) ||
-+          !["not_home", UNKNOWN, UNAVAILABLE].includes(stateObj.state)
-+        ) {
-+          zoneId = this._zoneContaining(position, gpsAccuracy);
-+        }
-+      }
-+
-       const clusterData: ClusterData = {
-         entityId,
-         title,
-@@ -1527,11 +1696,7 @@ export class HaMap extends ReactiveElement {
-         unit: entityMarker.entityUnit ?? "",
-         color: entityColor,
-         selected: entityMarker.selected,
--        zoneId: ["person", "device_tracker"].includes(
--          computeStateDomain(stateObj)
--        )
--          ? (zoneByState[stateObj.state] ?? this._zoneContaining(position))
--          : undefined,
-+        zoneId,
-       };
- 
-       const accuracy =
-@@ -1591,16 +1756,26 @@ export class HaMap extends ReactiveElement {
-     );
-   }
- 
--  private _zoneContaining(position: MapLatLng): string | undefined {
-+  private _zoneContaining(
-+    position: MapLatLng,
-+    gpsAccuracy = 0
-+  ): string | undefined {
-     let found: string | undefined;
-     let foundRadius = Infinity;
-+    let foundDistance = Infinity;
-     for (const [zoneId, radius] of Object.entries(this._zoneRadii)) {
-+      if (this._states[zoneId]?.attributes.passive) {
-+        continue;
-+      }
-+      const distance = distanceMeters(position, this._zonePositions[zoneId]);
-       if (
--        radius < foundRadius &&
--        distanceMeters(position, this._zonePositions[zoneId]) <= radius
-+        distance - gpsAccuracy < radius &&
-+        (radius < foundRadius ||
-+          (radius === foundRadius && distance < foundDistance))
-       ) {
-         found = zoneId;
-         foundRadius = radius;
-+        foundDistance = distance;
-       }
-     }
-     return found;
-@@ -1743,8 +1918,63 @@ export class HaMap extends ReactiveElement {
+@@ -1743,8 +1885,63 @@ export class HaMap extends ReactiveElement {
    static styles = css`
      :host {
        display: block;
@@ -1384,31 +1233,6 @@ index 771af52d5..262ec7aee 100644
      #map {
        height: 100%;
        /* The map arrives in one piece: the container carries the cartography's
-@@ -1987,13 +2217,8 @@ export class HaMap extends ReactiveElement {
-       font-size: var(--ha-font-size-s);
-       font-weight: var(--ha-font-weight-medium);
-     }
--    /* Markers are rounded squares to match the cluster bubble avatars */
--    ha-entity-marker {
--      --ha-marker-border-radius: var(--ha-border-radius-lg);
--    }
-     .cluster-bubble ha-entity-marker {
-       flex: none;
--      --ha-marker-border-radius: 10px;
-     }
-     ${unsafeCSS(zoneMarkerStyles)}
-     .leaflet-bottom {
-@@ -2052,10 +2277,6 @@ export class HaMap extends ReactiveElement {
-       box-shadow: none !important;
-       text-align: center;
-     }
--
--    ha-icon {
--      --mdc-icon-size: calc(var(--ha-marker-size, 48px) / 2);
--    }
-   `;
- }
- 
 diff --git a/src/data/frontend.ts b/src/data/frontend.ts
 index ca906897e..1c007807b 100644
 --- a/src/data/frontend.ts
@@ -1796,7 +1620,7 @@ index f53309e32..2d3fa53a1 100644
      super.willUpdate(changedProps);
      if (!changedProps.has("hass")) {
 diff --git a/test/common/map/base-layer.test.ts b/test/common/map/base-layer.test.ts
-index 5b58b3264..1a2387b62 100644
+index 5b58b3264..034ef0351 100644
 --- a/test/common/map/base-layer.test.ts
 +++ b/test/common/map/base-layer.test.ts
 @@ -1,5 +1,6 @@
@@ -1835,60 +1659,6 @@ index 5b58b3264..1a2387b62 100644
      rasterHandlers[event] = handler;
    }),
    options: {} as Record<string, unknown>,
-@@ -87,7 +87,7 @@ const map = { on: vi.fn() } as any;
- // needs its own copy of it.
- const setWebGL2 = async (supported: boolean) => {
-   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() =>
--    supported ? ({ getExtension: () => null } as any) : null
-+    supported ? ({ getExtension: () => null } as any) : null,
-   );
-   return (await import("../../../src/common/map/base-layer")).createBaseLayer;
- };
-@@ -110,7 +110,7 @@ beforeEach(() => {
-   }
-   vi.stubGlobal(
-     "fetch",
--    vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) }))
-+    vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) })),
-   );
- });
- 
-@@ -142,7 +142,7 @@ describe("loadStyle", () => {
-       () =>
-         new Promise((resolve) => {
-           respond = resolve;
--        })
-+        }),
-     );
-     vi.stubGlobal("fetch", fetchMock);
- 
-@@ -170,7 +170,7 @@ describe("loadStyle", () => {
-               osm: { type: "vector", url: "/api/map_tiles/tilejson.json" },
-             },
-           }),
--      }))
-+      })),
-     );
- 
-     const style = await load();
-@@ -183,7 +183,7 @@ describe("loadStyle", () => {
-     ]);
-     expect(style.glyphs).toMatch(/^https:\/\/tiles\.versatiles\.org\//);
-     expect((style.sources.osm as { url: string }).url).toMatch(
--      /^https:\/\/vector\.openstreetmap\.org\//
-+      /^https:\/\/vector\.openstreetmap\.org\//,
-     );
-   });
- });
-@@ -202,7 +202,7 @@ describe("createBaseLayer", () => {
-     // a browser can set neither a User-Agent nor a Referer.
-     // Absolute, because on Cast this page is not served by the instance.
-     expect(url).toBe(
--      `${INSTANCE_URL}/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}`
-+      `${INSTANCE_URL}/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}`,
-     );
-     // Leaflet substitutes options into the template on every tile request, so
-     // the token can be refreshed without recreating the layer.
 @@ -229,16 +229,87 @@ describe("createBaseLayer", () => {
      expect(options.referrerPolicy).toBe("origin");
    });
@@ -1907,7 +1677,7 @@ index 5b58b3264..1a2387b62 100644
 +      TOKEN,
 +      true,
 +      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
-+      onBaseMapError,
++      onBaseMapError
 +    );
 +
 +    const [url, options = {}] = vi.mocked(leaflet.tileLayer).mock.calls[0];
@@ -1929,7 +1699,7 @@ index 5b58b3264..1a2387b62 100644
 +    expect(rasterLayer.remove).toHaveBeenCalledOnce();
 +    expect(leaflet.tileLayer).toHaveBeenCalledTimes(2);
 +    expect(vi.mocked(leaflet.tileLayer).mock.calls[1][0]).toContain(
-+      "/api/map_tiles/raster/",
++      "/api/map_tiles/raster/"
 +    );
 +  });
 +
@@ -1941,7 +1711,7 @@ index 5b58b3264..1a2387b62 100644
 +      COLORFUL,
 +      TOKEN,
 +      false,
-+      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
++      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" }
 +    );
  
 -    await createBaseLayer(leaflet, map, COLORFUL, TOKEN);
@@ -1957,7 +1727,7 @@ index 5b58b3264..1a2387b62 100644
 +      layers: [],
 +    });
 +    expect(glMap.setStyle.mock.calls[0][0].sprite[0].url).toBe(
-+      `${location.origin}/static/map/sprites/base?v=abc12345`,
++      `${location.origin}/static/map/sprites/base?v=abc12345`
 +    );
 +  });
 +
@@ -1971,7 +1741,7 @@ index 5b58b3264..1a2387b62 100644
 +      TOKEN,
 +      false,
 +      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
-+      onBaseMapError,
++      onBaseMapError
 +    );
 +
 +    glHandlers.error({
@@ -1984,18 +1754,10 @@ index 5b58b3264..1a2387b62 100644
    });
  
    // The worker is an entry of the build, and the build hands over its URL.
-@@ -250,22 +321,10 @@ describe("createBaseLayer", () => {
- 
-     expect(setWorkerUrl).toHaveBeenCalledOnce();
-     expect(setWorkerUrl).toHaveBeenCalledWith(
--      `${location.origin}/frontend_latest/maplibre-gl-worker.test.js`
-+      `${location.origin}/frontend_latest/maplibre-gl-worker.test.js`,
+@@ -257,18 +328,6 @@ describe("createBaseLayer", () => {
      );
-     expect(setWorkerUrl.mock.invocationCallOrder[0]).toBeLessThan(
--      maplibreGL.mock.invocationCallOrder[0]
--    );
--  });
--
+   });
+ 
 -  it("registers the RTL text plugin once, lazily, from our own host", async () => {
 -    const createBaseLayer = await setWebGL2(true);
 -    await createBaseLayer(leaflet, map, COLORFUL, TOKEN);
@@ -2005,57 +1767,12 @@ index 5b58b3264..1a2387b62 100644
 -    expect(setRTLTextPlugin).toHaveBeenCalledWith(
 -      `${location.origin}/static/map/mapbox-gl-rtl-text.js`,
 -      true
-+      maplibreGL.mock.invocationCallOrder[0],
-     );
-   });
+-    );
+-  });
+-
+   it("uses vector tiles when WebGL2 is available", async () => {
+     const createBaseLayer = await setWebGL2(true);
  
-@@ -294,7 +353,7 @@ describe("createBaseLayer", () => {
-       "fetch",
-       vi.fn(async () => {
-         throw new Error("offline");
--      })
-+      }),
-     );
- 
-     await createBaseLayer(leaflet, map, COLORFUL, TOKEN);
-@@ -371,7 +430,7 @@ describe("setMapStyle", () => {
- 
-     vi.stubGlobal(
-       "fetch",
--      vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) }))
-+      vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) })),
-     );
-     baseLayer.setMapStyle(DARK);
- 
-@@ -389,8 +448,8 @@ describe("setMapStyle", () => {
-         () =>
-           new Promise((resolve) => {
-             resolvers.push(resolve);
--          })
--      )
-+          }),
-+      ),
-     );
- 
-     const styleResponse = (name: string) => ({
-@@ -497,7 +556,7 @@ describe("WebGL context loss", () => {
- 
-     expect(remove).toHaveBeenCalledWith(
-       "visibilitychange",
--      expect.any(Function)
-+      expect.any(Function),
-     );
-     // And a later visibility change must not add a second raster layer.
-     document.dispatchEvent(new Event("visibilitychange"));
-@@ -587,7 +646,7 @@ describe("recovering from a refused token", () => {
- 
-       emitToken("fresh-token");
-       await vi.waitFor(() => expect(glMap.setStyle).toHaveBeenCalledOnce());
--    }
-+    },
-   );
- 
-   it("ignores errors that are not a refusal", async () => {
 diff --git a/test/common/map/maplibre-map-engine.test.ts b/test/common/map/maplibre-map-engine.test.ts
 index 9632d632b..7f2d355e7 100644
 --- a/test/common/map/maplibre-map-engine.test.ts
@@ -2223,28 +1940,10 @@ index 000000000..81e2253e9
 +  });
 +});
 diff --git a/test/components/map/ha-map-engine.test.ts b/test/components/map/ha-map-engine.test.ts
-index b3893a197..4bab9cb4b 100644
+index b3893a197..3bdf3fa8e 100644
 --- a/test/components/map/ha-map-engine.test.ts
 +++ b/test/components/map/ha-map-engine.test.ts
-@@ -9,11 +9,17 @@ import type {
-   MapEngineOptions,
-   MapMarkerHandle,
- } from "../../../src/common/map/map-engine";
-+import { computeEntityNameDisplayWithoutContext } from "../../../src/common/entity/compute_entity_name_display";
- import "../../../src/components/map/ha-map";
- import type {
-   HaMap,
-   HaMapEditableLocation,
- } from "../../../src/components/map/ha-map";
-+import { createMockEntityState } from "../../fixtures/hass";
-+
-+const FORMATTERS = {
-+  formatEntityName: computeEntityNameDisplayWithoutContext,
-+};
- 
- // ha-map picks its engine at runtime: MapLibre GL where WebGL2 is available,
- // Leaflet otherwise or after MapLibre fails. jsdom has no WebGL2 and cannot
-@@ -69,6 +75,8 @@ const fakeEngine = vi.hoisted(() => {
+@@ -69,6 +69,8 @@ const fakeEngine = vi.hoisted(() => {
  
      setMapStyle = vi.fn();
  
@@ -2253,188 +1952,6 @@ index b3893a197..4bab9cb4b 100644
      setZoomControlPosition = vi.fn();
  
      setScaleRuler = vi.fn();
-@@ -182,6 +190,21 @@ const STATES = {
-   },
- } as unknown as HassEntities;
- 
-+const ZONES = {
-+  "zone.paulus": createMockEntityState("zone.paulus", "0", {
-+    friendly_name: "Work",
-+    latitude: 52.372,
-+    longitude: 4.89,
-+    radius: 100,
-+  }),
-+  "zone.anne_therese": createMockEntityState("zone.anne_therese", "0", {
-+    friendly_name: "Work",
-+    latitude: 52.377,
-+    longitude: 4.895,
-+    radius: 100,
-+  }),
-+};
-+
- const leafletMap = (el: HaMap) => (el as any)._engine?.leafletMap;
- const container = (el: HaMap) => el.shadowRoot!.getElementById("map")!;
- const isRevealed = (el: HaMap) => container(el).classList.contains("drawn");
-@@ -189,11 +212,15 @@ const isLoaded = (el: HaMap) => (el as any)._loaded as boolean;
- const entityHandles = (el: HaMap) =>
-   (el as any)._entityHandles as MapMarkerHandle[];
- 
--const createMap = async (): Promise<HaMap> => {
-+const createMap = async (
-+  states: HassEntities = STATES,
-+  entities: string[] = Object.keys(states)
-+): Promise<HaMap> => {
-   const el = document.createElement("ha-map");
--  el.entities = ["device_tracker.paulus", "device_tracker.anne_therese"];
-+  el.entities = entities;
-   el.clusterMarkers = false;
--  (el as any)._states = STATES;
-+  (el as any)._states = states;
-+  (el as any)._formatters = FORMATTERS;
-   (el as any)._config = {
-     config: { latitude: 52.3731339, longitude: 4.8903147 },
-   };
-@@ -230,11 +257,116 @@ describe("ha-map engine selection", () => {
-     expect(entityHandles(el)).toHaveLength(2);
-   });
- 
-+  it("groups same-named zones by reported IDs", async () => {
-+    const states: HassEntities = {
-+      ...ZONES,
-+      "person.paulus": createMockEntityState("person.paulus", "Work", {
-+        in_zones: ["zone.paulus"],
-+      }),
-+      "device_tracker.anne_therese": createMockEntityState(
-+        "device_tracker.anne_therese",
-+        "Work",
-+        {
-+          latitude: ZONES["zone.paulus"].attributes.latitude,
-+          longitude: ZONES["zone.paulus"].attributes.longitude,
-+          in_zones: ["zone.anne_therese"],
-+        }
-+      ),
-+    };
-+    const el = await createMap(states);
-+
-+    expect(entityHandles(el).map((marker) => marker.clusterData)).toMatchObject(
-+      [
-+        { entityId: "person.paulus", zoneId: "zone.paulus" },
-+        {
-+          entityId: "device_tracker.anne_therese",
-+          zoneId: "zone.anne_therese",
-+        },
-+      ]
-+    );
-+  });
-+
-+  it.each([
-+    {
-+      entityId: "device_tracker.paulus",
-+      state: "Work",
-+      inZones: undefined,
-+      expectedZoneId: "zone.paulus",
-+    },
-+    {
-+      entityId: "person.paulus",
-+      state: "Work",
-+      inZones: [],
-+      expectedZoneId: "zone.paulus",
-+    },
-+    {
-+      entityId: "person.paulus",
-+      state: "not_home",
-+      inZones: [],
-+      expectedZoneId: undefined,
-+    },
-+  ])(
-+    "handles zone membership for $entityId ($state, in_zones: $inZones)",
-+    async ({ entityId, state, inZones, expectedZoneId }) => {
-+      const el = await createMap({
-+        ...ZONES,
-+        [entityId]: createMockEntityState(entityId, state, {
-+          latitude: ZONES["zone.paulus"].attributes.latitude,
-+          longitude: ZONES["zone.paulus"].attributes.longitude,
-+          in_zones: inZones,
-+        }),
-+      });
-+
-+      expect(entityHandles(el)).toMatchObject([
-+        { clusterData: { entityId, zoneId: expectedZoneId } },
-+      ]);
-+    }
-+  );
-+
-+  it("updates grouping when a hidden active zone becomes passive and is restored", async () => {
-+    const hiddenZone = ZONES["zone.paulus"];
-+    const states: HassEntities = {
-+      ...ZONES,
-+      "zone.enclosing": createMockEntityState("zone.enclosing", "0", {
-+        ...hiddenZone.attributes,
-+        friendly_name: "City",
-+        radius: 1000,
-+      }),
-+      "person.paulus": createMockEntityState("person.paulus", "Work", {
-+        in_zones: [hiddenZone.entity_id, "zone.enclosing"],
-+      }),
-+    };
-+    const el = await createMap(states, ["zone.enclosing", "person.paulus"]);
-+    expect(entityHandles(el)[0].clusterData).toMatchObject({
-+      zoneId: undefined,
-+    });
-+
-+    (el as any)._states = {
-+      ...states,
-+      [hiddenZone.entity_id]: createMockEntityState(
-+        hiddenZone.entity_id,
-+        hiddenZone.state,
-+        { ...hiddenZone.attributes, passive: true }
-+      ),
-+    };
-+    await el.updateComplete;
-+    expect(entityHandles(el)[0].clusterData).toMatchObject({
-+      zoneId: "zone.enclosing",
-+    });
-+
-+    (el as any)._states = states;
-+    await el.updateComplete;
-+    expect(entityHandles(el)[0].clusterData).toMatchObject({
-+      zoneId: undefined,
-+    });
-+  });
-+
-   it("sets up while themes are not loaded yet, as during onboarding", async () => {
-     const el = document.createElement("ha-map");
-     el.themeMode = "auto";
-     (el as any)._ui = { themes: null };
-     (el as any)._states = STATES;
-+    (el as any)._formatters = FORMATTERS;
-     (el as any)._config = {
-       config: { latitude: 52.3731339, longitude: 4.8903147 },
-     };
-@@ -275,6 +407,7 @@ describe("ha-map engine selection", () => {
-     el.entities = ["device_tracker.paulus", "device_tracker.anne_therese"];
-     el.clusterMarkers = false;
-     (el as any)._states = STATES;
-+    (el as any)._formatters = FORMATTERS;
-     (el as any)._config = {
-       config: { latitude: 52.3731339, longitude: 4.8903147 },
-     };
-@@ -305,6 +438,7 @@ describe("ha-map engine selection", () => {
-     el.entities = ["device_tracker.paulus"];
-     el.clusterMarkers = false;
-     (el as any)._states = STATES;
-+    (el as any)._formatters = FORMATTERS;
-     (el as any)._config = {
-       config: { latitude: 52.3731339, longitude: 4.8903147 },
-     };
-@@ -405,6 +539,7 @@ describe("ha-map readiness", () => {
-     const el = document.createElement("ha-map");
-     el.entities = ["device_tracker.paulus"];
-     (el as any)._states = STATES;
-+    (el as any)._formatters = FORMATTERS;
-     (el as any)._config = {
-       config: { latitude: 52.3731339, longitude: 4.8903147 },
-     };
 diff --git a/test/data/frontend.test.ts b/test/data/frontend.test.ts
 new file mode 100644
 index 000000000..946a12e67

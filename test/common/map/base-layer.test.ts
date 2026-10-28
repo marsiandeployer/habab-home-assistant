@@ -87,7 +87,7 @@ const map = { on: vi.fn() } as any;
 // needs its own copy of it.
 const setWebGL2 = async (supported: boolean) => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() =>
-    supported ? ({ getExtension: () => null } as any) : null,
+    supported ? ({ getExtension: () => null } as any) : null
   );
   return (await import("../../../src/common/map/base-layer")).createBaseLayer;
 };
@@ -110,7 +110,7 @@ beforeEach(() => {
   }
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) })),
+    vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) }))
   );
 });
 
@@ -142,7 +142,7 @@ describe("loadStyle", () => {
       () =>
         new Promise((resolve) => {
           respond = resolve;
-        }),
+        })
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -170,7 +170,7 @@ describe("loadStyle", () => {
               osm: { type: "vector", url: "/api/map_tiles/tilejson.json" },
             },
           }),
-      })),
+      }))
     );
 
     const style = await load();
@@ -183,7 +183,7 @@ describe("loadStyle", () => {
     ]);
     expect(style.glyphs).toMatch(/^https:\/\/tiles\.versatiles\.org\//);
     expect((style.sources.osm as { url: string }).url).toMatch(
-      /^https:\/\/vector\.openstreetmap\.org\//,
+      /^https:\/\/vector\.openstreetmap\.org\//
     );
   });
 });
@@ -202,7 +202,7 @@ describe("createBaseLayer", () => {
     // a browser can set neither a User-Agent nor a Referer.
     // Absolute, because on Cast this page is not served by the instance.
     expect(url).toBe(
-      `${INSTANCE_URL}/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}`,
+      `${INSTANCE_URL}/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}`
     );
     // Leaflet substitutes options into the template on every tile request, so
     // the token can be refreshed without recreating the layer.
@@ -239,7 +239,7 @@ describe("createBaseLayer", () => {
       TOKEN,
       true,
       { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
-      onBaseMapError,
+      onBaseMapError
     );
 
     const [url, options = {}] = vi.mocked(leaflet.tileLayer).mock.calls[0];
@@ -261,7 +261,7 @@ describe("createBaseLayer", () => {
     expect(rasterLayer.remove).toHaveBeenCalledOnce();
     expect(leaflet.tileLayer).toHaveBeenCalledTimes(2);
     expect(vi.mocked(leaflet.tileLayer).mock.calls[1][0]).toContain(
-      "/api/map_tiles/raster/",
+      "/api/map_tiles/raster/"
     );
   });
 
@@ -273,7 +273,7 @@ describe("createBaseLayer", () => {
       COLORFUL,
       TOKEN,
       false,
-      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
+      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" }
     );
 
     baseLayer.setMapStyle(DARK);
@@ -286,7 +286,7 @@ describe("createBaseLayer", () => {
       layers: [],
     });
     expect(glMap.setStyle.mock.calls[0][0].sprite[0].url).toBe(
-      `${location.origin}/static/map/sprites/base?v=abc12345`,
+      `${location.origin}/static/map/sprites/base?v=abc12345`
     );
   });
 
@@ -300,7 +300,7 @@ describe("createBaseLayer", () => {
       TOKEN,
       false,
       { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
-      onBaseMapError,
+      onBaseMapError
     );
 
     glHandlers.error({
@@ -321,10 +321,10 @@ describe("createBaseLayer", () => {
 
     expect(setWorkerUrl).toHaveBeenCalledOnce();
     expect(setWorkerUrl).toHaveBeenCalledWith(
-      `${location.origin}/frontend_latest/maplibre-gl-worker.test.js`,
+      `${location.origin}/frontend_latest/maplibre-gl-worker.test.js`
     );
     expect(setWorkerUrl.mock.invocationCallOrder[0]).toBeLessThan(
-      maplibreGL.mock.invocationCallOrder[0],
+      maplibreGL.mock.invocationCallOrder[0]
     );
   });
 
@@ -353,7 +353,7 @@ describe("createBaseLayer", () => {
       "fetch",
       vi.fn(async () => {
         throw new Error("offline");
-      }),
+      })
     );
 
     await createBaseLayer(leaflet, map, COLORFUL, TOKEN);
@@ -430,7 +430,7 @@ describe("setMapStyle", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) })),
+      vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) }))
     );
     baseLayer.setMapStyle(DARK);
 
@@ -448,8 +448,8 @@ describe("setMapStyle", () => {
         () =>
           new Promise((resolve) => {
             resolvers.push(resolve);
-          }),
-      ),
+          })
+      )
     );
 
     const styleResponse = (name: string) => ({
@@ -556,7 +556,7 @@ describe("WebGL context loss", () => {
 
     expect(remove).toHaveBeenCalledWith(
       "visibilitychange",
-      expect.any(Function),
+      expect.any(Function)
     );
     // And a later visibility change must not add a second raster layer.
     document.dispatchEvent(new Event("visibilitychange"));
@@ -646,7 +646,7 @@ describe("recovering from a refused token", () => {
 
       emitToken("fresh-token");
       await vi.waitFor(() => expect(glMap.setStyle).toHaveBeenCalledOnce());
-    },
+    }
   );
 
   it("ignores errors that are not a refusal", async () => {

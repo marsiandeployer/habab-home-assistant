@@ -239,6 +239,9 @@ if [[ -f src/common/map/yandex-map.ts ]]; then
   )
   pnpm exec eslint "${map_paths[@]}" --max-warnings=0
   pnpm exec prettier --check "${map_paths[@]}"
+  # The settings dialog imports translation metadata; prepare it before the
+  # focused map tests below, which run before the full build cleanup.
+  pnpm exec gulp build-translations
   pnpm exec gulp gen-icons-json
   pnpm exec vitest run --config test/vitest.config.ts \
     --maxWorkers=1 \
