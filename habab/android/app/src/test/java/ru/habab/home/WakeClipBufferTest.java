@@ -20,9 +20,15 @@ public class WakeClipBufferTest {
             byte[] wav = Files.readAllBytes(dir.resolve("wake-1234567890123-1.wav"));
             assertEquals(32044, wav.length); assertEquals('R', wav[0]); assertEquals('W', wav[8]);
             assertEquals(0xe8, wav[44] & 0xff); assertEquals(0x03, wav[45] & 0xff);
+            WakeClipBuffer.markForReview(dir.toFile(), 1234567890123L, 1);
+            WakeClipBuffer.markForReview(dir.toFile(), 1234567890123L, 1);
+            assertTrue(Files.exists(dir.resolve("wake-1234567890123-1.wav.review")));
+            try { WakeClipBuffer.markForReview(dir.toFile(), 1234567890123L, 2); fail("missing clip"); }
+            catch (java.io.IOException expected) { assertEquals("wake_clip_missing", expected.getMessage()); }
             ring.clear(); assertEquals(0, ring.snapshot().length);
             for (int i = 0; i < 55; i++) WakeClipBuffer.save(dir.toFile(), new short[]{1}, 1234567891000L + i, i);
             try (Stream<Path> files = Files.list(dir)) { assertEquals(50, files.count()); }
+            assertFalse(Files.exists(dir.resolve("wake-1234567890123-1.wav.review")));
         } finally {
             try (Stream<Path> files = Files.list(dir)) { files.forEach(p -> p.toFile().delete()); }
             Files.deleteIfExists(dir);

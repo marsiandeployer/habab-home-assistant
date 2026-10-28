@@ -547,11 +547,11 @@ public final class VoiceService extends Service {
                         else if (wakeClipActive) wakeClip.clear();
                         wakeClipActive = recordWake;
                         if (detector.accept(samples, count, now)) {
+                            long capturedAt = System.currentTimeMillis();
                             if (recordWake) {
                                 File external = getExternalFilesDir(null);
                                 if (external != null) {
                                     short[] clip = wakeClip.snapshot();
-                                    long capturedAt = System.currentTimeMillis();
                                     long capturedAttempt = detector.lastMatchAttempt();
                                     try {
                                         wakeClipWriter.execute(() -> {
@@ -569,7 +569,7 @@ public final class VoiceService extends Service {
                             WakeMatchGate.MatchSource source = detector.lastMatchSource();
                             lastWakeSource = source == null ? "unknown" : source.statusValue();
                             wakeCount++; started = now; lastActivity = now;
-                            beginSession(now, detector.lastMatchAttempt());
+                            beginSession(now, detector.lastMatchAttempt(), recordWake ? capturedAt : -1);
                         }
                     } else if (client == null) {
                         if (wakeClipActive) wakeClip.clear();
@@ -641,7 +641,7 @@ public final class VoiceService extends Service {
         }
     }
 
-    private synchronized void beginSession(long wakeAt, long wakeAttempt) {
+    private synchronized void beginSession(long wakeAt, long wakeAttempt, long capturedAt) {
         if (!running || realtime != null) return;
         timings.clear();
         finishTrigger = null;
@@ -659,6 +659,19 @@ public final class VoiceService extends Service {
             @Override public void completed() { if (generation == attempt) { replies++; clearFailure(); } }
             @Override public void failed(String code) { if (generation == attempt) failure = VoiceFailure.normalize(code); }
             @Override public void ended() { if (running && generation == attempt) endRequested = true; }
+            @Override public void reviewWake() {
+                if (generation != attempt || capturedAt < 0) return;
+                File external = getExternalFilesDir(null);
+                if (external == null) return;
+                try {
+                    wakeClipWriter.execute(() -> {
+                        try { WakeClipBuffer.markForReview(new File(external, "wake-clips"), capturedAt, wakeAttempt); }
+                        catch (java.io.IOException error) { android.util.Log.w("HababWakeClip", "Failed to mark wake clip", error); }
+                    });
+                } catch (java.util.concurrent.RejectedExecutionException full) {
+                    android.util.Log.w("HababWakeClip", "Wake review queue full");
+                }
+            }
             @Override public void timing(String name, long value) { if (generation == attempt) timings.put(name, value); }
             @Override public void finishTrigger(String value) {
                 if (generation == attempt) { recordFinishTrigger(value); writeStatus(true); }

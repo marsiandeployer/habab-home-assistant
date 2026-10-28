@@ -400,6 +400,19 @@ def session_config(model, *, client=None, context=None, selected_provider=None,
                            "Не выключает сервер и устройства.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         })
+    if client == "native_v2":
+        config["instructions"] = (
+            "ПОМОЩЬ В ОТЛАДКЕ ПРОБУЖДЕНИЯ. Если после пробуждения пользователь явно "
+            "говорит, что обращался не к тебе или что ты сработал ошибочно, и завершает "
+            "разговор (например: «это не тебе, пока»), вызови end_voice_session с "
+            "review_wake=true. Это просьба пометить текущее срабатывание для проверки, "
+            "не утверждение, что ошибка уже доказана. Не ставь метку для обычного "
+            "прощания, обсуждения или цитирования такой фразы. Не говори, что запись "
+            "сохранена: её наличие зависит от настроек телефона.\n" + config["instructions"]
+        )
+        end_tool = config["tools"][-1]
+        end_tool["parameters"]["properties"]["review_wake"] = {
+            "type": "boolean", "description": "Пометить текущее пробуждение для проверки по явной просьбе пользователя."}
     return config
 
 

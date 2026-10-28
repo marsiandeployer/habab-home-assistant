@@ -11,7 +11,7 @@ import org.json.*;
 
 /** Native PCM transport. Master provider credentials never enter this class. */
 final class RealtimeVoice implements AutoCloseable {
-    interface Listener { void phase(String value); void completed(); void failed(String code); default void ended() {} default void timing(String name, long value) {} default void finishTrigger(String value) {} default void routed(int type, String name) {} default void connected(String provider, String model) {} }
+    interface Listener { void phase(String value); void completed(); void failed(String code); default void ended() {} default void reviewWake() {} default void timing(String name, long value) {} default void finishTrigger(String value) {} default void routed(int type, String name) {} default void connected(String provider, String model) {} }
     private final VoiceCredentials credentials;
     private final Context context;
     private final Listener listener;
@@ -367,7 +367,10 @@ final class RealtimeVoice implements AutoCloseable {
             if (toolEpoch == null || !currentTurn(toolEpoch)) return;
             String name = event.optString("name");
             if (name.equals("end_voice_session")) {
-                if (new JSONObject(event.getString("arguments")).length() != 0) { fail("invalid_voice_tool"); return; }
+                JSONObject endArgs = new JSONObject(event.getString("arguments"));
+                if (endArgs.length() > 1 || (endArgs.length() == 1 &&
+                        (!(endArgs.opt("review_wake") instanceof Boolean)))) { fail("invalid_voice_tool"); return; }
+                if (endArgs.optBoolean("review_wake", false)) listener.reviewWake();
                 acceptedEndElapsedAt = android.os.SystemClock.elapsedRealtime();
                 if (eventReceivedAt >= 0)
                     timing("end_tool_dispatch_ms", acceptedEndElapsedAt - eventReceivedAt);

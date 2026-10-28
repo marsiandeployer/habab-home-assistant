@@ -47,8 +47,17 @@ final class WakeClipBuffer {
         File[] files = directory.listFiles((dir, name) -> name.startsWith("wake-") && name.endsWith(".wav"));
         if (files != null && files.length > 50) {
             Arrays.sort(files, (a,b) -> a.getName().compareTo(b.getName()));
-            for (int i = 0; i < files.length - 50; i++) files[i].delete();
+            for (int i = 0; i < files.length - 50; i++) {
+                if (files[i].delete()) new File(directory, files[i].getName() + ".review").delete();
+            }
         }
+    }
+
+    static synchronized void markForReview(File directory, long timestamp, long attempt) throws IOException {
+        File clip = new File(directory, "wake-" + timestamp + "-" + attempt + ".wav");
+        if (!clip.isFile()) throw new IOException("wake_clip_missing");
+        File marker = new File(directory, clip.getName() + ".review");
+        if (!marker.exists() && !marker.createNewFile()) throw new IOException("wake_clip_marker");
     }
 
     private static void le(OutputStream out, int value, int size) throws IOException {

@@ -802,7 +802,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         tools = {tool['name']: tool for tool in config['tools']}
         self.assertEqual(set(tools), {'ask_home_assistant', 'end_voice_session'})
         self.assertFalse(tools['end_voice_session']['parameters']['additionalProperties'])
-        self.assertEqual(tools['end_voice_session']['parameters']['properties'], {})
+        self.assertEqual(tools['end_voice_session']['parameters']['properties']['review_wake']['type'], 'boolean')
         self.assertEqual(config['model'], 'gpt-realtime-mini')
         prompt_data = json.loads(config['instructions'].split('\n')[-1])
         self.assertEqual(prompt_data, {
@@ -839,8 +839,11 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
                     tools = {tool['name']: tool for tool in conversation['tools']}
                     self.assertEqual(set(tools), {'ask_home_assistant', 'end_voice_session'})
                     end_tool = tools['end_voice_session']
+                    properties = ({'review_wake': {
+                        'type': 'boolean', 'description': 'Пометить текущее пробуждение для проверки по явной просьбе пользователя.'}}
+                        if client == 'native_v2' else {})
                     self.assertEqual(end_tool['parameters'], {
-                        'type': 'object', 'properties': {}, 'additionalProperties': False,
+                        'type': 'object', 'properties': properties, 'additionalProperties': False,
                     })
                     self.assertEqual(conversation['tool_choice'], 'auto')
                     if provider == 'gemini':
@@ -857,7 +860,8 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(declarations['end_voice_session']['parametersJsonSchema'],
                                          end_tool['parameters'])
                     end_tools.append(end_tool)
-        self.assertTrue(all(tool == end_tools[0] for tool in end_tools[1:]))
+        self.assertEqual(end_tools[0], end_tools[1])
+        self.assertEqual(end_tools[2], end_tools[3])
 
     def test_native_v2_provider_model_metadata_uses_validated_selection_without_secrets(self):
         for provider, name in [('gemini', 'Google Gemini'), ('openai', 'OpenAI')]:
