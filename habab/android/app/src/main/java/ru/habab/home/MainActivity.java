@@ -574,7 +574,7 @@ public final class MainActivity extends Activity {
     private String voiceLifecycleLog() {
         String title = getString(R.string.voice_lifecycle_title);
         File trace = new File(getFilesDir(), "voice-lifecycle.json");
-        if (!trace.isFile() || trace.length() > 16384) return title + "\n" + getString(R.string.voice_lifecycle_unavailable);
+        if (!trace.isFile() || trace.length() > 65536) return title + "\n" + getString(R.string.voice_lifecycle_unavailable);
         try {
             String json = new String(Files.readAllBytes(trace.toPath()), StandardCharsets.UTF_8);
             org.json.JSONArray events = new org.json.JSONArray(json);
@@ -599,6 +599,10 @@ public final class MainActivity extends Activity {
                 lines.append('\n').append(name).append(" / ").append(reason)
                         .append(" #").append(Math.max(0, generation)).append(" / ").append(routeName);
                 if (at > 0) lines.append(" / ").append(at);
+                if (event.has("confidencePermille")) {
+                    lines.append(" / attempt=").append(event.optLong("attempt", -1));
+                    lines.append(" / confidence=").append(event.optInt("confidencePermille", -1));
+                }
             }
             return lines.toString();
         } catch (Exception ignored) {

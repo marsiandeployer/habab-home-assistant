@@ -117,7 +117,9 @@ final class WakeDetector implements AutoCloseable {
         String text = result.optString("text");
         boolean exact = phrase.equals(normalize(text));
         int confidence = confidencePermille(result);
-        boolean detected = matchGate.accept(text, kind);
+        int minimumConfidence = minimumConfidencePermille(result);
+        boolean confidenceAccepted = !phrase.equals("эй дом") || WakeMatchGate.confidenceAccepted(minimumConfidence);
+        boolean detected = confidenceAccepted && matchGate.accept(text, kind);
         record(VoiceLifecycleTrace.Event.WAKE_FINAL, reason, now, rms, vadSpeech,
                 -1, exact ? 1 : 0, confidence);
         if (detected) {
@@ -126,8 +128,10 @@ final class WakeDetector implements AutoCloseable {
             record(VoiceLifecycleTrace.Event.WAKE_ACCEPTED, VoiceLifecycleTrace.Reason.EXACT_FINAL,
                     now, rms, vadSpeech, -1, 1, confidence);
         } else {
-            record(VoiceLifecycleTrace.Event.WAKE_REJECTED, reason, now, rms, vadSpeech,
-                    -1, exact ? 1 : 0, confidence);
+            record(VoiceLifecycleTrace.Event.WAKE_REJECTED,
+                    exact && !confidenceAccepted ? VoiceLifecycleTrace.Reason.LOW_CONFIDENCE : reason,
+                    now, rms, vadSpeech, -1, exact ? 1 : 0,
+                    exact && !confidenceAccepted ? minimumConfidence : confidence);
         }
         return detected;
     }
@@ -162,6 +166,20 @@ final class WakeDetector implements AutoCloseable {
             count++;
         }
         return count == 0 ? -1 : (int) Math.round(total * 1000 / count);
+    }
+
+    private int minimumConfidencePermille(JSONObject result) {
+        JSONArray words = result.optJSONArray("result");
+        if (words == null || words.length() != phrase.split(" ").length) return -1;
+        double minimum = 1;
+        for (int i = 0; i < words.length(); i++) {
+            JSONObject word = words.optJSONObject(i);
+            if (word == null) return -1;
+            double confidence = word.optDouble("conf", Double.NaN);
+            if (Double.isNaN(confidence) || Double.isInfinite(confidence)) return -1;
+            minimum = Math.min(minimum, Math.max(0, Math.min(1, confidence)));
+        }
+        return (int) Math.round(minimum * 1000);
     }
 
     private int rmsPcm16(short[] samples, int count) {

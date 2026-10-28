@@ -17,7 +17,7 @@ final class VoiceLifecycleTrace {
         RECOGNIZER_RESET, VOICE_SESSION_BEGIN, START_CUE_QUEUED,
         REALTIME_CONNECT_START, ASR_GATE_OPEN }
     enum Reason { AUTOMATIC, SETTINGS, STOP, SERVICE, ROUTE, VAD, PARTIAL,
-        ENDPOINT, VAD_END, EXACT_FINAL, TIME_LIMIT, SESSION_RESET, ERROR_RESET, CUE }
+        ENDPOINT, VAD_END, EXACT_FINAL, LOW_CONFIDENCE, TIME_LIMIT, SESSION_RESET, ERROR_RESET, CUE }
     private static final int LIMIT = 64;
     private final ArrayDeque<Map<String, Object>> events = new ArrayDeque<>();
 

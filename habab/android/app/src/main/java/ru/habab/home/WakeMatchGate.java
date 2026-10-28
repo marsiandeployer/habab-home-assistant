@@ -5,6 +5,7 @@ import java.util.Locale;
 
 /** Accepts only one whole-phrase match from a finalized recognizer result. */
 final class WakeMatchGate {
+    static final int MIN_WORD_CONFIDENCE_PERMILLE = 800;
     enum ResultKind { PARTIAL, ENDPOINT, VAD_END }
     enum MatchSource {
         ENDPOINT_FINAL("endpoint_final"),
@@ -22,6 +23,11 @@ final class WakeMatchGate {
     private MatchSource matchSource;
 
     WakeMatchGate(String normalizedPhrase) { phrase = normalize(normalizedPhrase); }
+
+    /** Missing confidence must not silently prevent a valid wake. */
+    static boolean confidenceAccepted(int minimumPermille) {
+        return minimumPermille < 0 || minimumPermille >= MIN_WORD_CONFIDENCE_PERMILLE;
+    }
 
     static String normalize(String value) {
         if (value == null) return "";

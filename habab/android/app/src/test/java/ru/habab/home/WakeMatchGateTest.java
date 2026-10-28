@@ -4,6 +4,11 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class WakeMatchGateTest {
+    @Test public void lowConfidenceWordsDoNotPassButUnknownDoesNotDisableWake() {
+        assertFalse(WakeMatchGate.confidenceAccepted(799));
+        assertTrue(WakeMatchGate.confidenceAccepted(800));
+        assertTrue(WakeMatchGate.confidenceAccepted(-1));
+    }
     @Test public void partialExactThenDifferentEndpointFinalDoesNotMatch() {
         WakeMatchGate gate = new WakeMatchGate("эй дом");
         assertFalse(gate.accept("эй дом", WakeMatchGate.ResultKind.PARTIAL));
