@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from homeassistant.components.habab_home import feedback, feedback_action, realtime
 from homeassistant.components.habab_home.setup_agent import AgentError
-from homeassistant.components.habab_home.assistant import AssistantService
+from homeassistant.components.habab_home.assistant import AssistantService, bounded_voice_history
 from homeassistant.components.habab_home.setup_actions import execute as execute_setup_action
 
 
@@ -44,6 +44,18 @@ def relay_browser_capability(*, enabled=True, provider="habab", realtime_provide
 
 
 class RealtimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_shared_history_fits_relay_setup_after_json_escaping(self):
+        for text in ('я' * 4000, '😀' * 4000, '"' * 4000, 'x' + '\n' * 3999):
+            with self.subTest(prefix=text[:1]):
+                history = bounded_voice_history([{'role': 'user', 'text': text} for _ in range(20)])
+                config = realtime.session_config('gemini-3.8-live', client='native_v2',
+                    selected_provider='habab', context={'states': [], 'padding': 'я' * 2400},
+                    conversation_history=history)
+                setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
+                canonical = json.dumps(setup, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
+                self.assertLessEqual(len(canonical), 64 * 1024)
+                self.assertTrue(history)
+
     async def test_gemini_http_event_reaches_real_shared_store_without_engine_or_false_pair(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         runtime = SimpleNamespace(ensure=AsyncMock(), diagnostics=SimpleNamespace())
@@ -259,7 +271,9 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_gemini_bootstrap_locks_setup_and_never_returns_master_key(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         assistant = SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock(),
-            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 2}))
+            voice_history_context=AsyncMock(return_value={'session_id': 'web-alice', 'epoch': 2,
+                'messages': [{'role': 'user', 'content': 'Мою комнату зовут Кабинет'},
+                             {'role': 'assistant', 'content': 'Хорошо, Кабинет'}]}))
         request = Request(owner, {'client': 'native_v2'}, assistant)
         request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
             'provider': 'gemini', 'api_key': 'synthetic-master-gemini', 'model': 'gemini-3.8-flash'})
@@ -282,6 +296,12 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(args.kwargs['allow_redirects'])
         self.assertEqual(args.kwargs['json']['uses'], 1)
         self.assertEqual(args.kwargs['json']['bidiGenerateContentSetup'], payload['setup'])
+        instructions = payload['setup']['systemInstruction']['parts'][0]['text']
+        self.assertIn('Мою комнату зовут Кабинет', instructions)
+        self.assertIn('Хорошо, Кабинет', instructions)
+        self.assertIn('conversation_history', instructions)
+        self.assertEqual(assistant.voice_history_context.await_args_list[0].kwargs,
+                         {'include_messages': True})
         self.assertNotIn('fieldMask', args.kwargs['json'])
         self.assertNotIn('synthetic-master-gemini', result.body.decode())
         self.assertNotIn('tool_choice', payload['setup'])

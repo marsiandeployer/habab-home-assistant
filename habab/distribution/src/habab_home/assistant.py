@@ -15,7 +15,7 @@ from .agent_diagnostics import AgentDiagnostics
 from .assist_adapter import AssistAdapter
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
-from .fast_dialog import MAX_USER_CHARS, complete_dialogue, dialogue_part
+from .fast_dialog import MAX_USER_CHARS, bounded_history, complete_dialogue, dialogue_part
 from .providers import ProviderError
 from .diagnostics_sessions import (
     normalize_telegram_session_index,
@@ -39,6 +39,29 @@ from .voice_history import (
 
 VOICE_EVENT_ID = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 _LOGGER = logging.getLogger(__name__)
+
+
+def bounded_voice_history(messages):
+    """Budget text including the two JSON string layers in the voice setup."""
+    remaining = 16000
+    history = []
+    def cost(text):
+        return len(json.dumps(json.dumps(text, ensure_ascii=False), ensure_ascii=False).encode("utf-8"))
+    for item in reversed(bounded_history(messages)):
+        text = item["content"]
+        low, high = 0, len(text)
+        while low < high:
+            middle = (low + high + 1) // 2
+            if cost(text[:middle]) <= remaining:
+                low = middle
+            else:
+                high = middle - 1
+        if not low:
+            break
+        text = text[:low]
+        history.append({"role": item["role"], "content": text})
+        remaining -= cost(text)
+    return list(reversed(history))
 
 
 class AssistantService:
@@ -208,13 +231,43 @@ class AssistantService:
             await self._materialize_pending_voice(owner, result["session_id"], epoch)
             result["messages"] = self.web_history_cache.get(
                 (owner, result["session_id"]), result["messages"])
+            self.web_history_cache[(owner, result["session_id"])] = list(result["messages"])
             result["messages"] = self._project_pending_voice(
                 owner, result["session_id"], result["messages"], epoch)
             return result
 
-    async def voice_history_context(self, owner):
-        """Return the current private web history lease without starting OpenCode."""
+    async def voice_history_context(self, owner, *, include_messages=False):
+        """Read the owner's lease, optionally including bounded current-chat text."""
         await self._require_active_admin(owner)
+        if include_messages:
+            # Opening voice must not create a chat. Reuse the exact UI session,
+            # including voice turns not yet materialized into OpenCode history.
+            async with self.voice_journal_lock:
+                context = dict(self._web_context(owner))
+                session_id = context["session_id"]
+                messages = self.web_history_cache.get((owner, session_id))
+            if session_id and messages is None:
+                # A running command may take minutes; voice must not wait for it.
+                if self.runtime.lock.locked():
+                    raise AgentError("busy")
+                async with self.runtime.lock:
+                    await self.runtime.ensure()
+                    stored = await self.runtime.request(
+                        "GET", f"session/{session_id}/message?limit=60")
+                    if not isinstance(stored, list):
+                        raise AgentError("runtime_error")
+                    messages = self.runtime.visible(stored)
+            async with self.voice_journal_lock:
+                await self._require_active_admin(owner)
+                if context != self._web_context(owner):
+                    raise AgentError("not_found")
+                # A web turn may have finished while the cold read was in flight.
+                messages = self.web_history_cache.get((owner, session_id), messages)
+                if session_id:
+                    self.web_history_cache[(owner, session_id)] = messages
+                projected = self._project_pending_voice(
+                    owner, session_id, messages or [], context["epoch"])
+                return {**context, "messages": bounded_voice_history(projected)}
         async with self.voice_journal_lock:
             await self._require_active_admin(owner)
             context = self._web_context(owner)
@@ -330,8 +383,15 @@ class AssistantService:
                                      or expected_history_epoch != epoch))):
                         raise AgentError("not_found")
                 await self._materialize_pending_voice(owner, session_id, epoch)
-                result = await self._run_text(
-                    owner, channel, session_id, text, executor_only=executor_only)
+                try:
+                    result = await self._run_text(
+                        owner, channel, session_id, text, executor_only=executor_only)
+                except (Exception, asyncio.CancelledError):
+                    # The runtime may have persisted a user turn before failing.
+                    # Next voice/UI read must reload it instead of reusing old text.
+                    async with self.voice_journal_lock:
+                        self.web_history_cache.pop((owner, session_id), None)
+                    raise
                 async with self.voice_journal_lock:
                     if self._mapped_session(owner, channel, session_id):
                         canonical_messages = result.get("messages", [])

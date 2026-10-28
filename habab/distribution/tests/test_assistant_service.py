@@ -39,6 +39,101 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.voice_store = next(store for args, _kwargs, store in self.stores
                                 if args[2] == "habab_home.voice_turn_receipts")
 
+    async def test_voice_reads_current_web_text_and_pending_voice_without_new_session(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "web-alice", "bob": "web-bob"}
+        self.service.web_contexts = {"alice": {"session_id": "web-alice", "epoch": 4}}
+        self.service.web_history_cache[("alice", "web-alice")] = [
+            {"role": "user", "text": "Назови комнату Кабинет"},
+            {"role": "assistant", "text": "Буду называть её Кабинет"},
+        ]
+        self.service.web_history_cache[("bob", "web-bob")] = [
+            {"role": "user", "text": "Другой владелец"}]
+        await self.service.record_voice_event(
+            "alice", "web-alice", "voice-context-1", "user", "Что мы обсуждали?",
+            history_epoch=4)
+        context = await self.service.voice_history_context("alice", include_messages=True)
+        self.assertEqual(context["session_id"], "web-alice")
+        self.assertEqual(context["messages"], [
+            {"role": "user", "content": "Назови комнату Кабинет"},
+            {"role": "assistant", "content": "Буду называть её Кабинет"},
+            {"role": "user", "content": "Что мы обсуждали?"},
+        ])
+        self.runtime.ensure.assert_not_awaited()
+        self.runtime.request.assert_not_awaited()
+
+    async def test_voice_after_restart_reads_existing_history_but_empty_home_starts_nothing(self):
+        await self.service.setup()
+        empty = await self.service.voice_history_context("alice", include_messages=True)
+        self.assertEqual(empty, {"session_id": None, "epoch": 0, "messages": []})
+        self.runtime.ensure.assert_not_awaited()
+        self.service.web_sessions = {"alice": "existing"}
+        self.runtime.request.return_value = [{"info": {"role": "user"}, "parts": []}]
+        self.runtime.visible.return_value = [{"role": "user", "text": "Хочу обсудить освещение"}]
+        context = await self.service.voice_history_context("alice", include_messages=True)
+        self.assertEqual(context["messages"], [
+            {"role": "user", "content": "Хочу обсудить освещение"}])
+        self.runtime.request.assert_awaited_once_with("GET", "session/existing/message?limit=60")
+
+    async def test_voice_context_rejects_revoked_owner_and_bounds_visible_history(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "current"}
+        self.service.web_history_cache[("alice", "current")] = [
+            {"role": "user", "text": "😀" * 5000} for _ in range(50)]
+        context = await self.service.voice_history_context("alice", include_messages=True)
+        self.assertLessEqual(sum(len(m["content"]) for m in context["messages"]), 16000)
+        self.assertLessEqual(sum(len(m["content"].encode("utf-8")) for m in context["messages"]), 16000)
+        self.assertLessEqual(len(context["messages"]), 20)
+        self.user.is_active = False
+        with self.assertRaises(AgentError):
+            await self.service.voice_history_context("alice", include_messages=True)
+
+    async def test_voice_warm_history_does_not_wait_for_running_command_or_previous_chat(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "current"}
+        self.service.web_history_cache[("alice", "previous")] = [
+            {"role": "user", "text": "Old chat"}]
+        self.service.web_history_cache[("alice", "current")] = [
+            {"role": "user", "text": "Current chat"}]
+        async with self.service.web_lifecycle_lock:
+            async with self.runtime.lock:
+                context = await asyncio.wait_for(
+                    self.service.voice_history_context("alice", include_messages=True), .5)
+        self.assertEqual(context["messages"], [{"role": "user", "content": "Current chat"}])
+        self.runtime.request.assert_not_awaited()
+
+    async def test_voice_cold_read_rejects_new_chat_race_and_never_waits_for_busy_runtime(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "current"}
+        async with self.runtime.lock:
+            with self.assertRaisesRegex(AgentError, "busy"):
+                await asyncio.wait_for(
+                    self.service.voice_history_context("alice", include_messages=True), .5)
+        async def reset_during_read(*args):
+            self.service.web_sessions["alice"] = "new"
+            self.service.web_contexts["alice"] = {"session_id": "new", "epoch": 1}
+            return []
+        self.runtime.request.side_effect = reset_during_read
+        with self.assertRaisesRegex(AgentError, "not_found"):
+            await self.service.voice_history_context("alice", include_messages=True)
+        self.assertNotIn(("alice", "current"), self.service.web_history_cache)
+
+    async def test_failed_web_turn_invalidates_voice_cache_and_reads_persisted_user_turn(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "current"}
+        self.service.web_history_cache[("alice", "current")] = [
+            {"role": "assistant", "text": "Before failure"}]
+        self.runtime.run.side_effect = AgentError("runtime_error")
+        with self.assertRaises(AgentError):
+            await self.service.run("alice", "web", "current", "Persisted before failure")
+        self.assertNotIn(("alice", "current"), self.service.web_history_cache)
+        self.runtime.request.return_value = []
+        self.runtime.visible.return_value = [
+            {"role": "user", "text": "Persisted before failure"}]
+        context = await self.service.voice_history_context("alice", include_messages=True)
+        self.assertEqual(context["messages"], [
+            {"role": "user", "content": "Persisted before failure"}])
+
     async def test_existing_web_and_telegram_history_maps_are_loaded_unchanged(self):
         self.stores[0][2].async_load.return_value = {"alice": "web-existing"}
         self.stores[1][2].async_load.return_value = {"alice:bot:chat": "tg-existing"}
