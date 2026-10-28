@@ -6,12 +6,24 @@ export interface SurveyInteraction {
   action: "opened" | "dismissed";
 }
 
+export interface MapBasemapUserData {
+  provider: "osm" | "yandex";
+  /** Browser-visible by design for direct owner-key tile requests. */
+  yandexApiKey?: string;
+}
+
 export interface CoreFrontendUserData {
   showEntityIdPicker?: boolean;
   default_panel?: string;
   apps_info_dismissed?: boolean;
   dashboard_favorite_card_types?: string[];
+  mapBasemap?: MapBasemapUserData;
 }
+
+export const withMapBasemapUserData = (
+  current: CoreFrontendUserData | undefined,
+  mapBasemap: MapBasemapUserData
+): CoreFrontendUserData => ({ ...current, mapBasemap });
 
 export interface SidebarFrontendUserData {
   panelOrder?: string[];

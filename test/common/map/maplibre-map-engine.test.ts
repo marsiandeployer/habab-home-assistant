@@ -11,6 +11,7 @@ import {
   MapLibreMapEngine,
 } from "../../../src/common/map/engines/maplibre-map-engine";
 import type {
+  MapBaseMapConfig,
   MapEngineEvents,
   MapLatLng,
   MapMarkerHandle,
@@ -155,6 +156,8 @@ const fakes = vi.hoisted(() => {
 
     styleLoaded: boolean;
 
+    requestTransform?: (url: string) => unknown;
+
     listeners: Record<string, { layer?: string; handler: Listener }[]> = {};
 
     fitBounds = vi.fn();
@@ -224,9 +227,11 @@ const fakes = vi.hoisted(() => {
     constructor(options: {
       container: HTMLElement;
       style: StyleSpecification;
+      transformRequest?: (url: string) => unknown;
     }) {
       this._container = options.container;
       this.style = options.style;
+      this.requestTransform = options.transformRequest;
       this.styleLoaded = FakeMap.startLoaded;
       FakeMap.instances.push(this);
     }
@@ -415,7 +420,10 @@ const viewport = {
   },
 };
 
-const createEngine = async (events: Partial<MapEngineEvents> = {}) => {
+const createEngine = async (
+  events: Partial<MapEngineEvents> = {},
+  baseMap?: MapBaseMapConfig
+) => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const engine = new MapLibreMapEngine();
@@ -423,6 +431,7 @@ const createEngine = async (events: Partial<MapEngineEvents> = {}) => {
     center: [52, 4],
     zoom: 13,
     mapStyle: { palette: "colorful" as const },
+    baseMap,
     zoomControlPosition: "topleft",
     events,
   });
@@ -508,6 +517,27 @@ describe("MapLibreMapEngine", () => {
       expect(fakeAttribution.all[1].options.compact).toBe(true);
       expect(attribution(map)).toBe(fakeAttribution.all[1].element);
     });
+  });
+
+  it("sets origin-only referrers on Yandex requests alone", async () => {
+    const { map, ready } = await createEngine(
+      {},
+      {
+        provider: "yandex",
+        apiKey: "synthetic-test-key",
+        language: "ru_RU",
+      }
+    );
+    await ready;
+
+    expect(
+      map.requestTransform!(
+        "https://tiles.api-maps.yandex.ru/v1/tiles/?apikey=synthetic-test-key&x=0&y=0&z=0"
+      )
+    ).toMatchObject({ referrerPolicy: "origin" });
+    expect(
+      map.requestTransform!("https://example.invalid/map.png")
+    ).toMatchObject({ referrerPolicy: undefined });
   });
 
   afterEach(() => {

@@ -9,6 +9,18 @@
 
 import type { ResolvedMapStyle } from "./map-styles";
 
+export type YandexTilesLanguage = "ru_RU" | "en_US";
+
+export type MapBaseMapConfig =
+  | { provider: "osm" }
+  | {
+      provider: "yandex";
+      apiKey: string;
+      language: YandexTilesLanguage;
+    };
+
+export type MapBaseMapError = "invalid_key" | "rate_limited" | "unavailable";
+
 export type MapLatLng = [latitude: number, longitude: number];
 
 export interface MapView {
@@ -33,6 +45,8 @@ export interface MapEngineEvents {
    * layer in place. The host keeps the container hidden until then.
    */
   drawn(): void;
+  /** A basemap request failed; no request URL or credential is exposed. */
+  baseMapError?(error: MapBaseMapError): void;
 }
 
 export interface MapEngineOptions {
@@ -40,6 +54,8 @@ export interface MapEngineOptions {
   zoom: number;
   /** Cartography to draw; the host resolves the config and theme mode into one */
   mapStyle: ResolvedMapStyle;
+  /** Fixed basemap selection; omitted means Home Assistant's OSM layer. */
+  baseMap?: MapBaseMapConfig;
   /** Token for core's tile proxy */
   token?: string;
   zoomControlPosition: MapControlPosition;
@@ -236,6 +252,8 @@ export interface MapEngine {
   hasUsableSize(): boolean;
 
   setMapStyle(style: ResolvedMapStyle): void;
+
+  setBaseMap(baseMap: MapBaseMapConfig): void;
 
   setZoomControlPosition(position: MapControlPosition): void;
 

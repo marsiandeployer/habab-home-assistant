@@ -145,8 +145,13 @@ resolves and records the exact source SHA. The wheel version defaults to
 
 The job checks out only the native frontend producer and font QA files, fetches
 upstream frontend commit `26690e06b0bf64a1487929245c32842ef92c62b5`, and
-verifies the ordered bridge, test-fix, branding, and Dev Inspector patches
-against their recorded hashes. It downloads the official
+verifies the ordered bridge, test-fix, branding, Dev Inspector, and Yandex map
+patches against their recorded hashes. `habab-yandex-map.patch` contains 17 map source, test, and logo paths for the
+selectable Yandex Tiles basemap, its settings, and attribution. Its SHA-256 is
+`d9a6bf53ea38fb41fdc08fe958a2b3896726b063c931ad6dd60f6e8e6dee66e8`; the full
+five-patch bundle SHA-256 is
+`40685c1f7aa7e02ab3869a9dd9b1c79faea2128492ce6b0ff63df9b562e88084`. It
+downloads the official
 [Home Assistant frontend 20260930.4 wheel from PyPI](https://pypi.org/project/home-assistant-frontend/20260930.4/),
 checks SHA-256 `05c207fb6ce6720d1782766b54a67acdf4bab83f133a562204b972d062862fc8`,
 and extracts only its translation tree. The builder checks the extracted
@@ -317,12 +322,14 @@ policies that must be updated independently.
 This is **source wiring only**. No `.14` wheel, Docker/Windows image, Android
 runtime/APK, or live Core header was built or accepted by this change. The
 native candidate workflow builds the pinned wheel both on manual dispatch and
-as a required reusable Android release job. The Android job consumes the actual
-wheel and manifest from that run, packages a new signed runtime, and checks the
-frontend identity inside the signed APK; it does not reuse the published pointer. When that workflow is run, it records a fourth `dev_inspector_sha256`
-along with the exact combined patch hash.
+as a required reusable Android release job. It now appends
+`habab-yandex-map.patch` after the Dev Inspector patch and records its
+`yandex_map_sha256` in the candidate manifest. The Android job consumes the
+actual wheel and manifest from that run, packages a new signed runtime, and
+checks the frontend identity inside the signed APK; it does not reuse the
+published pointer.
 
-Candidate patch hashes:
+Historical `.14` patch hashes:
 
 - `bridge.patch`: `d483686b341c34705a62ca98f7358023599bdb92c80b039b005d4eeef472e092`
 - `native-test-fixes.patch`:

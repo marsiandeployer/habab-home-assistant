@@ -4,6 +4,15 @@ import type { setWorkerUrl, StyleSpecification } from "maplibre-gl";
 import { deepEqual } from "../util/deep-equal";
 import type { LeafletModuleType } from "../dom/setup-leaflet-map";
 import type { ResolvedMapStyle } from "./map-styles";
+import type { MapBaseMapConfig, MapBaseMapError } from "./map-engine";
+import {
+  buildYandexRasterStyle,
+  classifyYandexTileStatus,
+  yandexTilesAttribution,
+  yandexTilesUrl,
+  YANDEX_TILE_SOURCE_ID,
+  YANDEX_TILES_ORIGIN,
+} from "./yandex-map";
 import {
   MAP_TILES_PATH,
   mapTilesUrl,
@@ -49,7 +58,20 @@ type TokenTileLayerOptions = TileLayerOptions & { token?: string };
 export interface MapBaseLayer {
   // A no-op for raster, which has no dark variant and is inverted in CSS.
   setMapStyle: (style: ResolvedMapStyle) => void;
+  setBaseMap: (baseMap: MapBaseMapConfig) => void;
 }
+
+export const isYandexTilesUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url, location.href);
+    return (
+      parsed.origin === YANDEX_TILES_ORIGIN &&
+      parsed.pathname.startsWith("/v1/tiles/")
+    );
+  } catch {
+    return false;
+  }
+};
 
 let webGL2Supported: boolean | undefined;
 
@@ -112,8 +134,12 @@ const fetchStyle = (url: string): Promise<string> => {
 };
 
 export const loadStyle = async (
-  mapStyle: ResolvedMapStyle
+  mapStyle: ResolvedMapStyle,
+  baseMap: MapBaseMapConfig = { provider: "osm" }
 ): Promise<StyleSpecification> => {
+  if (baseMap.provider === "yandex" && !__DEMO__) {
+    return buildYandexRasterStyle(baseMap);
+  }
   const shipped = mapStyle.shipped && SHIPPED_STYLES[mapStyle.shipped];
 
   // Anything that does not ship is built here, from the same builder: its own
@@ -156,20 +182,24 @@ const createVectorLayer = async (
   leaflet: LeafletModuleType,
   map: LeafletMap,
   mapStyle: ResolvedMapStyle,
-  token: string | undefined
+  token: string | undefined,
+  baseMap: MapBaseMapConfig,
+  onBaseMapError?: (error: MapBaseMapError) => void
 ): Promise<MapBaseLayer | undefined> => {
   let layer: ReturnType<typeof maplibreGL> | undefined;
 
   try {
     layer = createLayer({
-      style: await loadStyle(mapStyle),
+      style: await loadStyle(mapStyle, baseMap),
       // Absolute, or the worker fetching tiles cannot resolve them.
-      transformRequest: (url) => ({
-        ...withMapTilesToken(url),
-        // OSM asks a website for a referrer, and the demo has no instance
-        // hostname to leak.
-        referrerPolicy: __DEMO__ ? "origin" : undefined,
-      }),
+      transformRequest: (url) => {
+        const request = withMapTilesToken(url);
+        return {
+          ...request,
+          referrerPolicy:
+            isYandexTilesUrl(url) || __DEMO__ ? "origin" : undefined,
+        };
+      },
     });
     // The plugin builds the MapLibre map in `onAdd`, so a refused WebGL
     // context throws here. Keep it guarded or that loses the fallback. The
@@ -198,6 +228,8 @@ const createVectorLayer = async (
   // A fallback hands this to the raster layer, and a rotation that already
   // happened is not announced again.
   let currentToken = token;
+  let currentBaseMap = baseMap;
+  let rasterFallback: MapBaseLayer | undefined;
 
   const glMap = layer.getMaplibreMap();
   let fallbackTimeout: number | undefined;
@@ -218,7 +250,13 @@ const createVectorLayer = async (
     } catch {
       // Nothing left to detach.
     }
-    createRasterLayer(leaflet, map, currentToken);
+    rasterFallback = createRasterLayer(
+      leaflet,
+      map,
+      currentToken,
+      currentBaseMap,
+      onBaseMapError
+    );
   };
 
   const scheduleSwap = () => {
@@ -249,7 +287,7 @@ const createVectorLayer = async (
   const applyStyle = (newStyle: ResolvedMapStyle) => {
     const request = ++latestRequest;
 
-    loadStyle(newStyle)
+    loadStyle(newStyle, currentBaseMap)
       .then((style) => {
         if (request === latestRequest) {
           appliedStyle = newStyle;
@@ -268,7 +306,16 @@ const createVectorLayer = async (
   // token. Throttled, or a proxy refusing for another reason loops.
   let lastRecovery = 0;
   glMap.on("error", (event) => {
+    const sourceId = (event as { sourceId?: string }).sourceId;
     const status = (event.error as { status?: number } | undefined)?.status;
+    if (currentBaseMap.provider === "yandex") {
+      onBaseMapError?.(
+        sourceId === YANDEX_TILE_SOURCE_ID
+          ? classifyYandexTileStatus(status)
+          : "unavailable"
+      );
+      return;
+    }
     // 403 is a stale token, 404 the proxy not registered yet during a restart,
     // and no status at all a network failure. All three recover the same way,
     // and a token that comes back unchanged costs nothing.
@@ -287,7 +334,7 @@ const createVectorLayer = async (
   // style that is refused just as the last one was, so it proves nothing.
   const unsubscribeToken = subscribeMapTilesToken((newToken) => {
     currentToken = newToken;
-    if (vector && refused) {
+    if (currentBaseMap.provider === "osm" && vector && refused) {
       refused = false;
       applyStyle(requestedStyle);
     }
@@ -300,7 +347,24 @@ const createVectorLayer = async (
         return;
       }
       requestedStyle = newStyle;
+      if (currentBaseMap.provider === "yandex") {
+        return;
+      }
       applyStyle(newStyle);
+    },
+    setBaseMap: (newBaseMap: MapBaseMapConfig) => {
+      if (deepEqual(newBaseMap, currentBaseMap)) {
+        return;
+      }
+      currentBaseMap = newBaseMap;
+      if (newBaseMap.provider === "yandex") {
+        refused = false;
+      }
+      if (vector) {
+        applyStyle(requestedStyle);
+      } else {
+        rasterFallback?.setBaseMap(newBaseMap);
+      }
     },
   };
 };
@@ -308,36 +372,70 @@ const createVectorLayer = async (
 const createRasterLayer = (
   leaflet: LeafletModuleType,
   map: LeafletMap,
-  token: string | undefined
+  token: string | undefined,
+  baseMap: MapBaseMapConfig,
+  onBaseMapError?: (error: MapBaseMapError) => void
 ): MapBaseLayer => {
-  const layer = leaflet
-    .tileLayer(__DEMO__ ? DEMO_RASTER_TILE_URL : mapTilesUrl(RASTER_TILE_URL), {
-      attribution: OSM_ATTRIBUTION,
-      maxZoom: MAP_MAX_ZOOM,
-      maxNativeZoom: RASTER_MAX_NATIVE_ZOOM,
-      referrerPolicy: __DEMO__ ? "origin" : undefined,
-      // Leaflet throws on an undefined template variable, so no token means an
-      // empty one: the tiles 403 and the markers still draw.
-      token: token ?? "",
-    } as TokenTileLayerOptions)
-    .addTo(map);
-
-  // The only sign this path gets that its token is stale. Throttled, or a
-  // tile missing for another reason asks on every pan.
+  let currentBaseMap = baseMap;
   let refused = false;
   let lastRecovery = 0;
-  layer.on("tileerror", () => {
-    refused = true;
-    if (Date.now() - lastRecovery < RECOVERY_THROTTLE) {
+  let hasReportedYandexError = false;
+  let layer: ReturnType<LeafletModuleType["tileLayer"]>;
+
+  const createLayer = () => {
+    const yandexConfig =
+      currentBaseMap.provider === "yandex" && !__DEMO__
+        ? currentBaseMap
+        : undefined;
+    const url = yandexConfig
+      ? yandexTilesUrl(yandexConfig)
+      : __DEMO__
+        ? DEMO_RASTER_TILE_URL
+        : mapTilesUrl(RASTER_TILE_URL);
+    const attribution = yandexConfig
+      ? yandexTilesAttribution(yandexConfig.language)
+      : OSM_ATTRIBUTION;
+    const created = leaflet
+      .tileLayer(url, {
+        attribution,
+        maxZoom: MAP_MAX_ZOOM,
+        maxNativeZoom: yandexConfig ? MAP_MAX_ZOOM : RASTER_MAX_NATIVE_ZOOM,
+        referrerPolicy: yandexConfig || __DEMO__ ? "origin" : undefined,
+        // Only the HA proxy URL has a token template.
+        token: yandexConfig ? undefined : (token ?? ""),
+      } as TokenTileLayerOptions)
+      .addTo(map);
+
+    created.on("tileerror", (event) => {
+      if (currentBaseMap.provider === "yandex" && !__DEMO__) {
+        if (!hasReportedYandexError) {
+          const status = (event as { error?: { status?: number } }).error
+            ?.status;
+          hasReportedYandexError = true;
+          onBaseMapError?.(classifyYandexTileStatus(status));
+        }
+        return;
+      }
+      refused = true;
+      if (Date.now() - lastRecovery < RECOVERY_THROTTLE) {
+        return;
+      }
+      lastRecovery = Date.now();
+      refreshMapTilesToken();
+    });
+    created.on("tileload", () => {
+      hasReportedYandexError = false;
+    });
+    return created;
+  };
+  layer = createLayer();
+
+  // Substituted per request, so later HA proxy tiles use the rotated token.
+  const unsubscribe = subscribeMapTilesToken((newToken) => {
+    token = newToken;
+    if (currentBaseMap.provider !== "osm") {
       return;
     }
-    lastRecovery = Date.now();
-    refreshMapTilesToken();
-  });
-
-  // Substituted per request, so later tiles pick up a new token by
-  // themselves. Only the ones already cached as failures need a redraw.
-  const unsubscribe = subscribeMapTilesToken((newToken) => {
     (layer.options as TokenTileLayerOptions).token = newToken;
     if (refused) {
       refused = false;
@@ -346,7 +444,19 @@ const createRasterLayer = (
   });
   map.on("unload", unsubscribe);
 
-  return { setMapStyle: () => undefined };
+  return {
+    setMapStyle: () => undefined,
+    setBaseMap: (newBaseMap) => {
+      if (deepEqual(newBaseMap, currentBaseMap)) {
+        return;
+      }
+      currentBaseMap = newBaseMap;
+      hasReportedYandexError = false;
+      refused = false;
+      layer.remove();
+      layer = createLayer();
+    },
+  };
 };
 
 export const createBaseLayer = async (
@@ -355,7 +465,9 @@ export const createBaseLayer = async (
   mapStyle: ResolvedMapStyle,
   token: string | undefined,
   // Skip the vector layer, e.g. after a permanent WebGL context loss
-  rasterOnly = false
+  rasterOnly = false,
+  baseMap: MapBaseMapConfig = { provider: "osm" },
+  onBaseMapError?: (error: MapBaseMapError) => void
 ): Promise<MapBaseLayer> => {
   if (!rasterOnly && supportsVectorMaps()) {
     let vectorLayer: MapBaseLayer | undefined;
@@ -370,7 +482,9 @@ export const createBaseLayer = async (
         leaflet,
         map,
         mapStyle,
-        token
+        token,
+        baseMap,
+        onBaseMapError
       );
     } catch {
       // No chunk, no vector map - but still a map.
@@ -379,5 +493,5 @@ export const createBaseLayer = async (
       return vectorLayer;
     }
   }
-  return createRasterLayer(leaflet, map, token);
+  return createRasterLayer(leaflet, map, token, baseMap, onBaseMapError);
 };

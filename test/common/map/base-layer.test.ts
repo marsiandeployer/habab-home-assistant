@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LeafletModuleType } from "../../../src/common/dom/setup-leaflet-map";
+import { YANDEX_TILE_SOURCE_ID } from "../../../src/common/map/yandex-map";
 
 // The fallback to raster tiles is what keeps the map working on devices
 // without WebGL2, on instances that cannot load the MapLibre chunk, and when
@@ -55,12 +56,13 @@ const STYLE = {
   sprite: [{ id: "base", url: "/static/map/sprites/base?v=abc12345" }],
 };
 
-const rasterHandlers: Record<string, () => void> = {};
+const rasterHandlers: Record<string, (event?: unknown) => void> = {};
 const rasterLayer = {
   // Leaflet returns the layer from addTo, and the source chains off it.
   addTo: vi.fn(() => rasterLayer),
+  remove: vi.fn(),
   redraw: vi.fn(),
-  on: vi.fn((event: string, handler: () => void) => {
+  on: vi.fn((event: string, handler: (event?: unknown) => void) => {
     rasterHandlers[event] = handler;
   }),
   options: {} as Record<string, unknown>,
@@ -85,7 +87,7 @@ const map = { on: vi.fn() } as any;
 // needs its own copy of it.
 const setWebGL2 = async (supported: boolean) => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() =>
-    supported ? ({ getExtension: () => null } as any) : null
+    supported ? ({ getExtension: () => null } as any) : null,
   );
   return (await import("../../../src/common/map/base-layer")).createBaseLayer;
 };
@@ -108,7 +110,7 @@ beforeEach(() => {
   }
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) }))
+    vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) })),
   );
 });
 
@@ -140,7 +142,7 @@ describe("loadStyle", () => {
       () =>
         new Promise((resolve) => {
           respond = resolve;
-        })
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -168,7 +170,7 @@ describe("loadStyle", () => {
               osm: { type: "vector", url: "/api/map_tiles/tilejson.json" },
             },
           }),
-      }))
+      })),
     );
 
     const style = await load();
@@ -181,7 +183,7 @@ describe("loadStyle", () => {
     ]);
     expect(style.glyphs).toMatch(/^https:\/\/tiles\.versatiles\.org\//);
     expect((style.sources.osm as { url: string }).url).toMatch(
-      /^https:\/\/vector\.openstreetmap\.org\//
+      /^https:\/\/vector\.openstreetmap\.org\//,
     );
   });
 });
@@ -200,7 +202,7 @@ describe("createBaseLayer", () => {
     // a browser can set neither a User-Agent nor a Referer.
     // Absolute, because on Cast this page is not served by the instance.
     expect(url).toBe(
-      `${INSTANCE_URL}/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}`
+      `${INSTANCE_URL}/api/map_tiles/raster/{z}/{x}/{y}.png?token={token}`,
     );
     // Leaflet substitutes options into the template on every tile request, so
     // the token can be refreshed without recreating the layer.
@@ -227,6 +229,89 @@ describe("createBaseLayer", () => {
     expect(options.referrerPolicy).toBe("origin");
   });
 
+  it("uses the owner-key Yandex raster without HA token refresh", async () => {
+    const createBaseLayer = await setWebGL2(false);
+    const onBaseMapError = vi.fn();
+    const baseLayer = await createBaseLayer(
+      leaflet,
+      map,
+      COLORFUL,
+      TOKEN,
+      true,
+      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
+      onBaseMapError,
+    );
+
+    const [url, options = {}] = vi.mocked(leaflet.tileLayer).mock.calls[0];
+    expect(url).toContain("https://tiles.api-maps.yandex.ru/v1/tiles/");
+    expect(url).toContain("apikey=synthetic-test-key");
+    expect(url).toContain("projection=web_mercator");
+    expect(options).toMatchObject({
+      attribution: expect.stringContaining("/legal/maps_api/ru/"),
+      maxNativeZoom: 20,
+      referrerPolicy: "origin",
+    });
+    expect((options as { token?: string }).token).toBeUndefined();
+
+    rasterHandlers.tileerror({ error: { status: 403 } });
+    expect(onBaseMapError).toHaveBeenCalledWith("invalid_key");
+    expect(refreshMapTilesToken).not.toHaveBeenCalled();
+
+    baseLayer.setBaseMap({ provider: "osm" });
+    expect(rasterLayer.remove).toHaveBeenCalledOnce();
+    expect(leaflet.tileLayer).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(leaflet.tileLayer).mock.calls[1][0]).toContain(
+      "/api/map_tiles/raster/",
+    );
+  });
+
+  it("keeps map_style separate while Yandex Tiles is selected", async () => {
+    const createBaseLayer = await setWebGL2(true);
+    const baseLayer = await createBaseLayer(
+      leaflet,
+      map,
+      COLORFUL,
+      TOKEN,
+      false,
+      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
+    );
+
+    baseLayer.setMapStyle(DARK);
+    expect(glMap.setStyle).not.toHaveBeenCalled();
+
+    baseLayer.setBaseMap({ provider: "osm" });
+    await vi.waitFor(() => expect(glMap.setStyle).toHaveBeenCalledOnce());
+    expect(glMap.setStyle.mock.calls[0][0]).toMatchObject({
+      sources: {},
+      layers: [],
+    });
+    expect(glMap.setStyle.mock.calls[0][0].sprite[0].url).toBe(
+      `${location.origin}/static/map/sprites/base?v=abc12345`,
+    );
+  });
+
+  it("reports Yandex MapLibre refusals without refreshing the HA token", async () => {
+    const createBaseLayer = await setWebGL2(true);
+    const onBaseMapError = vi.fn();
+    await createBaseLayer(
+      leaflet,
+      map,
+      COLORFUL,
+      TOKEN,
+      false,
+      { provider: "yandex", apiKey: "synthetic-test-key", language: "ru_RU" },
+      onBaseMapError,
+    );
+
+    glHandlers.error({
+      sourceId: YANDEX_TILE_SOURCE_ID,
+      error: { status: 429 },
+    });
+
+    expect(onBaseMapError).toHaveBeenCalledWith("rate_limited");
+    expect(refreshMapTilesToken).not.toHaveBeenCalled();
+  });
+
   // The worker is an entry of the build, and the build hands over its URL.
   // Absolute, because on Cast the page is not served from the instance.
   it("points MapLibre at the built worker once, before the first map", async () => {
@@ -236,10 +321,10 @@ describe("createBaseLayer", () => {
 
     expect(setWorkerUrl).toHaveBeenCalledOnce();
     expect(setWorkerUrl).toHaveBeenCalledWith(
-      `${location.origin}/frontend_latest/maplibre-gl-worker.test.js`
+      `${location.origin}/frontend_latest/maplibre-gl-worker.test.js`,
     );
     expect(setWorkerUrl.mock.invocationCallOrder[0]).toBeLessThan(
-      maplibreGL.mock.invocationCallOrder[0]
+      maplibreGL.mock.invocationCallOrder[0],
     );
   });
 
@@ -268,7 +353,7 @@ describe("createBaseLayer", () => {
       "fetch",
       vi.fn(async () => {
         throw new Error("offline");
-      })
+      }),
     );
 
     await createBaseLayer(leaflet, map, COLORFUL, TOKEN);
@@ -345,7 +430,7 @@ describe("setMapStyle", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) }))
+      vi.fn(async () => ({ text: async () => JSON.stringify(STYLE) })),
     );
     baseLayer.setMapStyle(DARK);
 
@@ -363,8 +448,8 @@ describe("setMapStyle", () => {
         () =>
           new Promise((resolve) => {
             resolvers.push(resolve);
-          })
-      )
+          }),
+      ),
     );
 
     const styleResponse = (name: string) => ({
@@ -471,7 +556,7 @@ describe("WebGL context loss", () => {
 
     expect(remove).toHaveBeenCalledWith(
       "visibilitychange",
-      expect.any(Function)
+      expect.any(Function),
     );
     // And a later visibility change must not add a second raster layer.
     document.dispatchEvent(new Event("visibilitychange"));
@@ -561,7 +646,7 @@ describe("recovering from a refused token", () => {
 
       emitToken("fresh-token");
       await vi.waitFor(() => expect(glMap.setStyle).toHaveBeenCalledOnce());
-    }
+    },
   );
 
   it("ignores errors that are not a refusal", async () => {

@@ -75,6 +75,8 @@ const fakeEngine = vi.hoisted(() => {
 
     setMapStyle = vi.fn();
 
+    setBaseMap = vi.fn();
+
     setZoomControlPosition = vi.fn();
 
     setScaleRuler = vi.fn();

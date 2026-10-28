@@ -25,6 +25,8 @@ import { supportsVectorMaps } from "../../common/map/base-layer";
 import type {
   MapCircleHandle,
   MapClusterIcon,
+  MapBaseMapConfig,
+  MapBaseMapError,
   MapControlPosition,
   MapEngine,
   MapFitPadding,
@@ -71,7 +73,13 @@ import {
 } from "../../data/context";
 import { UNAVAILABLE, UNKNOWN } from "../../data/entity/entity";
 import type { EntityRegistryEntry } from "../../data/entity/entity_registry";
+import type { MapBasemapUserData } from "../../data/frontend";
 import { ensureMapTilesToken } from "../../data/map_tiles";
+import {
+  yandexMapMessages,
+  yandexLogoUrl,
+  yandexMapsHomeUrl,
+} from "../../common/map/yandex-map";
 import "../ha-tooltip";
 import type {
   HomeAssistantConfig,
@@ -336,6 +344,13 @@ export class HaMap extends ReactiveElement {
   private _config!: HassConfig;
 
   @state()
+  @consume({ context: configContext, subscribe: true })
+  @transform<HomeAssistantConfig, MapBasemapUserData | undefined>({
+    transformer: ({ userData }) => userData?.mapBasemap,
+  })
+  private _mapBasemap?: MapBasemapUserData;
+
+  @state()
   @consume({ context: uiContext, subscribe: true })
   private _ui!: HomeAssistantUI;
 
@@ -398,9 +413,15 @@ export class HaMap extends ReactiveElement {
 
   @state() private _loaded = false;
 
+  @state() private _baseMapError?: MapBaseMapError;
+
   @query("#map") private _mapElement?: HTMLElement;
 
   private _engine?: MapEngine;
+
+  private _yandexAttribution?: HTMLElement;
+
+  private _baseMapStatus?: HTMLElement;
 
   // Reconciled by id, so updates move handles instead of recreating them
   private _editableHandles = new Map<
@@ -506,6 +527,10 @@ export class HaMap extends ReactiveElement {
     this._removeEditableLocations();
     this._focusPoints = [];
     this._focusZonePoints = [];
+    this._yandexAttribution?.remove();
+    this._yandexAttribution = undefined;
+    this._baseMapStatus?.remove();
+    this._baseMapStatus = undefined;
 
     this._pendingFit = undefined;
     this._hasFitted = false;
@@ -516,11 +541,22 @@ export class HaMap extends ReactiveElement {
     }
   }
 
+  protected willUpdate(changedProps: PropertyValues): void {
+    super.willUpdate(changedProps);
+    if (changedProps.has("_mapBasemap")) {
+      this._baseMapError = undefined;
+    }
+  }
+
   protected update(changedProps: PropertyValues) {
     super.update(changedProps);
 
     if (!this._loaded) {
       return;
+    }
+    if (changedProps.has("_mapBasemap") || changedProps.has("_i18n")) {
+      this._engine?.setBaseMap(this._resolvedBaseMap);
+      this._syncYandexDecorations();
     }
     let autoFitRequired = false;
     const oldStates = changedProps.get("_states") as HassEntities | undefined;
@@ -678,6 +714,108 @@ export class HaMap extends ReactiveElement {
     );
   }
 
+  private get _resolvedBaseMap(): MapBaseMapConfig {
+    if (__DEMO__) {
+      return { provider: "osm" };
+    }
+    const apiKey = this._mapBasemap?.yandexApiKey?.trim();
+    if (this._mapBasemap?.provider === "yandex" && apiKey) {
+      return {
+        provider: "yandex",
+        apiKey,
+        language: this._i18n?.language.toLowerCase().startsWith("ru")
+          ? "ru_RU"
+          : "en_US",
+      };
+    }
+    return { provider: "osm" };
+  }
+
+  private _handleBaseMapError(error: MapBaseMapError): void {
+    if (
+      this._resolvedBaseMap.provider !== "yandex" ||
+      this._baseMapError === error
+    ) {
+      return;
+    }
+    this._baseMapError = error;
+    this._syncYandexDecorations();
+  }
+
+  private _syncYandexDecorations(): void {
+    const root = this.shadowRoot;
+    if (!root) {
+      return;
+    }
+    const baseMap = this._resolvedBaseMap;
+    if (baseMap.provider !== "yandex") {
+      this._yandexAttribution?.remove();
+      this._yandexAttribution = undefined;
+      this._baseMapStatus?.remove();
+      this._baseMapStatus = undefined;
+      return;
+    }
+
+    const messages = yandexMapMessages(baseMap.language);
+    if (!this._yandexAttribution) {
+      const attribution = document.createElement("div");
+      attribution.className = "yandex-map-attribution";
+      attribution.setAttribute("role", "group");
+      const logoLink = document.createElement("a");
+      logoLink.className = "yandex-map-logo";
+      logoLink.target = "_blank";
+      logoLink.rel = "noopener noreferrer";
+      const logo = document.createElement("img");
+      logo.alt = "";
+      logoLink.append(logo);
+      const openLink = document.createElement("a");
+      openLink.className = "yandex-map-open";
+      openLink.target = "_blank";
+      openLink.rel = "noopener noreferrer";
+      attribution.append(logoLink, openLink);
+      root.append(attribution);
+      this._yandexAttribution = attribution;
+    }
+    this._yandexAttribution.setAttribute("aria-label", messages.yandexMaps);
+    const logoLink =
+      this._yandexAttribution.querySelector<HTMLAnchorElement>(
+        ".yandex-map-logo"
+      )!;
+    const logo = logoLink.querySelector<HTMLImageElement>("img")!;
+    logo.src = yandexLogoUrl(baseMap.language);
+    logoLink.href = yandexMapsHomeUrl(baseMap.language);
+    logoLink.setAttribute("aria-label", messages.yandexMaps);
+    const openLink =
+      this._yandexAttribution.querySelector<HTMLAnchorElement>(
+        ".yandex-map-open"
+      )!;
+    openLink.href = yandexMapsHomeUrl(baseMap.language);
+    openLink.textContent = messages.openInMaps;
+    if (this._baseMapError) {
+      if (!this._baseMapStatus) {
+        const status = document.createElement("div");
+        status.className = "yandex-map-status";
+        status.setAttribute("role", "alert");
+        const message = document.createElement("p");
+        const hint = document.createElement("p");
+        status.append(message, hint);
+        root.append(status);
+        this._baseMapStatus = status;
+      }
+      const [message, hint] = this._baseMapStatus.children;
+      message.textContent =
+        this._baseMapError === "invalid_key"
+          ? messages.invalidKey
+          : this._baseMapError === "rate_limited"
+            ? messages.rateLimited
+            : messages.providerError;
+      hint.textContent = messages.settingsHint;
+    } else {
+      this._baseMapStatus?.remove();
+      this._baseMapStatus = undefined;
+    }
+  }
+
   private _updateMapAppearance(): void {
     // A theme repaints the map by setting --ha-color-map-* on this element;
     // WebGL cannot read those, so they are collected here and rebuilt into
@@ -800,6 +938,7 @@ export class HaMap extends ReactiveElement {
         ],
         zoom: this.zoom,
         mapStyle: this._resolvedMapStyle,
+        baseMap: this._resolvedBaseMap,
         token,
         rasterOnly: this._forceLeaflet,
         zoomControlPosition: this.zoomPosition,
@@ -816,6 +955,7 @@ export class HaMap extends ReactiveElement {
             }
           },
           fatal: () => this._handleEngineFatal(),
+          baseMapError: (error) => this._handleBaseMapError(error),
           drawn: () => this._markDrawn(attempt),
         },
       });
@@ -828,7 +968,9 @@ export class HaMap extends ReactiveElement {
         throw new Error("Map engine failed during setup");
       }
       this._engine = engine;
+      this._engine.setBaseMap(this._resolvedBaseMap);
       this._updateMapAppearance();
+      this._syncYandexDecorations();
       this._loaded = true;
       fireEvent(this, "editing-available-changed", {
         available: !!engine.editing,
@@ -1776,7 +1918,62 @@ export class HaMap extends ReactiveElement {
   static styles = css`
     :host {
       display: block;
+      position: relative;
       height: 300px;
+    }
+    .yandex-map-attribution,
+    .yandex-map-status {
+      position: absolute;
+      z-index: 5;
+      inset-inline-start: 8px;
+      pointer-events: none;
+      border-radius: var(--ha-border-radius-md, 8px);
+      color: var(--primary-text-color);
+      background: var(--ha-card-background, var(--card-background-color, #fff));
+      box-shadow: var(--ha-box-shadow-medium);
+    }
+    .yandex-map-attribution {
+      bottom: 48px;
+      display: flex;
+      box-sizing: border-box;
+      max-width: calc(100% - 16px);
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--ha-space-2, 8px);
+      padding: 2px 8px 2px 4px;
+      font-size: var(--ha-font-size-xs, 12px);
+    }
+    .yandex-map-attribution a {
+      color: inherit;
+      pointer-events: auto;
+    }
+    .yandex-map-logo {
+      display: block;
+      line-height: 0;
+    }
+    .yandex-map-logo img {
+      display: block;
+      width: 88px;
+      height: 48px;
+      object-fit: contain;
+    }
+    .yandex-map-status {
+      bottom: 104px;
+      box-sizing: border-box;
+      max-width: min(340px, calc(100% - 16px));
+      padding: var(--ha-space-3, 12px);
+      font-size: var(--ha-font-size-s, 14px);
+    }
+    .yandex-map-status p {
+      margin: 0;
+    }
+    .yandex-map-status p + p {
+      margin-top: var(--ha-space-2, 8px);
+      color: var(--secondary-text-color);
+    }
+    .yandex-map-status p,
+    .yandex-map-status a {
+      pointer-events: auto;
     }
     #map {
       height: 100%;

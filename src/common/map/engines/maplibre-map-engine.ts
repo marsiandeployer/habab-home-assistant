@@ -17,6 +17,7 @@ import {
 import {
   CONTEXT_RESTORE_GRACE,
   ensureWorkerUrl,
+  isYandexTilesUrl,
   loadStyle,
   MAP_MAX_ZOOM,
   MAP_MIN_ZOOM,
@@ -30,6 +31,7 @@ import {
 import { deepEqual } from "../../util/deep-equal";
 import { isTouch } from "../../../util/is_touch";
 import type {
+  MapBaseMapConfig,
   MapCircleHandle,
   MapCircleOptions,
   MapClusterIcon,
@@ -52,6 +54,7 @@ import type {
   MapPathHandle,
   MapView,
 } from "../map-engine";
+import { classifyYandexTileStatus, YANDEX_TILE_SOURCE_ID } from "../yandex-map";
 import { destinationPoint, distanceMeters, pointEastOf } from "../map-engine";
 import type { ResolvedMapStyle } from "../map-styles";
 import {
@@ -288,6 +291,8 @@ export class MapLibreMapEngine implements MapEngine {
 
   private _requestedStyle!: ResolvedMapStyle;
 
+  private _baseMap: MapBaseMapConfig = { provider: "osm" };
+
   private _latestStyleRequest = 0;
 
   private _contextLost = false;
@@ -331,9 +336,10 @@ export class MapLibreMapEngine implements MapEngine {
 
     this._appliedStyle = options.mapStyle;
     this._requestedStyle = options.mapStyle;
+    this._baseMap = options.baseMap ?? { provider: "osm" };
     this._events = options.events;
 
-    const style = await loadStyle(options.mapStyle);
+    const style = await loadStyle(options.mapStyle, this._baseMap);
     if (this._destroyed) {
       return;
     }
@@ -355,7 +361,8 @@ export class MapLibreMapEngine implements MapEngine {
       // Proxied by core behind a token; absolute so the worker can resolve them
       transformRequest: (url) => ({
         ...withMapTilesToken(url),
-        referrerPolicy: __DEMO__ ? "origin" : undefined,
+        referrerPolicy:
+          isYandexTilesUrl(url) || __DEMO__ ? "origin" : undefined,
       }),
     });
     map.touchZoomRotate.disableRotation();
@@ -368,7 +375,18 @@ export class MapLibreMapEngine implements MapEngine {
     // restart, no status: network. Throttled so another refusal cannot loop.
     let lastRecovery = 0;
     map.on("error", (event) => {
+      const sourceId = (event as { sourceId?: string }).sourceId;
       const status = (event.error as { status?: number } | undefined)?.status;
+      if (sourceId === YANDEX_TILE_SOURCE_ID) {
+        if (this._baseMap.provider === "yandex") {
+          this._events.baseMapError?.(classifyYandexTileStatus(status));
+        }
+        return;
+      }
+      if (this._baseMap.provider === "yandex") {
+        this._events.baseMapError?.("unavailable");
+        return;
+      }
       if (status !== undefined && status !== 403 && status !== 404) {
         return;
       }
@@ -381,7 +399,7 @@ export class MapLibreMapEngine implements MapEngine {
     });
     // Only a new token clears a refusal; a style change in between is refused too
     this._unsubscribeToken = subscribeMapTilesToken(() => {
-      if (this._refused) {
+      if (this._baseMap.provider === "osm" && this._refused) {
         this._refused = false;
         this._applyStyle(this._requestedStyle);
       }
@@ -582,13 +600,27 @@ export class MapLibreMapEngine implements MapEngine {
       return;
     }
     this._requestedStyle = mapStyle;
+    if (this._baseMap.provider === "yandex") {
+      return;
+    }
     this._applyStyle(mapStyle);
+  }
+
+  public setBaseMap(baseMap: MapBaseMapConfig): void {
+    if (!this._map || deepEqual(baseMap, this._baseMap)) {
+      return;
+    }
+    this._baseMap = baseMap;
+    if (baseMap.provider === "yandex") {
+      this._refused = false;
+    }
+    this._applyStyle(this._requestedStyle);
   }
 
   private _applyStyle(mapStyle: ResolvedMapStyle): void {
     const request = ++this._latestStyleRequest;
 
-    loadStyle(mapStyle)
+    loadStyle(mapStyle, this._baseMap)
       .then((style) => {
         if (request === this._latestStyleRequest && this._map) {
           this._map.setStyle(style, {

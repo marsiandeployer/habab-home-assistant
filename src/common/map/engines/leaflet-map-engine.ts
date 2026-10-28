@@ -13,6 +13,7 @@ import { DecoratedMarker } from "../decorated_marker";
 import { isTouch } from "../../../util/is_touch";
 import type {
   MapClusterOptions,
+  MapBaseMapConfig,
   MapCircleHandle,
   MapCircleOptions,
   MapControlPosition,
@@ -90,7 +91,9 @@ export class LeafletMapEngine implements MapEngine {
       map,
       options.mapStyle,
       options.token,
-      options.rasterOnly ?? false
+      options.rasterOnly ?? false,
+      options.baseMap ?? { provider: "osm" },
+      options.events.baseMapError
     );
     this.leafletMap = map;
     this.Leaflet = Leaflet;
@@ -146,6 +149,10 @@ export class LeafletMapEngine implements MapEngine {
 
   public setMapStyle(style: ResolvedMapStyle): void {
     this._baseLayer?.setMapStyle(style);
+  }
+
+  public setBaseMap(baseMap: MapBaseMapConfig): void {
+    this._baseLayer?.setBaseMap(baseMap);
   }
 
   public setZoomControlPosition(position: MapControlPosition): void {
