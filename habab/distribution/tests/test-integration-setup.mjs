@@ -116,6 +116,30 @@ test("native StepFlowForm bridge is awaited and receives the protected native st
   assert.deepEqual(ready, [{interaction_id: "i1", domain: "mqtt"}]);
 });
 
+test("fresh-chat baseline hides a delayed global status snapshot and waits for its refresh", async () => {
+  let resolveFirstStatus;
+  let statusReads = 0;
+  const card = setupShell(new module.HababIntegrationSetup());
+  card.schedulePoll = () => {};
+  card._hass = {connected: true, language: "en", async callWS() {
+    statusReads++;
+    if (statusReads === 1) return new Promise((resolve) => { resolveFirstStatus = resolve; });
+    return {interactions: [formRecord({id: "old-flow", phase: "progress"})]};
+  }};
+
+  const initialLoad = card.refresh();
+  const captured = [];
+  card.suppressExistingForFreshChat((ids) => captured.push(...ids));
+  const freshChatLoad = card.refresh();
+  resolveFirstStatus({interactions: [formRecord({id: "old-flow", phase: "form"})]});
+  await Promise.all([initialLoad, freshChatLoad]);
+
+  assert.equal(statusReads, 2, "the fresh-chat caller waits for the queued status read");
+  assert.deepEqual(captured, ["old-flow"]);
+  assert.equal(card.cards.get("old-flow").element.hidden, true,
+    "an old active form remains hidden after a late status response");
+});
+
 test("form-ready waits for native updateComplete and reveal scrolls without focusing", async () => {
   let resolveUpdate;
   const updateComplete = new Promise((resolve) => { resolveUpdate = resolve; });

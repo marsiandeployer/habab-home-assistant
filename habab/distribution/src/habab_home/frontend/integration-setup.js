@@ -102,6 +102,9 @@ export class HababIntegrationSetup extends HTMLElement {
     this.statusError = undefined;
     this.lifecycle = 0;
     this.refreshPending = false;
+    this.refreshWaiters = [];
+    this.suppressNextSnapshot = false;
+    this.onFreshChatSnapshot = undefined;
   }
 
   get hass() { return this._hass; }
@@ -148,6 +151,7 @@ export class HababIntegrationSetup extends HTMLElement {
     this.interactions = [];
     this.busy.clear();
     this.statusError = undefined;
+    for (const resolve of this.refreshWaiters.splice(0)) resolve();
   }
 
   _language() {
@@ -205,7 +209,7 @@ export class HababIntegrationSetup extends HTMLElement {
     if (!this._hass || this._hass.connected === false) return;
     if (this.loading) {
       this.refreshPending = true;
-      return;
+      return new Promise((resolve) => this.refreshWaiters.push(resolve));
     }
     this._ensureShell();
     this.loading = true;
@@ -215,6 +219,13 @@ export class HababIntegrationSetup extends HTMLElement {
       const result = await this._hass.callWS({type: "habab_home/setup/status", language: this._language()});
       if (lifecycle !== this.lifecycle || !this.isConnected) return;
       const interactions = Array.isArray(result?.interactions) ? result.interactions : [];
+      if (this.suppressNextSnapshot) {
+        this.suppressNextSnapshot = false;
+        const ids = interactions.map(normalizeInteraction).filter(Boolean).map(({id}) => id);
+        this.suppressedInteractionIds = new Set([...this.suppressedInteractionIds, ...ids]);
+        this.onFreshChatSnapshot?.(ids);
+        this.onFreshChatSnapshot = undefined;
+      }
       this._applyInteractions(interactions);
       if (lifecycle !== this.lifecycle || !this.isConnected) return;
       this._render();
@@ -231,8 +242,17 @@ export class HababIntegrationSetup extends HTMLElement {
       } else {
         this.refreshPending = false;
         this.schedulePoll();
+        for (const resolve of this.refreshWaiters.splice(0)) resolve();
       }
     }
+  }
+
+  suppressExistingForFreshChat(onSnapshot) {
+    const ids = this.interactions.map(({id}) => id);
+    this.suppressedInteractionIds = new Set([...this.suppressedInteractionIds, ...ids]);
+    for (const [id, card] of this.cards) card.element.hidden = this.suppressedInteractionIds.has(id);
+    this.suppressNextSnapshot = true;
+    this.onFreshChatSnapshot = onSnapshot;
   }
 
   load() { return this.refresh(); }

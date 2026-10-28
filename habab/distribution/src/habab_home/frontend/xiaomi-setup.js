@@ -76,15 +76,28 @@ class HababXiaomiSetup extends HTMLElement {
   connectedCallback() { if (pollingPhases.has(this.state.phase)) this.schedule(); }
   disconnectedCallback() {clearTimeout(this.timer);}
   async load() {
-    if (!this._hass || this.loading) return;
+    if (!this._hass) return;
+    if (this.loading) {
+      this.loadPending = true;
+      return new Promise((resolve) => {
+        (this.loadWaiters ||= []).push(resolve);
+      });
+    }
     this.loading = true;
     try {
-      const state = await this._hass.callWS({type: 'habab_home/xiaomi/get'});
-      if (JSON.stringify(state) !== JSON.stringify(this.state)) {this.state = state; this.render();}
-      this.dispatchEvent(new CustomEvent('habab-setup-state', {detail: {phase: state.phase}}));
+      do {
+        this.loadPending = false;
+        const state = await this._hass.callWS({type: 'habab_home/xiaomi/get'});
+        if (JSON.stringify(state) !== JSON.stringify(this.state)) {this.state = state; this.render();}
+        this.dispatchEvent(new CustomEvent('habab-setup-state', {detail: {phase: state.phase}}));
+      } while (this.loadPending);
     } catch (error) {
       if (this.state.phase !== 'restarting') this.showError(error.code || 'disconnected');
-    } finally {this.loading = false; this.schedule();}
+    } finally {
+      this.loading = false;
+      this.schedule();
+      for (const resolve of (this.loadWaiters || []).splice(0)) resolve();
+    }
   }
   schedule() {
     clearTimeout(this.timer);

@@ -151,25 +151,32 @@ test("previous-chat recovery receipts cannot authorize saving", async () => {
   assert.deepEqual(calls, []);
 });
 
-test("old saved cards stay out of new chat while current and pending cards remain", async () => {
+test("fresh chat does not replay any previous-chat automation cards", async () => {
   const currentDraft = {...record(), draft_id: "c".repeat(32)};
   const oldSavedAutomation = {...record("automation", "saved"), from_previous_chat: true};
   const oldSavedHelper = {...record("input_boolean", "saved"), draft_id: "h".repeat(32), from_previous_chat: true};
-  const oldPending = {...record("automation", "saving"), draft_id: "p".repeat(32), from_previous_chat: true};
+  // Matches the reported UI snapshot: an old automation receipt remains in
+  // `saving` because the native object state could not be confirmed.
+  const oldUnconfirmed = {...record("automation", "saving"), draft_id: "p".repeat(32),
+    from_previous_chat: true, summary: "Start the vacuum after the front door first opens after 8 AM",
+    config: {id: `habab_${"p".repeat(32)}`, initial_state: false},
+    native_id: `habab_${"p".repeat(32)}`,
+    entity_id: "automation.pylesos_pri_utrennem_vykhode",
+    can_dismiss: true};
   let statusReads = 0;
   const {card} = fixture({callWS: async (msg) => {
     if (msg.operation !== "status") return {};
     statusReads += 1;
-    return {drafts: [currentDraft], recovery_drafts: [oldSavedAutomation, oldSavedHelper, oldPending]};
+    return {drafts: [currentDraft], recovery_drafts: [oldSavedAutomation, oldSavedHelper, oldUnconfirmed]};
   }});
 
   await card.refresh();
-  assert.deepEqual(card.records.map(({draft_id}) => draft_id), [currentDraft.draft_id, oldPending.draft_id]);
+  assert.deepEqual(card.records.map(({draft_id}) => draft_id), [currentDraft.draft_id]);
   assert.equal(statusReads, 1);
 
   await card.refresh();
-  assert.deepEqual(card.records.map(({draft_id}) => draft_id), [currentDraft.draft_id, oldPending.draft_id],
-    "a subsequent status response cannot restore completed cards");
+  assert.deepEqual(card.records.map(({draft_id}) => draft_id), [currentDraft.draft_id],
+    "a subsequent status response cannot restore any previous-chat card, including an unconfirmed write");
   assert.equal(statusReads, 2);
 });
 

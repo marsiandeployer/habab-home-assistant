@@ -659,8 +659,8 @@ test("completed or failed Xiaomi cards stay removed after dismissal and return f
   }, "starting another setup restores its card");
 });
 
-test("a new chat hides completed setup cards while keeping active setup forms available", async () => {
-  const setupCard = {hidden: false, state: {phase: "completed", setup_id: "xiaomi-old"}};
+test("a new chat hides every prior Xiaomi and integration card while allowing a new flow", async () => {
+  const setupCard = {hidden: false, state: {phase: "oauth", setup_id: "xiaomi-old"}};
   const integrationCard = {
     hidden: false,
     interactions: [{id: "active-setup", phase: "form"}, {id: "completed-setup", phase: "done"}],
@@ -705,17 +705,38 @@ test("a new chat hides completed setup cards while keeping active setup forms av
   assert.equal(chat.messages.length, 0);
   assert.equal(setupCard.hidden, true, "a completed prior Xiaomi card is suppressed in the new chat");
   assert.equal(setupCard.state.setup_id, "xiaomi-old");
-  assert.deepEqual([...chat.suppressedSetupInteractionIds], ["completed-setup"]);
-  assert.deepEqual([...integrationCard.suppressedInteractionIds], ["completed-setup"]);
+  assert.deepEqual([...chat.freshChatSetupInteractionIds].sort(), ["active-setup", "completed-setup"]);
+  assert.deepEqual([...integrationCard.suppressedInteractionIds].sort(), ["active-setup", "completed-setup"]);
   assert.equal(chat.setupCard, setupCard, "the Xiaomi setup component remains available for future attempts");
   assert.equal(chat.integrationCard, integrationCard, "the native config flow component is retained");
 
   assert.equal(chat.isXiaomiSetupSuppressed(), true, "the unchanged Xiaomi attempt remains scoped to the old chat");
   setupCard.state = {...setupCard.state, phase: "homes"};
-  assert.equal(chat.isXiaomiSetupSuppressed(), true, "the completed attempt stays scoped to the prior chat");
+  assert.equal(chat.isXiaomiSetupSuppressed(), true, "the active attempt stays scoped to the prior chat");
   setupCard.state = {...setupCard.state, setup_id: "xiaomi-new", phase: "oauth"};
   assert.equal(chat.isXiaomiSetupSuppressed(), false, "a new Xiaomi attempt in this chat appears automatically");
-  assert.deepEqual([...chat.suppressedSetupInteractionIds], ["completed-setup"], "active forms remain visible while old completed flows stay hidden");
+  assert.deepEqual([...chat.freshChatSetupInteractionIds].sort(), ["active-setup", "completed-setup"],
+    "old active flows stay suppressed even after their status changes");
+  integrationCard.interactions = [...integrationCard.interactions, {id: "new-setup", phase: "form"}];
+  chat.pruneActiveSetupSuppressions();
+  assert.equal(integrationCard.suppressedInteractionIds.has("active-setup"), true);
+  assert.equal(integrationCard.suppressedInteractionIds.has("new-setup"), false,
+    "a config flow created in the new chat is not suppressed");
+});
+
+test("starting a fresh chat invalidates an older pending setup loader", async () => {
+  const chat = Object.create(setupChatElementClass.prototype);
+  Object.assign(chat, {
+    demo: false,
+    sessionId: "previous-session",
+    setupLoadGeneration: 1,
+    isCurrentOwnerContext: () => true,
+  });
+
+  const pending = setupChatElementClass.prototype.loadSetup.call(chat);
+  chat.setupLoadGeneration += 1;
+  await pending;
+  assert.equal(chat.setupCard, undefined, "the stale loader exits before it creates or refreshes setup cards");
 });
 
 test("setup suppression survives reconnect only for its owner and current conversation", async () => {
@@ -751,7 +772,10 @@ test("setup suppression survives reconnect only for its owner and current conver
         setupCard,
         integrationCard,
         suppressedSetupInteractionIds: new Set(),
+        freshChatSetupInteractionIds: new Set(),
         suppressedXiaomiSetupId: undefined,
+        freshChatXiaomiSetupId: undefined,
+        setupLoadGeneration: 0,
         isCurrentOwnerContext: () => true,
         status() {},
         controls() {},
@@ -766,7 +790,7 @@ test("setup suppression survives reconnect only for its owner and current conver
     const first = makeChat();
     first.chat.captureSetupBaseline();
     assert.equal(first.setupCard.hidden, true);
-    assert.deepEqual([...first.integrationCard.suppressed], ["done-flow"]);
+    assert.deepEqual([...first.integrationCard.suppressed].sort(), ["active-flow", "done-flow"]);
 
     const reloaded = makeChat();
     await setupChatElementClass.prototype.connect.call(reloaded.chat, false);
@@ -774,8 +798,7 @@ test("setup suppression survives reconnect only for its owner and current conver
     assert.deepEqual(reloaded.chat.messages, []);
     assert.equal(reloaded.chat.suppressedXiaomiSetupId, "xiaomi-old");
     assert.equal(reloaded.setupCard.hidden, true);
-    assert.deepEqual([...reloaded.integrationCard.suppressed], ["done-flow"]);
-    assert.equal(reloaded.integrationCard.suppressed.has("active-flow"), false, "an active form is never suppressed");
+    assert.deepEqual([...reloaded.integrationCard.suppressed].sort(), ["active-flow", "done-flow"]);
 
     const otherSession = makeChat();
     assert.equal(otherSession.chat.restoreSetupBaseline("different-session"), false);
@@ -916,6 +939,31 @@ test("native voice history rejects other sessions and unsubscribes a stale recon
   assert.equal(drawCount, 1);
   pending[1].resolve(() => {});
   await Promise.resolve();
+});
+
+test("native voice history resubscribes at a new chat boundary and rejects old callbacks", async () => {
+  const chat = new setupChatElementClass();
+  chat.isConnected = true;
+  chat.sessionId = "previous-session";
+  let drawCount = 0;
+  chat.draw = () => { drawCount++; };
+  const pending = [];
+  const connection = {subscribeMessage(callback) {
+    return new Promise((resolve) => pending.push({callback, resolve}));
+  }};
+  chat._hass = {user: {is_admin: true}, connection};
+  chat.subscribeVoiceHistory();
+  chat.sessionId = "new-session";
+  chat.subscribeVoiceHistory();
+  pending[0].callback({session_id: "previous-session", messages: [{text: "late old history"}]});
+  assert.equal(drawCount, 0);
+  let oldUnsubscribed = false;
+  pending[0].resolve(() => { oldUnsubscribed = true; });
+  pending[1].resolve(() => {});
+  await Promise.resolve();
+  assert.equal(oldUnsubscribed, true);
+  pending[0].callback({session_id: "previous-session", messages: [{text: "another late message"}]});
+  assert.equal(drawCount, 0);
 });
 
 test("a ready setup form is revealed without focusing the composer", () => {

@@ -55,3 +55,45 @@ test("Xiaomi dismiss event is composed for completed or failed setup, not active
     }
   }
 });
+
+test("Xiaomi status reload waits for a newer snapshot when one is already pending", async () => {
+  const keys = ["HTMLElement", "customElements", "CustomEvent"];
+  const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const definitions = new Map();
+  class HTMLElementStub {
+    dispatchEvent() { return true; }
+    attachShadow() { return {}; }
+  }
+  class CustomEventStub {
+    constructor(type, options = {}) { this.type = type; Object.assign(this, options); }
+  }
+  Object.defineProperty(globalThis, "HTMLElement", {configurable: true, value: HTMLElementStub});
+  Object.defineProperty(globalThis, "CustomEvent", {configurable: true, value: CustomEventStub});
+  Object.defineProperty(globalThis, "customElements", {configurable: true, value: {
+    get: (name) => definitions.get(name), define: (name, value) => definitions.set(name, value),
+  }});
+  try {
+    await import(`${pathToFileURL(resolve("habab/distribution/src/habab_home/frontend/xiaomi-setup.js"))}?load-test`);
+    const setup = new (definitions.get("habab-xiaomi-setup"))();
+    let resolveFirst;
+    let reads = 0;
+    setup.render = () => {};
+    setup._hass = {async callWS() {
+      reads++;
+      if (reads === 1) return new Promise((resolve) => { resolveFirst = resolve; });
+      return {phase: "idle", setup_id: "current-after-refresh"};
+    }};
+    const initialLoad = setup.load();
+    const newChatLoad = setup.load();
+    resolveFirst({phase: "oauth", setup_id: "previous-chat-setup"});
+    await Promise.all([initialLoad, newChatLoad]);
+    assert.equal(reads, 2);
+    assert.equal(setup.state.setup_id, "current-after-refresh");
+  } finally {
+    for (const key of keys) {
+      const descriptor = descriptors.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});

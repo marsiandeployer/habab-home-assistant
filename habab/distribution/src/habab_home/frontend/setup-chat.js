@@ -367,7 +367,13 @@ function installChat() {
       this.drawGeneration = 0;
       this.followSetupForms = true;
       this.suppressedSetupInteractionIds = new Set();
+      this.freshChatSetupInteractionIds = new Set();
+      this.freshSetupSnapshotPending = false;
+      this.freshSetupSnapshotArmed = false;
+      this.freshXiaomiSnapshotPending = false;
       this.suppressedXiaomiSetupId = undefined;
+      this.freshChatXiaomiSetupId = undefined;
+      this.setupLoadGeneration = 0;
       this.xiaomiSetupDismissedInstance = false;
       this.xiaomiSetupDismissalIdentity = undefined;
       this.xiaomiSetupDismissalStorageFailed = false;
@@ -442,6 +448,12 @@ function installChat() {
     }
 
     updateXiaomiSetupPresentation(phase) {
+      const setupId = this.setupCard?.state?.setup_id;
+      if (this.freshXiaomiSnapshotPending && typeof setupId === "string" && setupId.length > 0) {
+        this.freshChatXiaomiSetupId = setupId;
+        if (this.setupCard) this.setupCard.hidden = true;
+        this.persistSetupBaseline();
+      }
       const presentation = getXiaomiSetupPresentation(phase, this.getXiaomiSetupDismissed());
       if (presentation.clearDismissal) this.setXiaomiSetupDismissed(false);
       const container = this.q("#setup-cards");
@@ -459,7 +471,12 @@ function installChat() {
 
     isXiaomiSetupSuppressed() {
       const setupId = this.setupCard?.state?.setup_id;
-      return typeof setupId === "string" && setupId.length > 0 && setupId === this.suppressedXiaomiSetupId;
+      return typeof setupId === "string" && setupId.length > 0 &&
+        (setupId === this.suppressedXiaomiSetupId || setupId === this.freshChatXiaomiSetupId);
+    }
+
+    allSuppressedSetupInteractionIds() {
+      return new Set([...(this.suppressedSetupInteractionIds || []), ...(this.freshChatSetupInteractionIds || [])]);
     }
 
     setupScopeStorageKey() {
@@ -484,12 +501,16 @@ function installChat() {
       const key = this.setupScopeStorageKey();
       if (!key || typeof this.sessionId !== "string" || !this.sessionId || this.sessionId.length > 128) return false;
       const value = JSON.stringify({
-        version: 2,
+        version: 3,
         session_id: this.sessionId,
         interaction_ids: [...this.suppressedSetupInteractionIds]
           .filter((id) => typeof id === "string" && id.length > 0 && id.length <= 128).slice(0, 256),
         xiaomi_setup_id: typeof this.suppressedXiaomiSetupId === "string" && this.suppressedXiaomiSetupId.length <= 128
           ? this.suppressedXiaomiSetupId : null,
+        fresh_chat_interaction_ids: [...this.freshChatSetupInteractionIds]
+          .filter((id) => typeof id === "string" && id.length > 0 && id.length <= 128).slice(0, 256),
+        fresh_chat_xiaomi_setup_id: typeof this.freshChatXiaomiSetupId === "string" && this.freshChatXiaomiSetupId.length <= 128
+          ? this.freshChatXiaomiSetupId : null,
       });
       let stored = false;
       for (const storage of this.setupScopeStorages()) {
@@ -503,7 +524,9 @@ function installChat() {
 
     restoreSetupBaseline(sessionId) {
       this.suppressedSetupInteractionIds = new Set();
+      this.freshChatSetupInteractionIds = new Set();
       this.suppressedXiaomiSetupId = undefined;
+      this.freshChatXiaomiSetupId = undefined;
       const key = this.setupScopeStorageKey();
       if (!key || typeof sessionId !== "string" || !sessionId) return false;
       for (const storage of this.setupScopeStorages()) {
@@ -516,22 +539,30 @@ function installChat() {
         }
         try {
           const saved = JSON.parse(raw);
-          if (![1, 2].includes(saved?.version) || saved.session_id !== sessionId ||
+          if (![1, 2, 3].includes(saved?.version) || saved.session_id !== sessionId ||
               !Array.isArray(saved.interaction_ids) || saved.interaction_ids.length > 256 ||
+              (saved.version === 3 && (!Array.isArray(saved.fresh_chat_interaction_ids) ||
+                saved.fresh_chat_interaction_ids.length > 256 ||
+                (saved.fresh_chat_xiaomi_setup_id !== null && saved.fresh_chat_xiaomi_setup_id !== undefined &&
+                  (typeof saved.fresh_chat_xiaomi_setup_id !== "string" || saved.fresh_chat_xiaomi_setup_id.length > 128)))) ||
               (saved.xiaomi_setup_id !== null && saved.xiaomi_setup_id !== undefined &&
                 (typeof saved.xiaomi_setup_id !== "string" || saved.xiaomi_setup_id.length > 128))) continue;
           this.suppressedSetupInteractionIds = new Set(saved.interaction_ids.filter((id) =>
             typeof id === "string" && id.length > 0 && id.length <= 128
           ));
           this.suppressedXiaomiSetupId = saved.xiaomi_setup_id || undefined;
-          this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+          this.freshChatSetupInteractionIds = new Set((saved.fresh_chat_interaction_ids || []).filter((id) =>
+            typeof id === "string" && id.length > 0 && id.length <= 128
+          ));
+          this.freshChatXiaomiSetupId = saved.fresh_chat_xiaomi_setup_id || undefined;
+          this.integrationCard?.setSuppressedInteractionIds?.(this.allSuppressedSetupInteractionIds());
           if (this.setupCard) this.setupCard.hidden = this.isXiaomiSetupSuppressed();
           return true;
         } catch (_) {
           try { storage.removeItem(key); } catch (_) {}
         }
       }
-      this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+      this.integrationCard?.setSuppressedInteractionIds?.(this.allSuppressedSetupInteractionIds());
       return false;
     }
 
@@ -541,14 +572,42 @@ function installChat() {
           .filter(({phase}) => ["done", "abort", "error", "expired"].includes(phase))
           .map(({id}) => id).filter((id) => typeof id === "string")
       );
-      this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+      this.freshChatSetupInteractionIds = new Set((this.integrationCard?.interactions || [])
+        .map(({id}) => id).filter((id) => typeof id === "string" && id.length > 0));
+      this.integrationCard?.setSuppressedInteractionIds?.(this.allSuppressedSetupInteractionIds());
       this.suppressedXiaomiSetupId = ["completed", "error"].includes(this.setupCard?.state?.phase)
         ? this.setupCard?.state?.setup_id : undefined;
+      this.freshChatXiaomiSetupId = typeof this.setupCard?.state?.setup_id === "string"
+        ? this.setupCard.state.setup_id : undefined;
+      this.freshSetupSnapshotPending = true;
+      this.freshSetupSnapshotArmed = false;
+      this.freshXiaomiSnapshotPending = true;
+      this.suppressExistingIntegrationSnapshot();
       if (this.setupCard) this.setupCard.hidden = this.isXiaomiSetupSuppressed();
       this.pendingSetupInteraction = undefined;
       const jump = this.q(".setup-jump");
       if (jump) jump.hidden = true;
       this.persistSetupBaseline();
+    }
+
+    suppressExistingIntegrationSnapshot() {
+      if (!this.freshSetupSnapshotPending || this.freshSetupSnapshotArmed ||
+          typeof this.integrationCard?.suppressExistingForFreshChat !== "function") return;
+      const generation = this.setupLoadGeneration;
+      const sessionId = this.sessionId;
+      this.freshSetupSnapshotArmed = true;
+      this.integrationCard.suppressExistingForFreshChat((ids) => {
+        if (generation !== this.setupLoadGeneration || sessionId !== this.sessionId ||
+            !Array.isArray(ids)) return;
+        for (const id of ids) {
+          if (typeof id === "string" && id.length > 0 && id.length <= 128) {
+            this.freshChatSetupInteractionIds.add(id);
+          }
+        }
+        this.freshSetupSnapshotPending = false;
+        this.integrationCard?.setSuppressedInteractionIds?.(this.allSuppressedSetupInteractionIds());
+        this.persistSetupBaseline();
+      });
     }
 
     pruneActiveSetupSuppressions() {
@@ -559,7 +618,7 @@ function installChat() {
           this.suppressedSetupInteractionIds.delete(id);
         }
       }
-      this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+      this.integrationCard?.setSuppressedInteractionIds?.(this.allSuppressedSetupInteractionIds());
       this.persistSetupBaseline();
     }
 
@@ -627,9 +686,10 @@ function installChat() {
     setupFormReady(detail) {
       if (typeof detail?.interaction_id !== "string") return;
       if (this.suppressedSetupInteractionIds?.delete(detail.interaction_id)) {
-        this.integrationCard?.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+        this.integrationCard?.setSuppressedInteractionIds?.(this.allSuppressedSetupInteractionIds());
         this.persistSetupBaseline();
       }
+      if (this.freshChatSetupInteractionIds?.has(detail.interaction_id)) return;
       this.pendingSetupInteraction = detail.interaction_id;
       if (this.followSetupForms !== false && this.revealSetupForm()) return;
       const jump = this.q(".setup-jump");
@@ -647,14 +707,17 @@ function installChat() {
     subscribeVoiceHistory() {
       const connection = !this.demo && this.isConnected && this.hass?.user?.is_admin
         ? this.hass.connection : undefined;
-      if (this.historyConnection === connection) return;
+      const sessionId = this.sessionId;
+      if (this.historyConnection === connection && this.historySessionId === sessionId) return;
       this.historyUnsubscribe?.();
       this.historyUnsubscribe = undefined;
       this.historyConnection = connection;
+      this.historySessionId = sessionId;
       const attempt = this.historyAttempt = {};
       if (!connection) return;
       connection.subscribeMessage((result) => {
-        if (this.historyAttempt !== attempt || result.session_id !== this.sessionId || !Array.isArray(result.messages)) return;
+        if (this.historyAttempt !== attempt || result.session_id !== sessionId ||
+            sessionId !== this.sessionId || !Array.isArray(result.messages)) return;
         this.messages = result.messages;
         this.draw();
       }, {type: "habab_home/realtime/subscribe"}).then((unsubscribe) => {
@@ -667,10 +730,15 @@ function installChat() {
 
     async loadSetup(afterTurn = false) {
       if (this.demo || !this.isCurrentOwnerContext()) return;
+      const generation = this.setupLoadGeneration;
+      const sessionId = this.sessionId;
+      const isCurrent = () => generation === this.setupLoadGeneration && sessionId === this.sessionId &&
+        this.isCurrentOwnerContext();
       try {
-        await import("/habab-home/xiaomi-setup.js?v=4");
-        await import("/habab-home/integration-setup.js?v=1");
-        await import("/habab-home/automation-setup.js?v=5");
+        await import("/habab-home/xiaomi-setup.js?v=5");
+        await import("/habab-home/integration-setup.js?v=2");
+        await import("/habab-home/automation-setup.js?v=6");
+        if (!isCurrent()) return;
         if (!this.setupCard) {
           this.setupCard = document.createElement("habab-xiaomi-setup");
           this.setupCard.addEventListener("habab-setup-dismiss", () => {
@@ -720,17 +788,22 @@ function installChat() {
             this.send();
           });
         }
+        this.suppressExistingIntegrationSnapshot();
         this.setupCard.hass = this.hass;
         if (!this.getXiaomiSetupDismissed()) mountStableElement(this.q("#setup-cards"), this.setupCard);
         this.setupCard.hidden = this.isXiaomiSetupSuppressed();
         await this.setupCard.load();
+        if (!isCurrent()) return;
         this.updateXiaomiSetupPresentation(this.setupCard.state?.phase || "idle");
+        this.freshXiaomiSnapshotPending = false;
         this.integrationCard.hass = this.hass;
         this.integrationCard.active = this.q("dialog").open;
         mountStableElement(this.q("#setup-cards"), this.integrationCard);
-        this.integrationCard.setSuppressedInteractionIds?.(this.suppressedSetupInteractionIds);
+        this.integrationCard.setSuppressedInteractionIds?.(this.allSuppressedSetupInteractionIds());
         if (afterTurn && typeof this.integrationCard.refresh === "function") await this.integrationCard.refresh();
         else await this.integrationCard.load();
+        if (!isCurrent()) return;
+        if (this.freshSetupSnapshotPending && this.integrationCard.statusError) this.freshSetupSnapshotArmed = false;
         this.pruneActiveSetupSuppressions();
         if (!this.automationCard) {
           this.automationCard = document.createElement("habab-automation-setup");
@@ -740,7 +813,8 @@ function installChat() {
         this.automationCard.sessionId = this.sessionId;
         mountStableElement(this.q("#setup-cards"), this.automationCard);
         await this.automationCard.refresh();
-      } catch (_) { this.status(this.t.setup_ui_unavailable, true); }
+        if (!isCurrent()) return;
+      } catch (_) { if (isCurrent()) this.status(this.t.setup_ui_unavailable, true); }
     }
 
     connectedCallback() {
@@ -877,6 +951,7 @@ function installChat() {
       this.reloadStateProvider = undefined;
       if (this.integrationCard) this.integrationCard.active = false;
       this.historyConnection = undefined;
+      this.historySessionId = undefined;
       this.historyAttempt = undefined;
       this.historyUnsubscribe?.();
       this.historyUnsubscribe = undefined;
@@ -1122,6 +1197,7 @@ function installChat() {
     async connect(fresh = false) {
       if (this.busy || !this.isCurrentOwnerContext()) return;
       if (fresh) {
+        this.setupLoadGeneration += 1;
         this.assistPipelineId = undefined;
         this.assistPipelineChoiceSet = false;
         if (this.openParams) {
@@ -1142,6 +1218,7 @@ function installChat() {
             onActivating: () => this.status(this.t.activatingBeta),
           });
         this.sessionId = result.session_id;
+        this.subscribeVoiceHistory();
         if (this.automationCard) this.automationCard.sessionId = this.sessionId;
         if (fresh) this.captureSetupBaseline();
         else this.restoreSetupBaseline(this.sessionId);
