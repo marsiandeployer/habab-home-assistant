@@ -133,6 +133,15 @@ test("global chat launcher follows the authenticated main element across routes"
     launcher.messages = [{role: "user", text: "Question"}, {role: "assistant", text: "Answer"}];
     launcher.sessionId = "feedback-session";
     launcher.feedbackStates = new Map();
+    const feedbackCopyKeys = [
+      "feedbackPositive", "feedbackNegative", "feedbackPositiveLabel", "feedbackNegativeLabel",
+      "feedbackSending", "feedbackSent", "feedbackSentTruncated", "feedbackSentWithoutTrace",
+      "feedbackNotConfigured", "feedbackPending", "feedbackFailed",
+    ];
+    for (const key of feedbackCopyKeys) {
+      assert.equal(typeof launcher.t[key], "string", `${key} must be provided by the real chat getter`);
+      assert.notEqual(launcher.t[key].trim(), "", `${key} must not be empty`);
+    }
     let feedbackRequests = 0;
     let finishFeedbackRequest;
     launcher.hass.fetchWithAuth = () => {
@@ -141,6 +150,10 @@ test("global chat launcher follows the authenticated main element across routes"
     };
     const controls = launcher.renderAnswerFeedback(1);
     assert.equal(controls.children.length, 2, "each assistant answer has positive and negative buttons");
+    assert.equal(controls.children[0].title, launcher.t.feedbackPositiveLabel);
+    assert.equal(controls.children[0].attributes["aria-label"], launcher.t.feedbackPositiveLabel);
+    assert.equal(controls.children[1].title, launcher.t.feedbackNegativeLabel);
+    assert.equal(controls.children[1].attributes["aria-label"], launcher.t.feedbackNegativeLabel);
     const submission = controls.children[0].onclick();
     await Promise.resolve();
     assert.equal(launcher.renderAnswerFeedback(1).children[0].disabled, true, "both ratings lock while one is pending");
@@ -153,6 +166,8 @@ test("global chat launcher follows the authenticated main element across routes"
     const completedFeedback = launcher.renderAnswerFeedback(1);
     assert.equal(completedFeedback.children[0].disabled, true);
     assert.equal(completedFeedback.children[2].textContent, launcher.t.feedbackSent);
+    assert.equal(typeof completedFeedback.children[2].textContent, "string");
+    assert.notEqual(completedFeedback.children[2].textContent.trim(), "");
     document.createElement = createElement;
     launcher.isCurrentOwnerContext = previousCurrentContext;
     launcher.draw = previousDraw;

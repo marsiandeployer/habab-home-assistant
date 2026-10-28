@@ -293,6 +293,10 @@ function installChat() {
       timeout: "The request timed out. Check the home state before repeating the command.",
     },
   };
+  // Keep the chat's existing local copy, while making newer shared UI strings
+  // (including answer feedback states) available through this component's getter.
+  copy.ru = {...strings.ru, ...copy.ru};
+  copy.en = {...strings.en, ...copy.en};
 
   function installAssistantSplitStyles() {
     if (!document.head || document.getElementById?.("habab-assistant-split-style")) return;
