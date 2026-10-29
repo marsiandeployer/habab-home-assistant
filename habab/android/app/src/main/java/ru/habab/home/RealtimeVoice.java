@@ -49,6 +49,8 @@ final class RealtimeVoice implements AutoCloseable {
     private final long activatedAt;
     private int outputSampleRate = 24000;
     private long speechStoppedAt, outputStartedAt;
+    private long receivedAudioChunks, receivedAudioBytes, maximumAudioChunkGapMs, lastAudioChunkAt;
+    private String lastAudioChunkResponse;
     private boolean uploaded, firstOutput;
     private AudioDeviceInfo lastRoute;
     private AudioDeviceInfo lastSecondaryRoute;
@@ -425,6 +427,10 @@ final class RealtimeVoice implements AutoCloseable {
                 finally { timing("assistant_tool_ms", android.os.SystemClock.elapsedRealtime() - toolStarted); pendingTools.decrementAndGet(); }
             });
         } else if (type.equals("response.output_audio.done")) {
+            // Numeric session totals, once per completed response. No audio or transcript is logged.
+            timing("audio_received_chunks", receivedAudioChunks);
+            timing("audio_received_bytes", receivedAudioBytes);
+            timing("audio_max_chunk_gap_ms", maximumAudioChunkGapMs);
             final int version;
             final String item = event.getString("item_id");
             final String responseId = event.getString("response_id");
@@ -444,7 +450,12 @@ final class RealtimeVoice implements AutoCloseable {
                         }
                     }
                     if (completedIn >= 0) {
-                        flushTranscripts(); timing("audio_to_played_ms", completedIn); listener.completed();
+                        flushTranscripts(); timing("audio_to_played_ms", completedIn);
+                        synchronized (outputLock) {
+                            if (track != null) timing("audio_primary_underruns", track.getUnderrunCount());
+                            if (secondaryTrack != null) timing("audio_secondary_underruns", secondaryTrack.getUnderrunCount());
+                        }
+                        listener.completed();
                         if (gemini != null) toolSession.audioPlayed(responseId);
                         listener.phase(pendingTools.get() > 0 || audioLimitReached(android.os.SystemClock.elapsedRealtime()) ? "thinking" : "listening"); return;
                     }
@@ -482,6 +493,11 @@ final class RealtimeVoice implements AutoCloseable {
             version = generation;
         }
         byte[] sourceAudio = Base64.decode(event.getString("delta"), Base64.DEFAULT);
+        long receivedAt = android.os.SystemClock.elapsedRealtime();
+        if (response.equals(lastAudioChunkResponse))
+            maximumAudioChunkGapMs = Math.max(maximumAudioChunkGapMs, receivedAt - lastAudioChunkAt);
+        lastAudioChunkAt = receivedAt; lastAudioChunkResponse = response;
+        receivedAudioChunks++; receivedAudioBytes += sourceAudio.length;
         byte[] audio = legacyScoSampleRate ? bluetoothOutputResampler.convertPcm16Le(sourceAudio) : sourceAudio;
         long queuedBytes = (long) audio.length * (duplicateOutput ? 2 : 1);
         if ((audio.length & 1) != 0 || queuedAudio.addAndGet(queuedBytes) > 3 * 1024 * 1024) {

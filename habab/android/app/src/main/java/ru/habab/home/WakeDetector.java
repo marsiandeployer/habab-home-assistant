@@ -51,7 +51,13 @@ final class WakeDetector implements AutoCloseable {
             Dictionary dictionary = Native.load("vosk", Dictionary.class);
             for (String word : phrase.split(" "))
                 if (dictionary.vosk_model_find_word(model.getPointer(), word) < 0) throw new IOException("unsupported_wake_word");
-            recognizer = new Recognizer(model, 16000, new JSONArray().put(phrase).put("[unk]").toString());
+            // Vosk estimates a language model from grammar occurrence counts. A single
+            // known phrase otherwise dominates unrelated speech, even with confidence 1.0.
+            // Keep custom phrases unchanged until they have their own labelled evidence.
+            JSONArray grammar = new JSONArray().put(phrase);
+            int unknownCount = phrase.equals("эй дом") ? 16 : 1;
+            for (int i = 0; i < unknownCount; i++) grammar.put("[unk]");
+            recognizer = new Recognizer(model, 16000, grammar.toString());
             recognizer.setWords(true);
             recognizer.setEndpointerMode(Recognizer.EndpointerMode.SHORT);
         } catch (Exception error) { model.close(); throw error; }
