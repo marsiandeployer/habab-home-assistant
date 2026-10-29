@@ -457,6 +457,9 @@ public final class VoiceService extends Service {
                     .put("lastCueCompleted", lastCueCompleted);
             VoiceStatusFile.write(new File(getFilesDir(), "voice-status.json").toPath(),
                     result.toString().getBytes(StandardCharsets.UTF_8));
+            // Bounded Android logcat metadata: prove capture continued during a negative-room test.
+            android.util.Log.i("HababWakeMonitor", "capture_frames=" + frames
+                    + " wake_count=" + wakeCount + " phase=" + status);
         } catch (Exception ignored) { /* Foreground status still reports failure. */ }
     }
 
@@ -548,11 +551,14 @@ public final class VoiceService extends Service {
                         else if (wakeClipActive) wakeClip.clear();
                         wakeClipActive = recordWake;
                         if (detector.accept(samples, count, now)) {
+                            short[] verifiedAudio = detector.consumeVerifiedAudio();
                             long capturedAt = System.currentTimeMillis();
                             if (recordWake) {
                                 File external = getExternalFilesDir(null);
                                 if (external != null) {
-                                    short[] clip = wakeClip.snapshot();
+                                    short[] clip = verifiedAudio == null ? wakeClip.snapshot()
+                                            : java.util.Arrays.copyOfRange(verifiedAudio,
+                                                    Math.max(0, verifiedAudio.length - 8 * 16000), verifiedAudio.length);
                                     long capturedAttempt = detector.lastMatchAttempt();
                                     try {
                                         wakeClipWriter.execute(() -> {
@@ -566,6 +572,7 @@ public final class VoiceService extends Service {
                                     }
                                 }
                             }
+                            if (verifiedAudio != null) java.util.Arrays.fill(verifiedAudio, (short) 0);
                             wakeClip.clear();
                             WakeMatchGate.MatchSource source = detector.lastMatchSource();
                             lastWakeSource = source == null ? "unknown" : source.statusValue();

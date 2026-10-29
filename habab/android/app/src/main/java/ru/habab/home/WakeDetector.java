@@ -20,6 +20,7 @@ final class WakeDetector implements AutoCloseable {
     private final Recognizer recognizer;
     private final String phrase;
     private final WakeMatchGate matchGate;
+    private final WakeVerifier verifier;
     private final VoiceActivityGate gate = new VoiceActivityGate();
     private final Diagnostics diagnostics;
     private final ArrayDeque<short[]> preRoll = new ArrayDeque<>();
@@ -35,6 +36,7 @@ final class WakeDetector implements AutoCloseable {
     private VoiceLifecycleTrace.Reason lastResetReason;
     private WakeMatchGate.MatchSource lastMatchSource;
     private long lastMatchAttempt;
+    private short[] verifiedAudio;
 
     static String normalize(String value) {
         return WakeMatchGate.normalize(value);
@@ -47,6 +49,7 @@ final class WakeDetector implements AutoCloseable {
         matchGate = new WakeMatchGate(phrase);
         LibVosk.vosk_set_log_level(-1);
         model = new Model(directory);
+        Recognizer created = null;
         try {
             Dictionary dictionary = Native.load("vosk", Dictionary.class);
             for (String word : phrase.split(" "))
@@ -57,14 +60,19 @@ final class WakeDetector implements AutoCloseable {
             JSONArray grammar = new JSONArray().put(phrase);
             int unknownCount = phrase.equals("эй дом") ? 16 : 1;
             for (int i = 0; i < unknownCount; i++) grammar.put("[unk]");
-            recognizer = new Recognizer(model, 16000, grammar.toString());
+            recognizer = created = new Recognizer(model, 16000, grammar.toString());
             recognizer.setWords(true);
             recognizer.setEndpointerMode(Recognizer.EndpointerMode.SHORT);
-        } catch (Exception error) { model.close(); throw error; }
+            verifier = phrase.equals(WakeVerifier.DEFAULT_PHRASE) ? new WakeVerifier(model) : null;
+        } catch (Exception | LinkageError error) {
+            if (created != null) created.close();
+            model.close(); throw error;
+        }
     }
 
     boolean accept(short[] samples, int count, long now) throws Exception {
         lastMatchSource = null;
+        if (pollVerification(now)) return true;
         lastRmsPcm16 = rmsPcm16(samples, count);
         boolean speech = gate.speech(samples, count);
         boolean detected = false;
@@ -106,6 +114,7 @@ final class WakeDetector implements AutoCloseable {
 
     private boolean acceptFrame(short[] samples, int count, long now, int vadSpeech, int rms) throws Exception {
         recognizerHasInput = true;
+        if (verifier != null) verifier.append(samples, count);
         if (!recognizer.acceptWaveForm(samples, count)) {
             samplePartial(now, rms, vadSpeech);
             return false;
@@ -128,6 +137,13 @@ final class WakeDetector implements AutoCloseable {
         boolean detected = confidenceAccepted && matchGate.accept(text, kind);
         record(VoiceLifecycleTrace.Event.WAKE_FINAL, reason, now, rms, vadSpeech,
                 -1, exact ? 1 : 0, confidence);
+        if (detected && verifier != null) {
+            WakeVerifier.Result immediate = verifier.submit(result,
+                    new WakeVerifier.Context(currentAttempt, attemptStartedAt, matchGate.matchSource(),
+                            rms, vadSpeech, confidence));
+            if (immediate != null) recordVerification(immediate, now);
+            return false;
+        }
         if (detected) {
             lastMatchSource = matchGate.matchSource();
             lastMatchAttempt = currentAttempt;
@@ -140,6 +156,38 @@ final class WakeDetector implements AutoCloseable {
                     exact && !confidenceAccepted ? minimumConfidence : confidence);
         }
         return detected;
+    }
+
+    /** Poll without submitting synthetic audio; also used by native replay drain. */
+    boolean hasPendingVerification() { return verifier != null && verifier.hasPending(); }
+
+    boolean pollVerification(long now) {
+        if (verifier == null) return false;
+        WakeVerifier.Result result = verifier.poll();
+        if (result == null) return false;
+        recordVerification(result, now);
+        if (!result.accepted()) return false;
+        lastMatchSource = result.context.source;
+        lastMatchAttempt = result.context.attempt;
+        verifiedAudio = result.acceptedAudio;
+        return true;
+    }
+
+    /** Caller consumes even when opt-in clip recording is disabled. */
+    short[] consumeVerifiedAudio() {
+        short[] audio = verifiedAudio; verifiedAudio = null; return audio;
+    }
+
+    private void recordVerification(WakeVerifier.Result result, long now) {
+        android.util.Log.i("HababWakeVerify", "outcome=" + result.outcome.name()
+                + " elapsed_ms=" + result.elapsedMs + " decoded_frames=" + (result.decodedSamples / 320));
+        WakeVerifier.Context context = result.context;
+        diagnostics.record(result.accepted() ? VoiceLifecycleTrace.Event.WAKE_ACCEPTED : VoiceLifecycleTrace.Event.WAKE_REJECTED,
+                result.accepted() ? VoiceLifecycleTrace.Reason.EXACT_FINAL
+                        : result.outcome == WakeVerifier.Outcome.ERROR ? VoiceLifecycleTrace.Reason.VERIFIER_ERROR
+                        : VoiceLifecycleTrace.Reason.VERIFIER_REJECTED,
+                context.attempt, now, context.rms, context.vadSpeech, -1, 1, context.confidence,
+                context.attemptStartedAt == 0 ? -1 : Math.max(0, now - context.attemptStartedAt));
     }
 
     private void samplePartial(long now, int rms, int vadSpeech) throws Exception {
@@ -218,8 +266,14 @@ final class WakeDetector implements AutoCloseable {
 
     void reset(long now, VoiceLifecycleTrace.Reason reason) {
         lastMatchSource = null;
+        verifiedAudio = null;
         resetRecognizer(reason, now, lastRmsPcm16, wasSpeech ? 1 : 0);
         preRoll.clear(); wasSpeech = false;
+        if (verifier != null) verifier.clearAudio();
     }
-    @Override public void close() { recognizer.close(); model.close(); }
+    @Override public void close() {
+        verifiedAudio = null;
+        if (verifier != null) verifier.close();
+        recognizer.close(); model.close();
+    }
 }
