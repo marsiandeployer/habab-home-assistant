@@ -1,7 +1,7 @@
 """Authenticated, bounded Gemini API transport for the owner's Android installation.
 
 No HA access, model substitution, public demo context, or credential logging.
-Habab credentials are hashed; Google credentials remain process-memory only.
+Habab credentials are hashed; Operator credentials stay in the private relay configuration across restarts.
 """
 import argparse
 import asyncio
@@ -18,6 +18,7 @@ import socket
 import stat
 import struct
 import time
+import tempfile
 from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, ClientResponseError, ClientTimeout, ClientWSTimeout, WSMsgType, web
@@ -103,7 +104,7 @@ async def redacted_stream(content, secret, max_bytes):
 class Gateway:
     def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
                  browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2,
-                 demo_openai_session_window_seconds=86400, beta_codes=None, voice_service_key=None):
+                 demo_openai_session_window_seconds=86400, beta_codes=None, voice_service_key=None, credential_store=None):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         if not isinstance(browser_origins, (list, tuple, set, frozenset)):
@@ -124,6 +125,7 @@ class Gateway:
                      or any(not 0x21 <= ord(char) <= 0x7e for char in voice_service_key))):
             raise ValueError('Invalid voice relay service credential')
         self.voice_service_key = voice_service_key
+        self.credential_store = credential_store
         self.upstream_key = upstream_key
         self.text_upstream_key = text_upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
@@ -295,7 +297,7 @@ class Gateway:
             await self.client.close()
 
     async def enroll(self, reader, writer):
-        """Local operator enrollment: keep the upstream credential only in memory."""
+        """Accept a local operator credential; production persists it privately."""
         try:
             peer = writer.get_extra_info('socket')
             _, uid, _ = struct.unpack('3i', peer.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
@@ -338,6 +340,8 @@ class Gateway:
                 raise ValueError('Invalid enrollment purpose')
             if not isinstance(key, str) or not 8 <= len(key) <= 2048 or any(ord(c) < 33 or ord(c) > 126 for c in key):
                 raise ValueError('Invalid enrollment')
+            if self.credential_store is not None:
+                self.credential_store(purpose, key)
             if purpose == 'text':
                 self.text_upstream_key = key
             else:
@@ -1123,7 +1127,28 @@ def load_private_config(config_path):
         if (not isinstance(key, str) or not 1 <= len(key) <= 2048 or not key.isascii()
                 or any(not 0x21 <= ord(char) <= 0x7e for char in key)):
             raise ValueError('private_config_invalid')
+    keys = config.get('upstream_keys', {})
+    if (not isinstance(keys, dict) or set(keys) - {'voice', 'text'}
+            or any(not isinstance(key, str) or not 8 <= len(key) <= 2048
+                   or any(not 33 <= ord(c) <= 126 for c in key) for key in keys.values())):
+        raise ValueError('private_config_invalid')
     return config
+
+
+def persist_upstream(config_path, purpose, key):
+    """Keep operator credentials in the existing private config across restarts."""
+    config = load_private_config(config_path)
+    config.setdefault('upstream_keys', {})[purpose] = key
+    descriptor, filename = tempfile.mkstemp(prefix='.credentials-', dir=Path(config_path).parent)
+    temporary = Path(filename)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as out:
+            json.dump(config, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, config_path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -1135,6 +1160,9 @@ def main():
     except (OSError, ValueError, TypeError):
         parser.error('private_config_invalid')
     gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock',
+                      upstream_key=config.get('upstream_keys', {}).get('voice'),
+                      text_upstream_key=config.get('upstream_keys', {}).get('text'),
+                      credential_store=lambda purpose, key: persist_upstream(args.config, purpose, key),
                       beta_codes=BetaCodes(config.get('beta_config') or os.environ.get('HABAB_BETA_CONFIG')),
                       browser_origins=config.get('browser_origins', []),
                       demo_openai_session_limit=config.get('demo_openai_session_limit', 5),

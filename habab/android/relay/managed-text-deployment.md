@@ -42,11 +42,10 @@ credential accepted by the existing voice relay. It is read only from that
 private config and is never forwarded to clients or logged.
 
 Enroll the managed DeepSeek upstream key for `purpose=text` through that
-process's control socket so it remains in RAM. Do not share the voice process's
-config, socket, or Google upstream key. Restarting the managed text process
-clears its DeepSeek key from RAM; load it again through that process's own
-control socket after any restart. The current service-key hash/config are
-private state and must be provisioned with the existing owner workflow.
+process's control socket. Production persists it atomically in `upstream_keys`
+in its existing private config (directory 0700, file 0600), and restores it
+on startup. Do not share the voice process's config, socket, or Google key.
+No upstream credential is exposed through PM2 arguments or environment.
 
 Disabling `issue_codes_enabled` makes `/beta/enroll` return the existing 403
 response for new enrollments. It does not revoke hb1 codes already issued. The

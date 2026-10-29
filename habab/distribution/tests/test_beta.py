@@ -266,6 +266,26 @@ class BetaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store_data, {"installation_id": INSTALLATION_ID})
         self.agent.select_provider.assert_not_called()
 
+    async def test_manual_habab_flow_generates_own_code_for_empty_or_arbitrary_key(self):
+        for supplied in (None, "", "anything"):
+            with self.subTest(supplied=supplied):
+                flow = config_flow.HababHomeConfigFlow()
+                flow.hass = self.hass
+                flow.context = {}
+                flow.async_set_unique_id = AsyncMock()
+                flow._async_current_entries = Mock(return_value=[])
+                flow.async_create_entry = Mock(side_effect=lambda title, data: {"type": "create_entry", "data": data})
+                data = {"provider": "habab", "model": beta.PROVIDERS["habab"]["model"]}
+                if supplied is not None:
+                    data["api_key"] = supplied
+                with patch.object(config_flow, "ProviderClient") as provider, patch.object(
+                        config_flow, "async_get_clientsession", return_value=self.session):
+                    provider.return_value.check = AsyncMock()
+                    result = await flow.async_step_user(data)
+                self.assertEqual(result["data"]["api_key"], CODE)
+                self.assertNotEqual(data.get("api_key"), CODE)
+                provider.return_value.check.assert_awaited_once()
+
     async def test_activation_composes_with_real_native_config_flow_check(self):
         native_flow = config_flow.HababHomeConfigFlow()
         native_flow.hass = self.hass

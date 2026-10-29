@@ -9,6 +9,7 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from .beta import BetaError, _installation_id, _enroll
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
 from .providers import PROVIDERS, ProviderClient, ProviderError, validate_settings
@@ -23,8 +24,15 @@ class HababHomeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
+                user_input = dict(user_input)
+                if user_input.get("provider") == "habab" and not self.context.get("habab_beta_enrollment"):
+                    # Habab owns activation; arbitrary user text is never a provider secret.
+                    installation_id = await _installation_id(self.hass)
+                    user_input["api_key"] = await _enroll(async_get_clientsession(self.hass), installation_id)
                 settings = validate_settings(user_input)
                 await ProviderClient(async_get_clientsession(self.hass), settings).check()
+            except BetaError:
+                errors["base"] = "cannot_connect"
             except ProviderError as err:
                 errors["base"] = err.code
             else:
@@ -49,7 +57,7 @@ class HababHomeConfigFlow(ConfigFlow, domain=DOMAIN):
                 probatio.Required("provider"): SelectSelector(SelectSelectorConfig(
                     options=[{"value": k, "label": v["name"]} for k, v in PROVIDERS.items()],
                 )),
-                probatio.Required("api_key"): TextSelector(TextSelectorConfig(
+                probatio.Optional("api_key"): TextSelector(TextSelectorConfig(
                     type=TextSelectorType.PASSWORD,
                 )),
                 probatio.Required("model"): str,

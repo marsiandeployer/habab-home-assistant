@@ -312,7 +312,7 @@ class HababAIPanel extends HTMLElement {
     }
     this.q("#model").readOnly = modelPresentation.readOnly;
     this.q("#model").required = (modelPresentation.required ?? true) && !firstHababConnection;
-    this.q("#key").required = !firstHababConnection;
+    this.q("#key").required = this.provider !== "habab";
     this.q("#model").placeholder = modelPresentation.placeholder || "";
     this.q("#model-label").textContent = modelPresentation.label || this.t("model");
     this.q("#model-help").textContent = modelPresentation.help || this.t("modelHelp");

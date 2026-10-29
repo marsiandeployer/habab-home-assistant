@@ -16,10 +16,23 @@ from aiohttp.client_exceptions import WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer
 
 from beta_codes import BetaCodes, create_config
-from openai_gateway import Gateway, load_private_config
+from openai_gateway import Gateway, load_private_config, persist_upstream
 
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
+    def test_operator_credentials_survive_config_reload_and_preserve_other_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'relay.json'
+            path.write_text(json.dumps({'key_sha256': 'a' * 64, 'port': 18328}))
+            path.chmod(0o600)
+            persist_upstream(path, 'text', 'synthetic-text-key')
+            persist_upstream(path, 'voice', 'synthetic-voice-key')
+            restored = load_private_config(path)
+            self.assertEqual(restored['upstream_keys'], {'text': 'synthetic-text-key', 'voice': 'synthetic-voice-key'})
+            self.assertEqual(restored['port'], 18328)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ['relay.json'])
+
     def test_private_config_accepts_optional_voice_service_key_only_from_private_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'relay.json'

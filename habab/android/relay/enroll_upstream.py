@@ -1,4 +1,4 @@
-"""Enroll an upstream credential from bounded private stdin; never save or echo it."""
+"""Enroll an upstream credential from bounded private stdin; never echo it."""
 import argparse
 import json
 import socket
@@ -28,7 +28,7 @@ def main():
             result = json.loads(response.readline(513))
     if result != {'enrolled': True}:
         raise ValueError('Upstream enrollment rejected')
-    print(json.dumps({'enrolled': True, 'storage': 'process_memory'}))
+    print(json.dumps({'enrolled': True, 'storage': 'relay_managed'}))
 
 
 if __name__ == '__main__':
