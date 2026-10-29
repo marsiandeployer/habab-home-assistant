@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 from aiohttp import ClientSession, ClientResponseError, ClientTimeout, ClientWSTimeout, WSMsgType, web
 
 from beta_codes import BetaCodes
+from usage_stats import UsageJournal, StreamUsage, token_counts
 from telegram_speech import capability as speech_capability, telegram_voice_capability, register_routes as register_speech_routes
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,7 @@ async def redacted_stream(content, secret, max_bytes):
 class Gateway:
     def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
                  browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2,
-                 demo_openai_session_window_seconds=86400, beta_codes=None, voice_service_key=None, credential_store=None):
+                 demo_openai_session_window_seconds=86400, beta_codes=None, voice_service_key=None, credential_store=None, usage_journal=None):
         if len(key_hash) != 64:
             raise ValueError('Expected an enrolled project key hash')
         if not isinstance(browser_origins, (list, tuple, set, frozenset)):
@@ -125,6 +126,7 @@ class Gateway:
                      or any(not 0x21 <= ord(char) <= 0x7e for char in voice_service_key))):
             raise ValueError('Invalid voice relay service credential')
         self.voice_service_key = voice_service_key
+        self.usage_journal = usage_journal
         self.credential_store = credential_store
         self.upstream_key = upstream_key
         self.text_upstream_key = text_upstream_key
@@ -616,6 +618,9 @@ class Gateway:
         upstream_body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         self.inflight += 1
         result = None
+        usage = StreamUsage()
+        outcome = "failed"
+        started = time.monotonic()
         try:
             async with self.client.post(DEEPSEEK_CHAT_COMPLETIONS,
                     headers={'Authorization': 'Bearer ' + upstream_key, 'Content-Type': 'application/json'},
@@ -628,9 +633,13 @@ class Gateway:
                     await result.prepare(request)
                     try:
                         async for block in redacted_stream(response.content, upstream_key.encode(), 16 * 1024 * 1024):
+                            usage.feed(block)
                             await result.write(block)
                     except ValueError:
+                        outcome = 'response_too_large'
                         await result.write(b'data: {"error":{"code":"relay_response_too_large"}}\n\n')
+                    else:
+                        outcome = 'ok'
                     await result.write_eof()
                     return result
                 response_body = bytearray()
@@ -638,6 +647,13 @@ class Gateway:
                     response_body.extend(block)
                     if len(response_body) > 8 * 1024 * 1024:
                         return web.json_response({'error': {'code': 'relay_response_too_large'}}, status=502)
+                if response.status == 200:
+                    outcome = 'ok'
+                    try:
+                        decoded = json.loads(response_body)
+                        usage.usage = token_counts(decoded.get('usage')) if isinstance(decoded, dict) else None
+                    except (ValueError, UnicodeError, RecursionError):
+                        outcome = 'invalid_response'
                 safe = bytes(response_body).replace(upstream_key.encode(), b'[redacted]')
                 return web.Response(body=safe, status=response.status, headers=headers)
         except asyncio.CancelledError:
@@ -662,6 +678,13 @@ class Gateway:
             return web.json_response({'error': {'code': 'relay_upstream_unavailable'}}, status=502)
         finally:
             self.inflight -= 1
+            if self.usage_journal is not None:
+                try:
+                    self.usage_journal.record(installation=digest, provider=DEEPSEEK_TEXT_PROVIDER,
+                        model=DEEPSEEK_TEXT_MODEL, status=outcome,
+                        elapsed_ms=int((time.monotonic() - started) * 1000), usage=usage.usage)
+                except Exception:
+                    logger.error('usage_statistics_write_failed')
 
     async def telegram(self, request):
         auth_values = request.headers.getall('Authorization', [])
@@ -816,6 +839,22 @@ class Gateway:
                                  headers={'Cache-Control': 'no-store'})
 
     async def proxied_gemini_bootstrap(self, request, service_key):
+        started = time.monotonic()
+        status = 'failed'
+        try:
+            result = await self._proxied_gemini_bootstrap(request, service_key)
+            status = 'ok' if result.status == 200 else 'failed'
+            return result
+        finally:
+            if self.usage_journal is not None:
+                try:
+                    self.usage_journal.record(installation=hashlib.sha256(service_key.encode()).hexdigest(),
+                        provider='gemini', model=GEMINI_MODEL, channel='voice_activation', status=status,
+                        elapsed_ms=int((time.monotonic() - started) * 1000))
+                except Exception:
+                    logger.error('usage_statistics_write_failed')
+
+    async def _proxied_gemini_bootstrap(self, request, service_key):
         if request.content_type != 'application/json':
             return self._voice_error('relay_invalid_model_or_setup', 400)
         if request.content_length is not None and request.content_length > VOICE_BOOTSTRAP_WIRE_MAX:
@@ -1163,6 +1202,7 @@ def main():
                       upstream_key=config.get('upstream_keys', {}).get('voice'),
                       text_upstream_key=config.get('upstream_keys', {}).get('text'),
                       credential_store=lambda purpose, key: persist_upstream(args.config, purpose, key),
+                      usage_journal=UsageJournal(args.config.parent / 'usage'),
                       beta_codes=BetaCodes(config.get('beta_config') or os.environ.get('HABAB_BETA_CONFIG')),
                       browser_origins=config.get('browser_origins', []),
                       demo_openai_session_limit=config.get('demo_openai_session_limit', 5),
