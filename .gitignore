@@ -83,3 +83,9 @@ test/benchmarks/results/
 
 # Generated Android delivery files; source lives in habab/android/.
 /habab/public/downloads/android/
+
+# Private wake recordings and local benchmark evidence; keep audio outside Git.
+**/wake-clips/
+**/habab-wake-benchmark/
+wake-*.wav
+wake-*.wav.review
