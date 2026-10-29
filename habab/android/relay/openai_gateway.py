@@ -103,6 +103,55 @@ async def redacted_stream(content, secret, max_bytes):
         yield pending.replace(secret, b'[redacted]')
 
 
+
+def trace_gemini_wire(raw, state):
+    """Opt-in bounded event metadata only; never log payloads, transcripts or provider IDs."""
+    try:
+        frame = json.loads(raw)
+        if not isinstance(frame, dict):
+            return
+        now = time.monotonic()
+        content = frame.get('serverContent')
+        content = content if isinstance(content, dict) else {}
+        model = content.get('modelTurn')
+        model = model if isinstance(model, dict) else {}
+        parts = model.get('parts', [])
+        for part in parts if isinstance(parts, list) else []:
+            if not isinstance(part, dict) or not isinstance(part.get('inlineData'), dict):
+                continue
+            state['audio_chunks'] = state.get('audio_chunks', 0) + 1
+            if state.get('last_audio_at') is not None:
+                state['max_audio_gap_ms'] = max(state.get('max_audio_gap_ms', 0),
+                                                round((now - state['last_audio_at']) * 1000))
+            state['last_audio_at'] = now
+            if part.get('thought') is True:
+                state['thought_audio_chunks'] = state.get('thought_audio_chunks', 0) + 1
+        activity = frame.get('voiceActivity')
+        activity = activity if isinstance(activity, dict) else {}
+        flags = [name for name, active in (
+            ('setup', 'setupComplete' in frame),
+            ('vad_start', activity.get('type') == 'ACTIVITY_START'),
+            ('vad_end', activity.get('type') == 'ACTIVITY_END'),
+            ('interrupted', content.get('interrupted') is True),
+            ('generation_complete', content.get('generationComplete') is True),
+            ('turn_complete', content.get('turnComplete') is True),
+            ('tool_call', isinstance(frame.get('toolCall'), dict)),
+        ) if active]
+        if flags and state.get('events', 0) < 128:
+            state['events'] = state.get('events', 0) + 1
+            print('HababVoiceWire ' + json.dumps({
+                'session': state['session'], 'at_ms': round(time.time() * 1000),
+                'events': flags, 'audio_chunks': state.get('audio_chunks', 0),
+                'max_audio_gap_ms': state.get('max_audio_gap_ms', 0),
+                'thought_audio_chunks': state.get('thought_audio_chunks', 0),
+            }, separators=(',', ':')), flush=True)
+        if content.get('turnComplete') is True:
+            for key in ('audio_chunks', 'last_audio_at', 'max_audio_gap_ms', 'thought_audio_chunks'):
+                state.pop(key, None)
+    except (ValueError, TypeError, KeyError, OSError):
+        pass  # Diagnostics never change the wire protocol or fail a conversation.
+
+
 class Gateway:
     def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
                  browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2,
@@ -128,6 +177,7 @@ class Gateway:
             raise ValueError('Invalid voice relay service credential')
         self.voice_service_key = voice_service_key
         self.provider_health = None
+        self.voice_diagnostics = False
         self.usage_journal = usage_journal
         self.credential_store = credential_store
         self.upstream_key = upstream_key
@@ -1084,10 +1134,13 @@ class Gateway:
                                if browser_mode else first.data)
                 await upstream.send_str(setup_frame)
 
+                wire_trace = {'session': secrets.token_hex(6)}
                 async def relay(source, target, *, from_upstream=False):
                     total = 0
                     async for message in source:
                         if message.type == WSMsgType.TEXT:
+                            if from_upstream and self.voice_diagnostics:
+                                trace_gemini_wire(message.data, wire_trace)
                             total += len(message.data.encode())
                             if total > 16 * 1024 * 1024:
                                 break
@@ -1243,6 +1296,7 @@ def main():
                       demo_openai_sessions_per_session=config.get('demo_openai_sessions_per_session', 2),
                       demo_openai_session_window_seconds=config.get('demo_openai_session_window_seconds', 86400),
                       voice_service_key=config.get('voice_service_key'))
+    gateway.voice_diagnostics = config.get('voice_diagnostics') is True
     provider = 'deepseek' if gateway.voice_service_key else 'gemini'
     model = DEEPSEEK_TEXT_MODEL if provider == 'deepseek' else GEMINI_MODEL
     gateway.provider_health = ProviderHealth(provider, model, args.config.parent / 'health-state.json',
