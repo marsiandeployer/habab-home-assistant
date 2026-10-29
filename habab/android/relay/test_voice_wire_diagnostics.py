@@ -17,6 +17,13 @@ class VoiceWireDiagnosticsTests(unittest.TestCase):
         self.assertEqual(record['audio_chunks'], 1)
         self.assertNotIn('private-', line)
 
+    def test_binary_json_frames_are_observed_without_payloads(self):
+        with patch('builtins.print') as output:
+            trace_gemini_wire(b'{"setupComplete":{},"ignored":"private-token"}',
+                              {'session': 'synthetic-trace'})
+        self.assertIn('setup', output.call_args.args[0])
+        self.assertNotIn('private-token', output.call_args.args[0])
+
     def test_audio_counts_reset_only_at_turn_complete_and_no_per_chunk_logging(self):
         state = {'session': 'synthetic-trace'}
         audio = {'serverContent': {'modelTurn': {'parts': [{'thought': True, 'inlineData': {}}]}}}

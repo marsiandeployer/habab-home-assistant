@@ -1146,6 +1146,8 @@ class Gateway:
                                 break
                             await target.send_str(message.data)
                         elif message.type == WSMsgType.BINARY:
+                            if from_upstream and self.voice_diagnostics:
+                                trace_gemini_wire(message.data, wire_trace)
                             total += len(message.data)
                             if total > 16 * 1024 * 1024:
                                 break
