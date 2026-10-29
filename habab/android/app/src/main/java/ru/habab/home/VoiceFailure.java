@@ -9,7 +9,7 @@ import java.util.Set;
 /** Only known codes cross from HTTP/native exceptions into status, UI or disk. */
 final class VoiceFailure extends IOException {
     private static final Set<String> CODES = new HashSet<>(Arrays.asList(
-            "openai_required", "provider_required", "realtime_provider_required", "realtime_provider_rejected", "realtime_unavailable",
+            "openai_required", "provider_required", "realtime_provider_required", "realtime_provider_rejected", "realtime_unavailable", "habab_voice_not_ready",
             "invalid_realtime_response", "unsupported_voice_protocol", "voice_history_protocol_required", "not_allowed", "invalid_voice_settings", "voice_rate_limited",
             "invalid_voice_turn", "empty_assistant_reply", "voice_authorization_required",
             "voice_authorization_expired", "voice_authorization_not_saved", "invalid_voice_authorization",

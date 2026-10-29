@@ -355,6 +355,7 @@ public final class VoiceService extends Service {
             case "openai_required": case "provider_required": case "realtime_provider_required": text = R.string.voice_error_provider; break;
             case "voice_authorization_required": case "voice_authorization_expired": case "not_allowed":
             case "invalid_voice_authorization": case "voice_authorization_not_saved": text = R.string.voice_error_auth; break;
+            case "habab_voice_not_ready": text = R.string.voice_error_habab_not_ready; break;
             case "realtime_provider_rejected": text = R.string.voice_error_rejected; break;
             case "voice_rate_limited": text = R.string.voice_error_limit; break;
             case "unsupported_wake_word": case "invalid_wake_phrase": text = R.string.voice_error_phrase; break;

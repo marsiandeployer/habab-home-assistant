@@ -426,6 +426,23 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lease['history_epoch'], 2)
         self.assertEqual(lease['provider'], 'gemini')
 
+    async def test_native_habab_reports_server_outage_without_blame_on_user_key(self):
+        for status, code in [(503, 'habab_voice_not_ready'), (429, 'voice_rate_limited')]:
+            with self.subTest(status=status):
+                owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+                assistant = SimpleNamespace(record_voice_event=AsyncMock(), voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 4}))
+                request = Request(owner, {'client': 'native_v2'}, assistant)
+                request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+                    'provider': 'habab', 'api_key': 'synthetic-selected-habab', 'model': 'habab-chat'})
+                response = SimpleNamespace(status=status, json=AsyncMock())
+                client = SimpleNamespace(post=Mock(return_value=AsyncContext(response)))
+                with patch.object(realtime, 'voice_context', return_value={'time_zone': 'UTC', 'states': []}), \
+                        patch.object(realtime, 'async_get_clientsession', return_value=client):
+                    result = await realtime.RealtimeSessionView().post(request)
+                self.assertEqual(result.status, status)
+                self.assertEqual(json.loads(result.body)['message'], code)
+                response.json.assert_not_awaited()
+
     async def test_browser_habab_bootstrap_uses_relay_and_creates_bound_voice2_lease(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         history = {'session_id': None, 'epoch': 4}

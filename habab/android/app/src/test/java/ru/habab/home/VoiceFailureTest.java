@@ -7,6 +7,7 @@ import static org.junit.Assert.*;
 
 public class VoiceFailureTest {
     @Test public void preservesSafeBackendReasonThroughBothNativeLayers() {
+        assertEquals("habab_voice_not_ready", VoiceFailure.code(VoiceFailure.fromHttp(503, "habab_voice_not_ready")));
         VoiceFailure failure = VoiceFailure.fromHttp(400, "openai_required");
         assertEquals("openai_required", VoiceFailure.code(failure));
         assertEquals("realtime_provider_rejected", VoiceFailure.code(VoiceFailure.fromHttp(502, "realtime_provider_rejected")));

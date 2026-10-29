@@ -91,6 +91,7 @@
     <string name="voice_error">Голос недоступен. Откройте настройки помощника.</string>
     <string name="voice_error_provider">Для голоса выберите Habab или OpenAI в разделе AI. Текущий провайдер не поддерживает Realtime.</string>
     <string name="voice_error_auth">Нет доступа к серверу. Войдите в умный дом и снова подключите голос к аккаунту.</string>
+    <string name="voice_error_habab_not_ready">Голосовой сервис Habab сейчас недоступен на сервере. Попробуйте подключиться позже. Ключ на телефоне вводить не нужно.</string>
     <string name="voice_error_rejected">Сервис голоса отклонил подключение. Проверьте доступ к Realtime и регион учётной записи.</string>
     <string name="voice_error_limit">Сервис голоса ограничил запросы. Проверьте лимит и повторите позже.</string>
     <string name="voice_error_phrase">Фраза не поддерживается локальным словарём. Выберите другие слова.</string>

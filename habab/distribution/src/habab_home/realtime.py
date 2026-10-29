@@ -540,6 +540,10 @@ class RealtimeSessionView(HomeAssistantView):
                     json={"model": model, "setup": setup},
                     timeout=ClientTimeout(total=25), allow_redirects=False,
                 ) as response:
+                    if response.status == 503:
+                        return self.json_message("habab_voice_not_ready", status_code=503)
+                    if response.status == 429:
+                        return self.json_message("voice_rate_limited", status_code=429)
                     if response.status != 200:
                         return self.json_message("realtime_provider_rejected", status_code=502)
                     relay = await response.json()
