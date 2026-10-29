@@ -25,6 +25,7 @@ from aiohttp import ClientSession, ClientResponseError, ClientTimeout, ClientWST
 
 from beta_codes import BetaCodes
 from usage_stats import UsageJournal, StreamUsage, token_counts
+from provider_health import ProviderHealth
 from telegram_speech import capability as speech_capability, telegram_voice_capability, register_routes as register_speech_routes
 
 logger = logging.getLogger(__name__)
@@ -126,6 +127,7 @@ class Gateway:
                      or any(not 0x21 <= ord(char) <= 0x7e for char in voice_service_key))):
             raise ValueError('Invalid voice relay service credential')
         self.voice_service_key = voice_service_key
+        self.provider_health = None
         self.usage_journal = usage_journal
         self.credential_store = credential_store
         self.upstream_key = upstream_key
@@ -276,6 +278,7 @@ class Gateway:
     async def lifecycle(self, app):
         self.client = ClientSession(timeout=ClientTimeout(total=60), trust_env=False)
         control = None
+        health_task = None
         try:
             if self.control_socket:
                 if self.control_socket.exists():
@@ -285,8 +288,14 @@ class Gateway:
                     self.control_socket.unlink()
                 control = await asyncio.start_unix_server(self.enroll, path=str(self.control_socket), limit=4096)
                 self.control_socket.chmod(0o600)
+            if self.provider_health is not None:
+                key = (lambda: self.text_upstream_key) if self.voice_service_key else (lambda: self.upstream_key)
+                health_task = asyncio.create_task(self.provider_health.run(self.client, key))
             yield
         finally:
+            if health_task is not None:
+                health_task.cancel()
+                await asyncio.gather(health_task, return_exceptions=True)
             if control:
                 control.close()
                 await control.wait_closed()
@@ -520,6 +529,22 @@ class Gateway:
     async def health(self, request):
         return web.json_response({'service': 'habab-voice-relay', 'ok': True, 'upstreamReady': self.upstream_key is not None})
 
+    async def readiness(self, request):
+        own = (self.provider_health.snapshot() if self.provider_health is not None else
+               {'ready': False, 'reason': 'not_checked'})
+        checks = {'text' if self.voice_service_key else 'voice': own}
+        if self.voice_service_key:
+            try:
+                async with self.client.get('http://127.0.0.1:8326/health/ready',
+                        timeout=ClientTimeout(total=3)) as response:
+                    other = await response.json()
+                    checks['voice'] = other.get('checks', {}).get('voice', {'ready': False, 'reason': 'invalid_health_response'})
+            except Exception:
+                checks['voice'] = {'ready': False, 'reason': 'voice_relay_unavailable'}
+        ready = all(value.get('ready') is True for value in checks.values())
+        return web.json_response({'service': 'habab-ai', 'ready': ready, 'checks': checks},
+                                 status=200 if ready else 503, headers={'Cache-Control': 'no-store'})
+
     async def capabilities(self, request):
         secret, digest = self.authorization(request)
         if not self.owner(digest, token=secret):
@@ -626,6 +651,8 @@ class Gateway:
                     headers={'Authorization': 'Bearer ' + upstream_key, 'Content-Type': 'application/json'},
                     data=upstream_body, allow_redirects=False,
                     timeout=ClientTimeout(total=120, sock_read=60)) as response:
+                if self.provider_health is not None:
+                    self.provider_health.observe_http(response.status)
                 headers = {'Content-Type': response.headers.get('Content-Type', 'application/json'),
                            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
                 if streaming and response.status == 200:
@@ -812,6 +839,12 @@ class Gateway:
         try:
             async with self.client.post(GEMINI_TOKEN_URL, headers={'x-goog-api-key': self.upstream_key},
                                         json=token_request, allow_redirects=False) as response:
+                if self.provider_health is not None:
+                    self.provider_health.observe_http(response.status)
+                if response.status == 429:
+                    return self._voice_error('relay_voice_busy', 429)
+                if response.status in (401, 403):
+                    return self._voice_error('habab_upstream_not_ready', 503)
                 if response.status != 200:
                     return web.json_response({'error': {'code': 'relay_upstream_unavailable'}}, status=502)
                 token_payload = await response.content.read(TOKEN_RESPONSE_MAX + 1)
@@ -1117,6 +1150,7 @@ class Gateway:
         self.beta_codes.register_routes(app)
         register_speech_routes(app, self)
         app.router.add_get('/health', self.health)
+        app.router.add_get('/health/ready', self.readiness)
         app.router.add_get('/v1/capabilities', self.capabilities)
         app.router.add_route('*', '/text/capabilities', self.text_capabilities)
         app.router.add_route('*', '/v1/models', self.text_models)
@@ -1209,6 +1243,10 @@ def main():
                       demo_openai_sessions_per_session=config.get('demo_openai_sessions_per_session', 2),
                       demo_openai_session_window_seconds=config.get('demo_openai_session_window_seconds', 86400),
                       voice_service_key=config.get('voice_service_key'))
+    provider = 'deepseek' if gateway.voice_service_key else 'gemini'
+    model = DEEPSEEK_TEXT_MODEL if provider == 'deepseek' else GEMINI_MODEL
+    gateway.provider_health = ProviderHealth(provider, model, args.config.parent / 'health-state.json',
+        notify_command=config.get('health_notify_command', []), recipient=config.get('health_notify_recipient'))
     web.run_app(gateway.app(), host='127.0.0.1', port=config.get('port', 8326), access_log=None, print=None, handler_cancellation=True)
 
 
