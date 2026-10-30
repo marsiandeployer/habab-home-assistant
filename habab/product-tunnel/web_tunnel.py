@@ -24,6 +24,9 @@ MAX_BODY = 32 * 1024 * 1024
 MAX_WS = 8 * 1024 * 1024
 MAX_STREAMS = 16
 MAX_TOTAL = 128
+MAX_WAITERS = 256
+MAX_WAITERS_TOTAL = 1024
+QUEUE_TIMEOUT = 60
 OPEN_TIMEOUT = 15
 HTTP_TIMEOUT = 180
 HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -117,6 +120,8 @@ class Relay:
             raise ValueError("each home must have its own token")
         self.controls: dict[str, web.WebSocketResponse] = {}
         self.slots: dict[str, Slot] = {}
+        self.capacity = asyncio.Condition()
+        self.waiters: dict[str, int] = {}
 
     def authenticate(self, request):
         home = request.headers.get("X-Habab-Home", "")
@@ -142,6 +147,8 @@ class Relay:
         finally:
             if self.controls.get(home) is ws:
                 del self.controls[home]
+            async with self.capacity:
+                self.capacity.notify_all()
             for slot in list(self.slots.values()):
                 if slot.control is ws:
                     if not slot.future.done():
@@ -169,6 +176,44 @@ class Relay:
             await ws.close()
         return ws
 
+    async def reserve_slot(self, request, home, control):
+        """Wait for both limits together, without allocating an agent/data stream."""
+        deadline = asyncio.get_running_loop().time() + QUEUE_TIMEOUT
+        waiting = False
+        async with self.capacity:
+            try:
+                while True:
+                    if self.controls.get(home) is not control or control.closed:
+                        raise web.HTTPServiceUnavailable(text="Home is offline\n")
+                    if request.transport is None or request.transport.is_closing():
+                        raise asyncio.CancelledError
+                    if (len(self.slots) < MAX_TOTAL
+                            and sum(slot.home == home for slot in self.slots.values()) < MAX_STREAMS):
+                        stream = secrets.token_hex(24)
+                        slot = Slot(home, control, asyncio.get_running_loop().create_future())
+                        self.slots[stream] = slot
+                        return stream, slot
+                    if not waiting:
+                        if (self.waiters.get(home, 0) >= MAX_WAITERS
+                                or sum(self.waiters.values()) >= MAX_WAITERS_TOTAL):
+                            raise web.HTTPServiceUnavailable(text="Home tunnel is busy\n")
+                        self.waiters[home] = self.waiters.get(home, 0) + 1
+                        waiting = True
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise web.HTTPServiceUnavailable(text="Home tunnel is busy\n")
+                    try:
+                        # aiohttp need not cancel a handler when its browser disconnects.
+                        # Recheck its transport while keeping the queue wait bounded.
+                        await asyncio.wait_for(self.capacity.wait(), min(remaining, 1))
+                    except asyncio.TimeoutError:
+                        pass
+            finally:
+                if waiting:
+                    self.waiters[home] -= 1
+                    if not self.waiters[home]:
+                        del self.waiters[home]
+
     async def public(self, request):
         try:
             home = hostname(request.headers.get("Host", ""))
@@ -177,16 +222,11 @@ class Relay:
         if home not in self.homes:
             raise web.HTTPMisdirectedRequest()
         control = self.controls.get(home)
-        if control is None or control.closed:
+        if control is None or not control.prepared or control.closed:
             raise web.HTTPServiceUnavailable(text="Home is offline\n")
-        if (len(self.slots) >= MAX_TOTAL
-                or sum(slot.home == home for slot in self.slots.values()) >= MAX_STREAMS):
-            raise web.HTTPServiceUnavailable(text="Home tunnel is busy\n")
         if request.content_length is not None and request.content_length > MAX_BODY:
             raise web.HTTPRequestEntityTooLarge(max_size=MAX_BODY, actual_size=request.content_length)
-        stream = secrets.token_hex(24)
-        slot = Slot(home, control, asyncio.get_running_loop().create_future())
-        self.slots[stream] = slot
+        stream, slot = await self.reserve_slot(request, home, control)
         upload = None
         response = None
         try:
@@ -237,12 +277,16 @@ class Relay:
         finally:
             if upload:
                 await cancel_tasks([upload])
-            self.slots.pop(stream, None)
             if not slot.future.done():
                 slot.future.cancel()
             slot.done.set()
-            if slot.socket:
-                await slot.socket.close()
+            try:
+                if slot.socket:
+                    await slot.socket.close()
+            finally:
+                async with self.capacity:
+                    self.slots.pop(stream, None)
+                    self.capacity.notify_all()
 
     @staticmethod
     async def upload(request, ws):

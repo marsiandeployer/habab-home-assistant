@@ -4,6 +4,7 @@ import contextlib
 import gzip
 import json
 import unittest
+from unittest.mock import patch
 
 import aiohttp
 from aiohttp import WSMsgType, web
@@ -28,6 +29,11 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.runners = []
         self.release_stream = asyncio.Event()
+        self.burst_release = asyncio.Event()
+        self.burst_active = 0
+        self.burst_peak = 0
+        self.burst_slots_peak = 0
+        self.extra_agents = []
         self.hit_paths = []
         self.upstream_headers = []
         self.ws_closed = asyncio.Event()
@@ -54,13 +60,23 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     self.ws_closed.set()
                 return ws
+            if request.path.startswith("/burst/"):
+                self.burst_active += 1
+                self.burst_peak = max(self.burst_peak, self.burst_active)
+                self.burst_slots_peak = max(self.burst_slots_peak, len(self.relay.slots))
+                try:
+                    await self.burst_release.wait()
+                    return web.Response(text=request.path)
+                finally:
+                    self.burst_active -= 1
             if request.path == "/slow-static":
                 response = web.StreamResponse(headers={"Content-Type": "application/octet-stream"})
                 await response.prepare(request)
                 await response.write(b"first")
                 await self.release_stream.wait()
-                await response.write(b"second")
-                await response.write_eof()
+                with contextlib.suppress(ConnectionError):
+                    await response.write(b"second")
+                    await response.write_eof()
                 return response
             if request.path == "/cookies":
                 response = web.Response(text=request.headers.get("Cookie", "none"))
@@ -91,15 +107,19 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
             HOME, TOKEN, target=self.target, allow_insecure_loopback=True))
         await self.online()
 
-    async def online(self):
+    async def online(self, home=HOME):
         for _ in range(200):
-            if HOME in self.relay.controls and self.relay.controls[HOME].prepared:
+            if home in self.relay.controls and self.relay.controls[home].prepared:
                 return
             await asyncio.sleep(.01)
         self.fail("agent did not connect")
 
     async def asyncTearDown(self):
         self.release_stream.set()
+        self.burst_release.set()
+        for task in self.extra_agents:
+            task.cancel()
+        await asyncio.gather(*self.extra_agents, return_exceptions=True)
         self.agent.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self.agent
@@ -224,8 +244,10 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         try:
             async with await self.get("/slow-static") as first:
                 self.assertEqual(await first.content.readexactly(5), b"first")
-                async with await self.get() as second:
-                    self.assertEqual(second.status, 503)
+                with patch.object(wt, "QUEUE_TIMEOUT", .05):
+                    async with await self.get() as second:
+                        self.assertEqual(second.status, 503)
+                        self.assertEqual(await second.text(), "Home tunnel is busy\n")
                 self.release_stream.set()
                 await first.read()
             wt.MAX_BODY = 8
@@ -234,6 +256,125 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
         finally:
             wt.MAX_STREAMS = old_streams
             wt.MAX_BODY = old_body
+
+    async def wait_until(self, predicate):
+        for _ in range(300):
+            if predicate():
+                return
+            await asyncio.sleep(.01)
+        self.fail("condition did not become true")
+
+    async def test_cold_browser_burst_queues_with_live_websocket(self):
+        ws = await self.session.ws_connect(self.base + "/api/websocket", headers={"Host": HOME})
+        await ws.receive()
+        async def fetch(index):
+            async with await self.get("/burst/" + str(index)) as response:
+                return response.status, await response.text()
+        requests = [asyncio.create_task(fetch(index)) for index in range(40)]
+        try:
+            await self.wait_until(lambda: self.relay.waiters.get(HOME) == 25)
+            self.assertEqual(len(self.relay.slots), 16)
+            self.assertEqual(self.burst_active, 15)
+            self.assertFalse(any(task.done() for task in requests))
+            self.burst_release.set()
+            results = await asyncio.wait_for(asyncio.gather(*requests), 10)
+            self.assertEqual(results, [(200, "/burst/" + str(index)) for index in range(40)])
+            self.assertLessEqual(self.burst_peak, 15)
+            self.assertLessEqual(self.burst_slots_peak, 16)
+            await self.wait_until(lambda: len(self.relay.slots) == 1)
+            self.assertEqual(self.relay.waiters, {})
+        finally:
+            self.burst_release.set()
+            await wt.cancel_tasks(requests)
+            await ws.close()
+
+    async def test_wait_queue_is_bounded_and_cancelled_browser_is_removed(self):
+        with patch.object(wt, "MAX_STREAMS", 1), patch.object(wt, "MAX_WAITERS", 1):
+            async with await self.get("/slow-static") as first:
+                await first.content.readexactly(5)
+                queued = asyncio.create_task(self.get())
+                try:
+                    await self.wait_until(lambda: self.relay.waiters.get(HOME) == 1)
+                    async with await self.get() as overflow:
+                        self.assertEqual(overflow.status, 503)
+                        self.assertEqual(await overflow.text(), "Home tunnel is busy\n")
+                    queued.cancel()
+                    await asyncio.gather(queued, return_exceptions=True)
+                    await self.wait_until(lambda: not self.relay.waiters)
+                    self.assertEqual(len(self.relay.slots), 1)
+                finally:
+                    await wt.cancel_tasks([queued])
+                    self.release_stream.set()
+                    await first.read()
+            await self.wait_until(lambda: not self.relay.slots)
+
+    async def test_disconnect_wakes_waiting_requests_as_offline(self):
+        with patch.object(wt, "MAX_STREAMS", 1):
+            async with await self.get("/slow-static") as first:
+                await first.content.readexactly(5)
+                queued = asyncio.create_task(self.get())
+                try:
+                    await self.wait_until(lambda: self.relay.waiters.get(HOME) == 1)
+                    await self.relay.controls[HOME].close(code=1001)
+                    async with await asyncio.wait_for(queued, 2) as response:
+                        self.assertEqual(response.status, 503)
+                        self.assertEqual(await response.text(), "Home is offline\n")
+                    self.assertEqual(self.relay.waiters, {})
+                finally:
+                    self.release_stream.set()
+                    await wt.cancel_tasks([queued])
+            await self.wait_until(lambda: not self.relay.slots)
+
+    async def test_busy_home_does_not_hold_global_capacity_from_other_home(self):
+        other = asyncio.create_task(wt.run_agent(
+            self.session, self.base.replace("http:", "ws:") + wt.PREFIX + "/control",
+            OTHER, TOKEN2, target=self.target, allow_insecure_loopback=True))
+        self.extra_agents.append(other)
+        await self.online(OTHER)
+        with patch.object(wt, "MAX_STREAMS", 1), patch.object(wt, "MAX_TOTAL", 2):
+            async with await self.get("/slow-static") as first:
+                await first.content.readexactly(5)
+                queued = asyncio.create_task(self.get())
+                try:
+                    await self.wait_until(lambda: self.relay.waiters.get(HOME) == 1)
+                    async with await asyncio.wait_for(self.get(headers={
+                        "Host": OTHER, "Authorization": "Bearer native-ha-secret"}), 2) as response:
+                        self.assertEqual(response.status, 200)
+                        self.assertEqual((await response.json())["host"], OTHER)
+                    self.assertFalse(queued.done())
+                    self.release_stream.set()
+                    await first.read()
+                    async with await asyncio.wait_for(queued, 2) as response:
+                        self.assertEqual(response.status, 401)
+                finally:
+                    self.release_stream.set()
+                    await wt.cancel_tasks([queued])
+
+    async def test_global_active_and_pending_limits_apply_across_homes(self):
+        other = asyncio.create_task(wt.run_agent(
+            self.session, self.base.replace("http:", "ws:") + wt.PREFIX + "/control",
+            OTHER, TOKEN2, target=self.target, allow_insecure_loopback=True))
+        self.extra_agents.append(other)
+        await self.online(OTHER)
+        with (patch.object(wt, "MAX_STREAMS", 2), patch.object(wt, "MAX_TOTAL", 1),
+              patch.object(wt, "MAX_WAITERS_TOTAL", 1)):
+            async with await self.get("/slow-static") as first:
+                await first.content.readexactly(5)
+                queued = asyncio.create_task(self.get(headers={"Host": OTHER}))
+                try:
+                    await self.wait_until(lambda: self.relay.waiters.get(OTHER) == 1)
+                    self.assertEqual(len(self.relay.slots), 1)
+                    async with await self.get() as overflow:
+                        self.assertEqual(overflow.status, 503)
+                        self.assertEqual(await overflow.text(), "Home tunnel is busy\n")
+                    self.release_stream.set()
+                    await first.read()
+                    async with await asyncio.wait_for(queued, 2) as response:
+                        self.assertEqual(response.status, 401)
+                    self.assertEqual(self.relay.waiters, {})
+                finally:
+                    self.release_stream.set()
+                    await wt.cancel_tasks([queued])
 
 
 if __name__ == "__main__":
