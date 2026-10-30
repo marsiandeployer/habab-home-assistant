@@ -110,6 +110,14 @@ jobs:
       - name: Test APK-only provenance and compatibility gates
         shell: bash
         run: python3 -m unittest -v habab.android.tools.test_prepare_apk_only
+      - name: Select the supported Java 17 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_17_X64:-}" || { echo '::error::The Android build requires the runner Java 17 toolchain'; exit 1; }
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME_17_X64/bin/java" -version
       - name: Prepare pinned Android native tools and voice assets
         shell: bash
         run: |

@@ -701,6 +701,15 @@ jobs:
           Path('habab/android/app/src/main/assets/release/build-provenance.json').write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + '\n')
           PY
+      - name: Select the supported Java 17 toolchain
+        if: ${{ needs.android-inputs.outputs.state == 'built' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_17_X64:-}" || { echo '::error::The Android build requires the runner Java 17 toolchain'; exit 1; }
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME_17_X64/bin/java" -version
       - name: Prepare pinned APK native tools and voice model
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         run: |

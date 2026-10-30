@@ -16,7 +16,8 @@ def main():
     archive = cache / (release['name'] + '.zip')
     if not archive.exists():
         partial = archive.with_suffix('.partial')
-        urllib.request.urlretrieve(release['url'], partial)
+        urllib.request.urlretrieve(
+            'https://habab-demo.wpmix.net/downloads/android/native-inputs/' + release['sha256'] + '.zip', partial)
         partial.replace(archive)
     if archive.stat().st_size != release['bytes'] or hashlib.sha256(archive.read_bytes()).hexdigest() != release['sha256']:
         raise ValueError('Offline voice model checksum mismatch')
