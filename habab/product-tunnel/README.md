@@ -1,3 +1,12 @@
+# Удалённый веб-доступ Habab Home
+
+Новый веб-туннель через исходящий HTTPS/WebSocket описан в [README-web.md](README-web.md).
+Он передаёт веб-интерфейс и API Home Assistant, сохраняет штатную авторизацию и не использует SSH.
+Android-клиент включается в настройках приложения: «Удалённый доступ».
+Поддомен и отдельный ключ дома пока выдаёт оператор; автоматическая регистрация не реализована.
+
+Ниже сохранено описание прежнего SSH-клиента для ручных Windows-пилотов.
+
 # Optional per-home remote access: client-side slice
 
 This folder is a reviewable client-side starter for the paid remote-access

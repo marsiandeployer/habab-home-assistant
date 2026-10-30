@@ -30,6 +30,9 @@ public final class ServerService extends Service {
     private volatile Process process;
     private Thread worker, tunnelThread, routeControlThread;
     private Tunnel tunnel;
+    private WebTunnel webTunnel;
+    private Thread webTunnelThread;
+    static final String ACTION_REMOTE_ACCESS = "ru.habab.home.action.REMOTE_ACCESS";
     private PowerManager.WakeLock wakeLock;
     private WifiManager.MulticastLock multicastLock;
     private volatile boolean foregroundNotification;
@@ -157,7 +160,10 @@ public final class ServerService extends Service {
         }
         if (!getSharedPreferences("server", 0).getBoolean("desired", false)) { stopSelf(); return START_NOT_STICKY; }
         if (stopping || MaintenanceService.active) { stopSelf(); return START_NOT_STICKY; }
-        if (worker != null) return START_STICKY;
+        if (worker != null) {
+            if (intent != null && ACTION_REMOTE_ACCESS.equals(intent.getAction())) restartWebTunnel();
+            return START_STICKY;
+        }
         active = true; setServerStatus("starting");
         wakeLock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "habab:server");
         wakeLock.acquire();
@@ -300,6 +306,7 @@ public final class ServerService extends Service {
                     if (System.currentTimeMillis() - networkUpdated > 10000) { updateDns(store); networkUpdated = System.currentTimeMillis(); }
                     if (!ready && healthy()) {
                         ready = true; setServerStatus("running");
+                        restartWebTunnel();
                         startVoiceIfReady(this);
                         if (tunnelThread == null) {
                             tunnel = new Tunnel(this); tunnelThread = new Thread(tunnel::run, "habab-tunnel"); tunnelThread.start();
@@ -325,9 +332,21 @@ public final class ServerService extends Service {
         } finally { stopSelf(); }
     }
 
+    private synchronized void restartWebTunnel() {
+        if (webTunnel != null) webTunnel.close();
+        if (webTunnelThread != null) webTunnelThread.interrupt();
+        webTunnel = null; webTunnelThread = null;
+        if (!active || !"running".equals(status)) return;
+        webTunnel = new WebTunnel(this);
+        webTunnelThread = new Thread(webTunnel::run, "habab-web-tunnel");
+        webTunnelThread.start();
+    }
+
     @Override public void onDestroy() {
         stopping = true;
         active = false;
+        if (webTunnel != null) webTunnel.close();
+        if (webTunnelThread != null) webTunnelThread.interrupt();
         if (tunnel != null) tunnel.close();
         tunnelStatus = "disabled";
         if (tunnelThread != null) tunnelThread.interrupt();

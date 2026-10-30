@@ -104,4 +104,10 @@
     <string name="voice_error_update">Для этого голосового режима обновите серверный пакет Habab.</string>
     <string name="voice_error_history">Не удалось сохранить разговор в общем чате. Проверьте домашний сервер.</string>
     <string name="voice_record_wake_clips">Сохранять локально до 8 секунд перед срабатыванием «эй дом» для диагностики (до 50 записей). Файлы не отправляются автоматически.</string>
+    <string name="remote_access_title">Удалённый доступ</string>
+    <string name="remote_access_help">Открывайте свой дом по личному адресу из любой сети. Вход — с обычным логином и паролем Home Assistant. Адрес и ключ подключения выдаёт Habab. Порты роутера открывать не нужно.</string>
+    <string name="remote_access_home">Личный поддомен дома</string>
+    <string name="remote_access_key">Ключ подключения Habab</string>
+    <string name="remote_access_enable">Разрешить удалённый доступ</string>
+    <string name="remote_access_invalid">Проверьте адрес дома и ключ подключения Habab.</string>
 </resources>

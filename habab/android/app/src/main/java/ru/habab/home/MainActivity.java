@@ -40,7 +40,7 @@ public final class MainActivity extends Activity {
             authorizeVoice(false);
             updateVoiceButton();
             if (state != null && !busy) state.setText(getString(R.string.status, phaseText())
-                    + "\nHTTPS: " + tunnelText() + "\n" + MaintenanceService.status);
+                    + "\n" + getString(R.string.remote_access_title) + ": " + WebTunnel.status + "\n" + MaintenanceService.status);
             handler.postDelayed(this, 2000);
         }
     };
@@ -184,7 +184,7 @@ public final class MainActivity extends Activity {
             stopService(new Intent(this, ServerService.class));
         });
         button(R.string.battery, () -> startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))));
-        button(R.string.tunnel, this::tunnelDialog);
+        button(R.string.remote_access_title, this::remoteAccessDialog);
         button(R.string.backup, () -> {
             if (!stopped()) return;
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
@@ -608,6 +608,45 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) {
             return title + "\n" + getString(R.string.voice_lifecycle_unavailable);
         }
+    }
+
+    private void remoteAccessDialog() {
+        SharedPreferences prefs = getSharedPreferences("remote_access", 0);
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(20, 8, 20, 8);
+        TextView help = new TextView(this); help.setText(R.string.remote_access_help); form.addView(help);
+        EditText home = new EditText(this); home.setSingleLine(true); home.setHint(R.string.remote_access_home);
+        home.setText(prefs.getString("home", "")); form.addView(home);
+        EditText token = new EditText(this); token.setSingleLine(true); token.setHint(R.string.remote_access_key);
+        token.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        token.setText(prefs.getString("token", "")); form.addView(token);
+        CheckBox enabled = new CheckBox(this); enabled.setText(R.string.remote_access_enable);
+        enabled.setChecked(prefs.getBoolean("enabled", false)); form.addView(enabled);
+        String publicUrl = prefs.getString("public_url", "");
+        TextView link = new TextView(this); link.setText(publicUrl); link.setTextIsSelectable(true); form.addView(link);
+        link.setOnClickListener(v -> {
+            if (!publicUrl.isEmpty()) startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(publicUrl)));
+        });
+        ScrollView scroll = new ScrollView(this); scroll.addView(form);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(R.string.remote_access_title).setView(scroll)
+                .setPositiveButton(R.string.configure, null).setNegativeButton(R.string.cancel, null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String hostname = home.getText().toString().trim().toLowerCase(java.util.Locale.ROOT);
+            String secret = token.getText().toString().trim();
+            if (enabled.isChecked() && (!hostname.matches("[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]")
+                    || hostname.contains("..") || secret.length() < 32)) {
+                message(getString(R.string.remote_access_invalid)); return;
+            }
+            getSharedPreferences("server", 0).edit().putBoolean("tunnel_enabled", false).apply();
+            prefs.edit().putBoolean("enabled", enabled.isChecked()).putString("home", hostname)
+                    .putString("token", secret).putString("public_url", "https://" + hostname)
+                    .putString("relay_url", "wss://" + hostname + "/_habab_tunnel/control").apply();
+            token.setText("");
+            if (ServerService.active) startForegroundService(new Intent(this, ServerService.class)
+                    .setAction(ServerService.ACTION_REMOTE_ACCESS));
+            dialog.dismiss();
+        }));
+        dialog.show();
     }
 
     private void tunnelDialog() {
