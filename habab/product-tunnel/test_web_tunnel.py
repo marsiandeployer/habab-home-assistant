@@ -4,7 +4,7 @@ import contextlib
 import gzip
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import aiohttp
 from aiohttp import WSMsgType, web
@@ -272,15 +272,15 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
                 return response.status, await response.text()
         requests = [asyncio.create_task(fetch(index)) for index in range(40)]
         try:
-            await self.wait_until(lambda: self.relay.waiters.get(HOME) == 25)
-            self.assertEqual(len(self.relay.slots), 16)
-            self.assertEqual(self.burst_active, 15)
+            await self.wait_until(lambda: self.relay.waiters.get(HOME) == len(requests) - (wt.MAX_STREAMS - 1))
+            self.assertEqual(len(self.relay.slots), wt.MAX_STREAMS)
+            self.assertEqual(self.burst_active, wt.MAX_STREAMS - 1)
             self.assertFalse(any(task.done() for task in requests))
             self.burst_release.set()
             results = await asyncio.wait_for(asyncio.gather(*requests), 10)
             self.assertEqual(results, [(200, "/burst/" + str(index)) for index in range(40)])
-            self.assertLessEqual(self.burst_peak, 15)
-            self.assertLessEqual(self.burst_slots_peak, 16)
+            self.assertLessEqual(self.burst_peak, wt.MAX_STREAMS - 1)
+            self.assertLessEqual(self.burst_slots_peak, wt.MAX_STREAMS)
             await self.wait_until(lambda: len(self.relay.slots) == 1)
             self.assertEqual(self.relay.waiters, {})
         finally:
@@ -375,6 +375,33 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     self.release_stream.set()
                     await wt.cancel_tasks([queued])
+
+    async def test_response_failure_log_excludes_secret_exception_text(self):
+        secret = "Bearer private-ha-token Cookie=private-browser-session"
+        original = wt.packet
+        async def fail_response_metadata(ws, *args, **kwargs):
+            if isinstance(ws, web.WebSocketResponse):
+                raise ValueError(secret)
+            return await original(ws, *args, **kwargs)
+        with patch.object(wt, "packet", side_effect=fail_response_metadata):
+            with self.assertLogs(wt.LOG, level="WARNING") as captured:
+                async with await self.get() as response:
+                    self.assertEqual(response.status, 502)
+                    self.assertEqual(await response.text(), "Home tunnel unavailable\n")
+        self.assertEqual(captured.output, [
+            "WARNING:habab.web_tunnel:Home tunnel failed phase=response_headers error=ValueError"])
+        self.assertNotIn(secret, " ".join(captured.output))
+
+    async def test_agent_connect_timeout_has_distinct_sanitized_phase(self):
+        with (patch.object(wt, "OPEN_TIMEOUT", .02),
+              patch.object(self.relay.controls[HOME], "send_json", new=AsyncMock())):
+            with self.assertLogs(wt.LOG, level="WARNING") as captured:
+                async with await self.get() as response:
+                    self.assertEqual(response.status, 502)
+                    self.assertEqual(await response.text(), "Home tunnel unavailable\n")
+        self.assertEqual(captured.output, [
+            "WARNING:habab.web_tunnel:Home tunnel failed phase=agent_connect error=TimeoutError"])
+        await self.wait_until(lambda: not self.relay.slots)
 
 
 if __name__ == "__main__":

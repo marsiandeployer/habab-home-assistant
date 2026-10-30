@@ -22,7 +22,8 @@ PREFIX = "/_habab_tunnel"
 CHUNK = 64 * 1024
 MAX_BODY = 32 * 1024 * 1024
 MAX_WS = 8 * 1024 * 1024
-MAX_STREAMS = 16
+MAX_STREAMS = 8  # Pilot relay budget leaves cleanup headroom for native capacity 16.
+MAX_AGENT_STREAMS = 16
 MAX_TOTAL = 128
 MAX_WAITERS = 256
 MAX_WAITERS_TOTAL = 1024
@@ -229,11 +230,13 @@ class Relay:
         stream, slot = await self.reserve_slot(request, home, control)
         upload = None
         response = None
+        phase = "agent_connect"
         try:
             await control.send_json({"type": "open", "stream": stream})
             ws = await asyncio.wait_for(asyncio.shield(slot.future), OPEN_TIMEOUT)
             if ws is None:
                 raise ConnectionError("home disconnected")
+            phase = "request_metadata"
             is_ws = request.headers.get("Upgrade", "").lower() == "websocket"
             headers = filtered_headers(request.headers.items(), request=True, websocket=is_ws)
             await ws.send_json({"type": "request", "method": request.method, "path": request.raw_path,
@@ -241,6 +244,7 @@ class Relay:
                                 "protocols": request.headers.get("Sec-WebSocket-Protocol", "")})
             if not is_ws:
                 upload = asyncio.create_task(self.upload(request, ws))
+            phase = "response_headers"
             meta = await packet(ws)
             if meta.get("type") != "response":
                 raise ValueError("invalid response metadata")
@@ -250,11 +254,13 @@ class Relay:
                 response = web.WebSocketResponse(protocols=protocols, max_msg_size=MAX_WS,
                                                  autoclose=False, heartbeat=30)
                 await response.prepare(request)
+                phase = "websocket"
                 await bridge(response, ws)
                 return response
             response = web.StreamResponse(status=status, headers=CIMultiDict(
                 filtered_headers(meta.get("headers", []))))
             await response.prepare(request)
+            phase = "response_body"
             total = 0
             while True:
                 message = await asyncio.wait_for(ws.receive(), HTTP_TIMEOUT)
@@ -268,7 +274,9 @@ class Relay:
                     return response
                 else:
                     raise ConnectionError("incomplete home response")
-        except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError, ValueError, KeyError):
+        except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError, ValueError, KeyError) as error:
+            # Exception text, URLs, headers and request bodies may contain credentials.
+            LOG.warning("Home tunnel failed phase=%s error=%s", phase, type(error).__name__)
             if response is not None and response.prepared:
                 if request.transport:
                     request.transport.close()
@@ -466,7 +474,7 @@ async def run_agent(session: aiohttp.ClientSession, relay_url: str, home: str, t
     timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT, connect=OPEN_TIMEOUT, sock_read=HTTP_TIMEOUT)
     async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar(), auto_decompress=False,
                                      trust_env=False, timeout=timeout, trace_configs=[trace],
-                                     connector=aiohttp.TCPConnector(limit=MAX_STREAMS)) as local:
+                                     connector=aiohttp.TCPConnector(limit=MAX_AGENT_STREAMS)) as local:
         delay = 1
         while True:
             tasks = set()
@@ -484,7 +492,7 @@ async def run_agent(session: aiohttp.ClientSession, relay_url: str, home: str, t
                         data = json.loads(message.data)
                         stream = data.get("stream", "")
                         if (data.get("type") != "open" or not re.fullmatch(r"[a-f0-9]{48}", stream)
-                                or len(tasks) >= MAX_STREAMS):
+                                or len(tasks) >= MAX_AGENT_STREAMS):
                             raise ValueError("invalid stream allocation")
                         data_url = relay.with_path(PREFIX + "/data/" + stream)
                         task = asyncio.create_task(serve_stream(session, local, data_url, auth, target))
