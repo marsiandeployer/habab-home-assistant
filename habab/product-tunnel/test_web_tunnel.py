@@ -272,7 +272,10 @@ class TunnelTests(unittest.IsolatedAsyncioTestCase):
                 return response.status, await response.text()
         requests = [asyncio.create_task(fetch(index)) for index in range(40)]
         try:
-            await self.wait_until(lambda: self.relay.waiters.get(HOME) == len(requests) - (wt.MAX_STREAMS - 1))
+            await self.wait_until(lambda: (
+                self.relay.waiters.get(HOME) == len(requests) - (wt.MAX_STREAMS - 1)
+                and self.burst_active == wt.MAX_STREAMS - 1
+            ))
             self.assertEqual(len(self.relay.slots), wt.MAX_STREAMS)
             self.assertEqual(self.burst_active, wt.MAX_STREAMS - 1)
             self.assertFalse(any(task.done() for task in requests))

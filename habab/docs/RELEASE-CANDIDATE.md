@@ -40,6 +40,15 @@ runtime installation without changed inputs, a failure, or a concrete concern.
 Publication still checks signatures and artifact hashes; device acceptance is
 reported separately from source/build checks.
 
+APK native `.deb` inputs are served by SHA-256 from
+`https://habab-demo.wpmix.net/downloads/android/native-inputs/<SHA256>.deb`.
+The producer still verifies every file against `native-packages.json` and
+includes the upstream notices. Publish the verified pinned inputs before changing
+that lock: upstream Termux repositories remove older package revisions. These
+small shared build dependencies remain available while a retained APK release
+uses them; they are not a replacement for a signed server runtime.
+
+
 ## Targets
 
 - **Windows:** the existing builder's installer kit ZIP from the selected

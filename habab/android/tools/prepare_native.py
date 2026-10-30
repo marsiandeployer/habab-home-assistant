@@ -23,7 +23,7 @@ def package_file(name, record, cache, offline=False):
             raise FileNotFoundError(f'Missing offline native package cache entry: {package}')
         package.parent.mkdir(parents=True, exist_ok=True)
         urllib.request.urlretrieve(
-            'https://packages.termux.dev/apt/termux-main/' + record['Filename'], package)
+            'https://habab-demo.wpmix.net/downloads/android/native-inputs/' + record['SHA256'] + '.deb', package)
     if hashlib.sha256(package.read_bytes()).hexdigest() != record['SHA256']:
         raise ValueError(f'Package checksum mismatch: {name}')
     return package

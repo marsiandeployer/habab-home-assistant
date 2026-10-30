@@ -20,6 +20,7 @@ APK_PREFIXES = (
     'habab/android/app/src/main/res/',
 )
 EXACT_SAFE_PATHS = {
+    'habab/android/tools/prepare_native.py',
     'habab/distribution/.gitignore',
     'habab/android/tools/prepare_apk_only.py',
     'habab/android/tools/test_prepare_apk_only.py',

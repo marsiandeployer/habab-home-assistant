@@ -26,7 +26,8 @@ class HababTunnelConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return HababTunnelOptionsFlow(config_entry)
+        # Home Assistant attaches the ConfigEntry to the OptionsFlow instance.
+        return HababTunnelOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         errors = {}
