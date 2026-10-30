@@ -9,6 +9,9 @@ import org.json.JSONArray;
 import org.junit.Test;
 import java.lang.reflect.Proxy;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class WebTunnelTest {
     private static final String CONTROL = "wss://home-p30.wpmix.net/_habab_tunnel/control";
@@ -99,5 +102,92 @@ public final class WebTunnelTest {
         long started = System.nanoTime();
         assertFalse(WebTunnel.gracefulDataClose(slowPeer, neverEnds, 25));
         assertTrue(System.nanoTime() - started < 1_000_000_000L);
+    }
+
+    @Test public void peerCloseAcknowledgesAndWakesConsumerAfterQueuedFrames() throws Exception {
+        WebTunnel.FrameQueue frames = new WebTunnel.FrameQueue();
+        for (int i = 0; i < WebTunnel.MAX_QUEUED_FRAMES; i++)
+            assertTrue(frames.offer(WebTunnel.Frame.text("frame-" + i)));
+        AtomicInteger closeCalls = new AtomicInteger();
+        WebSocket peer = (WebSocket) Proxy.newProxyInstance(WebSocket.class.getClassLoader(),
+                new Class<?>[]{WebSocket.class}, (proxy, method, args) -> {
+                    if ("close".equals(method.getName())) {
+                        assertEquals(1000, args[0]);
+                        assertEquals("peer finished", args[1]);
+                        closeCalls.incrementAndGet();
+                        return true;
+                    }
+                    if (method.getReturnType() == boolean.class) return false;
+                    if (method.getReturnType() == long.class) return 0L;
+                    if (method.getReturnType() == int.class) return 0;
+                    return null;
+                });
+
+        WebTunnel.acknowledgePeerClose(peer, 1000, "peer finished", frames);
+        WebTunnel.acknowledgePeerClose(peer, 1000, "peer finished", frames);
+        for (int i = 0; i < WebTunnel.MAX_QUEUED_FRAMES; i++) {
+            WebTunnel.Frame frame = frames.poll(10, TimeUnit.MILLISECONDS);
+            assertNotNull(frame);
+            assertFalse(frame.end);
+            assertEquals("frame-" + i, frame.text);
+        }
+        WebTunnel.Frame terminal = frames.poll(10, TimeUnit.MILLISECONDS);
+        assertNotNull("peer close must wake a blocked consumer", terminal);
+        assertTrue(terminal.end);
+        assertNull("repeated peer close must not enqueue duplicate end markers",
+                frames.poll(10, TimeUnit.MILLISECONDS));
+        assertEquals(2, closeCalls.get());
+    }
+
+    @Test public void peerCloseReleasesAConsumerWaitingOnAnEmptyFrameQueue() throws Exception {
+        WebTunnel.FrameQueue frames = new WebTunnel.FrameQueue();
+        CountDownLatch polling = new CountDownLatch(1);
+        CompletableFuture<WebTunnel.Frame> next = new CompletableFuture<>();
+        Thread consumer = new Thread(() -> {
+            try {
+                polling.countDown();
+                next.complete(frames.poll(5, TimeUnit.SECONDS));
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                next.completeExceptionally(error);
+            }
+        });
+        consumer.start();
+        assertTrue(polling.await(1, TimeUnit.SECONDS));
+
+        WebSocket peer = (WebSocket) Proxy.newProxyInstance(WebSocket.class.getClassLoader(),
+                new Class<?>[]{WebSocket.class}, (proxy, method, args) ->
+                        "close".equals(method.getName()) || method.getReturnType() == boolean.class);
+        WebTunnel.acknowledgePeerClose(peer, 1000, "peer finished", frames);
+
+        WebTunnel.Frame terminal = next.get(1, TimeUnit.SECONDS);
+        assertNotNull(terminal);
+        assertTrue(terminal.end);
+        consumer.join(1000);
+        assertFalse(consumer.isAlive());
+    }
+
+    @Test public void emptyPeerCloseUsesLegalAckCodeAndWakesConsumer() throws Exception {
+        WebTunnel.FrameQueue frames = new WebTunnel.FrameQueue();
+        AtomicInteger ackCode = new AtomicInteger();
+        WebSocket peer = (WebSocket) Proxy.newProxyInstance(WebSocket.class.getClassLoader(),
+                new Class<?>[]{WebSocket.class}, (proxy, method, args) -> {
+                    if ("close".equals(method.getName())) {
+                        ackCode.set((Integer) args[0]);
+                        assertEquals("", args[1]);
+                        return true;
+                    }
+                    if (method.getReturnType() == boolean.class) return false;
+                    if (method.getReturnType() == long.class) return 0L;
+                    if (method.getReturnType() == int.class) return 0;
+                    return null;
+                });
+
+        WebTunnel.acknowledgePeerClose(peer, 1005, "", frames);
+
+        assertEquals(1001, ackCode.get());
+        WebTunnel.Frame terminal = frames.poll(10, TimeUnit.MILLISECONDS);
+        assertNotNull("empty close must wake a blocked consumer", terminal);
+        assertTrue(terminal.end);
     }
 }

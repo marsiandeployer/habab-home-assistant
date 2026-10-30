@@ -49,7 +49,7 @@ final class WebTunnel {
     static final int MAX_BODY = 32 * 1024 * 1024;
     static final int MAX_WS_MESSAGE = 8 * 1024 * 1024;
     static final int CHUNK = 64 * 1024;
-    private static final int MAX_QUEUED_FRAMES = 64;
+    static final int MAX_QUEUED_FRAMES = 64;
     private static final long MAX_QUEUED_BYTES = 16L * 1024 * 1024;
     private static final Set<String> HOP_HEADERS = new HashSet<>(Arrays.asList(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -182,31 +182,37 @@ final class WebTunnel {
         final Config config;
         final CompletableFuture<String> ready = new CompletableFuture<>();
         private final BlockingQueue<String> incoming = new ArrayBlockingQueue<>(MAX_QUEUED_FRAMES);
-        private volatile boolean ended;
+        private final AtomicBoolean ended = new AtomicBoolean();
 
         ControlListener(Config config) { this.config = config; }
 
         @Override public void onMessage(WebSocket webSocket, String text) {
-            if (text.length() > CHUNK) { webSocket.close(1009, "control message too large"); ended = true; return; }
+            if (text.length() > CHUNK) { webSocket.close(1009, "control message too large"); ended.set(true); return; }
             if (!ready.isDone()) { ready.complete(text); return; }
             if (!incoming.offer(text)) {
                 webSocket.close(1009, "control queue full");
-                ended = true;
+                ended.set(true);
             }
         }
 
         @Override public void onClosed(WebSocket webSocket, int code, String reason) {
-            ended = true;
+            ended.set(true);
+            ready.completeExceptionally(new IOException("relay closed"));
+        }
+
+        @Override public void onClosing(WebSocket webSocket, int code, String reason) {
+            webSocket.close(normalizeCloseCode(code), reason);
+            ended.set(true);
             ready.completeExceptionally(new IOException("relay closed"));
         }
 
         @Override public void onFailure(WebSocket webSocket, Throwable error, Response response) {
-            ended = true;
+            ended.set(true);
             ready.completeExceptionally(new IOException("relay connection failed"));
         }
 
         void awaitClosed() throws Exception {
-            while (!closed.get() && !ended) {
+            while (!closed.get() && !ended.get()) {
                 String message = incoming.poll(1, TimeUnit.SECONDS);
                 if (message == null) continue;
                 JSONObject data = new JSONObject(message);
@@ -226,7 +232,7 @@ final class WebTunnel {
     private final class Stream {
         final String id;
         final Config config;
-        final BlockingQueue<Frame> frames = new ArrayBlockingQueue<>(MAX_QUEUED_FRAMES);
+        final FrameQueue frames = new FrameQueue();
         final CompletableFuture<JSONObject> request = new CompletableFuture<>();
         final CompletableFuture<Void> dataEnded = new CompletableFuture<>();
         final AtomicBoolean cancelled = new AtomicBoolean();
@@ -252,6 +258,9 @@ final class WebTunnel {
             return !cancelled.get() && ws.send(value);
         }
         void dataClose(int code, String reason) { WebSocket ws = data; if (ws != null) ws.close(code, reason); }
+        void peerClosed(WebSocket ws, int code, String reason) {
+            acknowledgePeerClose(ws, code, reason, frames);
+        }
         boolean finishNormally() {
             stage = Stage.NORMAL_CLOSE;
             WebSocket ws = data;
@@ -265,7 +274,7 @@ final class WebTunnel {
             return !cancelled.get() && ws.send(value);
         }
         boolean offerFrame(Frame frame) {
-            if (frame.end) return frames.offer(frame);
+            if (frame.end) return frames.enqueueEnd();
             long bytes = frame.bytes != null ? frame.bytes.size() : frame.text.getBytes(StandardCharsets.UTF_8).length;
             long total = queuedBytes.addAndGet(bytes);
             if (total > MAX_QUEUED_BYTES || !frames.offer(frame)) {
@@ -280,7 +289,34 @@ final class WebTunnel {
         }
     }
 
-    private static final class Frame {
+    /** Keeps one queue slot available for a terminal marker without dropping queued payloads. */
+    static final class FrameQueue {
+        private final BlockingQueue<Frame> queue = new ArrayBlockingQueue<>(MAX_QUEUED_FRAMES + 1);
+        private boolean endQueued;
+
+        synchronized boolean offer(Frame frame) {
+            return !endQueued && queue.size() < MAX_QUEUED_FRAMES && queue.offer(frame);
+        }
+
+        synchronized boolean enqueueEnd() {
+            if (endQueued) return true;
+            endQueued = queue.offer(Frame.end());
+            return endQueued;
+        }
+
+        Frame poll(long timeout, TimeUnit unit) throws InterruptedException { return queue.poll(timeout, unit); }
+    }
+
+    static void acknowledgePeerClose(WebSocket ws, int code, String reason, FrameQueue frames) {
+        ws.close(normalizeCloseCode(code), reason);
+        frames.enqueueEnd();
+    }
+
+    static int normalizeCloseCode(int code) {
+        return code == 1005 || code == 1006 || code == 1015 ? 1001 : code;
+    }
+
+    static final class Frame {
         final ByteString bytes;
         final String text;
         final boolean end;
@@ -323,7 +359,7 @@ final class WebTunnel {
                         } else if ("end".equals(data.optString("type")) && stream.request.isDone()) {
                             if (!stream.offerFrame(Frame.end())) stream.cancel();
                         } else if (stream.request.isDone()) {
-                    if (text.getBytes(StandardCharsets.UTF_8).length > MAX_WS_MESSAGE + CHUNK
+                            if (text.getBytes(StandardCharsets.UTF_8).length > MAX_WS_MESSAGE + CHUNK
                                     || !stream.offerFrame(Frame.text(text))) stream.cancel();
                         } else stream.request.completeExceptionally(new IOException("invalid request"));
                     } catch (JSONException error) { stream.cancel(); }
@@ -336,7 +372,10 @@ final class WebTunnel {
                     opened.completeExceptionally(new IOException("data socket closed"));
                     stream.dataEnded.complete(null);
                     stream.request.completeExceptionally(new IOException("data socket closed"));
-                    stream.offerFrame(Frame.end());
+                    stream.frames.enqueueEnd();
+                }
+                @Override public void onClosing(WebSocket webSocket, int code, String reason) {
+                    stream.peerClosed(webSocket, code, reason);
                 }
                 @Override public void onFailure(WebSocket webSocket, Throwable error, Response response) {
                     logFailure(stream.stage, error);
@@ -344,11 +383,11 @@ final class WebTunnel {
                     stream.dataFailed.set(true);
                     stream.dataEnded.complete(null);
                     stream.request.completeExceptionally(new IOException("data socket failed"));
-                    stream.offerFrame(Frame.end());
+                    stream.frames.enqueueEnd();
                 }
             });
             stream.data = socket;
-                    opened.get(15, TimeUnit.SECONDS);
+            opened.get(15, TimeUnit.SECONDS);
             stream.stage = Stage.REQUEST_META;
             JSONObject message = stream.request.get(15, TimeUnit.SECONDS);
             String path = message.getString("path");
@@ -464,7 +503,9 @@ final class WebTunnel {
                 catch (InterruptedException error) { Thread.currentThread().interrupt(); webSocket.cancel(); }
             }
             @Override public void onClosing(WebSocket webSocket, int code, String reason) {
-                try { stream.send(new JSONObject().put("type", "close").put("code", code).put("reason", reason).toString()); }
+                int closeCode = normalizeCloseCode(code);
+                webSocket.close(closeCode, reason);
+                try { stream.send(new JSONObject().put("type", "close").put("code", closeCode).put("reason", reason).toString()); }
                 catch (InterruptedException error) { Thread.currentThread().interrupt(); }
                 catch (JSONException ignored) { }
             }
@@ -512,8 +553,7 @@ final class WebTunnel {
                     if (text.getBytes(StandardCharsets.UTF_8).length > MAX_WS_MESSAGE) throw new IOException("websocket message too large");
                     upstream.send(text);
                 } else if ("close".equals(item.optString("type"))) {
-                    int code = item.optInt("code", 1000);
-                    if (code == 1005 || code == 1006 || code == 1015) code = 1001;
+                    int code = normalizeCloseCode(item.optInt("code", 1000));
                     upstream.close(code, item.optString("reason", ""));
                     break;
                 } else throw new IOException("invalid websocket frame");
