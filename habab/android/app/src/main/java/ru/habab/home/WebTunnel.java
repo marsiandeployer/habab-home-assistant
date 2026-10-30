@@ -2,6 +2,7 @@ package ru.habab.home;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
 import java.io.IOException;
 import java.net.URI;
 import java.net.Proxy;
@@ -38,6 +39,7 @@ import org.json.JSONObject;
 
 /** Outbound-only HTTP/WebSocket bridge to the per-home product relay. */
 final class WebTunnel {
+    private static final String LOG_TAG = "HababWebTunnel";
     static volatile String status = "Выключен";
     static final String PREFS = "remote_access";
     static final String CONTROL_PATH = "/_habab_tunnel/control";
@@ -52,6 +54,13 @@ final class WebTunnel {
     private static final Set<String> HOP_HEADERS = new HashSet<>(Arrays.asList(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "transfer-encoding", "upgrade", "content-length"));
+
+    private enum Stage {
+        DATA_OPEN("data_open"), REQUEST_META("request_meta"), LOCAL_REQUEST("local_request"),
+        RESPONSE_METADATA("response_metadata"), RESPONSE_BODY("response_body"), NORMAL_CLOSE("normal_close");
+        final String label;
+        Stage(String label) { this.label = label; }
+    }
 
     private final SharedPreferences prefs;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -223,6 +232,7 @@ final class WebTunnel {
         final AtomicBoolean cancelled = new AtomicBoolean();
         final AtomicBoolean dataFailed = new AtomicBoolean();
         final java.util.concurrent.atomic.AtomicLong queuedBytes = new java.util.concurrent.atomic.AtomicLong();
+        volatile Stage stage = Stage.DATA_OPEN;
         volatile boolean websocket;
         volatile WebSocket data;
         volatile Call call;
@@ -243,6 +253,7 @@ final class WebTunnel {
         }
         void dataClose(int code, String reason) { WebSocket ws = data; if (ws != null) ws.close(code, reason); }
         boolean finishNormally() {
+            stage = Stage.NORMAL_CLOSE;
             WebSocket ws = data;
             if (ws == null || dataFailed.get()) return false;
             return gracefulDataClose(ws, dataEnded, 5000) && !dataFailed.get();
@@ -279,8 +290,21 @@ final class WebTunnel {
         static Frame end() { return new Frame(null, null, true); }
     }
 
+    private static String exceptionClass(Throwable error) {
+        if (error == null) return "none";
+        String simple = error.getClass().getSimpleName();
+        return simple.matches("[A-Za-z0-9_$]{1,80}") ? simple : "Exception";
+    }
+
+    private static void logFailure(Stage stage, Throwable error) {
+        Throwable cause = error == null ? null : error.getCause();
+        Log.w(LOG_TAG, "stage=" + stage.label + " error=" + exceptionClass(error)
+                + " cause=" + exceptionClass(cause));
+    }
+
     private void serve(Stream stream) {
         try {
+            stream.stage = Stage.DATA_OPEN;
             HttpUrl dataUrl = stream.config.dataUrl(stream.id);
             Request request = authorized(dataUrl, stream.config.home, stream.config.token).build();
             CompletableFuture<WebSocket> opened = new CompletableFuture<>();
@@ -315,7 +339,8 @@ final class WebTunnel {
                     stream.offerFrame(Frame.end());
                 }
                 @Override public void onFailure(WebSocket webSocket, Throwable error, Response response) {
-                opened.completeExceptionally(new IOException("data socket failed"));
+                    logFailure(stream.stage, error);
+                    opened.completeExceptionally(new IOException("data socket failed"));
                     stream.dataFailed.set(true);
                     stream.dataEnded.complete(null);
                     stream.request.completeExceptionally(new IOException("data socket failed"));
@@ -324,14 +349,18 @@ final class WebTunnel {
             });
             stream.data = socket;
                     opened.get(15, TimeUnit.SECONDS);
+            stream.stage = Stage.REQUEST_META;
             JSONObject message = stream.request.get(15, TimeUnit.SECONDS);
             String path = message.getString("path");
             HttpUrl target = localUrl(path);
             boolean websocket = message.optBoolean("websocket", false);
             Headers headers = headers(message.optJSONArray("headers"), websocket);
+            stream.stage = Stage.LOCAL_REQUEST;
             if (websocket) serveWebSocket(stream, target, headers, message.optString("protocols", ""));
             else serveHttp(stream, target, headers, message.getString("method"));
-        } catch (Exception ignored) {
+        } catch (Exception error) {
+            logFailure(stream.stage, error);
+            status = "Ошибка удалённого доступа";
             stream.dataClose(1011, "local request failed");
         } finally {
             // Successful handlers wait for the peer close before reaching this cancellation.
@@ -365,6 +394,7 @@ final class WebTunnel {
         if (headers.get("Accept-Encoding") == null)
             headers = headers.newBuilder().set("Accept-Encoding", "identity").build();
         Request.Builder builder = new Request.Builder().url(url).headers(headers).method(method, body);
+        stream.stage = Stage.LOCAL_REQUEST;
         stream.call = localClient.newCall(builder.build());
         try (Response response = stream.call.execute()) {
             forwardResponse(stream, response.code(), response.headers(), response.body());
@@ -372,6 +402,7 @@ final class WebTunnel {
     }
 
     private void forwardMetadata(Stream stream, int statusCode, Headers headers, boolean websocket) throws Exception {
+        stream.stage = Stage.RESPONSE_METADATA;
         JSONArray responseHeaders = headerPairs(headers, websocket);
         if (!stream.send(new JSONObject().put("type", "response").put("status", statusCode)
                 .put("headers", responseHeaders).toString())) throw new IOException("data socket closed");
@@ -380,6 +411,7 @@ final class WebTunnel {
     private void forwardResponse(Stream stream, int statusCode, Headers headers, ResponseBody body) throws Exception {
         forwardMetadata(stream, statusCode, headers, false);
         if (body != null) {
+            stream.stage = Stage.RESPONSE_BODY;
             BufferedSource source = body.source();
             byte[] buffer = new byte[CHUNK];
             long total = 0;
@@ -391,6 +423,7 @@ final class WebTunnel {
                 if (!stream.send(ByteString.of(buffer, 0, count))) throw new IOException("data socket closed");
             }
         }
+        stream.stage = Stage.NORMAL_CLOSE;
         if (!stream.send("{\"type\":\"end\"}")) throw new IOException("data socket closed");
         stream.finishNormally();
     }
@@ -400,10 +433,12 @@ final class WebTunnel {
         if (upstreamHeaders.get("Accept-Encoding") == null)
             upstreamHeaders = upstreamHeaders.newBuilder().set("Accept-Encoding", "identity").build();
         Request.Builder builder = new Request.Builder().url(url).headers(upstreamHeaders);
+        stream.stage = Stage.LOCAL_REQUEST;
         CompletableFuture<Boolean> opened = new CompletableFuture<>();
         stream.localSocket = localClient.newWebSocket(builder.build(), new WebSocketListener() {
             @Override public void onOpen(WebSocket webSocket, Response response) {
                 try {
+                    stream.stage = Stage.RESPONSE_METADATA;
                     if (!stream.send(new JSONObject().put("type", "response").put("status", 101)
                             .put("protocol", response.header("Sec-WebSocket-Protocol") == null
                                     ? JSONObject.NULL : response.header("Sec-WebSocket-Protocol")).toString()))
@@ -413,6 +448,7 @@ final class WebTunnel {
             }
             @Override public void onMessage(WebSocket webSocket, String text) {
                 try {
+                    stream.stage = Stage.RESPONSE_BODY;
                     if (text.getBytes(StandardCharsets.UTF_8).length > MAX_WS_MESSAGE) { webSocket.close(1009, "message too large"); return; }
                     String frame = new JSONObject().put("type", "text").put("data", text).toString();
                     if (frame.getBytes(StandardCharsets.UTF_8).length > MAX_WS_MESSAGE + CHUNK) {
@@ -424,7 +460,8 @@ final class WebTunnel {
                 catch (JSONException error) { webSocket.cancel(); }
             }
             @Override public void onMessage(WebSocket webSocket, ByteString bytes) {
-                try { stream.send(bytes); } catch (InterruptedException error) { Thread.currentThread().interrupt(); webSocket.cancel(); }
+                try { stream.stage = Stage.RESPONSE_BODY; stream.send(bytes); }
+                catch (InterruptedException error) { Thread.currentThread().interrupt(); webSocket.cancel(); }
             }
             @Override public void onClosing(WebSocket webSocket, int code, String reason) {
                 try { stream.send(new JSONObject().put("type", "close").put("code", code).put("reason", reason).toString()); }
@@ -433,6 +470,7 @@ final class WebTunnel {
             }
             @Override public void onClosed(WebSocket webSocket, int code, String reason) { }
             @Override public void onFailure(WebSocket webSocket, Throwable error, Response response) {
+                stream.stage = Stage.RESPONSE_METADATA;
                 if (response == null) {
                     stream.dataFailed.set(true);
                     stream.dataEnded.complete(null);
@@ -462,6 +500,7 @@ final class WebTunnel {
             Frame frame = stream.frames.poll(180, TimeUnit.SECONDS);
             if (frame == null) throw new IOException("websocket tunnel timed out");
             if (frame.end) break;
+            stream.stage = Stage.RESPONSE_BODY;
             stream.consumed(frame);
             if (frame.bytes != null) {
                 if (frame.bytes.size() > MAX_WS_MESSAGE) throw new IOException("websocket message too large");
@@ -481,6 +520,7 @@ final class WebTunnel {
             }
         }
         upstream.close(1000, "tunnel closed");
+        stream.stage = Stage.NORMAL_CLOSE;
         stream.finishNormally();
     }
 
