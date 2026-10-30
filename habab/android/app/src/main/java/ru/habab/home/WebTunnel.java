@@ -219,7 +219,9 @@ final class WebTunnel {
         final Config config;
         final BlockingQueue<Frame> frames = new ArrayBlockingQueue<>(MAX_QUEUED_FRAMES);
         final CompletableFuture<JSONObject> request = new CompletableFuture<>();
+        final CompletableFuture<Void> dataEnded = new CompletableFuture<>();
         final AtomicBoolean cancelled = new AtomicBoolean();
+        final AtomicBoolean dataFailed = new AtomicBoolean();
         final java.util.concurrent.atomic.AtomicLong queuedBytes = new java.util.concurrent.atomic.AtomicLong();
         volatile boolean websocket;
         volatile WebSocket data;
@@ -240,6 +242,11 @@ final class WebTunnel {
             return !cancelled.get() && ws.send(value);
         }
         void dataClose(int code, String reason) { WebSocket ws = data; if (ws != null) ws.close(code, reason); }
+        boolean finishNormally() {
+            WebSocket ws = data;
+            if (ws == null || dataFailed.get()) return false;
+            return gracefulDataClose(ws, dataEnded, 5000) && !dataFailed.get();
+        }
         boolean send(ByteString value) throws InterruptedException {
             WebSocket ws = data;
             if (ws == null || cancelled.get()) return false;
@@ -303,11 +310,14 @@ final class WebTunnel {
                 }
                 @Override public void onClosed(WebSocket webSocket, int code, String reason) {
                     opened.completeExceptionally(new IOException("data socket closed"));
+                    stream.dataEnded.complete(null);
                     stream.request.completeExceptionally(new IOException("data socket closed"));
                     stream.offerFrame(Frame.end());
                 }
                 @Override public void onFailure(WebSocket webSocket, Throwable error, Response response) {
                 opened.completeExceptionally(new IOException("data socket failed"));
+                    stream.dataFailed.set(true);
+                    stream.dataEnded.complete(null);
                     stream.request.completeExceptionally(new IOException("data socket failed"));
                     stream.offerFrame(Frame.end());
                 }
@@ -324,6 +334,7 @@ final class WebTunnel {
         } catch (Exception ignored) {
             stream.dataClose(1011, "local request failed");
         } finally {
+            // Successful handlers wait for the peer close before reaching this cancellation.
             stream.cancel();
             streams.remove(stream.id, stream);
         }
@@ -380,7 +391,8 @@ final class WebTunnel {
                 if (!stream.send(ByteString.of(buffer, 0, count))) throw new IOException("data socket closed");
             }
         }
-        stream.send("{\"type\":\"end\"}");
+        if (!stream.send("{\"type\":\"end\"}")) throw new IOException("data socket closed");
+        stream.finishNormally();
     }
 
     private void serveWebSocket(Stream stream, HttpUrl url, Headers headers, String protocols) throws Exception {
@@ -422,6 +434,8 @@ final class WebTunnel {
             @Override public void onClosed(WebSocket webSocket, int code, String reason) { }
             @Override public void onFailure(WebSocket webSocket, Throwable error, Response response) {
                 if (response == null) {
+                    stream.dataFailed.set(true);
+                    stream.dataEnded.complete(null);
                     opened.completeExceptionally(new IOException("local websocket failed"));
                     stream.cancel();
                     return;
@@ -438,12 +452,16 @@ final class WebTunnel {
                 }
             }
         });
-        if (!opened.get(15, TimeUnit.SECONDS)) return;
+        if (!opened.get(15, TimeUnit.SECONDS)) {
+            stream.finishNormally();
+            return;
+        }
         WebSocket upstream = stream.localSocket;
         if (upstream == null) throw new IOException("local websocket unavailable");
         while (!stream.cancelled.get()) {
             Frame frame = stream.frames.poll(180, TimeUnit.SECONDS);
-            if (frame == null || frame.end) break;
+            if (frame == null) throw new IOException("websocket tunnel timed out");
+            if (frame.end) break;
             stream.consumed(frame);
             if (frame.bytes != null) {
                 if (frame.bytes.size() > MAX_WS_MESSAGE) throw new IOException("websocket message too large");
@@ -463,6 +481,7 @@ final class WebTunnel {
             }
         }
         upstream.close(1000, "tunnel closed");
+        stream.finishNormally();
     }
 
     private static Headers withProtocols(Headers source, String protocols) {
@@ -559,7 +578,20 @@ final class WebTunnel {
 
     private static boolean isForwardedHeader(String name) {
         return name.equalsIgnoreCase("forwarded") || name.equalsIgnoreCase("x-habab-home")
+                || name.equalsIgnoreCase("x-real-ip")
                 || name.toLowerCase(Locale.ROOT).startsWith("x-forwarded-");
+    }
+
+    static boolean gracefulDataClose(WebSocket ws, CompletableFuture<Void> ended, long timeoutMillis) {
+        if (ws == null || ended == null || timeoutMillis < 1) return false;
+        if (!ended.isDone()) ws.close(1000, "stream complete");
+        try {
+            ended.get(timeoutMillis, TimeUnit.MILLISECONDS);
+            return true;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception ignored) { return false; }
     }
 
     private static final class Config {

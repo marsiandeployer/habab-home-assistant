@@ -4,8 +4,11 @@ import static org.junit.Assert.*;
 
 import okhttp3.Headers;
 import okhttp3.HttpUrl;
+import okhttp3.WebSocket;
 import org.json.JSONArray;
 import org.junit.Test;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.CompletableFuture;
 
 public final class WebTunnelTest {
     private static final String CONTROL = "wss://home-p30.wpmix.net/_habab_tunnel/control";
@@ -62,6 +65,7 @@ public final class WebTunnelTest {
                 .put(new JSONArray().put("Authorization").put("Bearer native-login"))
                 .put(new JSONArray().put("Cookie").put("ha_auth=opaque"))
                 .put(new JSONArray().put("X-Forwarded-For").put("192.0.2.1"))
+                .put(new JSONArray().put("X-Real-IP").put("192.0.2.1"))
                 .put(new JSONArray().put("Forwarded").put("for=192.0.2.1"))
                 .put(new JSONArray().put("X-Habab-Home").put("spoof"))
                 .put(new JSONArray().put("Connection").put("keep-alive, X-Private-Hop"))
@@ -73,7 +77,27 @@ public final class WebTunnelTest {
         assertEquals("https://home-p30.wpmix.net", headers.get("Origin"));
         assertEquals("Bearer native-login", headers.get("Authorization"));
         assertEquals("ha_auth=opaque", headers.get("Cookie"));
-        for (String dropped : new String[]{"X-Forwarded-For", "Forwarded", "X-Habab-Home", "Connection",
+        for (String dropped : new String[]{"X-Forwarded-For", "X-Real-IP", "Forwarded", "X-Habab-Home", "Connection",
                 "X-Private-Hop", "Content-Length", "Sec-WebSocket-Key"}) assertNull(headers.get(dropped));
+    }
+
+    @Test public void gracefulDataCloseWaitsForPeerOrTimesOut() {
+        CompletableFuture<Void> ended = new CompletableFuture<>();
+        WebSocket peerCloses = (WebSocket) Proxy.newProxyInstance(WebSocket.class.getClassLoader(),
+                new Class<?>[]{WebSocket.class}, (proxy, method, args) -> {
+                    if ("close".equals(method.getName())) { ended.complete(null); return true; }
+                    if (method.getReturnType() == boolean.class) return false;
+                    if (method.getReturnType() == long.class) return 0L;
+                    if (method.getReturnType() == int.class) return 0;
+                    return null;
+                });
+        assertTrue(WebTunnel.gracefulDataClose(peerCloses, ended, 100));
+
+        CompletableFuture<Void> neverEnds = new CompletableFuture<>();
+        WebSocket slowPeer = (WebSocket) Proxy.newProxyInstance(WebSocket.class.getClassLoader(),
+                new Class<?>[]{WebSocket.class}, (proxy, method, args) -> true);
+        long started = System.nanoTime();
+        assertFalse(WebTunnel.gracefulDataClose(slowPeer, neverEnds, 25));
+        assertTrue(System.nanoTime() - started < 1_000_000_000L);
     }
 }
