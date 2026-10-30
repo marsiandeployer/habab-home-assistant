@@ -22,8 +22,7 @@ class ApkOnlyReleaseTests(unittest.TestCase):
         self.repo = Path(self.temp.name) / 'repo'
         self.repo.mkdir()
         subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
-        subprocess.run(['git', '-C', str(self.repo), 'config', 'user.email', 'test@example.invalid'], check=True)
-        subprocess.run(['git', '-C', str(self.repo), 'config', 'user.name', 'APK Candidate Test'], check=True)
+        self.configure_git_identity(self.repo)
         self.write('habab/android/app/src/main/AndroidManifest.xml', '<manifest />')
         self.write('habab/android/app/src/main/java/App.java', 'class App {}')
         self.write('habab/native-frontend/src/app.ts', 'const app = true;')
@@ -48,6 +47,11 @@ class ApkOnlyReleaseTests(unittest.TestCase):
     def git(self, *args):
         return subprocess.run(['git', '-C', str(self.repo), *args], check=True,
                               capture_output=True, text=True).stdout.strip()
+
+    @staticmethod
+    def configure_git_identity(repo):
+        subprocess.run(['git', '-C', str(repo), 'config', 'user.email', 'test@example.invalid'], check=True)
+        subprocess.run(['git', '-C', str(repo), 'config', 'user.name', 'APK Candidate Test'], check=True)
 
     def commit(self, message):
         self.git('add', '.')
@@ -84,6 +88,7 @@ class ApkOnlyReleaseTests(unittest.TestCase):
 
         temp_repo = Path(self.temp.name) / 'dockerfile-case'
         subprocess.run(['git', 'clone', '-q', str(self.repo), str(temp_repo)], check=True)
+        self.configure_git_identity(temp_repo)
         base = subprocess.run(['git', '-C', str(temp_repo), 'rev-parse', 'HEAD'],
                               check=True, capture_output=True, text=True).stdout.strip()
         path = temp_repo / 'habab/distribution/Dockerfile'
@@ -125,7 +130,7 @@ class ApkOnlyReleaseTests(unittest.TestCase):
             with self.subTest(path=path):
                 temp_repo = Path(self.temp.name) / ('case-' + str(len(path)))
                 subprocess.run(['git', 'clone', '-q', str(self.repo), str(temp_repo)], check=True)
-                # The clone starts at the base commit and uses the same commit identity.
+                self.configure_git_identity(temp_repo)
                 prepare_rev = subprocess.run(['git', '-C', str(temp_repo), 'rev-parse', 'HEAD'],
                                              check=True, capture_output=True, text=True).stdout.strip()
                 target = temp_repo / path
