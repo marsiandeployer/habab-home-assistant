@@ -1,0 +1,10 @@
+{
+  "domain": "habab_product_tunnel",
+  "name": "Habab Home Remote Access",
+  "documentation": "https://habab.ru/habab-home-remote-access",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["habab_home"],
+  "integration_type": "service",
+  "iot_class": "cloud_push"
+}

@@ -11,6 +11,35 @@ an image, updates `main`/`latest`, uploads to the public download host, or
 creates a GitHub Release. Candidate artifacts stay in GitHub Actions for one
 day.
 
+## Choose the smallest release
+
+| Changed component | Release path |
+| --- | --- |
+| Server relay | Test/deploy the relay only; leave Android unchanged |
+| Android Java, resources, or app manifest | APK-only candidate with a compatible existing signed runtime |
+| Native frontend, HA components, runtime launcher, or dependencies | Full Android path below |
+| Unknown or incompatible inputs | Full Android path; do not guess compatibility |
+
+The APK-only workflow is `.github/workflows/habab-android-apk-candidate.yaml`.
+It takes an explicit full `apk_source_revision`, `runtime_manifest_url`,
+`android_version_code`, and `android_version_name`. It preserves the existing
+runtime/frontend identities and separately records the new APK source revision.
+Without all four APK-signing secrets it produces an explicitly unsigned review
+candidate; it does not publish or install it. The runtime archive is not
+downloaded, rebuilt, or installed in this path. Gradle dependencies use the
+existing setup-gradle cache. Reuse requires checking the complete change range from
+the runtime source, not just the latest commit. A version label alone is not
+proof of compatibility. The existing full workflow remains the conservative
+path when runtime/frontend inputs change.
+
+Run the changed component's fast checks before a large build. The full workflow's
+preflight now runs the relay tests (including concurrent HTTP with an open
+WebSocket) inside its existing bounded HA test container before compiling any
+Android frontend. Do not repeat a completed build, archive scan, or device
+runtime installation without changed inputs, a failure, or a concrete concern.
+Publication still checks signatures and artifact hashes; device acceptance is
+reported separately from source/build checks.
+
 ## Targets
 
 - **Windows:** the existing builder's installer kit ZIP from the selected

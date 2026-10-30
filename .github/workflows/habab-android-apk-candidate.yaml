@@ -1,0 +1,211 @@
+name: Habab Android APK-only candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_source_revision:
+        description: Full source commit SHA for the native Android APK changes
+        required: true
+        type: string
+      runtime_manifest_url:
+        description: Canonical URL of an already signed and accepted Android runtime manifest
+        required: true
+        type: string
+      android_version_code:
+        description: Reviewed versionCode, greater than distributed and installed builds
+        required: true
+        type: string
+      android_version_name:
+        description: Reviewed Android versionName
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  apk-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APK_SOURCE_REVISION: ${{ inputs.apk_source_revision }}
+      RUNTIME_MANIFEST_URL: ${{ inputs.runtime_manifest_url }}
+      ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+      ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
+    steps:
+      - name: Validate explicit source and version inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$APK_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || {
+            echo '::error::APK source revision must be a full lowercase 40-character SHA'; exit 1;
+          }
+          [[ "$ANDROID_VERSION_CODE" =~ ^[1-9][0-9]{0,9}$ ]] && (( ANDROID_VERSION_CODE <= 2100000000 )) || {
+            echo '::error::Android versionCode must be between 1 and 2100000000'; exit 1;
+          }
+          [[ "$ANDROID_VERSION_NAME" =~ ^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$ ]] || {
+            echo '::error::Android versionName must contain 1-64 release label characters'; exit 1;
+          }
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          url = urlsplit(os.environ['RUNTIME_MANIFEST_URL'])
+          if (url.scheme != 'https' or url.hostname != 'habab-demo.wpmix.net'
+                  or url.username or url.password or url.query or url.fragment
+                  or not url.path.startswith('/downloads/android/release-')
+                  or not url.path.endswith('.json')):
+              raise SystemExit('::error::Runtime URL must be a canonical signed Android release manifest URL')
+          PY
+      - name: Fetch selected source and validate it against current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git config extensions.partialClone origin
+          git config remote.origin.promisor true
+          git config remote.origin.partialclonefilter blob:none
+          git sparse-checkout init --cone
+          git sparse-checkout set habab/android habab/distribution
+          git fetch --filter=blob:none --no-tags origin "$APK_SOURCE_REVISION" +refs/heads/main:refs/remotes/origin/main
+          resolved=$(git rev-parse --verify "$APK_SOURCE_REVISION^{commit}")
+          [[ "$resolved" == "$APK_SOURCE_REVISION" ]] || { echo '::error::APK source SHA did not resolve exactly'; exit 1; }
+          git merge-base --is-ancestor "$APK_SOURCE_REVISION" refs/remotes/origin/main || {
+            echo '::error::APK source is not an ancestor of current origin/main'; exit 1;
+          }
+          git checkout --detach "$APK_SOURCE_REVISION"
+          [[ -z "$(git status --porcelain --untracked-files=all)" ]] || {
+            echo '::error::Selected source checkout is not clean'; exit 1;
+          }
+      - name: Download and validate the signed runtime manifest only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-input
+          curl --fail --location --silent --show-error "$RUNTIME_MANIFEST_URL" -o runtime-input/release.json
+          curl --fail --location --silent --show-error "$RUNTIME_MANIFEST_URL.sig" -o runtime-input/release.json.sig
+          runtime_revision=$(python3 -c 'import json; print(json.load(open("runtime-input/release.json"))["sourceRevision"])')
+          [[ "$runtime_revision" =~ ^[0-9a-f]{40}$ ]] || {
+            echo '::error::Signed runtime has no valid full sourceRevision'; exit 1;
+          }
+          git fetch --filter=blob:none --no-tags origin "$runtime_revision"
+          git cat-file -e "$runtime_revision^{commit}"
+          echo "RUNTIME_SOURCE_REVISION=$runtime_revision" >> "$GITHUB_ENV"
+          echo 'Runtime archive is intentionally not downloaded or rebuilt by this APK-only workflow.'
+      - name: Validate runtime reuse range, signature, and payload attestations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 habab/android/tools/prepare_apk_only.py \
+            --repo . \
+            --runtime-manifest runtime-input/release.json \
+            --runtime-signature runtime-input/release.json.sig \
+            --trusted-public-key habab/android/app/src/main/assets/release/trusted-key.der \
+            --apk-source-revision "$APK_SOURCE_REVISION" \
+            --runtime-manifest-url "$RUNTIME_MANIFEST_URL" \
+            --output habab/android/app/src/main/assets/release
+          mkdir -p candidate/android
+          cp runtime-input/release.json candidate/android/
+          cp runtime-input/release.json.sig candidate/android/
+      - name: Test APK-only provenance and compatibility gates
+        shell: bash
+        run: python3 -m unittest -v habab.android.tools.test_prepare_apk_only
+      - name: Prepare pinned Android native tools and voice assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends patchelf
+          python3 habab/android/tools/prepare_native.py
+          python3 habab/android/tools/prepare_voice.py
+      - uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
+        with:
+          gradle-version: '8.5'
+          dependency-graph: disabled
+      - name: Test, lint, and assemble APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon -p habab/android \
+            "-PappVersionCode=$ANDROID_VERSION_CODE" "-PappVersionName=$ANDROID_VERSION_NAME" \
+            :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
+      - name: Align, optionally sign, and verify candidate APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.HABAB_ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HABAB_ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.HABAB_ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.HABAB_ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          unsigned=$(find habab/android/app/build/outputs/apk/release -name '*.apk' -print -quit)
+          test -n "$unsigned"
+          aligned="$RUNNER_TEMP/habab-home-aligned.apk"
+          "$build_tools/zipalign" -p -f 4 "$unsigned" "$aligned"
+          apk=candidate/android/habab-home-arm64.apk
+          signing_status=unsigned-candidate
+          present=0
+          [[ -n "${ANDROID_KEYSTORE_BASE64:-}" ]] && present=$((present + 1))
+          [[ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ]] && present=$((present + 1))
+          [[ -n "${ANDROID_KEY_ALIAS:-}" ]] && present=$((present + 1))
+          [[ -n "${ANDROID_KEY_PASSWORD:-}" ]] && present=$((present + 1))
+          if (( present != 0 && present != 4 )); then
+            echo '::error::Configure all four APK signing secrets or leave all four blank'; exit 1
+          fi
+          if (( present == 4 )); then
+            keystore="$RUNNER_TEMP/habab-release.jks"
+            trap 'rm -f "$keystore" "$aligned"' EXIT
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+            "$build_tools/apksigner" sign --ks "$keystore" --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD \
+              --out "$apk" "$aligned"
+            "$build_tools/apksigner" verify --verbose "$apk"
+            signing_status=signed-candidate
+          else
+            cp "$aligned" "$apk"
+            rm -f "$aligned"
+            echo 'APK signing secrets are absent; artifact is explicitly unsigned and never publishable.'
+          fi
+          export APK_SIGNING_STATUS="$signing_status"
+          export ANDROID_AAPT="$build_tools/aapt"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import runpy
+          verifier = runpy.run_path('habab/android/tools/verify_runtime.py')
+          release_path = Path('runtime-input/release.json')
+          release = json.loads(release_path.read_text())
+          provenance = verifier['apk_provenance'](release, release_path, os.environ['APK_SOURCE_REVISION'])
+          apk = Path('candidate/android/habab-home-arm64.apk')
+          verifier['verify_apk_provenance'](apk, release, release_path, os.environ['APK_SOURCE_REVISION'])
+          version = verifier['verify_apk_version'](
+              apk, os.environ['ANDROID_AAPT'], os.environ['ANDROID_VERSION_CODE'], os.environ['ANDROID_VERSION_NAME'])
+          status = {
+              'state': 'unsigned_candidate' if os.environ['APK_SIGNING_STATUS'] == 'unsigned-candidate' else 'built',
+              'candidate_type': 'apk-only-reuse-signed-runtime',
+              'apk_signature': os.environ['APK_SIGNING_STATUS'],
+              'publishable': os.environ['APK_SIGNING_STATUS'] != 'unsigned-candidate',
+              'runtime_source_revision': release['sourceRevision'],
+              'apk_source_revision': os.environ['APK_SOURCE_REVISION'],
+              'runtime_id': release['id'],
+              'runtime_manifest_url': verifier['runtime_manifest_url'](release),
+              'runtime_manifest_sha256': __import__('hashlib').sha256(release_path.read_bytes()).hexdigest(),
+              'apk_version': version,
+              'apk_sha256': __import__('hashlib').sha256(apk.read_bytes()).hexdigest(),
+              'apk_bytes': apk.stat().st_size,
+              'workflow_revision': os.environ['GITHUB_WORKFLOW_SHA'],
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+              'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+          }
+          Path('candidate/android/build-provenance.json').write_text(json.dumps(provenance, indent=2, sort_keys=True) + '\n')
+          Path('candidate/android/status.json').write_text(json.dumps(status, indent=2, sort_keys=True) + '\n')
+          PY
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: candidate-android-apk-only-${{ inputs.apk_source_revision }}
+          path: candidate/android
+          if-no-files-found: error
+          retention-days: 1

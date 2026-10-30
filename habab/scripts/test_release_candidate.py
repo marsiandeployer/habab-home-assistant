@@ -111,9 +111,7 @@ class ReleaseCandidateTests(unittest.TestCase):
         product_tunnel = self.source_tree / "habab/product-tunnel"
         product_tunnel.mkdir(parents=True)
         external_members = {
-            "product-tunnel/control.ps1": b"control client\n",
-            "product-tunnel/connect.ps1": b"connect client\n",
-            "product-tunnel/home.example.json": b"{}\n",
+            "product-tunnel/web_tunnel.py": b"canonical outbound agent\n",
         }
         for name, content in external_members.items():
             (product_tunnel / Path(name).name).write_bytes(content)
@@ -493,6 +491,7 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
             "--network none", "--memory=1g", "--memory-swap=1g", "--cpus=1",
             "--pids-limit=64", "--entrypoint python3", ":ro",
             "tests/run_release_candidate_backend_tests.py",
+            "$GITHUB_WORKSPACE/habab/product-tunnel:/workspace/habab/product-tunnel:ro",
         ):
             with self.subTest(value=value):
                 self.assertIn(value, preflight)

@@ -64,17 +64,23 @@ Home Assistant OS, Supervisor, add-ons, облачный аккаунт, GPU и�
 
 ```sh
 cp .env.example .env
-docker compose build
+./build.sh
 docker compose up -d
 docker compose logs -f homeassistant
 ```
+
+Dockerfile включает HA-интеграцию удалённого доступа. Для сборки требуются
+исходники `habab/product-tunnel/web_tunnel.py`; Windows ZIP и `build.sh`
+автоматически подготавливают этот модуль агента для Docker context.
+Если вы вызываете `docker compose build` напрямую, сначала вручную скопируйте
+`../product-tunnel/web_tunnel.py` в `product-tunnel/web_tunnel.py` из этого каталога.
 
 Без указания коммита локальная сборка получает OCI label
 `org.opencontainers.image.revision=unknown`. Для релиза используйте чистый
 коммит и передайте его полный SHA:
 
 ```sh
-docker compose build --build-arg HABAB_SOURCE_REVISION=<full-clean-commit-sha>
+./build.sh
 docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' <release-image-tag>
 ```
 
@@ -124,7 +130,7 @@ API, конфигурацию, веб-интерфейс, виртуальные
 версии. Соберите образ и пересоздайте контейнер, сохранив том с данными:
 
 ```sh
-docker compose build --no-cache
+./build.sh
 docker compose up -d --force-recreate homeassistant
 ```
 

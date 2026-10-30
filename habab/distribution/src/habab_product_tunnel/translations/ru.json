@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение удалённого доступа",
+        "description": "Введите данные, выданные для этого дома. Секретный token хранится в Home Assistant.",
+        "data": {
+          "relay": "Адрес WSS relay",
+          "home": "Имя дома",
+          "token": "Секретный token"
+        }
+      }
+    },
+    "error": {
+      "invalid_config": "Проверьте адрес relay, имя дома и секретный token. Нужен адрес WSS и token не короче 32 символов."
+    },
+    "abort": {
+      "already_configured": "Этот дом уже подключён. Измените его параметры в настройках интеграции."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки удалённого доступа",
+        "description": "Оставьте поле token пустым, чтобы сохранить текущий secret.",
+        "data": {
+          "relay": "Адрес WSS relay",
+          "home": "Имя дома",
+          "token": "Новый секретный token"
+        }
+      }
+    },
+    "error": {
+      "invalid_config": "Проверьте адрес relay, имя дома и секретный token."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "agent": {
+        "name": "Клиент туннеля"
+      }
+    }
+  }
+}

@@ -40,9 +40,17 @@ def main() -> int:
         "test_voice_route_hooks",
         "test_voice",
         "test_xiaomi_setup",
+        "test_habab_product_tunnel",
+        "test_habab_product_tunnel_ha",
     )
     loader = unittest.defaultTestLoader
     suite = unittest.TestSuite(loader.loadTestsFromName(name) for name in modules)
+    # Reuse the same bounded CI container: catch browser bursts before compiling Android.
+    tunnel_tests = DIST.parent / "product-tunnel"
+    if not (tunnel_tests / "test_web_tunnel.py").is_file():
+        raise RuntimeError("Web tunnel preflight tests must be mounted alongside distribution")
+    sys.path.insert(0, str(tunnel_tests))
+    suite.addTests(loader.loadTestsFromName("test_web_tunnel"))
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     if not result.wasSuccessful():
         return 1

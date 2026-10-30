@@ -3,6 +3,7 @@
 !.env.example
 config-data/
 secrets/
+/product-tunnel/
 *.key
 *.pem
 credentials.json

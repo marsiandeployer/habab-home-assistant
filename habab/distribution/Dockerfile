@@ -14,6 +14,9 @@ RUN python3 /opt/habab-frontend/install-native-frontend.py
 # The custom integration is part of the downstream Core tree, so HA's normal
 # integration loader imports it as product code rather than as a sidecar.
 COPY src/habab_home /usr/src/homeassistant/homeassistant/components/habab_home
+COPY src/habab_product_tunnel /usr/src/homeassistant/homeassistant/components/habab_product_tunnel
+# Generated from the canonical relay source by Windows/Linux build entrypoints.
+COPY product-tunnel/web_tunnel.py /usr/src/homeassistant/homeassistant/components/habab_product_tunnel/web_tunnel.py
 COPY src/habab_telegram /usr/src/homeassistant/homeassistant/components/habab_telegram
 COPY src/habab_yandex_speech /usr/src/homeassistant/homeassistant/components/habab_yandex_speech
 COPY src/idigital_sms /usr/src/homeassistant/homeassistant/components/idigital_sms

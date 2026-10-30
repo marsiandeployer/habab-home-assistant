@@ -12,16 +12,14 @@ _WINDOWS_PACKAGE_FILES = (
     'install-native-frontend.py', 'native-frontend-release.json',
     'install-opencode-volume.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
     'source_provenance.py', 'config/configuration.yaml',
-    'product-tunnel/control.ps1', 'product-tunnel/connect.ps1', 'product-tunnel/home.example.json',
+    'product-tunnel/web_tunnel.py',
 )
 _EXTERNAL_PRODUCT_TUNNEL_FILES = frozenset({
-    'product-tunnel/control.ps1',
-    'product-tunnel/connect.ps1',
-    'product-tunnel/home.example.json',
+    'product-tunnel/web_tunnel.py',
 })
 _WINDOWS_SOURCE_DIRECTORIES = (
     'src/habab_home', 'src/habab_telegram', 'src/habab_yandex_speech',
-    'src/idigital_sms', 'telegram-agent',
+    'src/idigital_sms', 'src/habab_product_tunnel', 'telegram-agent',
 )
 _WINDOWS_SOURCE_SUFFIXES = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.vtt'}
 _EXCLUDED_DIRECTORY_NAMES = {'__pycache__', 'node_modules', 'test', 'tests'}
@@ -45,7 +43,7 @@ def collect_windows_package_names(root: Path) -> list[str]:
 
 
 def resolve_windows_package_source(root: Path, name: str) -> Path:
-    """Resolve package members, allowing only the reviewed adjacent tunnel files."""
+    """Resolve package members, allowing the canonical adjacent tunnel agent."""
     member = Path(name)
     if member.is_absolute() or '\\' in name or '..' in member.parts:
         raise ValueError(f'Unsafe Windows package member path: {name}')

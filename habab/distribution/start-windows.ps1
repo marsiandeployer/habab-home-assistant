@@ -181,7 +181,38 @@ try {
     Write-Host 'Building Home Assistant. The first download can take several minutes.'
     $env:HABAB_OPENCODE_SHA256 = 'bootstrap-pending'
     Set-SourceProvenance
-    Run-Docker -DockerArgs @('compose', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'build', 'homeassistant')
+    $checkoutTunnel = Join-Path (Split-Path -Parent $PSScriptRoot) 'product-tunnel\web_tunnel.py'
+    $stageDirectory = Join-Path $PSScriptRoot 'product-tunnel'
+    $stagedTunnel = Join-Path $stageDirectory 'web_tunnel.py'
+    $stagedByThisRun = $false
+    if (Test-Path -LiteralPath $checkoutTunnel -PathType Leaf) {
+        if (Test-Path -LiteralPath $stagedTunnel -PathType Leaf) {
+            $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $checkoutTunnel).Hash
+            $stagedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stagedTunnel).Hash
+            if ($sourceHash -ne $stagedHash) { throw 'A stale staged tunnel source exists in the Docker context. Remove the generated distribution/product-tunnel copy and rerun.' }
+        } else {
+            New-Item -ItemType Directory -Force -Path $stageDirectory | Out-Null
+            Copy-Item -LiteralPath $checkoutTunnel -Destination $stagedTunnel
+            $stagedByThisRun = $true
+        }
+    } elseif (Test-Path -LiteralPath $stagedTunnel -PathType Leaf) {
+        # A downloaded ZIP already contains the canonical source at its build-context path.
+        $stagedTunnel = (Resolve-Path -LiteralPath $stagedTunnel).Path
+    } else {
+        throw 'Canonical product tunnel source is missing from this Windows kit.'
+    }
+    if ($stagedByThisRun) {
+        try {
+            Run-Docker -DockerArgs @('compose', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'build', 'homeassistant')
+        } finally {
+            Remove-Item -LiteralPath $stagedTunnel -Force -ErrorAction SilentlyContinue
+            if ((Test-Path -LiteralPath $stageDirectory) -and -not (Get-ChildItem -LiteralPath $stageDirectory -Force)) {
+                Remove-Item -LiteralPath $stageDirectory -Force
+            }
+        }
+    } else {
+        Run-Docker -DockerArgs @('compose', '-p', 'habab-home-windows', '-f', 'compose.windows.yaml', 'build', 'homeassistant')
+    }
     Run-Docker -DockerArgs @('volume', 'create', 'habab-home-opencode-bin')
     $mount = "$($PSScriptRoot):/bootstrap:ro"
     $installation = & $Docker run --rm --entrypoint python3 -v 'habab-home-opencode-bin:/opt/habab-opencode' -v $mount 'habab-home:windows-test' '/bootstrap/install-opencode-volume.py'

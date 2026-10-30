@@ -60,21 +60,28 @@ def runtime_manifest_url(release):
     return release['url'].rsplit('/', 1)[0] + '/release-' + release['id'] + '.json'
 
 
-def apk_provenance(release, manifest):
-    return {
+def apk_provenance(release, manifest, apk_source_revision=None):
+    provenance = {
         'sourceRevision': release['sourceRevision'],
         'runtimeId': release['id'],
         'runtimeManifestSha256': hashlib.sha256(Path(manifest).read_bytes()).hexdigest(),
         'runtimeManifestUrl': runtime_manifest_url(release),
         'nativeFrontend': release['nativeFrontend'],
     }
+    # APK-only candidates keep the signed runtime's sourceRevision intact while
+    # independently identifying the native Android source used for this APK.
+    if apk_source_revision is not None:
+        if not re.fullmatch(r'[0-9a-f]{40}', apk_source_revision):
+            raise ValueError('APK source revision must be a full lowercase commit SHA')
+        provenance['apkSourceRevision'] = apk_source_revision
+    return provenance
 
 
-def verify_apk_provenance(apk, release, manifest):
+def verify_apk_provenance(apk, release, manifest, apk_source_revision=None):
     with zipfile.ZipFile(apk) as archive:
         embedded = json.loads(archive.read('assets/release/build-provenance.json'))
         default_url = archive.read('assets/release/default-url.txt').decode().strip()
-    if embedded != apk_provenance(release, manifest):
+    if embedded != apk_provenance(release, manifest, apk_source_revision):
         raise ValueError('Signed APK does not embed this runtime and frontend provenance')
     if default_url != runtime_manifest_url(release):
         raise ValueError('Signed APK runtime download URL does not match its own release')
