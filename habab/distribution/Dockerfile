@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.title="Habab Home" \
       org.opencontainers.image.version="0.3.6" \
       org.opencontainers.image.description="Local Home Assistant Core distribution maintained by Habab"
 
-RUN apk add --no-cache nodejs=24.22.1-r0
+RUN apk add --no-cache nodejs=24.22.1-r1
 
 # Same upstream frontend version as Core, with the downstream Assist entry and
 # native-form bridge. The installer verifies the complete public wheel first.
