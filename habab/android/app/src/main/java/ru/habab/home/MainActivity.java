@@ -306,6 +306,20 @@ public final class MainActivity extends Activity {
         LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(28, 8, 28, 8);
         TextView explanation = new TextView(this); explanation.setText(R.string.voice_privacy); form.addView(explanation);
         TextView phase = new TextView(this); phase.setText(VoiceService.label(this, VoiceService.status)); form.addView(phase);
+        TextView engineLabel = new TextView(this); engineLabel.setText(R.string.voice_wake_engine); form.addView(engineLabel);
+        Spinner wakeEngine = new Spinner(this);
+        ArrayAdapter<CharSequence> engineOptions = ArrayAdapter.createFromResource(this,
+                R.array.voice_wake_engines, android.R.layout.simple_spinner_item);
+        engineOptions.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        wakeEngine.setAdapter(engineOptions);
+        String selectedEngine = getSharedPreferences("voice", 0).getString("wake_engine", "vosk");
+        for (int i = 0; i < WakeEngineFactory.IDS.length; i++)
+            if (WakeEngineFactory.IDS[i].equals(selectedEngine)) wakeEngine.setSelection(i);
+        form.addView(wakeEngine);
+        TextView engineHelp = new TextView(this); engineHelp.setText(R.string.voice_wake_engine_help); form.addView(engineHelp);
+        if (!"experimental_models_installed".equals(WakeEngineFactory.bundleStatus(this))) {
+            TextView missingModels = new TextView(this); missingModels.setText(R.string.voice_wake_models_missing); form.addView(missingModels);
+        }
         TextView routeHelp = new TextView(this); routeHelp.setText(R.string.voice_audio_route_help); form.addView(routeHelp);
         String routeMode = getSharedPreferences("voice", 0).getString("audio_route_mode",
                 getSharedPreferences("voice", 0).getBoolean("bluetooth_audio", false) ? "bluetooth" : "phone");
@@ -326,6 +340,16 @@ public final class MainActivity extends Activity {
         EditText phrase = new EditText(this); phrase.setHint(R.string.voice_phrase);
         phrase.setText(getSharedPreferences("voice", 0).getString("phrase", "эй дом"));
         phrase.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)}); form.addView(phrase);
+        String[] voskPhrase = {phrase.getText().toString()};
+        wakeEngine.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                boolean custom = position == 0;
+                if (!custom && phrase.isEnabled()) voskPhrase[0] = phrase.getText().toString();
+                phrase.setEnabled(custom);
+                phrase.setText(custom ? voskPhrase[0] : "эй дом");
+            }
+            public void onNothingSelected(AdapterView<?> parent) { }
+        });
         CheckBox enabled = new CheckBox(this); enabled.setText(R.string.voice_enable);
         enabled.setChecked(getSharedPreferences("voice", 0).getBoolean("enabled", false)); form.addView(enabled);
         CheckBox wakeClips = new CheckBox(this); wakeClips.setText(R.string.voice_record_wake_clips);
@@ -336,6 +360,7 @@ public final class MainActivity extends Activity {
                     String value = WakeDetector.normalize(phrase.getText().toString());
                     if (value.isEmpty()) { message(getString(R.string.voice_invalid_phrase)); return; }
                     getSharedPreferences("voice", 0).edit().putString("phrase", value)
+                            .putString("wake_engine", WakeEngineFactory.IDS[wakeEngine.getSelectedItemPosition()])
                             .putBoolean("enabled", enabled.isChecked())
                             .putBoolean("record_wake_clips", wakeClips.isChecked())
                             .putString("audio_route_mode", audioRouteGroup.findViewById(audioRouteGroup.getCheckedRadioButtonId()).getTag().toString())
@@ -574,7 +599,7 @@ public final class MainActivity extends Activity {
     private String voiceLifecycleLog() {
         String title = getString(R.string.voice_lifecycle_title);
         File trace = new File(getFilesDir(), "voice-lifecycle.json");
-        if (!trace.isFile() || trace.length() > 65536) return title + "\n" + getString(R.string.voice_lifecycle_unavailable);
+        if (!trace.isFile() || trace.length() > 128 * 1024) return title + "\n" + getString(R.string.voice_lifecycle_unavailable);
         try {
             String json = new String(Files.readAllBytes(trace.toPath()), StandardCharsets.UTF_8);
             org.json.JSONArray events = new org.json.JSONArray(json);
@@ -602,6 +627,17 @@ public final class MainActivity extends Activity {
                 if (event.has("confidencePermille")) {
                     lines.append(" / attempt=").append(event.optLong("attempt", -1));
                     lines.append(" / confidence=").append(event.optInt("confidencePermille", -1));
+                }
+                org.json.JSONObject engine = event.optJSONObject("wake_engine");
+                if (engine != null) {
+                    String hash = engine.optString("model_sha256", "");
+                    lines.append(" / engine=").append(engine.optString("engine"))
+                            .append(" / model=").append(engine.optString("model_id"))
+                            .append('@').append(engine.optString("model_version"))
+                            .append(" / sha=").append(hash.substring(0, Math.min(12, hash.length())))
+                            .append(" / threshold=").append(engine.optDouble("threshold"))
+                            .append(" / window=").append(engine.optInt("sliding_window"))
+                            .append(" / hop_ms=").append(engine.optInt("hop_ms"));
                 }
             }
             return lines.toString();

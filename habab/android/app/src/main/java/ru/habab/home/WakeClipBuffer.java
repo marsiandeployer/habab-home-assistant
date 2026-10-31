@@ -43,9 +43,38 @@ final class WakeClipBuffer {
         retain(directory);
     }
 
+    /** Saves an accepted clip with the engine identity captured for that attempt. */
+    static synchronized void save(File directory, short[] data, long timestamp, long attempt,
+            WakeEngineInfo wakeEngine) throws IOException {
+        if (wakeEngine == null) throw new IOException("wake_engine_identity");
+        if (data == null || data.length > MAX_DIAGNOSTIC_SAMPLES) throw new IOException("wake_clip_size");
+        String name = "wake-" + timestamp + "-" + attempt + ".wav";
+        writeWav(directory, name, data);
+        JSONObject metadata = new JSONObject();
+        try {
+            metadata.put("recording_result", true)
+                    .put("ground_truth", false)
+                    .put("outcome", "ACCEPTED")
+                    .put("attempt", attempt)
+                    .put("timestamp_ms", timestamp)
+                    .put("wallclock_ms", timestamp)
+                    .put("wake_engine", wakeEngine.toJson());
+        } catch (org.json.JSONException error) {
+            throw new IOException("wake_clip_metadata", error);
+        }
+        writeJson(directory, name + ".json", metadata);
+        retain(directory);
+    }
+
     /** Saves the exact bounded verifier snapshot and numeric/enum outcome metadata. */
     static synchronized String saveDiagnostic(File directory, short[] data, long timestamp,
             long attempt, WakeVerifier.Result result) throws IOException {
+        return saveDiagnostic(directory, data, timestamp, attempt, result, null);
+    }
+
+    /** Saves verifier output with the immutable engine identity captured for that attempt. */
+    static synchronized String saveDiagnostic(File directory, short[] data, long timestamp,
+            long attempt, WakeVerifier.Result result, WakeEngineInfo wakeEngine) throws IOException {
         if (result == null || result.diagnosticAudio == null || data == null
                 || data.length > MAX_DIAGNOSTIC_SAMPLES) throw new IOException("wake_clip_size");
         String prefix = result.accepted() ? "wake-" : "wake-rejected-";
@@ -63,6 +92,7 @@ final class WakeClipBuffer {
                     .put("rms_pcm16", result.context.rms)
                     .put("confidence_permille", result.context.confidence)
                     .put("wallclock_ms", result.wallClockMs);
+            if (wakeEngine != null) metadata.put("wake_engine", wakeEngine.toJson());
         } catch (org.json.JSONException error) {
             throw new IOException("wake_clip_metadata", error);
         }

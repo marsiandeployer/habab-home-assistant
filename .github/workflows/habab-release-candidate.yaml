@@ -118,6 +118,8 @@ jobs:
         run: PYTHONPATH=habab/scripts python3 -m unittest -v test_release_candidate.ReleasePreflightWorkflowTests
       - name: Test Android runtime source payload
         run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_package_runtime_sources test_package_runtime_serialx
+      - name: Test optional private wake model pack validation
+        run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_prepare_wake_experiments
       - name: Set up Node 24.21.0
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -718,6 +720,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends patchelf
           python3 habab/android/tools/prepare_native.py
           python3 habab/android/tools/prepare_voice.py
+          sdkmanager 'ndk;27.2.12479018' 'cmake;3.22.1'
       - uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         with:

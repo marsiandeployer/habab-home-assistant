@@ -3,9 +3,15 @@ package ru.habab.home;
 import static org.junit.Assert.*;
 import java.nio.file.*;
 import java.util.stream.Stream;
+import org.json.JSONObject;
 import org.junit.Test;
 
 public class WakeClipBufferTest {
+    private static WakeEngineInfo engine(String id, String version, char hash) {
+        char[] digest = new char[64]; java.util.Arrays.fill(digest, hash);
+        return new WakeEngineInfo(id, "wake-model", version, new String(digest), null, 0.42, 4, "secret phrase");
+    }
+
     @Test public void wrapsAndSavesValidPcmWithoutPersistingBeforeWake() throws Exception {
         WakeClipBuffer ring = new WakeClipBuffer(1);
         short[] input = new short[17000];
@@ -85,5 +91,45 @@ public class WakeClipBufferTest {
             try (Stream<Path> files = Files.list(dir)) { files.forEach(p -> p.toFile().delete()); }
             Files.deleteIfExists(dir);
         }
+    }
+
+    @Test public void acceptedAndRejectedSidecarsKeepTheirCapturedEngineIdentity() throws Exception {
+        Path dir = Files.createTempDirectory("wake-engine-sidecar");
+        try {
+            short[] pcm = new short[]{4, 5, 6};
+            WakeEngineInfo acceptedEngine = engine("vosk", "1", 'a');
+            WakeEngineInfo rejectedEngine = engine("onnx", "2", 'b');
+            WakeClipBuffer.save(dir.toFile(), pcm, 1700000000123L, 21, acceptedEngine);
+            WakeVerifier.Result rejected = new WakeVerifier.Result(
+                    new WakeVerifier.Context(22, 10, WakeMatchGate.MatchSource.VAD_END_FINAL, 120, 1, 800),
+                    WakeVerifier.Outcome.REJECTED, 30, 320, null, pcm, 1700000000456L);
+            String rejectedName = WakeClipBuffer.saveDiagnostic(dir.toFile(), pcm, 1700000000456L,
+                    22, rejected, rejectedEngine);
+
+            JSONObject acceptedJson = readSidecar(dir, "wake-1700000000123-21.wav");
+            assertTrue(acceptedJson.getBoolean("recording_result"));
+            assertFalse(acceptedJson.getBoolean("ground_truth"));
+            assertEquals("ACCEPTED", acceptedJson.getString("outcome"));
+            assertEquals(21, acceptedJson.getLong("attempt"));
+            assertEquals(1700000000123L, acceptedJson.getLong("timestamp_ms"));
+            assertEquals("vosk", acceptedJson.getJSONObject("wake_engine").getString("engine"));
+            assertEquals("1", acceptedJson.getJSONObject("wake_engine").getString("model_version"));
+            assertFalse(acceptedJson.getJSONObject("wake_engine").has("phrase"));
+            assertFalse(acceptedJson.toString().contains("secret phrase"));
+
+            JSONObject rejectedJson = readSidecar(dir, rejectedName);
+            assertEquals("REJECTED", rejectedJson.getString("outcome"));
+            assertEquals("onnx", rejectedJson.getJSONObject("wake_engine").getString("engine"));
+            assertEquals("2", rejectedJson.getJSONObject("wake_engine").getString("model_version"));
+            assertEquals("b".repeat(64), rejectedJson.getJSONObject("wake_engine").getString("model_sha256"));
+        } finally {
+            try (Stream<Path> files = Files.list(dir)) { files.forEach(p -> p.toFile().delete()); }
+            Files.delete(dir);
+        }
+    }
+
+    private static JSONObject readSidecar(Path dir, String wavName) throws Exception {
+        return new JSONObject(new String(Files.readAllBytes(dir.resolve(wavName + ".json")),
+                java.nio.charset.StandardCharsets.UTF_8));
     }
 }

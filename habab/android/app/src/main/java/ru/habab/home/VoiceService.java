@@ -36,6 +36,8 @@ public final class VoiceService extends Service {
     private volatile AudioRecord recorder;
     private volatile SilentVoiceCallPlayback silentCallPlayback;
     private volatile RealtimeVoice realtime;
+    private volatile WakeEngineInfo activeWakeEngine;
+    private volatile String requestedWakeEngine = "vosk";
     private volatile String failure;
     private volatile String finishTrigger;
     private volatile boolean endRequested;
@@ -250,6 +252,13 @@ public final class VoiceService extends Service {
     private void traceWake(VoiceLifecycleTrace.Event event, VoiceLifecycleTrace.Reason reason,
             long attempt, long elapsedAt, int rmsPcm16, int vadSpeech, int partialPresent, int phraseMatch,
             int confidencePermille, long elapsedFromWakeMs) {
+        traceWake(event, reason, attempt, elapsedAt, rmsPcm16, vadSpeech, partialPresent,
+                phraseMatch, confidencePermille, elapsedFromWakeMs, activeWakeEngine);
+    }
+
+    private void traceWake(VoiceLifecycleTrace.Event event, VoiceLifecycleTrace.Reason reason,
+            long attempt, long elapsedAt, int rmsPcm16, int vadSpeech, int partialPresent, int phraseMatch,
+            int confidencePermille, long elapsedFromWakeMs, WakeEngineInfo engineInfo) {
         String requested = getSharedPreferences("voice", 0).getString("audio_route_mode", VoiceAudioRoute.PHONE);
         int routeCode = "duplicate".equals(requested) ? 2 : "bluetooth".equals(requested) ? 1 : 0;
         AudioRecord current = recorder;
@@ -260,7 +269,7 @@ public final class VoiceService extends Service {
                     deviceType, traceAudioSource, traceSampleRate, captureSilenced, recordingEffects,
                     System.currentTimeMillis(), elapsedAt,
                     rmsPcm16, vadSpeech, partialPresent, phraseMatch, confidencePermille,
-                    elapsedFromWakeMs);
+                    elapsedFromWakeMs, engineInfo);
             persistLifecycleTrace(this);
         }
     }
@@ -280,12 +289,13 @@ public final class VoiceService extends Service {
         long at = System.currentTimeMillis(), elapsed = SystemClock.elapsedRealtime();
         long attempt = diagnosticAttempt, capturedAt = diagnosticCapturedAt;
         long fromWake = diagnosticWakeAt < 0 ? -1 : Math.max(0, elapsed - diagnosticWakeAt);
+        WakeEngineInfo engineInfo = activeWakeEngine;
         try {
             wakeClipWriter.execute(() -> {
                 try {
                     if (getSharedPreferences("voice", 0).getBoolean("record_wake_clips", false))
                         VoiceTimingJournal.append(new File(external, "wake-clips"), event,
-                                attempt, capturedAt, at, elapsed, fromWake, value);
+                                attempt, capturedAt, at, elapsed, fromWake, value, engineInfo);
                 }
                 catch (java.io.IOException | IllegalArgumentException error) { diagnosticDropped.incrementAndGet(); }
             });
@@ -382,6 +392,9 @@ public final class VoiceService extends Service {
             case "realtime_provider_rejected": text = R.string.voice_error_rejected; break;
             case "voice_rate_limited": text = R.string.voice_error_limit; break;
             case "unsupported_wake_word": case "invalid_wake_phrase": text = R.string.voice_error_phrase; break;
+            case "unsupported_wake_engine": case "wake_model_unavailable": case "wake_model_checksum":
+            case "wake_engine_failed": text = R.string.voice_error_wake_engine; break;
+            case "wake_model_phrase": text = R.string.voice_error_experimental_phrase; break;
             case "microphone_permission_revoked": text = R.string.voice_error_permission; break;
             case "voice_model_unavailable": case "voice_model_checksum_mismatch":
             case "invalid_voice_model": case "incomplete_voice_model": text = R.string.voice_error_model; break;
@@ -448,6 +461,7 @@ public final class VoiceService extends Service {
                     .put("serviceGeneration", serviceGeneration).put("lifecycleCleanupFailed", lifecycleCleanupFailed)
                     .put("captureFrames", frames).put("wakeCount", wakeCount).put("replies", replies)
                     .put("lastWakeSource", lastWakeSource)
+                    .put("requestedWakeEngine", requestedWakeEngine)
                     .put("uploadedPcmBytes", audioUploaded).put("screenOn", getSystemService(PowerManager.class).isInteractive())
                     .put("timingsMs", new JSONObject(timings))
                     .put("localDiagnosticDropped", diagnosticDropped.get())
@@ -462,6 +476,8 @@ public final class VoiceService extends Service {
                             .put("outputDeviceType", outputDeviceType)
                             .put("inputDeviceName", inputDeviceName).put("outputDeviceName", outputDeviceName))
                     .put("recordedAt", System.currentTimeMillis());
+            WakeEngineInfo engineInfo = activeWakeEngine;
+            if (engineInfo != null) result.put("wakeEngine", engineInfo.toJson());
             if (cues != null) {
                 result.put("lastCueDiagnostics", new JSONObject(cues.diagnostics()));
                 result.put("lastStartCueDiagnostics", new JSONObject(cues.startDiagnostics()));
@@ -490,14 +506,24 @@ public final class VoiceService extends Service {
     private void captureLoop() {
         AcousticEchoCanceler echo = null; NoiseSuppressor noise = null;
         try {
+            requestedWakeEngine = getSharedPreferences("voice", 0).getString("wake_engine", "vosk");
+            activeWakeEngine = null;
+            lifecycleTrace.setWakeEngine(null);
             phase("preparing"); writeStatus(true);
-            File model = VoiceModel.prepare(this);
             String phrase = getSharedPreferences("voice", 0).getString("phrase", "эй дом");
-            try (WakeDetector detector = new WakeDetector(model.toString(), phrase,
+            java.util.concurrent.atomic.AtomicReference<WakeEngineInfo> engineIdentity = new java.util.concurrent.atomic.AtomicReference<>();
+            try (WakeEngine detector = WakeEngineFactory.create(this, requestedWakeEngine, phrase,
                     (event, reason, attempt, elapsedAt, rmsPcm16, vadSpeech,
                             partialPresent, phraseMatch, confidencePermille, elapsedFromWakeMs) ->
                             traceWake(event, reason, attempt, elapsedAt, rmsPcm16, vadSpeech,
-                                    partialPresent, phraseMatch, confidencePermille, elapsedFromWakeMs))) {
+                                    partialPresent, phraseMatch, confidencePermille, elapsedFromWakeMs,
+                                    engineIdentity.get()))) {
+                final WakeEngineInfo captureEngineInfo = detector.info();
+                engineIdentity.set(captureEngineInfo);
+                activeWakeEngine = captureEngineInfo;
+                lifecycleTrace.setWakeEngine(captureEngineInfo);
+                android.util.Log.i("HababWakeModel", "event=engine_started identity=" + captureEngineInfo.toJson());
+                recordVoiceDiagnostic("WAKE_ENGINE_STARTED", 0);
                 awaitBluetoothSco();
                 int inputRate = legacyScoSampleRate ? 8000 : 16000;
                 int size = Math.max(6400, AudioRecord.getMinBufferSize(inputRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT));
@@ -575,7 +601,13 @@ public final class VoiceService extends Service {
                         else if (wakeClipActive) wakeClip.clear();
                         wakeClipActive = recordWake;
                         detector.setDiagnosticCaptureEnabled(recordWake);
-                        boolean wakeAccepted = detector.accept(samples, count, now);
+                        boolean wakeAccepted;
+                        try { wakeAccepted = detector.accept(samples, count, now); }
+                        catch (Exception error) {
+                            if ("vosk".equals(captureEngineInfo.engineId)) throw error;
+                            VoiceFailure modelFailure = new VoiceFailure("wake_engine_failed");
+                            modelFailure.initCause(error); throw modelFailure;
+                        }
                         WakeVerifier.Result diagnostic = detector.consumeDiagnosticResult();
                         long candidateCapturedAt = System.currentTimeMillis();
                         boolean diagnosticCaptured = recordWake && diagnostic != null
@@ -589,7 +621,7 @@ public final class VoiceService extends Service {
                                         try {
                                             if (getSharedPreferences("voice", 0).getBoolean("record_wake_clips", false))
                                                 WakeClipBuffer.saveDiagnostic(new File(external, "wake-clips"), clip,
-                                                        candidateCapturedAt, diagnostic.context.attempt, diagnostic);
+                                                        candidateCapturedAt, diagnostic.context.attempt, diagnostic, captureEngineInfo);
                                         }
                                         catch (java.io.IOException error) { diagnosticDropped.incrementAndGet(); }
                                         finally { java.util.Arrays.fill(clip, (short) 0); }
@@ -611,7 +643,7 @@ public final class VoiceService extends Service {
                                     long capturedAttempt = detector.lastMatchAttempt();
                                     try {
                                         wakeClipWriter.execute(() -> {
-                                            try { WakeClipBuffer.save(new File(external, "wake-clips"), clip, capturedAt, capturedAttempt); }
+                                            try { WakeClipBuffer.save(new File(external, "wake-clips"), clip, capturedAt, capturedAttempt, captureEngineInfo); }
                                             catch (java.io.IOException error) { android.util.Log.w("HababWakeClip", "Failed to save wake clip", error); }
                                             finally { java.util.Arrays.fill(clip, (short) 0); }
                                         });
@@ -624,7 +656,7 @@ public final class VoiceService extends Service {
                             if (verifiedAudio != null) java.util.Arrays.fill(verifiedAudio, (short) 0);
                             wakeClip.clear();
                             WakeMatchGate.MatchSource source = detector.lastMatchSource();
-                            lastWakeSource = source == null ? "unknown" : source.statusValue();
+                            lastWakeSource = source == null ? "acoustic_model" : source.statusValue();
                             wakeCount++; started = now; lastActivity = now;
                             beginSession(now, detector.lastMatchAttempt(), recordWake ? capturedAt : -1);
                         }
@@ -669,6 +701,9 @@ public final class VoiceService extends Service {
             }
         } catch (Exception | LinkageError error) {
             if (running) {
+                android.util.Log.w("HababWakeModel", "event=engine_error engine="
+                        + (WakeEngineFactory.known(requestedWakeEngine) ? requestedWakeEngine : "unknown")
+                        + " code=" + VoiceFailure.code(error) + " type=" + error.getClass().getSimpleName());
                 failure = VoiceFailure.code(error); recordFailure(failure);
                 phase("error");
             }

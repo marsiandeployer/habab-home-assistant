@@ -21,7 +21,8 @@ final class VoiceFailure extends IOException {
             "voice_connection_too_slow", "voice_session_ended", "voice_signal_unavailable", "microphone_permission_revoked", "microphone_unavailable",
             "microphone_read_failed", "invalid_wake_phrase", "unsupported_wake_word",
             "voice_model_checksum_mismatch", "invalid_voice_model", "voice_model_too_large",
-            "incomplete_voice_model", "voice_model_unavailable"));
+            "incomplete_voice_model", "voice_model_unavailable", "unsupported_wake_engine",
+            "wake_model_unavailable", "wake_model_phrase", "wake_model_checksum", "wake_engine_failed"));
 
     VoiceFailure(String code) { super(normalize(code)); }
 
