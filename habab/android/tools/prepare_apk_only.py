@@ -18,6 +18,7 @@ APK_PREFIXES = (
     'habab/android/app/src/main/java/',
     'habab/android/app/src/main/kotlin/',
     'habab/android/app/src/main/res/',
+    'habab/android/app/src/test/',
 )
 EXACT_SAFE_PATHS = {
     'habab/android/tools/prepare_voice.py',

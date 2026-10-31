@@ -34,4 +34,56 @@ public class WakeClipBufferTest {
             Files.deleteIfExists(dir);
         }
     }
+
+    @Test public void savesRejectedResultWithSidecarAndBoundsCombinedRetention() throws Exception {
+        Path dir = Files.createTempDirectory("wake-diagnostic-test");
+        try {
+            short[] pcm = new short[]{1, -2, 3};
+            for (int i = 0; i < 52; i++) {
+                WakeVerifier.Context context = new WakeVerifier.Context(i, 10,
+                        WakeMatchGate.MatchSource.VAD_END_FINAL, 123, 1, 876);
+                WakeVerifier.Result rejected = new WakeVerifier.Result(context,
+                        WakeVerifier.Outcome.REJECTED, 42, 640, null, pcm, 1700000000000L + i);
+                String name = WakeClipBuffer.saveDiagnostic(dir.toFile(), pcm, 1700000000000L + i, i, rejected);
+                if (i == 0) assertEquals("wake-rejected-1700000000000-0.wav", name);
+            }
+            try (Stream<Path> files = Files.list(dir)) {
+                assertEquals(50, files.filter(p -> p.getFileName().toString().endsWith(".wav")).count());
+            }
+            assertFalse(Files.exists(dir.resolve("wake-rejected-1700000000000-0.wav")));
+            assertFalse(Files.exists(dir.resolve("wake-rejected-1700000000000-0.wav.json")));
+            Path wav = dir.resolve("wake-rejected-1700000000051-51.wav");
+            Path metadata = dir.resolve(wav.getFileName().toString() + ".json");
+            assertTrue(Files.exists(wav)); assertTrue(Files.exists(metadata));
+            byte[] bytes = Files.readAllBytes(wav);
+            assertEquals(50, bytes.length); assertEquals(1, bytes[44]);
+            org.json.JSONObject json = new org.json.JSONObject(new String(Files.readAllBytes(metadata),
+                    java.nio.charset.StandardCharsets.UTF_8));
+            assertTrue(json.getBoolean("recording_result"));
+            assertFalse(json.getBoolean("ground_truth"));
+            assertEquals("REJECTED", json.getString("outcome"));
+            assertEquals(51, json.getLong("attempt"));
+            assertEquals(10, json.getLong("attempt_started_elapsed_ms"));
+            assertEquals(42, json.getLong("verify_elapsed_ms"));
+            assertEquals(2, json.getLong("decoded_frames"));
+            assertEquals(123, json.getInt("rms_pcm16"));
+            assertEquals(876, json.getInt("confidence_permille"));
+            assertEquals(1700000000051L, json.getLong("wallclock_ms"));
+            long total = 0;
+            try (Stream<Path> files = Files.list(dir)) {
+                for (Path path : (Iterable<Path>) files.filter(p -> p.getFileName().toString().endsWith(".wav"))::iterator)
+                    total += Files.size(path);
+            }
+            assertTrue(total <= WakeClipBuffer.MAX_RETAINED_BYTES);
+
+            WakeVerifier.Result accepted = new WakeVerifier.Result(
+                    new WakeVerifier.Context(99, 10, WakeMatchGate.MatchSource.VAD_END_FINAL, 1, 1, 2),
+                    WakeVerifier.Outcome.ACCEPTED, 5, 320, pcm, pcm, 1700000000099L);
+            assertEquals("wake-1700000000099-99.wav",
+                    WakeClipBuffer.saveDiagnostic(dir.toFile(), pcm, 1700000000099L, 99, accepted));
+        } finally {
+            try (Stream<Path> files = Files.list(dir)) { files.forEach(p -> p.toFile().delete()); }
+            Files.deleteIfExists(dir);
+        }
+    }
 }

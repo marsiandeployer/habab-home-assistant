@@ -37,6 +37,7 @@ final class WakeDetector implements AutoCloseable {
     private WakeMatchGate.MatchSource lastMatchSource;
     private long lastMatchAttempt;
     private short[] verifiedAudio;
+    private WakeVerifier.Result diagnosticResult;
 
     static String normalize(String value) {
         return WakeMatchGate.normalize(value);
@@ -161,11 +162,25 @@ final class WakeDetector implements AutoCloseable {
     /** Poll without submitting synthetic audio; also used by native replay drain. */
     boolean hasPendingVerification() { return verifier != null && verifier.hasPending(); }
 
+    void setDiagnosticCaptureEnabled(boolean enabled) {
+        if (verifier != null) verifier.setDiagnosticCaptureEnabled(enabled);
+        if (!enabled) clearDiagnosticResult();
+    }
+
+    /** Consume the opt-in verification snapshot. Caller owns and must zeroize diagnosticAudio. */
+    WakeVerifier.Result consumeDiagnosticResult() {
+        WakeVerifier.Result result = diagnosticResult; diagnosticResult = null; return result;
+    }
+
     boolean pollVerification(long now) {
         if (verifier == null) return false;
         WakeVerifier.Result result = verifier.poll();
         if (result == null) return false;
         recordVerification(result, now);
+        if (result.diagnosticAudio != null) {
+            clearDiagnosticResult();
+            diagnosticResult = result;
+        }
         if (!result.accepted()) return false;
         lastMatchSource = result.context.source;
         lastMatchAttempt = result.context.attempt;
@@ -266,14 +281,24 @@ final class WakeDetector implements AutoCloseable {
 
     void reset(long now, VoiceLifecycleTrace.Reason reason) {
         lastMatchSource = null;
+        if (verifiedAudio != null) java.util.Arrays.fill(verifiedAudio, (short) 0);
         verifiedAudio = null;
+        clearDiagnosticResult();
         resetRecognizer(reason, now, lastRmsPcm16, wasSpeech ? 1 : 0);
         preRoll.clear(); wasSpeech = false;
         if (verifier != null) verifier.clearAudio();
     }
     @Override public void close() {
+        if (verifiedAudio != null) java.util.Arrays.fill(verifiedAudio, (short) 0);
         verifiedAudio = null;
+        clearDiagnosticResult();
         if (verifier != null) verifier.close();
         recognizer.close(); model.close();
+    }
+
+    private void clearDiagnosticResult() {
+        if (diagnosticResult != null && diagnosticResult.diagnosticAudio != null)
+            java.util.Arrays.fill(diagnosticResult.diagnosticAudio, (short) 0);
+        diagnosticResult = null;
     }
 }

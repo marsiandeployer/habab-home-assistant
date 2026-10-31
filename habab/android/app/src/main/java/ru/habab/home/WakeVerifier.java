@@ -26,10 +26,15 @@ final class WakeVerifier implements AutoCloseable {
         final long elapsedMs;
         final long decodedSamples;
         final short[] acceptedAudio;
-        Result(Context context, Outcome outcome, long elapsedMs, long decodedSamples, short[] acceptedAudio) {
+        final short[] diagnosticAudio;
+        final long wallClockMs;
+        Result(Context context, Outcome outcome, long elapsedMs, long decodedSamples,
+                short[] acceptedAudio, short[] diagnosticAudio, long wallClockMs) {
             this.context = context;
             this.outcome = outcome; this.elapsedMs = elapsedMs; this.decodedSamples = decodedSamples;
             this.acceptedAudio = acceptedAudio;
+            this.diagnosticAudio = diagnosticAudio;
+            this.wallClockMs = wallClockMs;
         }
         boolean accepted() { return outcome == Outcome.ACCEPTED; }
     }
@@ -50,9 +55,12 @@ final class WakeVerifier implements AutoCloseable {
         final short[] samples;
         final int wordStart, wordEnd;
         final long generation;
-        Snapshot(Context context, short[] samples, int wordStart, int wordEnd, long generation) {
+        final boolean diagnosticCapture;
+        Snapshot(Context context, short[] samples, int wordStart, int wordEnd, long generation,
+                boolean diagnosticCapture) {
             this.context = context; this.samples = samples; this.wordStart = wordStart;
             this.wordEnd = wordEnd; this.generation = generation;
+            this.diagnosticCapture = diagnosticCapture;
         }
     }
 
@@ -114,6 +122,7 @@ final class WakeVerifier implements AutoCloseable {
     private Result completed;
     private long generation;
     private boolean closed, running;
+    private boolean diagnosticCaptureEnabled;
 
     WakeVerifier(Model model) throws Exception {
         // Create before returning, so this Recognizer already owns a native Model
@@ -130,9 +139,28 @@ final class WakeVerifier implements AutoCloseable {
     }
 
     void append(short[] samples, int count) { audio.append(samples, count); }
+    void setDiagnosticCaptureEnabled(boolean enabled) {
+        synchronized (lock) {
+            diagnosticCaptureEnabled = enabled;
+            if (!enabled) {
+                // A queued snapshot is recognition input, not diagnostic-only storage.
+                // Let it finish; completion checks this flag before copying PCM for diagnostics.
+                if (completed != null && completed.diagnosticAudio != null) {
+                    clearDiagnosticAudio(completed);
+                    completed = new Result(completed.context, completed.outcome, completed.elapsedMs,
+                            completed.decodedSamples, completed.acceptedAudio, null, completed.wallClockMs);
+                }
+            }
+        }
+    }
     void clearAudio() {
         audio.clear();
-        synchronized (lock) { generation++; pending = null; completed = null; }
+        synchronized (lock) {
+            generation++;
+            if (pending != null) Arrays.fill(pending.samples, (short) 0);
+            if (completed != null) clearResultAudio(completed);
+            pending = null; completed = null;
+        }
     }
 
     /** Capture-thread only: copy one bounded region. Never waits for native decoding.
@@ -168,10 +196,14 @@ final class WakeVerifier implements AutoCloseable {
             short[] snapshot = audio.crop(cropStart, cropEnd);
             if (snapshot == null) return result(context, Outcome.INVALID_AUDIO, started, 0);
             synchronized (lock) {
-                if (closed) return result(context, Outcome.ERROR, started, 0);
+                if (closed) {
+                    Arrays.fill(snapshot, (short) 0);
+                    return result(context, Outcome.ERROR, started, 0);
+                }
                 // One running crop and one latest candidate; no unbounded work queue.
+                if (pending != null) Arrays.fill(pending.samples, (short) 0);
                 pending = new Snapshot(context, snapshot, (int) (start - cropStart),
-                        (int) (end - cropStart), generation);
+                        (int) (end - cropStart), generation, diagnosticCaptureEnabled);
                 lock.notifyAll();
             }
             return null;
@@ -200,8 +232,22 @@ final class WakeVerifier implements AutoCloseable {
                 Result result = verify(task);
                 synchronized (lock) {
                     running = false;
-                    if (!closed && task.generation == generation
-                            && (completed == null || !completed.accepted())) completed = result;
+                    boolean valid = !closed && task.generation == generation;
+                    if (valid && task.diagnosticCapture && diagnosticCaptureEnabled) {
+                        // Diagnostic audio has independent ownership from acceptedAudio.
+                        result = new Result(result.context, result.outcome, result.elapsedMs,
+                                result.decodedSamples, result.acceptedAudio,
+                                Arrays.copyOf(task.samples, task.samples.length), result.wallClockMs);
+                    }
+                    if (valid && (completed == null || !completed.accepted())) {
+                        if (completed != null) clearResultAudio(completed);
+                        completed = result;
+                    } else {
+                        if (result.acceptedAudio != null) Arrays.fill(result.acceptedAudio, (short) 0);
+                        clearResultAudio(result);
+                    }
+                    // Rejected snapshots otherwise have no owner after verify() returns.
+                    if (!result.accepted()) Arrays.fill(task.samples, (short) 0);
                 }
             }
         } catch (InterruptedException interrupted) {
@@ -237,7 +283,7 @@ final class WakeVerifier implements AutoCloseable {
                     JSONObject alternative = alternatives.optJSONObject(i);
                     if (alternative == null || !alternative.has("text")) return result(task.context, Outcome.ERROR, started, decoded);
                     if (DEFAULT_PHRASE.equals(WakeMatchGate.normalize(alternative.optString("text"))))
-                        return new Result(task.context, Outcome.ACCEPTED, elapsed(started), decoded, task.samples);
+                        return result(task.context, Outcome.ACCEPTED, started, decoded, task.samples);
                 }
             }
             return result(task.context, Outcome.REJECTED, started, decoded);
@@ -253,12 +299,26 @@ final class WakeVerifier implements AutoCloseable {
     @Override public void close() {
         audio.clear();
         synchronized (lock) {
-            closed = true; generation++; pending = null; completed = null; lock.notifyAll();
+            closed = true; generation++;
+            if (pending != null) Arrays.fill(pending.samples, (short) 0);
+            if (completed != null) clearResultAudio(completed);
+            pending = null; completed = null; lock.notifyAll();
         }
     }
 
     private long elapsed(long started) { return Math.max(0, (clock.nanos() - started) / 1000000); }
     private Result result(Context context, Outcome outcome, long started, long decoded) {
-        return new Result(context, outcome, elapsed(started), decoded, null);
+        return result(context, outcome, started, decoded, null);
+    }
+    private Result result(Context context, Outcome outcome, long started, long decoded, short[] acceptedAudio) {
+        return new Result(context, outcome, elapsed(started), decoded, acceptedAudio, null,
+                System.currentTimeMillis());
+    }
+    private static void clearResultAudio(Result result) {
+        if (result.acceptedAudio != null) Arrays.fill(result.acceptedAudio, (short) 0);
+        clearDiagnosticAudio(result);
+    }
+    private static void clearDiagnosticAudio(Result result) {
+        if (result.diagnosticAudio != null) Arrays.fill(result.diagnosticAudio, (short) 0);
     }
 }

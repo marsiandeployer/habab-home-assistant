@@ -173,6 +173,73 @@ public class WakeVerifierTest {
         assertEquals(4, calls[0]);
     }
 
+    @Test public void rejectedSnapshotIsRetainedOnlyWhenOptedInAndIsIndependentFromAcceptedAudio() throws Exception {
+        WakeVerifier verifier = create(audio -> response("другая фраза"), () -> 0);
+        short[] source = samples(32000, 100);
+        verifier.append(source, source.length);
+        verifier.setDiagnosticCaptureEnabled(true);
+        WakeVerifier.Result rejected = verify(verifier, candidate(1, 1.5));
+        assertEquals(WakeVerifier.Outcome.REJECTED, rejected.outcome);
+        assertNotNull(rejected.diagnosticAudio);
+        assertEquals(25600, rejected.diagnosticAudio.length);
+        assertEquals((short) (100 + 6400), rejected.diagnosticAudio[0]);
+        assertNull(rejected.acceptedAudio);
+
+        WakeVerifier acceptedVerifier = create(audio -> response("эй дом"), () -> 0);
+        acceptedVerifier.append(source, source.length);
+        acceptedVerifier.setDiagnosticCaptureEnabled(true);
+        WakeVerifier.Result accepted = verify(acceptedVerifier, candidate(1, 1.5));
+        assertNotNull(accepted.acceptedAudio);
+        assertNotNull(accepted.diagnosticAudio);
+        assertNotSame(accepted.acceptedAudio, accepted.diagnosticAudio);
+        accepted.diagnosticAudio[0] = 0;
+        assertEquals((short) (100 + 6400), accepted.acceptedAudio[0]);
+    }
+
+    @Test public void asynchronousRejectionDoesNotRetainPcmWhenCaptureIsDisabled() throws Exception {
+        WakeVerifier verifier = create(audio -> response("другая фраза"), () -> 0);
+        verifier.append(samples(32000, 0), 32000);
+        WakeVerifier.Result rejected = verify(verifier, candidate(1, 1.5));
+        assertEquals(WakeVerifier.Outcome.REJECTED, rejected.outcome);
+        assertNull(rejected.diagnosticAudio);
+    }
+
+    @Test public void disablingCaptureDoesNotCancelQueuedAcceptedWake() throws Exception {
+        CountDownLatch decoding = new CountDownLatch(1), release = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        WakeVerifier verifier = create(audio -> {
+            int call = calls.incrementAndGet();
+            if (call == 1) {
+                decoding.countDown();
+                if (!release.await(2, TimeUnit.SECONDS)) throw new IllegalStateException("test_release");
+            }
+            if (call <= 4) {
+                return response("другая фраза");
+            }
+            return response("эй дом");
+        }, System::nanoTime);
+        verifier.append(samples(32000, 400), 32000);
+        verifier.setDiagnosticCaptureEnabled(true);
+        assertNull(verifier.submit(candidate(1, 1.5), context(3)));
+        assertTrue(decoding.await(2, TimeUnit.SECONDS));
+        verifier.append(samples(16000, 800), 16000);
+        assertNull(verifier.submit(candidate(2, 2.5), context(4)));
+        verifier.setDiagnosticCaptureEnabled(false);
+        release.countDown();
+        WakeVerifier.Result accepted = null;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            WakeVerifier.Result result = verifier.poll();
+            if (result != null && result.context.attempt == 4) { accepted = result; break; }
+            Thread.sleep(1);
+        }
+        assertNotNull("queued verifier result was discarded", accepted);
+        assertTrue(accepted.accepted());
+        assertNotNull(accepted.acceptedAudio);
+        assertEquals((short) (400 + 22400), accepted.acceptedAudio[0]);
+        assertNull(accepted.diagnosticAudio);
+    }
+
     @Test public void pendingUsesImmutableAudioAndKeepsOriginalAttemptAndSource() throws Exception {
         CountDownLatch decoding = new CountDownLatch(1), release = new CountDownLatch(1);
         List<short[]> decoded = new ArrayList<>();

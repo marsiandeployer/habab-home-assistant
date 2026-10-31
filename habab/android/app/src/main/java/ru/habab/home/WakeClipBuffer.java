@@ -6,10 +6,15 @@ import java.io.BufferedOutputStream;
 import java.io.OutputStream;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Comparator;
+import org.json.JSONObject;
 
-/** In-memory rolling audio; only an accepted wake is persisted. */
+/** In-memory rolling audio; persisted only for accepted wakes or opt-in verifier diagnostics. */
 final class WakeClipBuffer {
     static final int SAMPLE_RATE = 16000;
+    static final int MAX_DIAGNOSTIC_SAMPLES = 16 * SAMPLE_RATE;
+    static final int MAX_RETAINED_CLIPS = 50;
+    static final long MAX_RETAINED_BYTES = 32L * 1024 * 1024;
     private final short[] samples;
     private int next, length;
 
@@ -32,8 +37,43 @@ final class WakeClipBuffer {
     void clear() { Arrays.fill(samples, (short) 0); next = 0; length = 0; }
 
     static synchronized void save(File directory, short[] data, long timestamp, long attempt) throws IOException {
+        if (data == null || data.length > MAX_DIAGNOSTIC_SAMPLES) throw new IOException("wake_clip_size");
+        String name = "wake-" + timestamp + "-" + attempt + ".wav";
+        writeWav(directory, name, data);
+        retain(directory);
+    }
+
+    /** Saves the exact bounded verifier snapshot and numeric/enum outcome metadata. */
+    static synchronized String saveDiagnostic(File directory, short[] data, long timestamp,
+            long attempt, WakeVerifier.Result result) throws IOException {
+        if (result == null || result.diagnosticAudio == null || data == null
+                || data.length > MAX_DIAGNOSTIC_SAMPLES) throw new IOException("wake_clip_size");
+        String prefix = result.accepted() ? "wake-" : "wake-rejected-";
+        String name = prefix + timestamp + "-" + attempt + ".wav";
+        writeWav(directory, name, data);
+        JSONObject metadata = new JSONObject();
+        try {
+            metadata.put("recording_result", true)
+                    .put("ground_truth", false)
+                    .put("outcome", result.outcome.name())
+                    .put("attempt", result.context.attempt)
+                    .put("attempt_started_elapsed_ms", result.context.attemptStartedAt)
+                    .put("verify_elapsed_ms", result.elapsedMs)
+                    .put("decoded_frames", result.decodedSamples / 320)
+                    .put("rms_pcm16", result.context.rms)
+                    .put("confidence_permille", result.context.confidence)
+                    .put("wallclock_ms", result.wallClockMs);
+        } catch (org.json.JSONException error) {
+            throw new IOException("wake_clip_metadata", error);
+        }
+        writeJson(directory, name + ".json", metadata);
+        retain(directory);
+        return name;
+    }
+
+    private static void writeWav(File directory, String name, short[] data) throws IOException {
         if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("wake_clip_directory");
-        File destination = new File(directory, "wake-" + timestamp + "-" + attempt + ".wav");
+        File destination = new File(directory, name);
         File temporary = new File(directory, destination.getName() + ".tmp");
         try (OutputStream out = new BufferedOutputStream(new FileOutputStream(temporary))) {
             int bytes = data.length * 2;
@@ -44,11 +84,32 @@ final class WakeClipBuffer {
             for (short sample : data) le(out, sample, 2);
         } catch (IOException error) { temporary.delete(); throw error; }
         if (!temporary.renameTo(destination)) { temporary.delete(); throw new IOException("wake_clip_rename"); }
-        File[] files = directory.listFiles((dir, name) -> name.startsWith("wake-") && name.endsWith(".wav"));
-        if (files != null && files.length > 50) {
-            Arrays.sort(files, (a,b) -> a.getName().compareTo(b.getName()));
-            for (int i = 0; i < files.length - 50; i++) {
-                if (files[i].delete()) new File(directory, files[i].getName() + ".review").delete();
+    }
+
+    private static void writeJson(File directory, String name, JSONObject metadata) throws IOException {
+        File destination = new File(directory, name);
+        File temporary = new File(directory, name + ".tmp");
+        try (OutputStream out = new BufferedOutputStream(new FileOutputStream(temporary))) {
+            out.write(metadata.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.flush();
+        } catch (IOException error) { temporary.delete(); throw error; }
+        if (!temporary.renameTo(destination)) { temporary.delete(); throw new IOException("wake_clip_metadata_rename"); }
+    }
+
+    private static void retain(File directory) {
+        File[] clips = directory.listFiles((dir, name) -> name.startsWith("wake-") && name.endsWith(".wav"));
+        if (clips == null) return;
+        Arrays.sort(clips, Comparator.comparingLong(File::lastModified).thenComparing(File::getName));
+        long bytes = 0;
+        for (File clip : clips) bytes += clip.length();
+        int count = clips.length;
+        for (File clip : clips) {
+            if (count <= MAX_RETAINED_CLIPS && bytes <= MAX_RETAINED_BYTES) break;
+            long size = clip.length();
+            if (clip.delete()) {
+                count--; bytes -= size;
+                new File(directory, clip.getName() + ".review").delete();
+                new File(directory, clip.getName() + ".json").delete();
             }
         }
     }

@@ -19,7 +19,7 @@ public final class VoiceService extends Service {
     private static final VoiceLifecycleTrace lifecycleTrace = new VoiceLifecycleTrace();
     private static final java.util.concurrent.ThreadPoolExecutor wakeClipWriter =
             new java.util.concurrent.ThreadPoolExecutor(1, 1, 0, java.util.concurrent.TimeUnit.SECONDS,
-                    new java.util.concurrent.ArrayBlockingQueue<>(2),
+                    new java.util.concurrent.ArrayBlockingQueue<>(16),
                     new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
     private static volatile Context lifecycleContext;
     private static volatile VoiceService instance;
@@ -40,6 +40,9 @@ public final class VoiceService extends Service {
     private volatile String finishTrigger;
     private volatile boolean endRequested;
     private volatile long lastActivity;
+    private volatile long diagnosticAttempt = -1, diagnosticCapturedAt = -1, diagnosticWakeAt = -1;
+    private volatile boolean firstPostCueFrameRecorded;
+    private final java.util.concurrent.atomic.AtomicLong diagnosticDropped = new java.util.concurrent.atomic.AtomicLong();
     private volatile long generation;
     private PowerManager.WakeLock wakeLock;
     private VoiceCuePlayer cues;
@@ -267,6 +270,26 @@ public final class VoiceService extends Service {
         long now = SystemClock.elapsedRealtime();
         traceWake(event, reason, attempt, now, -1, -1, -1, -1, -1,
                 Math.max(0, now - wakeAcceptedAt));
+        recordVoiceDiagnostic(event.name(), Math.max(0, now - wakeAcceptedAt));
+    }
+
+    private void recordVoiceDiagnostic(String event, long value) {
+        if (!getSharedPreferences("voice", 0).getBoolean("record_wake_clips", false)) return;
+        File external = getExternalFilesDir(null);
+        if (external == null) return;
+        long at = System.currentTimeMillis(), elapsed = SystemClock.elapsedRealtime();
+        long attempt = diagnosticAttempt, capturedAt = diagnosticCapturedAt;
+        long fromWake = diagnosticWakeAt < 0 ? -1 : Math.max(0, elapsed - diagnosticWakeAt);
+        try {
+            wakeClipWriter.execute(() -> {
+                try {
+                    if (getSharedPreferences("voice", 0).getBoolean("record_wake_clips", false))
+                        VoiceTimingJournal.append(new File(external, "wake-clips"), event,
+                                attempt, capturedAt, at, elapsed, fromWake, value);
+                }
+                catch (java.io.IOException | IllegalArgumentException error) { diagnosticDropped.incrementAndGet(); }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException full) { diagnosticDropped.incrementAndGet(); }
     }
 
     private static void persistLifecycleTrace(Context context) {
@@ -427,6 +450,7 @@ public final class VoiceService extends Service {
                     .put("lastWakeSource", lastWakeSource)
                     .put("uploadedPcmBytes", audioUploaded).put("screenOn", getSystemService(PowerManager.class).isInteractive())
                     .put("timingsMs", new JSONObject(timings))
+                    .put("localDiagnosticDropped", diagnosticDropped.get())
                     .put("audio", new JSONObject().put("echoAvailable", echoAvailable).put("echoEnabled", echoEnabled)
                             .put("noiseSuppressionEnabled", noiseEnabled)
                             .put("scoInputEffectsBypassed", scoInputEffectsBypassed)
@@ -550,10 +574,35 @@ public final class VoiceService extends Service {
                         if (recordWake) wakeClip.append(samples, count);
                         else if (wakeClipActive) wakeClip.clear();
                         wakeClipActive = recordWake;
-                        if (detector.accept(samples, count, now)) {
+                        detector.setDiagnosticCaptureEnabled(recordWake);
+                        boolean wakeAccepted = detector.accept(samples, count, now);
+                        WakeVerifier.Result diagnostic = detector.consumeDiagnosticResult();
+                        long candidateCapturedAt = System.currentTimeMillis();
+                        boolean diagnosticCaptured = recordWake && diagnostic != null
+                                && diagnostic.diagnosticAudio != null && diagnostic.diagnosticAudio.length > 0;
+                        if (diagnostic != null && diagnostic.diagnosticAudio != null) {
+                            short[] clip = diagnostic.diagnosticAudio;
+                            File external = getExternalFilesDir(null);
+                            if (diagnosticCaptured && external != null) {
+                                try {
+                                    wakeClipWriter.execute(() -> {
+                                        try {
+                                            if (getSharedPreferences("voice", 0).getBoolean("record_wake_clips", false))
+                                                WakeClipBuffer.saveDiagnostic(new File(external, "wake-clips"), clip,
+                                                        candidateCapturedAt, diagnostic.context.attempt, diagnostic);
+                                        }
+                                        catch (java.io.IOException error) { diagnosticDropped.incrementAndGet(); }
+                                        finally { java.util.Arrays.fill(clip, (short) 0); }
+                                    });
+                                } catch (java.util.concurrent.RejectedExecutionException full) {
+                                    java.util.Arrays.fill(clip, (short) 0); diagnosticDropped.incrementAndGet();
+                                }
+                            } else java.util.Arrays.fill(clip, (short) 0);
+                        }
+                        if (wakeAccepted) {
                             short[] verifiedAudio = detector.consumeVerifiedAudio();
-                            long capturedAt = System.currentTimeMillis();
-                            if (recordWake) {
+                            long capturedAt = candidateCapturedAt;
+                            if (recordWake && !diagnosticCaptured) {
                                 File external = getExternalFilesDir(null);
                                 if (external != null) {
                                     short[] clip = verifiedAudio == null ? wakeClip.snapshot()
@@ -603,11 +652,16 @@ public final class VoiceService extends Service {
                         detector.reset(now, VoiceLifecycleTrace.Reason.SESSION_RESET);
                     } else if (!signals.allowsAudio()) {
                         pending.clear(); // Discard microphone frames while the START cue is still playing.
-                    } else if (client.ready()) {
-                        while (!pending.isEmpty()) { short[] buffered = pending.removeFirst(); audioUploaded += client.append(buffered, buffered.length); }
-                        audioUploaded += client.append(samples, count);
                     } else {
-                        if (pending.size() >= 400) failure = "voice_connection_too_slow";
+                        if (!firstPostCueFrameRecorded) {
+                            firstPostCueFrameRecorded = true;
+                            recordVoiceDiagnostic("first_post_cue_audio", count);
+                        }
+                        if (client.ready()) {
+                            if (!pending.isEmpty()) recordVoiceDiagnostic("pending_audio_ms", pending.size() * 20L);
+                            while (!pending.isEmpty()) { short[] buffered = pending.removeFirst(); audioUploaded += client.append(buffered, buffered.length); }
+                            audioUploaded += client.append(samples, count);
+                        } else if (pending.size() >= 400) failure = "voice_connection_too_slow";
                         else pending.add(java.util.Arrays.copyOf(samples, count));
                     }
                     writeStatus(false);
@@ -651,6 +705,8 @@ public final class VoiceService extends Service {
 
     private synchronized void beginSession(long wakeAt, long wakeAttempt, long capturedAt) {
         if (!running || realtime != null) return;
+        diagnosticAttempt = wakeAttempt; diagnosticCapturedAt = capturedAt; diagnosticWakeAt = wakeAt;
+        firstPostCueFrameRecorded = false;
         timings.clear();
         finishTrigger = null;
         voiceProvider = voiceModel = null; voiceConnectedAt = 0;
@@ -680,7 +736,9 @@ public final class VoiceService extends Service {
                     android.util.Log.w("HababWakeClip", "Wake review queue full");
                 }
             }
-            @Override public void timing(String name, long value) { if (generation == attempt) timings.put(name, value); }
+            @Override public void timing(String name, long value) {
+                if (generation == attempt) { timings.put(name, value); recordVoiceDiagnostic(name, value); }
+            }
             @Override public void finishTrigger(String value) {
                 if (generation == attempt) { recordFinishTrigger(value); writeStatus(true); }
             }
@@ -697,6 +755,7 @@ public final class VoiceService extends Service {
                     VoiceLifecycleTrace.Reason.CUE, wakeAttempt, wakeAt);
             playCue(signals.begin(attempt)).thenAccept(complete -> {
                 if (!running || generation != attempt) return;
+                recordVoiceDiagnostic("start_cue_completed", complete ? 1 : 0);
                 if (!signals.startCompleted(attempt, complete)) { failure = "voice_signal_unavailable"; return; }
                 traceWakeMilestone(VoiceLifecycleTrace.Event.ASR_GATE_OPEN,
                         VoiceLifecycleTrace.Reason.CUE, wakeAttempt, wakeAt);

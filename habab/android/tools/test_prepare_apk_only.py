@@ -71,6 +71,7 @@ class ApkOnlyReleaseTests(unittest.TestCase):
         self.write('habab/android/app/src/main/java/App.java', 'class App { int value = 2; }')
         self.write('habab/android/app/src/main/res/values/strings.xml', '<resources />')
         self.write('habab/android/app/src/main/AndroidManifest.xml', '<manifest version="2" />')
+        self.write('habab/android/app/src/test/java/VoiceTest.java', 'class VoiceTest {}')
         self.write('habab/product-tunnel/web_tunnel.py', 'changed but outside runtime package\n')
         self.write('.github/workflows/habab-android-apk-candidate.yaml', 'name: candidate\n')
         self.commit('native candidate changes')
