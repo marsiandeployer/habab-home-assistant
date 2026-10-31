@@ -24,6 +24,10 @@ def delegate(arguments="{}", name="ask_home_assistant"):
     }]}
 
 
+def direct(answer):
+    return delegate(json.dumps({"answer": answer}, ensure_ascii=False), "reply_to_user")
+
+
 class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         store = SimpleNamespace(async_load=AsyncMock(return_value=None), async_save=AsyncMock())
@@ -52,7 +56,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.service = AssistantService(self.hass, self.runtime)
         self.service.web_sessions = {"alice": "web"}
         self.service.telegram_sessions = {"alice:bot:10": "tg", "alice:bot:11": "tg2"}
-        self.provider = AsyncMock(return_value={"role": "assistant", "content": "Привет!"})
+        self.provider = AsyncMock(return_value=direct("Привет!"))
         for name, kwargs in (
             ("homeassistant.components.habab_home.fast_dialog.ProviderClient", {"return_value": SimpleNamespace(complete=self.provider)}),
             ("homeassistant.components.habab_home.fast_dialog.build_voice_context", {"side_effect": lambda _hass: {"local_time": "fresh"}}),
@@ -94,6 +98,10 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         part = self.histories["web"][0]["parts"][0]
         self.assertIn(DIALOGUE_METADATA_KEY, part["metadata"])
         self.assertFalse(any("voice" in key for key in part["metadata"]))
+        self.assertEqual(self.provider.await_count, 1)
+        self.assertEqual(self.provider.call_args.kwargs, {"required_tool": True})
+        self.assertEqual({tool["function"]["name"] for tool in self.provider.call_args.args[1]},
+                         {"ask_home_assistant", "reply_to_user"})
 
     async def test_history_continuity_direct_then_delegate_and_original_text(self):
         await self.service.run("alice", "web", "web", "Меня зовут Саша")
@@ -107,9 +115,44 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["text"] for item in result["messages"]],
                          ["Меня зовут Саша", "Привет!", original, "Готово"])
         self.assertEqual(result["dialogue"]["route"], "opencode")
-        self.provider.return_value = {"role": "assistant", "content": "Саша"}
+        self.provider.return_value = direct("Саша")
         await self.service.run("alice", "web", "web", "Как меня зовут?")
         self.assertIn({"role": "assistant", "content": "Готово"}, self.provider.call_args.args[0])
+
+    async def test_readonly_model_delegation_preserves_request_and_does_not_save_direct_answer(self):
+        # These exercise the service boundary, not the model's semantic decision.
+        # Real-provider routing and registry readback must also be checked in QA.
+        requests = (
+            "Это read-only QA: прочитай реестр устройств и реестр сущностей Home "
+            "Assistant через инструменты. Ничего не включай и не меняй. Ответь "
+            "кратко только двумя числами: число записей реестра устройств и число "
+            "записей реестра сущностей. Не перечисляй имена устройств.",
+            "Я отключил пару датчиков в настройках. Сколько всего записей теперь "
+            "зарегистрировано, включая отключённые? Проверь, ничего не переключай.",
+            "Вчера ты называл пять устройств. Пересчитай их сейчас по настройкам, "
+            "не используй вчерашний ответ и ничего не меняй.",
+            "Проверь инструментом, работает ли свет в гостиной. Только прочитай "
+            "состояние, включать его не надо.",
+        )
+        self.provider.return_value = delegate()
+        for text in requests:
+            with self.subTest(text=text):
+                result = await self.service.run("alice", "web", "web", text)
+                self.runtime.run.assert_awaited_with("alice", "web", text)
+                self.assertEqual(result["dialogue"]["route"], "opencode")
+                self.assertEqual(self.provider.call_args.args[0][-1],
+                                 {"role": "user", "content": text})
+        self.assertFalse(any(method == "POST" for method, _route, _body in self.requests))
+        self.assertFalse(any(DIALOGUE_METADATA_KEY in part.get("metadata", {})
+                             for message in self.histories["web"]
+                             for part in message["parts"]))
+
+    async def test_conceptual_registry_question_can_still_be_answered_directly(self):
+        self.provider.return_value = direct("У одного устройства может быть несколько сущностей.")
+        result = await self.service.run(
+            "alice", "web", "web", "Чем реестр устройств отличается от реестра сущностей?")
+        self.assertEqual(result["dialogue"]["route"], "direct")
+        self.runtime.run.assert_not_awaited()
 
     async def test_each_request_has_fresh_context(self):
         with patch("homeassistant.components.habab_home.fast_dialog.build_voice_context",
@@ -156,8 +199,15 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_response_and_tool_never_delegate(self):
         replies = [None, {}, {"role": "assistant", "content": ""},
+                   {"role": "assistant", "content": "5 и 92"},
+                   {"role": "assistant", "content": "unsupported direct answer", "tool_calls": []},
                    delegate('{"request":"rewritten action"}'), delegate("null"),
                    delegate("{bad"), delegate(name="other_tool"),
+                   delegate(name=[]),
+                   delegate('{}', name="reply_to_user"),
+                   delegate('{"answer":42}', name="reply_to_user"),
+                   delegate('{"answer":"ok","route":"opencode"}', name="reply_to_user"),
+                   direct(" "), direct("x" * 12001),
                    {**delegate(), "tool_calls": delegate()["tool_calls"] * 2},
                    {**delegate(), "tool_calls": {}},
                    {"role": "assistant", "content": "x" * 12001}]
@@ -168,6 +218,12 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.run.assert_not_awaited()
         self.assertEqual(self.histories["web"], [])
 
+    async def test_structured_direct_reply_is_bounded_and_only_its_answer_is_visible(self):
+        self.provider.return_value = {**direct("  Привет!  "), "content": "not the final answer"}
+        result = await self.service.run("alice", "web", "web", "Привет")
+        self.assertEqual(result["messages"][-1], {"role": "assistant", "text": "Привет!"})
+        self.runtime.run.assert_not_awaited()
+
     async def test_acl_before_call_and_revoked_after_provider(self):
         self.user.is_active = False
         with self.assertRaisesRegex(AgentError, "not_allowed"):
@@ -175,7 +231,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.provider.assert_not_awaited()
         self.user.is_active = True
 
-        async def revoked(*args):
+        async def revoked(*args, **kwargs):
             self.user.is_admin = False
             return delegate()
 
@@ -186,9 +242,9 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.histories["web"], [])
 
     async def test_session_reset_during_provider_cannot_append_or_delegate(self):
-        async def reset(*args):
+        async def reset(*args, **kwargs):
             self.service.telegram_sessions.clear()
-            return {"role": "assistant", "content": "answer"}
+            return direct("answer")
 
         self.provider.side_effect = reset
         with self.assertRaisesRegex(AgentError, "not_found"):
@@ -197,7 +253,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.histories["tg"], [])
 
     async def test_provider_timeout_is_bounded_and_does_not_delegate(self):
-        async def slow(*args):
+        async def slow(*args, **kwargs):
             await asyncio.sleep(1)
 
         self.provider.side_effect = slow
@@ -208,7 +264,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.histories["web"], [])
 
     async def test_selected_provider_change_discards_inflight_answer(self):
-        async def changed(*args):
+        async def changed(*args, **kwargs):
             self.entry.data = {**self.entry.data, "provider": "openai"}
             return delegate()
 
@@ -226,7 +282,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
     async def test_web_abort_cancels_provider_without_history_append(self):
         entered = asyncio.Event()
 
-        async def slow(*args):
+        async def slow(*args, **kwargs):
             entered.set()
             await asyncio.Event().wait()
 
@@ -245,7 +301,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
     async def test_telegram_external_cancel_propagates_and_cannot_append(self):
         entered = asyncio.Event()
 
-        async def slow(*args):
+        async def slow(*args, **kwargs):
             entered.set()
             await asyncio.Event().wait()
 
@@ -286,7 +342,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.use_real_executor()
         entered = asyncio.Event()
 
-        async def ensure(*args):
+        async def ensure(*args, **kwargs):
             if self.runtime.ensure.await_count == 2:
                 entered.set()
                 await asyncio.Event().wait()

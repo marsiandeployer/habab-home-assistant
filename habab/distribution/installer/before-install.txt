@@ -1,0 +1,14 @@
+Habab Home
+
+Files will be installed in your Windows profile. A Habab Home shortcut starts
+Home Assistant through Docker Desktop and opens http://127.0.0.1:8123.
+
+On first launch, the startup script installs Docker Desktop if it is missing.
+Complete the official Docker installer and accept Docker's terms in its window.
+Windows may ask for administrator permission to install Docker, enable WSL 2,
+or prepare the optional homeassistant.local address. If Windows requests a
+restart, restart it and open the Habab Home shortcut again.
+
+Removing Habab Home through Windows removes its launcher files and shortcuts.
+It does not remove Docker Desktop, stop Home Assistant, or delete your home's
+Docker volumes, account, settings, and keys.

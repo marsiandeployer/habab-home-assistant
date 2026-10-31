@@ -81,7 +81,7 @@ function Get-DockerKind {
 }
 
 try {
-    Write-Host 'Habab Home: local Home Assistant + OpenCode + DeepSeek'
+    Write-Host 'Habab Home: local Home Assistant + OpenCode + Habab AI'
     Write-Host 'OpenCode for Windows is not required. The Linux executable stays in a Docker volume.'
     $Docker = Find-Docker
     if (-not $Docker) {
@@ -245,7 +245,7 @@ try {
     }
     if (-not $httpReady) { throw 'Home Assistant is not ready yet. Run docker compose --env-file .env.opencode-windows -p habab-home-windows -f compose.windows.yaml logs --tail 80, then rerun this BAT.' }
     Write-Host "Ready: $url"
-    Write-Host 'Create your owner account, open AI, save your own DeepSeek API key, then use the chat icon in the dashboard.'
+    Write-Host 'Create your owner account and open the chat. Habab is the default AI provider. Open AI settings to use your own OpenAI, DeepSeek or Gemini API key.'
     Write-Host 'No API keys are included. Windows Bluetooth/USB is not passed through automatically.'
     if ($XiaomiHome) {
         Write-Host 'Opening the official Xiaomi Home integration. Choose Russia and complete Xiaomi login in your browser.'

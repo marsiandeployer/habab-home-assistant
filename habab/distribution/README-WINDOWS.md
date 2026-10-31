@@ -1,7 +1,28 @@
 # Запуск на Windows
 
-Habab Home 0.3.6 использует Home Assistant Core 2026.10.2. Выберите способ
-запуска по тому, как вы установили Habab Home.
+Habab Home 0.3.6 использует Home Assistant Core 2026.10.2.
+
+**Установка из GitHub Release.** Скачайте
+[`habab_home_assistant.exe`](https://github.com/marsiandeployer/habab-home-assistant/releases/latest/download/habab_home_assistant.exe)
+или выберите выпуск в разделе Releases. Откройте EXE и завершите установку. Файлы попадут
+в `%LOCALAPPDATA%\HababHome`; ярлык **Habab Home** появится в меню «Пуск» и,
+если выбрать эту опцию, на рабочем столе. В последнем окне установщика оставьте
+«Запустить Habab Home» включённым или запустите ярлык позже.
+
+Окно запуска подготовит Docker Desktop и откроет Home Assistant. Если Windows
+запросит перезагрузку, выполните её и снова откройте ярлык **Habab Home**.
+Установщик не принимает условия Docker за вас: подтвердите их в окне Docker
+Desktop. Для установки Docker и WSL могут потребоваться права администратора.
+
+Для обновления скачайте EXE нового выпуска и запустите его. Настройки дома
+хранятся отдельно в Docker volume и сохраняются. Удаление **Habab Home** через
+«Установленные приложения» Windows убирает файлы запуска и ярлыки; Docker
+Desktop, работающий Home Assistant и тома с настройками остаются.
+
+Прямой URL каждого выпуска имеет вид:
+`https://github.com/marsiandeployer/habab-home-assistant/releases/download/<tag>/habab_home_assistant.exe`.
+Контрольные суммы и исходный commit находятся в `windows-package.json`
+того же выпуска.
 
 **Из Git-checkout.** Для первой установки из корня репозитория запустите
 `habab\distribution\start-windows.bat`. Для обновления откройте `cmd` в корне
@@ -43,7 +64,7 @@ preview на Windows **NOT RUN**.
 скачивает пакет 0.3.1 в `%LOCALAPPDATA%\HababHome`; для обновления Git-checkout
 используйте команды выше.
 
-Если Docker Desktop отсутствует, скрипт запускает установку через winget или скачивает официальный установщик Docker и проверяет его цифровую подпись. Следуйте окнам установщика и Docker Desktop. Если нужен WSL 2, появится запрос прав администратора. После требуемой перезагрузки Windows запустите батник ещё раз. Виртуализация должна быть включена в BIOS/UEFI.
+Если Docker Desktop отсутствует, скрипт запускает установку через winget или скачивает официальный установщик Docker и проверяет его цифровую подпись. Следуйте окнам установщика и Docker Desktop. Если нужен WSL 2, появится запрос прав администратора. После требуемой перезагрузки Windows снова откройте ярлык Habab Home или BAT. Виртуализация должна быть включена в BIOS/UEFI.
 
 При стандартном порте 8123 обычный BAT один раз предлагает подготовить адрес
 `homeassistant.local` для возможного входа Xiaomi. Windows отдельно спросит
@@ -289,3 +310,33 @@ USB к WSL ещё не доказывает доступность адапте�
 для этого облачного пути не требуется. Настройка callback-адреса описана выше.
 
 Исходные требования: [Docker Desktop для Windows](https://docs.docker.com/desktop/setup/install/windows-install/), [OpenCode](https://opencode.ai/docs/). Скрипт использует штатные окна установки и не меняет глобальную Execution Policy PowerShell.
+
+## Сборка EXE для выпуска
+
+На свежем Windows runner с Python и Inno Setup 6 выполните из корня чистого checkout
+или экспорта исходников:
+
+```powershell
+$env:HABAB_WINDOWS_PUBLIC_BASE = 'https://github.com/marsiandeployer/habab-home-assistant/releases/download/<tag>'
+python habab/distribution/package-windows.py
+pwsh -File habab/distribution/installer/build-windows-installer.ps1
+```
+
+Для экспорта без `.git` задайте также `HABAB_SOURCE_REVISION` (полный SHA)
+и `HABAB_SOURCE_DIRTY=false`. В checkout provenance берётся из Git; грязный
+checkout не проходит сборку EXE. GitHub runner `windows-latest` уже содержит
+Inno Setup 6; скрипт использует `ISCC.exe` из `Program Files (x86)` и записывает
+его фактическую версию в manifest.
+
+После компиляции скрипт тихо устанавливает EXE в отдельную временную папку,
+сверяет состав и SHA-256 всех установленных файлов с ZIP, затем запускает
+uninstaller. Home Assistant и Docker Desktop при этой проверке не запускаются.
+Ошибка установки, сверки или удаления останавливает сборку до записи метаданных
+EXE. Проверку выполняйте под пользователем без установленного Habab Home.
+
+Результат находится в `habab/public/downloads/habab_home_assistant.exe`.
+`windows-package.json` содержит отдельные SHA-256, размер и исходный commit
+для ZIP и EXE. EXE содержит файлы проверенного ZIP и вызывает
+существующий `start-windows.bat`; ZIP не скачивается повторно при установке.
+BAT-загрузчики для ручной диагностики используют `HABAB_WINDOWS_PUBLIC_BASE`.
+При публикации загрузите уже собранные файлы вместе с manifest без пересборки.

@@ -621,19 +621,28 @@ class RealtimeStopView(HomeAssistantView):
             if not isinstance(session_id, str) or not session_id.startswith("voice2_") or len(session_id) > 128:
                 return self.json_message("invalid_session", status_code=400)
             hass = request.app["hass"]
-            lease = browser_lease(hass, owner.id, session_id)
+            lease = voice_lease(hass, owner.id, session_id)
+            client = lease.get("client", "native_v2")
+            if client == BROWSER_CLIENT:
+                lease = browser_lease(hass, owner.id, session_id)
+            elif lease.get("provider") not in {"gemini", "openai"}:
+                raise AgentError("invalid_session")
         except (ValueError, AttributeError):
             return self.json_message("invalid_session", status_code=400)
         except AgentError as error:
             return self.json_message(error.code, status_code=403)
 
-        complete = await revoke_browser_lease(hass, session_id, expected=lease, wait=True)
-        if complete is None:
-            return self.json_message("invalid_session", status_code=403)
-        if not complete:
-            # The lease is revoked even if cancellation cleanup is incomplete.
-            return self.json_message("stop_incomplete", status_code=504)
-        result = self.json({"stopped": True, "client": BROWSER_CLIENT})
+        if client == BROWSER_CLIENT:
+            complete = await revoke_browser_lease(hass, session_id, expected=lease, wait=True)
+            if complete is None:
+                return self.json_message("invalid_session", status_code=403)
+            if not complete:
+                # The lease is revoked even if cancellation cleanup is incomplete.
+                return self.json_message("stop_incomplete", status_code=504)
+        else:
+            # Native clients own their provider connection; revoke only our lease.
+            hass.data[DOMAIN]["voice_sessions"].pop(session_id)
+        result = self.json({"stopped": True, "client": client})
         result.headers["Cache-Control"] = "no-store"
         return result
 

@@ -14,6 +14,7 @@ from homeassistant.components.habab_home.providers import (
     HABAB_TEXT_CAPABILITY_TIMEOUT,
     HABAB_TEXT_CAPABILITY_MAX_BYTES,
     ProviderClient,
+    ProviderContract,
     ProviderError,
     provider_api_base,
     resolve_provider_contract,
@@ -198,9 +199,51 @@ class HababTextContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unavailable.exception.code, "provider_not_ready")
         self.assertFalse(session.post_calls)
 
+
         service_error = b'{"error":{"code":"habab_text_upstream_not_ready"}}'
         session = _Session([_Response(503, service_error)])
         with self.assertRaises(ProviderError) as unavailable_response:
             await ProviderClient(session, self.settings()).complete([], [])
         self.assertEqual(unavailable_response.exception.code, "provider_not_ready")
+        self.assertFalse(session.post_calls)
+
+
+class RequiredToolChoiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_required_choice_is_opt_in_for_compatible_providers(self):
+        tool = {"type": "function", "function": {
+            "name": "reply_to_user", "description": "Reply without execution.",
+            "parameters": {"type": "object", "properties": {"answer": {"type": "string"}},
+                           "required": ["answer"]},
+        }}
+        completion = json.dumps({"choices": [{"finish_reason": "tool_calls", "message": {
+            "role": "assistant", "content": None, "tool_calls": [{
+                "id": "reply-1", "type": "function", "function": {
+                    "name": "reply_to_user", "arguments": '{"answer":"hello"}'}}],
+        }}]}).encode()
+        for provider in ("habab", "openai", "deepseek"):
+            for required in (False, True):
+                with self.subTest(provider=provider, required=required):
+                    session = _Session(post_response=_Response(200, completion))
+                    client = ProviderClient(session, {
+                        "provider": provider, "model": "fixture-model", "api_key": "fixture-project-key"})
+                    client.contract = ProviderContract(
+                        provider=provider, protocol="openai_compatible", model="fixture-model",
+                        base_url="https://fixture.invalid/v1")
+                    result = await client.complete(
+                        [{"role": "user", "content": "hello"}], [tool], required_tool=required)
+                    self.assertEqual(result["tool_calls"][0]["function"]["name"], "reply_to_user")
+                    request = session.post_calls[0][1]["json"]
+                    self.assertEqual(request["tool_choice"], "required" if required else "auto")
+                    self.assertEqual(request["tools"], [tool])
+                    if provider == "deepseek":
+                        self.assertEqual(request["thinking"], {"type": "disabled"})
+                    self.assertEqual(len(session.post_calls), 1)
+
+    async def test_required_choice_without_tools_fails_before_transport(self):
+        session = _Session()
+        with self.assertRaisesRegex(ProviderError, "invalid_response"):
+            await ProviderClient(session, {
+                "provider": "habab", "model": "fixture-model", "api_key": "fixture-project-key",
+            }).complete([{"role": "user", "content": "hello"}], [], required_tool=True)
+        self.assertFalse(session.get_calls)
         self.assertFalse(session.post_calls)

@@ -25,10 +25,16 @@ class HababHomeConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 user_input = dict(user_input)
-                if user_input.get("provider") == "habab" and not self.context.get("habab_beta_enrollment"):
-                    # Habab owns activation; arbitrary user text is never a provider secret.
-                    installation_id = await _installation_id(self.hass)
-                    user_input["api_key"] = await _enroll(async_get_clientsession(self.hass), installation_id)
+                if user_input.get("provider") == "habab":
+                    existing = next((entry for entry in self._async_current_entries()
+                                     if entry.unique_id == "habab"), None)
+                    if existing is not None and existing.data.get("api_key"):
+                        # Saving/selecting a provider must retain its managed identity,
+                        # including legacy keys. User text never replaces this secret.
+                        user_input["api_key"] = existing.data["api_key"]
+                    elif not self.context.get("habab_beta_enrollment"):
+                        installation_id = await _installation_id(self.hass)
+                        user_input["api_key"] = await _enroll(async_get_clientsession(self.hass), installation_id)
                 settings = validate_settings(user_input)
                 await ProviderClient(async_get_clientsession(self.hass), settings).check()
             except BetaError:

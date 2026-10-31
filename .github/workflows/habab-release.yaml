@@ -1,0 +1,185 @@
+name: Habab public release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_revision:
+        description: Frozen full SHA of this workflow on main (all products build from it)
+        required: true
+        type: string
+      release_tag:
+        description: Immutable habab-v<VERSION>-<first 12 source SHA characters>
+        required: true
+        type: string
+      android_version_code:
+        description: New reviewed Android versionCode, greater than distributed builds
+        required: true
+        type: string
+      android_version_name:
+        description: Reviewed public Android versionName
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: habab-public-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      source_revision: ${{ steps.source.outputs.source_revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            habab/scripts
+            habab/distribution
+            habab/android/tools
+            habab/native-frontend
+            .github/workflows
+          persist-credentials: false
+      - name: Require immutable source/tag and an unused release identity
+        id: source
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main && "$SOURCE_REVISION" == "$GITHUB_SHA" ]]
+          python3 - <<'PY'
+          import os
+          import runpy
+          runpy.run_path('habab/scripts/github-release.py')['release_base'](
+              os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG'], os.environ['SOURCE_REVISION'])
+          PY
+          [[ -z "$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")" ]] || {
+            echo '::error::Release tag already exists; immutable releases cannot be overwritten'; exit 1;
+          }
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          if any(item['tag_name'] == os.environ['RELEASE_TAG'] for item in json.loads(
+                  (Path(os.environ['RUNNER_TEMP']) / 'releases.json').read_text())):
+              raise SystemExit('A release/draft with this tag already exists; inspect it before retrying')
+          PY
+          echo "source_revision=$SOURCE_REVISION" >> "$GITHUB_OUTPUT"
+      - name: Require existing signing credentials before any platform build
+        env:
+          HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64: ${{ secrets.HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64 }}
+          HABAB_ANDROID_KEYSTORE_BASE64: ${{ secrets.HABAB_ANDROID_KEYSTORE_BASE64 }}
+          HABAB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HABAB_ANDROID_KEYSTORE_PASSWORD }}
+          HABAB_ANDROID_KEY_ALIAS: ${{ secrets.HABAB_ANDROID_KEY_ALIAS }}
+          HABAB_ANDROID_KEY_PASSWORD: ${{ secrets.HABAB_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64 HABAB_ANDROID_KEYSTORE_BASE64 HABAB_ANDROID_KEYSTORE_PASSWORD HABAB_ANDROID_KEY_ALIAS HABAB_ANDROID_KEY_PASSWORD; do
+            [[ -n "${!name}" ]] || { echo "::error::Missing required signing secret: $name"; exit 1; }
+          done
+      - name: Test strict release gates
+        run: PYTHONPATH=habab/scripts python3 -m unittest -v test_github_release
+
+  candidate:
+    needs: validate
+    uses: ./.github/workflows/habab-release-candidate.yaml
+    with:
+      target_scope: all
+      source_ref: ${{ needs.validate.outputs.source_revision }}
+      release_tag: ${{ inputs.release_tag }}
+      android_version_code: ${{ inputs.android_version_code }}
+      android_version_name: ${{ inputs.android_version_name }}
+    secrets:
+      HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64: ${{ secrets.HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64 }}
+      HABAB_ANDROID_KEYSTORE_BASE64: ${{ secrets.HABAB_ANDROID_KEYSTORE_BASE64 }}
+      HABAB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.HABAB_ANDROID_KEYSTORE_PASSWORD }}
+      HABAB_ANDROID_KEY_ALIAS: ${{ secrets.HABAB_ANDROID_KEY_ALIAS }}
+      HABAB_ANDROID_KEY_PASSWORD: ${{ secrets.HABAB_ANDROID_KEY_PASSWORD }}
+
+  publish:
+    needs: [validate, candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      SOURCE_REVISION: ${{ needs.validate.outputs.source_revision }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.source_revision }}
+          persist-credentials: false
+          sparse-checkout: |
+            habab/scripts
+            habab/distribution
+            habab/android/tools
+            habab/android/app/src/main/assets/release
+            habab/native-frontend
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: candidate-*
+          path: candidate
+          merge-multiple: true
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: habab-release-candidate-${{ needs.validate.outputs.source_revision }}
+          path: candidate
+      - name: Verify exact payloads and signatures before creating a draft
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]]
+          git diff --quiet && git diff --cached --quiet
+          python3 habab/scripts/github-release.py --root candidate --source-tree . \
+            --source-revision "$SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" --output release --receipt upload-receipt.json
+          (cd release && sha256sum --check SHA256SUMS)
+      - name: Create draft and upload verified assets without replacement
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          Path('release-notes.md').write_text(
+              'Habab Home for Windows, Android, Linux amd64 and arm64.\n\n'
+              + 'Source: `' + os.environ['SOURCE_REVISION'] + '`.\n\n'
+              + 'Checksums and build provenance are in `SHA256SUMS` and `release-receipt.json`.\n'
+              + 'Build verification does not replace physical device acceptance.\n')
+          PY
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$SOURCE_REVISION" >/dev/null
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Habab Home $RELEASE_TAG" --notes-file release-notes.md --draft
+          gh release upload "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY"
+      - name: Verify GitHub calculated asset hashes and publish
+        run: |
+          set -euo pipefail
+          release_id=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" > uploaded-release.json
+          python3 habab/scripts/github-release.py --receipt upload-receipt.json --verify-uploaded uploaded-release.json
+          tag_source=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)
+          [[ "$tag_source" == "$SOURCE_REVISION" ]] || { echo '::error::Release tag source changed'; exit 1; }
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - name: Read back published direct download endpoints
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -Fx false
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG"
+          curl --fail --location --silent --show-error "$base/release-receipt.json" -o published-receipt.json
+          cmp published-receipt.json release/release-receipt.json
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          receipt = json.loads(Path('upload-receipt.json').read_text())
+          for item in receipt['assets']:
+              url = 'https://github.com/' + receipt['repository'] + '/releases/download/' + receipt['tag'] + '/' + item['name']
+              subprocess.run(['curl', '--fail', '--head', '--location', '--silent', '--show-error', url],
+                             stdout=subprocess.DEVNULL, check=True)
+          PY

@@ -343,6 +343,7 @@ class ReleaseCandidateTests(unittest.TestCase):
         complete = {**apk, **versions, "RUNTIME_SIGNING_KEY_BASE64": "test-present"}
         cases = (
             ("all", {}, 0, "blocked"),
+            ("all", {"RELEASE_TAG": "habab-v0.3.6-aaaaaaaaaaaa"}, 1, None),
             ("android", {}, 1, None),
             ("all", complete, 0, "built"),
             ("all", {**complete, "ANDROID_VERSION_CODE": ""}, 0, "blocked"),

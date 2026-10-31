@@ -15,7 +15,7 @@ from google.genai import errors, types
 import httpx
 
 from homeassistant.components.habab_home.providers import (
-    PROVIDERS, ProviderClient, ProviderError, provider_api_base,
+    PROVIDERS, ProviderClient, ProviderContract, ProviderError, provider_api_base,
 )
 from homeassistant.components.habab_home.providers_gemini import GeminiProvider
 from homeassistant.components.habab_home import providers as providers_module
@@ -65,6 +65,27 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         fake = FakeClient(outcomes)
         return fake, patch("homeassistant.components.habab_home.providers_gemini.genai.Client",
                            return_value=fake)
+
+    async def test_required_choice_uses_any_mode_and_preserves_both_dialogue_choices(self):
+        from homeassistant.components.habab_home.fast_dialog import DELEGATE_TOOL, REPLY_TOOL
+
+        fake, client_patch = self.make_client([response(types.Part(
+            function_call=types.FunctionCall(name="reply_to_user", args={"answer": "Привет!"}),
+        ))])
+        with client_patch:
+            message = await ProviderClient(None, self.settings()).complete(
+                [{"role": "user", "content": "Привет"}],
+                [DELEGATE_TOOL, REPLY_TOOL], required_tool=True)
+        request = fake.models.requests[0]
+        config = request["config"]
+        self.assertEqual(config.tool_config.function_calling_config.mode, "ANY")
+        self.assertIsNone(config.tool_config.function_calling_config.allowed_function_names)
+        self.assertEqual({item.name for item in config.tools[0].function_declarations},
+                         {"ask_home_assistant", "reply_to_user"})
+        self.assertEqual(config.max_output_tokens, 1024)
+        self.assertEqual(message["tool_calls"][0]["function"]["name"], "reply_to_user")
+        self.assertEqual(len(fake.models.requests), 1)
+        self.assertTrue(fake.closed)
 
     async def test_native_probe_forces_exact_safe_tool_and_uses_no_proxy(self):
         fake, client_patch = self.make_client([response(types.Part(
@@ -117,7 +138,13 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
                     return sdk_client(api_key=api_key, http_options=options)
 
                 with patch("homeassistant.components.habab_home.providers_gemini.genai.Client", side_effect=factory):
-                    await ProviderClient(None, self.settings(provider)).check()
+                    client = ProviderClient(None, self.settings(provider))
+                    # This test exercises the native/legacy Google wire format,
+                    # not the separate managed-Habab capability discovery.
+                    client.contract = ProviderContract(
+                        provider=provider, protocol="google", model=PROVIDERS[provider]["model"],
+                        base_url=provider_api_base(provider))
+                    await client.check()
                 for unused in unused_clients:
                     await unused.aclose()
                 self.assertEqual(len(requests), 1)
@@ -180,6 +207,9 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         fake, client_patch = self.make_client([first, second])
         with client_patch:
             client = ProviderClient(None, self.settings(provider))
+            client.contract = ProviderContract(
+                provider=provider, protocol="google", model=PROVIDERS[provider]["model"],
+                base_url=provider_api_base(provider))
             tools = [{"type": "function", "function": {
                 "name": "HassTurnOn", "description": "Turn on a selected device.",
                 "parameters": {"type": "object", "properties": {"name": {"type": "string"}},

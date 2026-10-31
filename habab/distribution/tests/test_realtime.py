@@ -1147,10 +1147,58 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         release.set()
         await asyncio.wait_for(task, 1)
 
-    async def test_stop_rejects_native_foreign_and_expired_leases_without_cancelling(self):
+    async def test_native_stop_revokes_only_owned_lease_and_repeated_stop_is_inert(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        for provider in ('gemini', 'openai'):
+            with self.subTest(provider=provider):
+                native = {'owner': 'alice', 'client': 'native_v2',
+                          'provider': provider, 'expires': time.monotonic() + 60}
+                browser = {'owner': 'alice', 'client': 'browser_v1',
+                           'provider': 'gemini', 'expires': time.monotonic() + 60}
+                hass = SimpleNamespace(data={'habab_home': {'voice_sessions': {
+                    'voice2_native': native, 'voice2_browser': browser}}})
+                request = Request(owner, {'session_id': 'voice2_native'})
+                request.app['hass'] = hass
+                with patch.object(realtime, 'revoke_browser_lease', new_callable=AsyncMock) as revoke:
+                    response = await realtime.RealtimeStopView().post(request)
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(json.loads(response.body), {'stopped': True, 'client': 'native_v2'})
+                    self.assertEqual(response.headers['Cache-Control'], 'no-store')
+                    self.assertNotIn('voice2_native', hass.data['habab_home']['voice_sessions'])
+                    self.assertIs(hass.data['habab_home']['voice_sessions']['voice2_browser'], browser)
+                    repeated = await realtime.RealtimeStopView().post(request)
+                    self.assertEqual(repeated.status, 403)
+                    self.assertEqual(json.loads(repeated.body)['message'], 'invalid_session')
+                    revoke.assert_not_awaited()
+                with self.assertRaises(AgentError):
+                    realtime.voice_lease(hass, 'alice', 'voice2_native')
+
+    async def test_native_stop_requires_active_administrator(self):
+        for owner in (None, SimpleNamespace(id='alice', is_active=False, is_admin=True),
+                      SimpleNamespace(id='alice', is_active=True, is_admin=False)):
+            with self.subTest(owner=owner):
+                lease = {'owner': 'alice', 'client': 'native_v2', 'provider': 'gemini',
+                         'expires': time.monotonic() + 60}
+                request = Request(owner, {'session_id': 'voice2_native'})
+                request.app['hass'].data['habab_home']['voice_sessions'] = {'voice2_native': lease}
+                response = await realtime.RealtimeStopView().post(request)
+                self.assertEqual(response.status, 403)
+                self.assertEqual(json.loads(response.body)['message'], 'not_allowed')
+                self.assertIs(request.app['hass'].data['habab_home']['voice_sessions']['voice2_native'], lease)
+
+    async def test_stop_rejects_foreign_expired_and_unsupported_leases_without_cancelling(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         for session_id, lease in [
-            ('voice2_native', {'owner': 'alice', 'client': 'native_v2', 'expires': time.monotonic() + 60}),
+            ('voice2_native_foreign', {'owner': 'bob', 'client': 'native_v2', 'provider': 'openai',
+                                     'expires': time.monotonic() + 60}),
+            ('voice2_native_expired', {'owner': 'alice', 'client': 'native_v2', 'provider': 'gemini',
+                                     'expires': time.monotonic() - 1}),
+            ('voice2_client_unsupported', {'owner': 'alice', 'client': 'native_v3', 'provider': 'gemini',
+                                         'expires': time.monotonic() + 60}),
+            ('voice2_provider_unsupported', {'owner': 'alice', 'client': 'native_v2', 'provider': 'deepseek',
+                                           'expires': time.monotonic() + 60}),
+            ('voice2_browser_provider_unsupported', {'owner': 'alice', 'client': 'browser_v1',
+                                                   'provider': 'openai', 'expires': time.monotonic() + 60}),
             ('voice2_foreign', {'owner': 'bob', 'client': 'browser_v1', 'expires': time.monotonic() + 60}),
             ('voice2_expired', {'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() - 1}),
         ]:

@@ -23,15 +23,7 @@ final class RuntimeStore {
     boolean installed() { return new File(root(), "etc/habab-android-release.json").isFile(); }
 
     static HttpURLConnection connection(String address) throws Exception {
-        URL url = new URL(address);
-        if (!url.getProtocol().equals("https") || url.getUserInfo() != null || url.getRef() != null || url.getQuery() != null)
-            throw new IOException("A plain HTTPS URL is required");
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-        connection.setConnectTimeout(20000);
-        connection.setReadTimeout(60000);
-        connection.setInstanceFollowRedirects(false);
-        if (connection.getResponseCode() != 200) { connection.disconnect(); throw new IOException("Download HTTP error"); }
-        return connection;
+        return ReleaseDownload.connection(address);
     }
 
     private static byte[] downloadSmall(String address) throws Exception {

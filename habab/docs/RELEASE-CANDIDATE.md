@@ -1,7 +1,7 @@
 # Habab release candidate workflow
 
 `.github/workflows/habab-release-candidate.yaml` is a manual, non-publishing
-candidate workflow. It accepts only a full Git commit SHA or an existing tag,
+candidate workflow, also reused by the public release workflow. It accepts only a full Git commit SHA or an existing tag,
 resolves that input once, and fetches only the required source paths at the
 resulting full SHA. The resolver fetches commit metadata with `blob:none` to
 check ancestry against current `origin/main`; platform jobs use shallow,
@@ -10,6 +10,104 @@ blob-filtered sparse checkouts. Choose `all`, `windows`, `linux`, `android`, or
 an image, updates `main`/`latest`, uploads to the public download host, or
 creates a GitHub Release. Candidate artifacts stay in GitHub Actions for one
 day.
+
+## Publish all platforms to GitHub
+
+`.github/workflows/habab-release.yaml` is the public release entrypoint. Dispatch
+it from `main` at the frozen source commit with four explicit inputs:
+
+```sh
+gh workflow run habab-release.yaml --ref main \
+  -f source_revision=<FULL_MAIN_SHA> \
+  -f release_tag=habab-v<VERSION>-<FIRST_12_SHA_CHARACTERS> \
+  -f android_version_code=<NEW_CODE> \
+  -f android_version_name=<REVIEWED_NAME>
+```
+
+The source SHA must equal the workflow's own dispatch SHA. The tag must be new
+and include that SHA's first 12 characters. Existing releases, drafts, and tags
+are never overwritten. The workflow serializes public releases and requires all
+five existing Android signing secrets before starting platform builds.
+
+The release reuses the candidate producer with `target_scope=all`. This caller
+requires a built Windows EXE, both Linux OCI images, and a signed public Android
+APK/runtime. A blocked, skipped, unsigned, failed, or missing platform cannot
+reach publication. Review-only candidate dispatches retain their existing
+explicit Android `blocked` and unsigned-runtime behavior.
+
+The download assets are:
+
+| Platform | GitHub asset |
+| --- | --- |
+| Windows | `habab_home_assistant.exe`, the source-bound ZIP, `windows-package.json` |
+| Android | `habab-home-arm64.apk`, `release-<ID>.json`, its `.sig`, and the signed runtime archive |
+| Linux amd64 | `habab-home-linux-amd64.oci.tar.gz` |
+| Linux arm64 | `habab-home-linux-arm64.oci.tar.gz` |
+| Provenance | `release-receipt.json`, `SHA256SUMS` |
+
+Windows runs the existing ZIP packager and Inno Setup compiler on
+`windows-latest`; `HABAB_WINDOWS_PUBLIC_BASE` points at the immutable GitHub tag.
+The EXE embeds its installation payload. Linux keeps the existing OCI builder
+and compresses the resulting archive with `gzip --no-name`; each architecture's
+OCI descriptors, layers, revision label and clean-source label are verified.
+The common source SHA binds distribution code and its dependency pins. The
+Windows/Linux Docker builder installs the frontend wheel pinned in
+`native-frontend-release.json`; it does not freshly compile that frontend. The
+receipt records this dependency and its original producer source separately
+from the new distribution/backend source SHA. The current pin is the verified
+`20260930.4+habab.20` wheel from producer commit `224fc2adbff66e42fa27d69945cb8dcc0f79c93c`
+and CI run `41223227286`. Android compiles a fresh frontend from the release
+source as described below. Before publication, the pinned Windows/Linux wheel
+SHA-256 must equal `nativeFrontend.wheelSha256` in the signed Android runtime;
+different frontend bytes fail the release gate.
+Every published asset must be nonempty and smaller than GitHub's 2 GiB limit.
+Oversized output fails before a draft is created.
+
+The Android producer receives this exact repository/tag's GitHub download base.
+The signed manifest's runtime URL and the APK's embedded default URL/provenance
+must identify those assets. The current runtime is freshly built and signed;
+there is no external factory-runtime dependency in this release path. Existing
+runtime RSA and APK signing identities are retained. CI prepares the pinned
+public Vosk model; it does not stage private experimental wake models. Both the
+source-asset check and the final APK check reject experimental model weights and
+WAV recordings. Private APK57 and local model/audio packs are never inputs.
+
+Android's `ReleaseDownload` helper follows at most five HTTPS redirects. A
+GitHub download may redirect to `release-assets.githubusercontent.com`, including
+its short-lived signed query. Other cross-host redirects, HTTP downgrades,
+credentials, fragments and nonstandard ports fail. Runtime manifest signatures,
+archive size and archive SHA-256 checks still run before installation.
+
+Before upload, `github-release.py` rechecks candidate checksums, common source
+and workflow identities, Windows installer metadata, runtime RSA signature,
+APK runtime/frontend provenance, private-model exclusion, and both OCI payloads.
+It stages an explicit asset list and creates a draft. After upload it compares
+GitHub's actual asset `digest` (SHA-256), byte count, state, and full inventory
+with the local receipt. This proves uploaded-byte identity using GitHub's
+calculated checksum; it does not re-download all multi-gigabyte payloads.
+Only after this comparison does the workflow publish the draft and mark the
+release latest. It then downloads and byte-compares the small public receipt and
+performs redirected HEAD requests for every direct asset URL.
+
+Website download buttons can use:
+
+```text
+https://github.com/marsiandeployer/habab-home-assistant/releases/latest/download/habab_home_assistant.exe
+https://github.com/marsiandeployer/habab-home-assistant/releases/latest/download/habab-home-arm64.apk
+https://github.com/marsiandeployer/habab-home-assistant/releases/latest/download/habab-home-linux-amd64.oci.tar.gz
+https://github.com/marsiandeployer/habab-home-assistant/releases/latest/download/habab-home-linux-arm64.oci.tar.gz
+```
+
+The receipt records immutable tag URLs. Release creation/build checks and public
+download availability are separate from Windows installation and physical
+Android acceptance. A source build still depends on the pinned upstream Alpine
+packages being available; Dockerfiles currently pin Node `24.22.1-r1`.
+
+If upload or checksum verification fails, the release remains a draft. Inspect
+the draft and Actions artifacts before any cleanup or retry. Do not overwrite a
+published version. For rollback, point `latest` and the website back at an
+already verified earlier release; do not rebuild or replace its assets. Android
+updates still require a greater versionCode and their own compatibility review.
 
 ## Choose the smallest release
 
@@ -53,8 +151,8 @@ uses them; they are not a replacement for a signed server runtime.
 
 ## Targets
 
-- **Windows:** the existing builder's installer kit ZIP from the selected
-  commit. Its
+- **Windows:** the existing builder's installer kit ZIP and compiled
+  `habab_home_assistant.exe` from the selected commit. Its
   `windows-package.json` contains the ZIP digest, size, and member allowlist;
   the candidate step verifies embedded provenance and compares every ZIP
   member with the selected Git tree. The builder's bootstrap BAT files pin the
@@ -180,15 +278,21 @@ The workflow does not create or rotate keys and has no runtime publishing creden
 operator-owned keys through repository **Settings → Secrets and variables →
 Actions**; do not create replacement keys for this workflow.
 
-This is a source implementation. At the 2026-10-26 read-only configuration check,
-this repository had no Actions secrets configured. No frontend/runtime/APK build,
-workflow dispatch, publication, or physical Android acceptance was performed for
-this change. Configure the five signing secrets, select explicit release version inputs,
-and review the exact source commit before running an Android candidate. Local proof covers small synthetic
-provenance, gate, archive and packaging tests; `actionlint` was not available and
-was **NOT RUN**. The candidate artifacts still expire after one day; normal
-publication remains a separate operator step with the existing current/previous
-release retention procedure in `habab/android/README.md`.
+The read-only inventory on 2026-11-01 confirmed all five Android signing
+secret names above, plus `DOCKERHUB_TOKEN`, in repository Actions secrets. The
+operator provisioned the existing signing identities; keys were not rotated.
+Inspect names with `gh secret list` without printing values. The five signing
+secrets are required by the public release workflow.
+
+Local validation for the public release implementation covers synthetic signed
+runtime/APK provenance, changed payloads, blocked platforms, private-model
+exclusion, OCI archives, uploaded GitHub checksum mismatches, and HTTPS redirect
+behavior. `actionlint` 1.7.12 validates both release workflows. A small real
+GitHub asset was fetched through the Java helper's GitHub redirect path. These
+checks do not claim a completed multi-platform build, public release, Windows
+installation, or phone acceptance. Candidate artifacts still expire after one
+day; use the current/previous retention procedure in `habab/android/README.md`
+for separately managed installed/runtime releases.
 
 ## Failure and recovery
 

@@ -196,7 +196,10 @@ class ProviderClient:
         tools: list[dict[str, Any]],
         *,
         probe: bool = False,
+        required_tool: bool = False,
     ) -> dict[str, Any]:
+        if required_tool and not tools:
+            raise ProviderError("invalid_response")
         provider = self.settings["provider"]
         contract = await self.resolved_contract()
         if contract.text_ready is False:
@@ -213,7 +216,8 @@ class ProviderClient:
                 except Exception:
                     raise ProviderError("cannot_connect") from None
                 self._gemini = module.GeminiProvider(self.settings)
-            return await self._gemini.complete(messages, tools, probe=probe)
+            return await self._gemini.complete(
+                messages, tools, probe=probe, required_tool=required_tool)
         body: dict[str, Any] = {
             "model": contract.model,
             "messages": messages,
@@ -229,7 +233,7 @@ class ProviderClient:
             body["tools"] = tools
             body["tool_choice"] = (
                 {"type": "function", "function": {"name": "habab_connection_test"}}
-                if probe else "auto"
+                if probe else "required" if required_tool else "auto"
             )
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):

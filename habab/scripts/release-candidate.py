@@ -196,7 +196,7 @@ def verify_linux_image(image_path: Path, platform: str, source_revision: str) ->
 
     architecture = platform.split("/", 1)[1]
     try:
-        with tarfile.open(image_path, mode="r:") as archive:
+        with tarfile.open(image_path, mode="r:*") as archive:
             _, layout = _read_oci_json(archive, "oci-layout")
             if layout.get("imageLayoutVersion") != "1.0.0":
                 raise ValueError("OCI image layout version is unsupported")

@@ -31,12 +31,15 @@ class GeminiProvider:
         tools: list[dict[str, Any]],
         *,
         probe: bool = False,
+        required_tool: bool = False,
     ) -> dict[str, Any]:
+        if required_tool and not tools:
+            raise ProviderError("invalid_response")
         contents, system_instruction = self._contents(messages)
         declarations = self._declarations(tools)
         tool_config = None
         if declarations:
-            mode = "ANY" if probe else "AUTO"
+            mode = "ANY" if probe or required_tool else "AUTO"
             allowed = ["habab_connection_test"] if probe else None
             if probe and not any(item.name == "habab_connection_test" for item in declarations):
                 raise ProviderError("tools_unsupported")

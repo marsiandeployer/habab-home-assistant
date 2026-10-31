@@ -35,6 +35,44 @@ on:
         required: false
         type: string
 
+  workflow_call:
+    inputs:
+      target_scope:
+        type: string
+        default: all
+      source_ref:
+        type: string
+        required: true
+      android_version_code:
+        type: string
+        default: ''
+      android_version_name:
+        type: string
+        default: ''
+      android_runtime_manifest_url:
+        type: string
+        default: ''
+      android_base_runtime_manifest_url:
+        type: string
+        default: ''
+      release_tag:
+        type: string
+        required: true
+    outputs:
+      source_revision:
+        value: ${{ jobs.resolve-source.outputs.source_revision }}
+    secrets:
+      HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64:
+        required: true
+      HABAB_ANDROID_KEYSTORE_BASE64:
+        required: true
+      HABAB_ANDROID_KEYSTORE_PASSWORD:
+        required: true
+      HABAB_ANDROID_KEY_ALIAS:
+        required: true
+      HABAB_ANDROID_KEY_PASSWORD:
+        required: true
+
 permissions:
   contents: read
 
@@ -44,6 +82,17 @@ jobs:
     outputs:
       source_revision: ${{ steps.resolve.outputs.source_revision }}
     steps:
+      - name: Validate release caller contract
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TARGET_SCOPE: ${{ inputs.target_scope }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SCOPE" == all && "$SOURCE_REF" == "$GITHUB_SHA" ]]
+          [[ "$RELEASE_TAG" =~ ^habab-v[0-9][0-9A-Za-z.+_-]{0,62}-[0-9a-f]{12}$ ]]
+          [[ "$RELEASE_TAG" == *"-${SOURCE_REF:0:12}" ]]
       - id: resolve
         env:
           SOURCE_REF: ${{ inputs.source_ref }}
@@ -150,7 +199,10 @@ jobs:
   windows-source:
     needs: [resolve-source, release-preflight]
     if: ${{ inputs.target_scope == 'all' || inputs.target_scope == 'windows' }}
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Fetch only Windows package source blobs
         env:
@@ -166,9 +218,12 @@ jobs:
           git sparse-checkout init --cone
           git sparse-checkout set habab/distribution habab/product-tunnel
           git checkout --detach FETCH_HEAD
+      - name: Test Windows packaging contract
+        run: python -m unittest discover -s habab/distribution/tests -p test_windows_installer.py -v
       - name: Create exact-source Windows distribution snapshot
         env:
           SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+          HABAB_WINDOWS_PUBLIC_BASE: ${{ inputs.release_tag != '' && format('https://github.com/{0}/releases/download/{1}', github.repository, inputs.release_tag) || 'https://habab-demo.wpmix.net/downloads' }}
         run: |
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Windows checkout does not match the selected source'; exit 1; }
@@ -176,10 +231,11 @@ jobs:
           snapshot=$(mktemp -d "$RUNNER_TEMP/habab-source.XXXXXX")
           trap 'rm -rf "$snapshot"' EXIT
           git archive "$SOURCE_REVISION" habab/distribution habab/product-tunnel | tar -x -C "$snapshot"
-          HABAB_SOURCE_REVISION="$SOURCE_REVISION" HABAB_SOURCE_DIRTY=false \
-            python3 "$snapshot/habab/distribution/package-windows.py"
+          export HABAB_SOURCE_REVISION="$SOURCE_REVISION" HABAB_SOURCE_DIRTY=false
+          python "$snapshot/habab/distribution/package-windows.py"
+          pwsh -NoProfile -File "$snapshot/habab/distribution/installer/build-windows-installer.ps1"
           mkdir -p candidate/windows
-          python3 - "$snapshot/habab/public/downloads" candidate/windows "$SOURCE_REVISION" <<'PY'
+          python - "$snapshot/habab/public/downloads" candidate/windows "$SOURCE_REVISION" <<'PY'
           import json
           import os
           import shutil
@@ -190,7 +246,7 @@ jobs:
           revision = sys.argv[3]
           metadata = json.loads((source / 'windows-package.json').read_text())
           for name in (metadata['filename'], 'windows-package.json', 'start-home-assistant.bat',
-                       'start-xiaomi-home.bat', 'support_tunnel.bat'):
+                       'start-xiaomi-home.bat', 'support_tunnel.bat', 'habab_home_assistant.exe'):
               path = source / name
               if not path.is_file():
                   raise SystemExit(f'Canonical Windows builder output is missing: {name}')
@@ -203,8 +259,8 @@ jobs:
               'workflow_run_id': os.environ['GITHUB_RUN_ID'],
               'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}, sort_keys=True) + '\n')
           PY
-          windows_zip=$(python3 -c 'import json; print(json.load(open("candidate/windows/windows-package.json"))["filename"])')
-          unzip -t "candidate/windows/$windows_zip"
+          windows_zip=$(python -c 'import json; print(json.load(open("candidate/windows/windows-package.json"))["filename"])')
+          python -m zipfile -t "candidate/windows/$windows_zip"
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: candidate-windows
@@ -262,6 +318,7 @@ jobs:
             --platform "$PLATFORM" \
             --source-revision "$SOURCE_REVISION" \
             --status-output "candidate/$ARTIFACT/status.json"
+          gzip --no-name --fast "candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar"
           python3 - "$ARTIFACT/status.json" <<'PY'
           import json
           import os
@@ -291,6 +348,7 @@ jobs:
     outputs:
       state: ${{ steps.inputs.outputs.state || steps.unsigned.outputs.state }}
     env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
       RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
       ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
       ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
@@ -317,7 +375,7 @@ jobs:
           [[ -n "$ANDROID_KEY_ALIAS" ]] || missing+=("key alias")
           [[ -n "$ANDROID_KEY_PASSWORD" ]] || missing+=("key password")
           if (( ${#missing[@]} > 0 )); then
-            if [[ "${{ inputs.target_scope }}" == android ]]; then
+            if [[ "${{ inputs.target_scope }}" == android || -n "${RELEASE_TAG:-}" ]]; then
               echo '::error::Android scope requires explicit Android version code/name, runtime signing key (or matching signed runtime) and all APK release signing inputs'
               exit 1
             fi
@@ -415,11 +473,13 @@ jobs:
     outputs:
       state: ${{ needs.android-inputs.outputs.state }}
     env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
       RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
       ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
       ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
       ANDROID_BASE_RUNTIME_MANIFEST_URL: ${{ inputs.android_base_runtime_manifest_url }}
       SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+      ANDROID_PUBLIC_BASE: ${{ inputs.release_tag != '' && format('https://github.com/{0}/releases/download/{1}', github.repository, inputs.release_tag) || 'https://habab-demo.wpmix.net/downloads/android' }}
     steps:
       - name: Fetch only Android and distribution source blobs
         env:
@@ -577,7 +637,7 @@ jobs:
           python3 habab/android/tools/package_runtime.py \
             --signing-key "$key" --source-revision "$SOURCE_REVISION" \
             --frontend-candidate frontend-input \
-            --public-base https://habab-demo.wpmix.net/downloads/android
+            --public-base "$ANDROID_PUBLIC_BASE"
           mkdir -p runtime-input
           cp habab/android/dist/release-*.json runtime-input/release.json
           cp habab/android/dist/release-*.json.sig runtime-input/release.json.sig
@@ -660,9 +720,10 @@ jobs:
                       raise SystemExit('::error::Android network-tools launcher does not match this exact checkout')
           url = release.get('url', '')
           archive_url = urlsplit(url)
-          if (archive_url.scheme != 'https' or archive_url.hostname != 'habab-demo.wpmix.net'
-                  or archive_url.username or archive_url.password or archive_url.query
-                  or archive_url.fragment or not archive_url.path.startswith('/downloads/android/')):
+          public_base = os.environ.get('ANDROID_PUBLIC_BASE', 'https://habab-demo.wpmix.net/downloads/android')
+          if (not url.startswith(public_base + '/') or '/' in url[len(public_base) + 1:]
+                  or archive_url.scheme != 'https' or archive_url.username or archive_url.password
+                  or archive_url.query or archive_url.fragment):
               raise SystemExit('::error::Runtime archive must use the canonical HTTPS downloads path')
           archive_name = Path(archive_url.path).name
           if not archive_name or archive_name in {'.', '..'}:
@@ -720,6 +781,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends patchelf
           python3 habab/android/tools/prepare_native.py
           python3 habab/android/tools/prepare_voice.py
+          if find habab/android/app/src/main/assets -type f \( -path '*/voice/experiments/*' -o -iname '*.wav' -o -iname '*.tflite' -o -iname '*.onnx' \) -print -quit | grep -q .; then
+            echo '::error::Private experimental models or audio are forbidden in a public APK'; exit 1
+          fi
           sdkmanager 'ndk;27.2.12479018' 'cmake;3.22.1'
       - uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
@@ -785,6 +849,8 @@ jobs:
           status['apk_version'] = runpy.run_path('habab/android/tools/verify_runtime.py')['verify_apk_version'](
               Path('candidate/android/habab-home-arm64.apk'), os.environ['ANDROID_AAPT'],
               os.environ['ANDROID_VERSION_CODE'], os.environ['ANDROID_VERSION_NAME'])
+          status['apk_signature'] = 'verified-release'
+          status['publishable'] = True
           status['native_frontend'] = release['nativeFrontend']
           status['runtime_manifest'] = Path('habab/android/app/src/main/assets/release/default-url.txt').read_text().strip()
           status.update({

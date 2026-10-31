@@ -22,7 +22,8 @@ final class MicroWakeEngine implements WakeEngine {
     private final WakeEngineInfo info;
     private final WakeDetector.Diagnostics diagnostics;
     private final MicroFrontend frontend;
-    private final Interpreter interpreter;
+    private final MappedByteBuffer model;
+    private Interpreter interpreter;
     private final ByteBuffer input = ByteBuffer.allocateDirect(INPUT_BYTES).order(ByteOrder.nativeOrder());
     private final ByteBuffer output = ByteBuffer.allocateDirect(1).order(ByteOrder.nativeOrder());
     private final float[] inferenceFeatures = new float[INPUT_BYTES];
@@ -57,12 +58,11 @@ final class MicroWakeEngine implements WakeEngine {
 
         this.info = info;
         this.diagnostics = diagnostics;
-        MappedByteBuffer model = mapModel(modelFile);
+        this.model = mapModel(modelFile);
         Interpreter created = null;
         MicroFrontend createdFrontend = null;
         try {
-            created = new Interpreter(model, new Interpreter.Options().setNumThreads(2));
-            validateModel(created);
+            created = createInterpreter();
             org.tensorflow.lite.Tensor inputTensor = created.getInputTensor(0);
             org.tensorflow.lite.Tensor outputTensor = created.getOutputTensor(0);
             this.inputScale = inputTensor.quantizationParams().getScale();
@@ -210,6 +210,20 @@ final class MicroWakeEngine implements WakeEngine {
             throw new IOException("wake_model_tensor_shape");
     }
 
+    private Interpreter createInterpreter() throws IOException {
+        Interpreter created = null;
+        try {
+            model.position(0);
+            model.limit(model.capacity());
+            created = new Interpreter(model, new Interpreter.Options().setNumThreads(2));
+            validateModel(created);
+            return created;
+        } catch (IOException | RuntimeException | LinkageError error) {
+            if (created != null) created.close();
+            throw error;
+        }
+    }
+
     private static MappedByteBuffer mapModel(File file) throws IOException {
         try (FileInputStream stream = new FileInputStream(file);
              FileChannel channel = stream.getChannel()) {
@@ -232,12 +246,31 @@ final class MicroWakeEngine implements WakeEngine {
 
     private void ensureOpen() {
         if (closed) throw new IllegalStateException("wake_engine_closed");
+        if (interpreter == null) throw new IllegalStateException("wake_model_unavailable");
     }
 
     @Override public synchronized void reset(long now, VoiceLifecycleTrace.Reason reason) {
         if (closed) return;
+        Interpreter previous = interpreter;
+        interpreter = null;
+        try {
+            if (previous != null) {
+                previous.close();
+                previous = null;
+            }
+            interpreter = createInterpreter();
+        } catch (IOException | RuntimeException | LinkageError error) {
+            if (interpreter != null) {
+                interpreter.close();
+                interpreter = null;
+            }
+            if (previous != null) {
+                try { previous.close(); }
+                catch (RuntimeException | LinkageError closeError) { error.addSuppressed(closeError); }
+            }
+            throw new IllegalStateException("wake_model_reset_failed", error);
+        }
         frontend.reset();
-        interpreter.resetVariableTensors();
         Arrays.fill(inferenceFeatures, 0f);
         Arrays.fill(scoreWindow, 0f);
         input.clear(); while (input.hasRemaining()) input.put((byte) 0);
@@ -262,7 +295,10 @@ final class MicroWakeEngine implements WakeEngine {
         if (closed) return;
         closed = true;
         frontend.close();
-        interpreter.close();
+        if (interpreter != null) {
+            interpreter.close();
+            interpreter = null;
+        }
         Arrays.fill(inferenceFeatures, 0f);
         Arrays.fill(scoreWindow, 0f);
         input.clear(); while (input.hasRemaining()) input.put((byte) 0);
