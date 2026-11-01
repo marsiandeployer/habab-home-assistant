@@ -19,6 +19,9 @@ def main() -> int:
     homeassistant.components.__path__.insert(0, str(SRC))
 
     modules = (
+        "test_android_usb",
+        "test_discovery",
+        "test_integration_setup",
         "test_setup_agent",
         "test_setup_actions",
         "test_automation_setup",

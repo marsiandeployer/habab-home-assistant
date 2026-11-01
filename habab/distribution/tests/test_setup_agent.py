@@ -1066,6 +1066,15 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Windows Docker Desktop", prompt)
         self.assertNotIn("не предполагает наличие Windows-адаптера", prompt)
 
+    def test_android_usb_guidance_requires_live_permission_and_bridge_status(self):
+        self.assertIn("Учитывай только поле usb из свежего результата", PROMPT)
+        self.assertIn("Только bridge_ready=true подтверждает свежий сокет", PROMPT)
+        self.assertIn("unix:///run/habab-ipc/cc2531.sock", PROMPT)
+        self.assertIn("RadioType бери из значения HA", PROMPT)
+        self.assertIn("скорость оставь 115200 с flow control none", PROMPT)
+        self.assertIn("предложенный integration_setup suggested_input дословно", PROMPT)
+        self.assertIn("Не советуй form_new_network, сброс или создание новой Zigbee-сети", PROMPT)
+
     def test_runtime_kind_is_part_of_runtime_fingerprint(self):
         settings = {"provider": "deepseek", "model": "deepseek-flash"}
         self.assertNotEqual(

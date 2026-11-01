@@ -121,4 +121,35 @@
         <item>openWakeWord (эксперимент)</item>
         <item>LiveKit WakeWord (эксперимент)</item>
     </string-array>
+
+    <string name="usb_bridge_title">Zigbee по USB</string>
+    <string name="usb_bridge_help">Подключите TI CC2531 и разрешите Android доступ к USB. Затем напишите помощнику «Настрой Zigbee через подключённый USB-координатор».</string>
+    <string name="usb_bridge_start">Подключить USB</string>
+    <string name="usb_bridge_stop">Отключить USB-мост</string>
+    <string name="usb_bridge_status">Состояние: %1$s</string>
+    <string name="usb_bridge_notification_title">USB-мост Zigbee</string>
+    <string name="usb_bridge_notification_channel">Мост Zigbee по USB</string>
+    <string name="usb_bridge_notification_stop">Остановить</string>
+    <string name="usb_bridge_state_stopped">Мост выключен</string>
+    <string name="usb_bridge_state_waiting">Ожидаю USB-координатор TI CC2531.</string>
+    <string name="usb_bridge_state_waiting_supported">Ожидаю совместимый CC2531 с USB CDC.</string>
+    <string name="usb_bridge_state_permission_request">Запрашиваю разрешение на USB-доступ.</string>
+    <string name="usb_bridge_state_permission_granted">USB-доступ разрешён, подключаю координатор.</string>
+    <string name="usb_bridge_state_permission_denied">Разрешение на USB не предоставлено. Нажмите «Подключить USB» и разрешите доступ.</string>
+    <string name="usb_bridge_state_device_attached">Координатор подключён, проверяю разрешение.</string>
+    <string name="usb_bridge_state_device_detached">Координатор отключён. Подключите его снова, чтобы продолжить.</string>
+    <string name="usb_bridge_state_permission_cancelled">Координатор отключён. Запрос разрешения отменён.</string>
+    <string name="usb_bridge_state_opening_detached">Координатор отключён во время подключения.</string>
+    <string name="usb_bridge_state_ready">USB-мост готов. Попросите помощника настроить Zigbee. Прошивка ZNP ещё не проверена.</string>
+    <string name="usb_bridge_state_client_connected">Подключён клиент Home Assistant.</string>
+    <string name="usb_bridge_state_client_wait">Клиент отключился. Ожидаю повторное подключение.</string>
+    <string name="usb_bridge_state_error">Не удалось открыть USB-мост. Переподключите координатор и попробуйте снова.</string>
+    <string name="usb_bridge_state_error_permission">Нет USB-разрешения. Нажмите «Подключить USB» и разрешите доступ.</string>
+    <string name="usb_bridge_state_error_open">Android не открыл USB-устройство. Переподключите его и повторите запуск.</string>
+    <string name="usb_bridge_state_error_descriptors">Не найдены совместимые CDC-интерфейсы CC2531.</string>
+    <string name="usb_bridge_state_error_interface">Не удалось занять USB-интерфейс координатора.</string>
+    <string name="usb_bridge_state_error_line_coding">Координатор не принял настройки последовательного соединения.</string>
+    <string name="usb_bridge_state_error_ipc">Не удалось подготовить приватный канал связи с Home Assistant.</string>
+    <string name="usb_bridge_state_error_transport">USB-связь прервалась. Нажмите «Подключить USB», чтобы повторить подключение.</string>
+    <string name="usb_bridge_state_ended">Мост завершён. Подключите координатор снова, чтобы продолжить.</string>
 </resources>

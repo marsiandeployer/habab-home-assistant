@@ -48,6 +48,10 @@ async def async_setup(hass, config):
     from .voice_route import async_setup_voice_route
 
     await async_setup_voice_route(hass)
+    from .android_usb import async_setup as async_setup_android_usb
+
+    if not await async_setup_android_usb(hass):
+        return False
     frontend_dir = Path(__file__).parent / "frontend"
     assistant_file = frontend_dir / "setup-chat.js"
     assistant_digest = await hass.async_add_executor_job(

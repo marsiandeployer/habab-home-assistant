@@ -175,6 +175,7 @@ public final class MainActivity extends Activity {
         content.addView(autoStartOnBoot);
         button(R.string.open_home, this::openHome);
         button(R.string.voice_title, this::voiceSettings);
+        button(R.string.usb_bridge_title, this::usbCdcBridgeSettings);
         button(R.string.stop, () -> {
             getSharedPreferences("server", 0).edit().putBoolean("desired", false)
                     .putBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, true)
@@ -530,6 +531,37 @@ public final class MainActivity extends Activity {
                 microphoneGranted, serverReady, manuallyStopped)) return;
         autoStartVoiceRequested = true;
         ServerService.startVoiceIfReady(this);
+    }
+
+    private void usbCdcBridgeSettings() {
+        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(28, 8, 28, 8);
+        TextView explanation = new TextView(this); explanation.setText(R.string.usb_bridge_help); form.addView(explanation);
+        TextView status = new TextView(this); form.addView(status);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(R.string.usb_bridge_title).setView(form)
+                .setPositiveButton(R.string.usb_bridge_start, (ignored, which) -> {
+                    startServerManually();
+                    startForegroundService(new Intent(this, UsbCdcBridgeService.class));
+                })
+                .setNeutralButton(R.string.usb_bridge_stop, (ignored, which) ->
+                        stopUsbCdcBridge())
+                .setNegativeButton(R.string.cancel, null).create();
+        Runnable updateStatus = new Runnable() {
+            @Override public void run() {
+                if (!dialog.isShowing()) return;
+                String bridgeStatus = UsbCdcBridgeService.active ? UsbCdcBridgeService.status
+                        : getString(R.string.usb_bridge_state_stopped);
+                status.setText(getString(R.string.usb_bridge_status, bridgeStatus));
+                handler.postDelayed(this, 1000);
+            }
+        };
+        dialog.setOnShowListener(ignored -> handler.post(updateStatus));
+        dialog.setOnDismissListener(ignored -> handler.removeCallbacks(updateStatus));
+        dialog.show();
+    }
+
+    private void stopUsbCdcBridge() {
+        startForegroundService(new Intent(this, UsbCdcBridgeService.class)
+                .setAction(UsbCdcBridgeService.ACTION_STOP));
     }
 
     private String voiceAudioStatus() {

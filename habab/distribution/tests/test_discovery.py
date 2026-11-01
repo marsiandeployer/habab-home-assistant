@@ -23,6 +23,16 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["network"]["status"], "no_discovery_results")
         read.assert_not_called()
 
+    async def test_usb_result_comes_from_the_validated_android_status_reader(self):
+        hass = self.fixture(["bluetooth", "usb"])
+        usb_status = {"status": "ready", "bridge_ready": True,
+                      "device_path": "unix:///run/habab-ipc/cc2531.sock"}
+        with patch.object(bluetooth, "async_scanner_count", return_value=0), \
+             patch.object(discovery, "read_usb_status", return_value=usb_status), \
+             patch.object(discovery.asyncio, "sleep", AsyncMock()):
+            result = await discovery.observe(hass, SimpleNamespace(flow_owners={}), 1)
+        self.assertEqual(result["usb"], usb_status)
+
     async def test_setup_failure_is_unavailable_not_successful_empty_scan(self):
         hass = self.fixture([])
         with patch.object(discovery, "async_setup_component", AsyncMock(side_effect=RuntimeError())), \

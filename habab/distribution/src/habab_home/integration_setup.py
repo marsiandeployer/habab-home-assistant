@@ -125,6 +125,71 @@ def _model_input_fields(view):
     return fields
 
 
+def _android_zha_suggested_input(hass, record):
+    """Return safe native ZHA form values only for the live Android USB bridge."""
+    if record.get("domain") != "zha" or record.get("kind") != "config":
+        return None
+
+    from homeassistant.components import onboarding
+
+    if not onboarding.async_is_onboarded(hass):
+        return None
+
+    from .android_usb import USB_DEVICE_PATH, read_usb_status
+
+    usb = read_usb_status()
+    if usb.get("bridge_ready") is not True or usb.get("device_path") != USB_DEVICE_PATH:
+        return None
+
+    step_id = record.get("step_id")
+    if step_id == "choose_serial_port":
+        return {"path": USB_DEVICE_PATH}
+
+    # Use the pinned Core enum description, because ZHA's selector submits that
+    # translated technical value rather than the enum member name "znp".
+    from homeassistant.components.zha.config_flow import RadioType
+
+    if step_id == "manual_pick_radio_type":
+        return {"radio_type": RadioType.znp.description}
+    if step_id == "manual_port_config":
+        return {"path": USB_DEVICE_PATH, "baudrate": 115200, "flow_control": "none"}
+    return None
+
+
+def _zha_config_agent_input_allowed(hass, record, user_input):
+    """Use a small positive allowlist for model-driven ZHA config steps."""
+    if record.get("domain") != "zha" or record.get("kind") != "config":
+        return True
+
+    from homeassistant.components import onboarding
+
+    if not onboarding.async_is_onboarded(hass):
+        return False
+
+    if record.get("phase") == "menu":
+        allowed_options = {option["value"] for option in record.get("menu_options", [])}
+        return (
+            set(user_input) == {"next_step_id"}
+            and user_input.get("next_step_id") in {"setup_strategy_advanced", "reuse_settings"}
+            and user_input.get("next_step_id") in allowed_options
+        )
+
+    if record.get("phase") == "form":
+        if record.get("step_id") == "verify_radio" and user_input == {}:
+            return True
+        suggested = _android_zha_suggested_input(hass, record)
+        return suggested is not None and user_input == suggested
+
+    return False
+
+
+def _agent_safe_suggested_input(hass, record):
+    """Attach bridge-derived values only to native ZHA's three technical forms."""
+    if record.get("phase") != "form":
+        return None
+    return _android_zha_suggested_input(hass, record)
+
+
 def _safe_description_placeholders(value):
     """Keep bounded JSON primitives for the protected native form only."""
     if not isinstance(value, dict):
@@ -696,6 +761,9 @@ class IntegrationSetup:
                 input_fields = _model_input_fields(item)
                 if input_fields is not None:
                     summary["input_fields"] = input_fields
+                suggested_input = _agent_safe_suggested_input(self.hass, self.interactions[item["id"]])
+                if suggested_input is not None:
+                    summary["suggested_input"] = suggested_input
                 summaries.append(summary)
             return {"interactions": summaries}
         if action == "start_integration":
@@ -715,7 +783,10 @@ class IntegrationSetup:
             user_input = body.get("input", {})
             if not isinstance(user_input, dict):
                 raise ValueError("invalid_input")
-            if record["phase"] == "menu":
+            if (record.get("domain") == "zha" and record.get("kind") == "config"):
+                if not _zha_config_agent_input_allowed(self.hass, record, user_input):
+                    raise ValueError("protected_ui_required")
+            elif record["phase"] == "menu":
                 allowed = {item["value"] for item in record.get("menu_options", [])}
                 if set(user_input) != {"next_step_id"} or user_input.get("next_step_id") not in allowed:
                     raise ValueError("protected_ui_required")
@@ -738,6 +809,9 @@ class IntegrationSetup:
         input_fields = _model_input_fields(view)
         if input_fields is not None:
             summary["input_fields"] = input_fields
+        suggested_input = _agent_safe_suggested_input(self.hass, self.interactions[view["id"]])
+        if suggested_input is not None:
+            summary["suggested_input"] = suggested_input
         return summary
 
 

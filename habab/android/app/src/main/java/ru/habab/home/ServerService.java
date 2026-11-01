@@ -165,6 +165,8 @@ public final class ServerService extends Service {
             return START_STICKY;
         }
         active = true; setServerStatus("starting");
+        try { UsbCdcBridgeService.startWithServer(this); }
+        catch (RuntimeException error) { android.util.Log.w("HababUsbBridge", "service_start_failed: " + error.getClass().getSimpleName()); }
         wakeLock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "habab:server");
         wakeLock.acquire();
         WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
@@ -345,6 +347,7 @@ public final class ServerService extends Service {
     @Override public void onDestroy() {
         stopping = true;
         active = false;
+        stopService(new Intent(this, UsbCdcBridgeService.class));
         if (webTunnel != null) webTunnel.close();
         if (webTunnelThread != null) webTunnelThread.interrupt();
         if (tunnel != null) tunnel.close();

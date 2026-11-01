@@ -40,6 +40,7 @@ class FlowManager:
 def setup_controller(flow=None, options=None, entries=None):
     hass = SimpleNamespace(
         config=SimpleNamespace(language="en"),
+        data={},
         config_entries=SimpleNamespace(
             flow=flow or FlowManager(), options=options or FlowManager(),
             async_get_entry=(entries or {}).get,
@@ -56,6 +57,185 @@ def setup_controller(flow=None, options=None, entries=None):
 
 
 class IntegrationSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_android_zha_bridge_allows_only_exact_live_usb_fields(self):
+        from homeassistant.components.zha.config_flow import RadioType
+        from homeassistant.components.habab_home import android_usb
+
+        ready = {"bridge_ready": True, "device_path": android_usb.USB_DEVICE_PATH}
+        cases = (
+            ("choose_serial_port", {"path": android_usb.USB_DEVICE_PATH}),
+            ("manual_pick_radio_type", {"radio_type": RadioType.znp.description}),
+            ("manual_port_config", {
+                "path": android_usb.USB_DEVICE_PATH, "baudrate": 115200, "flow_control": "none",
+            }),
+        )
+        for step_id, user_input in cases:
+            with self.subTest(step_id=step_id), patch.object(
+                android_usb, "read_usb_status", return_value=ready
+            ):
+                manager = FlowManager(
+                    initial={"type": "form", "flow_id": "zha-flow", "step_id": step_id,
+                             "data_schema": vol.Schema({})},
+                    configured={"zha-flow": {"type": "form", "flow_id": "zha-flow",
+                                               "step_id": step_id, "data_schema": vol.Schema({})}},
+                )
+                controller, _, _ = setup_controller(flow=manager)
+                started = await controller.agent_action("alice", "start_integration", {"domain": "zha"})
+                self.assertEqual(started["suggested_input"], user_input)
+                current = await controller.agent_action("alice", "integration_setup_status", {})
+                self.assertEqual(current["interactions"][0]["suggested_input"], user_input)
+                result = await controller.agent_action("alice", "continue_integration", {
+                    "flow_id": "zha-flow", "input": user_input,
+                })
+                self.assertEqual(result["phase"], "form")
+                self.assertEqual(manager.async_configure.await_args.args[1], user_input)
+
+    async def test_android_zha_submission_requires_ready_bridge_and_exact_values(self):
+        from homeassistant.components.habab_home import android_usb
+
+        cases = (
+            ("choose_serial_port", {"path": android_usb.USB_DEVICE_PATH},
+             {"bridge_ready": False, "device_path": android_usb.USB_DEVICE_PATH}),
+            ("choose_serial_port", {"path": "/dev/ttyUSB0"},
+             {"bridge_ready": True, "device_path": android_usb.USB_DEVICE_PATH}),
+            ("manual_pick_radio_type", {"radio_type": "znp"},
+             {"bridge_ready": True, "device_path": android_usb.USB_DEVICE_PATH}),
+            ("manual_port_config", {
+                "path": android_usb.USB_DEVICE_PATH, "baudrate": 9600, "flow_control": "none",
+            }, {"bridge_ready": True, "device_path": android_usb.USB_DEVICE_PATH}),
+            ("manual_port_config", {
+                "path": android_usb.USB_DEVICE_PATH, "baudrate": 115200, "flow_control": "none",
+                "password": "fixture-secret",
+            }, {"bridge_ready": True, "device_path": android_usb.USB_DEVICE_PATH}),
+        )
+        for step_id, user_input, status in cases:
+            with self.subTest(step_id=step_id, user_input=user_input), patch.object(
+                android_usb, "read_usb_status", return_value=status
+            ):
+                manager = FlowManager(initial={
+                    "type": "form", "flow_id": "zha-flow", "step_id": step_id,
+                    "data_schema": vol.Schema({}),
+                })
+                controller, _, _ = setup_controller(flow=manager)
+                await controller.agent_action("alice", "start_integration", {"domain": "zha"})
+                with self.assertRaisesRegex(ValueError, "protected_ui_required"):
+                    await controller.agent_action("alice", "continue_integration", {
+                        "flow_id": "zha-flow", "input": user_input,
+                    })
+                manager.async_configure.assert_not_awaited()
+
+    async def test_android_zha_technical_steps_are_blocked_until_onboarding_finishes(self):
+        from homeassistant.components import onboarding
+        from homeassistant.components.habab_home import android_usb
+
+        ready = {"bridge_ready": True, "device_path": android_usb.USB_DEVICE_PATH}
+        cases = (
+            ("choose_serial_port", {"path": android_usb.USB_DEVICE_PATH}),
+            ("manual_pick_radio_type", {"radio_type": "ZNP pinned description"}),
+            ("manual_port_config", {
+                "path": android_usb.USB_DEVICE_PATH, "baudrate": 115200, "flow_control": "none",
+            }),
+        )
+        for step_id, user_input in cases:
+            with self.subTest(step_id=step_id), \
+                    patch.object(android_usb, "read_usb_status", return_value=ready), \
+                    patch.object(onboarding, "async_is_onboarded", return_value=False):
+                manager = FlowManager(initial={
+                    "type": "form", "flow_id": "zha-flow", "step_id": step_id,
+                    "data_schema": vol.Schema({}),
+                })
+                controller, _, _ = setup_controller(flow=manager)
+                started = await controller.agent_action("alice", "start_integration", {"domain": "zha"})
+                self.assertNotIn("suggested_input", started)
+                with self.assertRaisesRegex(ValueError, "protected_ui_required"):
+                    await controller.agent_action("alice", "continue_integration", {
+                        "flow_id": "zha-flow", "input": user_input,
+                    })
+                manager.async_configure.assert_not_awaited()
+
+    async def test_zha_migration_retry_and_verify_steps_blocked_during_onboarding(self):
+        from homeassistant.components import onboarding
+
+        flow = FlowHandler()
+        flow.flow_id = "zha-flow"
+        migration_menu = flow.async_show_menu(
+            step_id="choose_migration_strategy",
+            menu_options=("migration_strategy_recommended", "migration_strategy_advanced"),
+        )
+        cases = (
+            (migration_menu, {"next_step_id": "migration_strategy_recommended"}),
+            ({"type": "form", "flow_id": "zha-flow", "step_id": "retry_old_radio",
+              "data_schema": vol.Schema({})}, {}),
+            ({"type": "form", "flow_id": "zha-flow", "step_id": "verify_radio",
+              "data_schema": vol.Schema({})}, {}),
+        )
+        for initial, user_input in cases:
+            with self.subTest(step=initial.get("step_id")), patch.object(
+                onboarding, "async_is_onboarded", return_value=False
+            ):
+                manager = FlowManager(initial=initial)
+                controller, _, _ = setup_controller(flow=manager)
+                await controller.agent_action("alice", "start_integration", {"domain": "zha"})
+                with self.assertRaisesRegex(ValueError, "protected_ui_required"):
+                    await controller.agent_action("alice", "continue_integration", {
+                        "flow_id": "zha-flow", "input": user_input,
+                    })
+                manager.async_configure.assert_not_awaited()
+
+    async def test_zha_network_formation_menu_choices_stay_owner_ui_only(self):
+        menus = (
+            ("choose_setup_strategy", ("setup_strategy_recommended", "setup_strategy_advanced"),
+             "setup_strategy_recommended", "setup_strategy_advanced"),
+            ("choose_formation_strategy", ("reuse_settings", "form_new_network", "form_initial_network"),
+             "form_new_network", "reuse_settings"),
+        )
+        for step_id, options, blocked, allowed in menus:
+            with self.subTest(step_id=step_id):
+                flow = FlowHandler()
+                flow.flow_id = "zha-flow"
+                menu = flow.async_show_menu(step_id=step_id, menu_options=options)
+                manager = FlowManager(
+                    initial=menu,
+                    configured={"zha-flow": {"type": "abort", "flow_id": "zha-flow",
+                                               "reason": "already_configured"}},
+                )
+                controller, _, _ = setup_controller(flow=manager)
+                await controller.agent_action("alice", "start_integration", {"domain": "zha"})
+                with self.assertRaisesRegex(ValueError, "protected_ui_required"):
+                    await controller.agent_action("alice", "continue_integration", {
+                        "flow_id": "zha-flow", "input": {"next_step_id": blocked},
+                    })
+                result = await controller.agent_action("alice", "continue_integration", {
+                    "flow_id": "zha-flow", "input": {"next_step_id": allowed},
+                })
+                self.assertEqual(result["phase"], "abort")
+                self.assertEqual(manager.async_configure.await_args.args[1], {"next_step_id": allowed})
+
+        manager = FlowManager(initial={
+            "type": "form", "flow_id": "zha-flow", "step_id": "form_initial_network",
+            "data_schema": vol.Schema({}),
+        })
+        controller, _, _ = setup_controller(flow=manager)
+        await controller.agent_action("alice", "start_integration", {"domain": "zha"})
+        with self.assertRaisesRegex(ValueError, "protected_ui_required"):
+            await controller.agent_action("alice", "continue_integration", {
+                "flow_id": "zha-flow", "input": {},
+            })
+        manager.async_configure.assert_not_awaited()
+
+        verify_manager = FlowManager(
+            initial={"type": "form", "flow_id": "verify-flow", "step_id": "verify_radio",
+                     "data_schema": vol.Schema({})},
+            configured={"verify-flow": {"type": "abort", "flow_id": "verify-flow",
+                                          "reason": "already_configured"}},
+        )
+        verify_controller, _, _ = setup_controller(flow=verify_manager)
+        await verify_controller.agent_action("alice", "start_integration", {"domain": "zha"})
+        result = await verify_controller.agent_action("alice", "continue_integration", {
+            "flow_id": "verify-flow", "input": {},
+        })
+        self.assertEqual(result["phase"], "abort")
+
     async def test_telegram_origin_is_private_and_completion_is_acknowledged_once(self):
         class Bus:
             def async_listen_once(self, *_args):

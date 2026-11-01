@@ -7,6 +7,7 @@ from homeassistant.core import callback
 from homeassistant.setup import async_setup_component
 
 from .const import DOMAIN
+from .android_usb import read_usb_status
 
 
 async def observe(hass, manager, duration=8):
@@ -39,11 +40,13 @@ async def observe(hass, manager, duration=8):
         except Exception:
             bluetooth["status"] = "unavailable"
     flows = discovered_flows(hass, manager)
+    usb = read_usb_status()
     return {"mode": "native_discovery_observation", "duration_seconds": duration,
             "network": {"methods_loaded": methods, "flows": flows,
                         "status": "results" if flows else "no_discovery_results" if any(methods.values()) else "unavailable",
                         "multicast_reachability_verified": False},
             "bluetooth": bluetooth,
+            "usb": usb,
             "instruction": "These are native HA discovery results, not a list of every device or Wi-Fi network. No results do not prove the LAN is empty. A missing Bluetooth adapter requires an adapter/proxy accessible to HA; do not claim Windows Bluetooth is forwarded."}
 
 
