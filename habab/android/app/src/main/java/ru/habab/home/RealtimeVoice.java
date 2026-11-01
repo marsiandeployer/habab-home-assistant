@@ -59,6 +59,7 @@ final class RealtimeVoice implements AutoCloseable {
     private long secondaryPlaybackStart;
     private long writtenFrames;
     private long secondaryWrittenFrames;
+    private long lastPlaybackCaptureMuteAt = -1;
     private volatile boolean drainAnnounced;
     private final boolean legacyScoSampleRate;
     private final boolean duplicateOutput;
@@ -246,10 +247,25 @@ final class RealtimeVoice implements AutoCloseable {
         if (!ready() || ending || current == null) return 0;
         if (current.queueSize() > 512 * 1024) { fail("realtime_upload_backpressure"); return 0; }
         byte[] audio = gemini == null ? resampler.convert(samples, count) : GeminiVoiceProtocol.pcm16(samples, count);
+        // Keep the provider's input clock running, but never transcribe our speaker output.
+        if (playbackCaptureMuted()) java.util.Arrays.fill(audio, (byte) 0);
         boolean accepted = send(new JSONObject().put("type", "input_audio_buffer.append")
                 .put("audio", Base64.encodeToString(audio, Base64.NO_WRAP)));
         if (accepted && !uploaded) { uploaded = true; timing("wake_to_upload_ms", android.os.SystemClock.elapsedRealtime() - activatedAt); }
         return accepted ? audio.length : 0;
+    }
+
+    private boolean playbackCaptureMuted() {
+        synchronized (outputLock) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            boolean primary = track != null && writtenFrames > Math.max(0,
+                    Integer.toUnsignedLong(track.getPlaybackHeadPosition()) - playbackStart);
+            boolean secondary = secondaryTrack != null && secondaryWrittenFrames > Math.max(0,
+                    Integer.toUnsignedLong(secondaryTrack.getPlaybackHeadPosition()) - secondaryPlaybackStart);
+            if (primary || secondary) lastPlaybackCaptureMuteAt = now;
+            return primary || secondary || lastPlaybackCaptureMuteAt >= 0
+                    && now - lastPlaybackCaptureMuteAt < 350;
+        }
     }
 
     private boolean send(JSONObject event) {
