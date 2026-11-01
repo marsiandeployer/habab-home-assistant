@@ -48,7 +48,7 @@ async def async_setup_alias(hass):
     registration = None
     published = []
     stopping = False
-    aio = await zeroconf.async_get_async_instance(hass)
+    aio = None
 
     async def withdraw():
         nonlocal registration, published
@@ -59,11 +59,13 @@ async def async_setup_alias(hass):
             await pending
 
     async def refresh(_now=None):
-        nonlocal registration, published
+        nonlocal aio, registration, published
         async with lock:
             if stopping:
                 return
             try:
+                if aio is None:
+                    aio = await zeroconf.async_get_async_instance(hass)
                 addresses = await hass.async_add_executor_job(android_wifi_addresses)
                 if addresses == published and registration is not None:
                     return

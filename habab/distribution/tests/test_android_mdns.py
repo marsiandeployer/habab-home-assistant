@@ -20,6 +20,23 @@ class AndroidAliasTests(unittest.IsolatedAsyncioTestCase):
             await mdns.async_setup_alias(SimpleNamespace())
         instance.assert_not_awaited()
 
+    async def test_failed_multicast_does_not_block_setup_and_is_retried(self):
+        callbacks = {}
+        hass = SimpleNamespace(data={"habab_home": {}}, http=SimpleNamespace(server_port=8123),
+                               async_add_executor_job=AsyncMock(return_value=[]),
+                               bus=SimpleNamespace(async_listen_once=lambda event, cb: callbacks.update(stop=cb)))
+        instance = AsyncMock(side_effect=[OSError("network unavailable"), SimpleNamespace()])
+        with patch.dict(os.environ, {"HABAB_RUNTIME_KIND": "android_proot"}), \
+                patch.object(mdns.zeroconf, "async_get_async_instance", instance), \
+                patch.object(mdns, "async_at_started", side_effect=lambda h, cb: callbacks.update(start=cb)), \
+                patch.object(mdns, "async_track_time_interval", return_value=Mock()):
+            await mdns.async_setup_alias(hass)
+            await callbacks["start"]()
+            self.assertEqual(hass.data["habab_home"]["lan_alias"]["status"], "unavailable")
+            await callbacks["start"]()
+            self.assertEqual(hass.data["habab_home"]["lan_alias"]["status"], "no_lan_address")
+        self.assertEqual(instance.await_count, 2)
+
     async def scenario(self, occupied):
         callbacks = {}
         hass = SimpleNamespace(data={"habab_home": {}}, http=SimpleNamespace(server_port=8123),

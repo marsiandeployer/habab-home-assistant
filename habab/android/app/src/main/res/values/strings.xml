@@ -52,6 +52,8 @@
     <string name="no_link_handler">Нет приложения для открытия этой ссылки</string>
     <string name="phase_running">Работает</string>
     <string name="phase_starting">Запускается (может занять несколько минут)</string>
+    <string name="phase_running_no_network">Работает, сеть не подключена</string>
+    <string name="phase_starting_no_network">Запускается, сеть не подключена. Проверьте Wi-Fi.</string>
     <string name="phase_stopping">Останавливается</string>
     <string name="phase_long_start">Запуск занимает больше пяти минут — проверьте диагностику</string>
     <string name="phase_restarting">Повторный запуск</string>

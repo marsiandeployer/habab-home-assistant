@@ -793,8 +793,10 @@ public final class MainActivity extends Activity {
     private void message(String value) { new AlertDialog.Builder(this).setMessage(value).setPositiveButton(android.R.string.ok, null).show(); }
     private String phaseText() {
         String phase = ServerService.status;
-        if (phase.equals("running")) return getString(R.string.phase_running);
-        if (phase.equals("starting")) return getString(R.string.phase_starting);
+        if (phase.equals("running")) return getString(ServerService.networkConnected(this)
+                ? R.string.phase_running : R.string.phase_running_no_network);
+        if (phase.equals("starting")) return getString(ServerService.networkConnected(this)
+                ? R.string.phase_starting : R.string.phase_starting_no_network);
         if (phase.equals("stopping")) return getString(R.string.phase_stopping);
         if (phase.equals("stopped")) return getString(R.string.stopped);
         if (phase.startsWith("restarting")) return getString(R.string.phase_restarting);

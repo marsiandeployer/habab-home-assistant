@@ -264,6 +264,11 @@ public final class ServerService extends Service {
         return healthyAt(NATIVE_BASE_URL + "/api/habab_home/status");
     }
 
+    static boolean networkConnected(Context context) {
+        ConnectivityManager manager = context.getSystemService(ConnectivityManager.class);
+        return manager != null && manager.getActiveNetwork() != null;
+    }
+
     static boolean healthyAt(String endpoint) {
         HttpURLConnection connection = null;
         try {
