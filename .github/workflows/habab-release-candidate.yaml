@@ -504,7 +504,7 @@ jobs:
   android:
     needs: [resolve-source, android-inputs, android-frontend]
     if: ${{ always() && needs.resolve-source.result == 'success' && needs.android-inputs.result == 'success' && (needs.android-inputs.outputs.state == 'blocked' || needs.android-frontend.result == 'success' || (inputs.frontend_run_id != '' && needs.android-frontend.result == 'skipped')) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
       state: ${{ needs.android-inputs.outputs.state }}
@@ -518,6 +518,45 @@ jobs:
       SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
       ANDROID_PUBLIC_BASE: ${{ inputs.release_tag != '' && format('https://github.com/{0}/releases/download/{1}', github.repository, inputs.release_tag) || 'https://habab-demo.wpmix.net/downloads/android' }}
     steps:
+      - name: Select the supported Java 17 toolchain and verify Android SDK tools
+        if: ${{ needs.android-inputs.outputs.state == 'built' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_17_X64:-}" && test -x "$JAVA_HOME_17_X64/bin/java" || {
+            echo '::error::The Android build requires the runner Java 17 toolchain'; exit 1;
+          }
+          android_sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$android_sdk_root" || { echo '::error::The runner Android SDK root is missing'; exit 1; }
+          android_sdkmanager="$android_sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$android_sdkmanager" || {
+            echo '::error::The runner SDK manager is missing at cmdline-tools/latest/bin/sdkmanager'; exit 1;
+          }
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=$android_sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$android_sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDKMANAGER=$android_sdkmanager" >> "$GITHUB_ENV"
+          "$JAVA_HOME/bin/java" -version
+          "$android_sdkmanager" --version
+      - name: Ensure pinned Android SDK packages before runtime packaging
+        if: ${{ needs.android-inputs.outputs.state == 'built' }}
+        run: |
+          set -euo pipefail
+          "$ANDROID_SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            'platforms;android-34' 'build-tools;34.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
+          for tool in aapt apksigner zipalign; do
+            test -x "$ANDROID_HOME/build-tools/34.0.0/$tool"
+          done
+          test -f "$ANDROID_HOME/platforms/android-34/android.jar"
+          android_ndk_root="$ANDROID_HOME/ndk/27.2.12479018"
+          grep -Eq '^Pkg.Revision[[:space:]]*=[[:space:]]*27\.2\.12479018[[:space:]]*$' "$android_ndk_root/source.properties"
+          echo "ANDROID_NDK=$android_ndk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$android_ndk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$android_ndk_root" >> "$GITHUB_ENV"
+          test -x "$ANDROID_HOME/cmake/3.22.1/bin/cmake"
       - name: Fetch only Android and distribution source blobs
         env:
           SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
@@ -799,15 +838,6 @@ jobs:
           Path('habab/android/app/src/main/assets/release/build-provenance.json').write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + '\n')
           PY
-      - name: Select the supported Java 17 toolchain
-        if: ${{ needs.android-inputs.outputs.state == 'built' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${JAVA_HOME_17_X64:-}" || { echo '::error::The Android build requires the runner Java 17 toolchain'; exit 1; }
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          "$JAVA_HOME_17_X64/bin/java" -version
       - name: Prepare pinned APK native tools and voice model
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         run: |
@@ -819,7 +849,6 @@ jobs:
           if find habab/android/app/src/main/assets -type f \( -path '*/voice/experiments/*' -o -iname '*.wav' -o -iname '*.tflite' -o -iname '*.onnx' \) -print -quit | grep -q .; then
             echo '::error::Private experimental models or audio are forbidden in a public APK'; exit 1
           fi
-          sdkmanager 'ndk;27.2.12479018' 'cmake;3.22.1'
       - uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         with:
@@ -860,7 +889,7 @@ jobs:
           test -s "$keystore"
           unsigned=$(find habab/android/app/build/outputs/apk/release -name '*.apk' -print -quit)
           test -n "$unsigned"
-          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          build_tools="$ANDROID_HOME/build-tools/34.0.0"
           "$build_tools/zipalign" -p -f 4 "$unsigned" candidate/android/habab-home-unsigned-aligned.apk
           "$build_tools/apksigner" sign --ks "$keystore" --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
             --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD \

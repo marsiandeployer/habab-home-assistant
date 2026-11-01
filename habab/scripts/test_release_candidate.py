@@ -606,6 +606,49 @@ if sys.argv[1:2] == ['run']:
             "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069",
         )
 
+    def test_android_sdk_preflight_uses_absolute_tools_and_runs_before_runtime_packaging(self):
+        workflow = self.workflow_text()
+        android = workflow[workflow.index('  android:\n'):workflow.index('  assemble-candidate:\n')]
+        self.assertIn('runs-on: ubuntu-24.04', android)
+        check = android.index('      - name: Select the supported Java 17 toolchain and verify Android SDK tools')
+        install = android.index('      - name: Ensure pinned Android SDK packages before runtime packaging')
+        build = android.index('      - name: Build fresh same-source runtime with the compiled frontend')
+        native = android.index('      - name: Prepare pinned APK native tools and voice model')
+        self.assertLess(check, install)
+        self.assertLess(install, build)
+        self.assertLess(install, native)
+        self.assertIn('build_tools="$ANDROID_HOME/build-tools/34.0.0"', android)
+        for package in ('platforms;android-34', 'build-tools;34.0.0', 'ndk;27.2.12479018', 'cmake;3.22.1'):
+            self.assertIn("'" + package + "'", android[install:build])
+        for variable in ('ANDROID_NDK', 'ANDROID_NDK_HOME', 'ANDROID_NDK_ROOT'):
+            self.assertIn('echo "' + variable + '=$android_ndk_root" >> "$GITHUB_ENV"', android[install:build])
+        start = android.index('        run: |\n', check) + len('        run: |\n')
+        script = textwrap.dedent(android[start:install])
+        for mode in ('android_home', 'sdk_root_fallback', 'missing_manager', 'missing_java', 'missing_root'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                jdk, sdk = root / 'jdk', root / 'sdk'
+                java = jdk / 'bin/java'
+                manager = sdk / 'cmdline-tools/latest/bin/sdkmanager'
+                for path, name in ((java, 'java'), (manager, 'sdkmanager')):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text('#!/bin/sh\nprintf "%s %s\\n" ' + name + ' "$*" >> "$SDK_LOG"\n')
+                    path.chmod(0o755)
+                if mode == 'missing_manager':
+                    manager.unlink()
+                env = {**os.environ, 'JAVA_HOME_17_X64': '' if mode == 'missing_java' else str(jdk),
+                       'ANDROID_HOME': str(sdk) if mode in {'android_home', 'missing_manager', 'missing_java'} else '',
+                       'ANDROID_SDK_ROOT': str(sdk) if mode == 'sdk_root_fallback' else '',
+                       'GITHUB_ENV': str(root / 'env'), 'GITHUB_PATH': str(root / 'path'), 'SDK_LOG': str(root / 'calls')}
+                result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+                if mode in {'android_home', 'sdk_root_fallback'}:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn('ANDROID_SDKMANAGER=' + str(manager), (root / 'env').read_text())
+                    self.assertEqual((root / 'calls').read_text().splitlines(), ['java -version', 'sdkmanager --version'])
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse((root / 'calls').exists(), 'Missing tools must fail before any build/version probe')
+
     def test_android_unit_gate_runs_after_signed_inputs_and_before_assembly(self):
         workflow = self.workflow_text()
         runtime_check = workflow.index("      - name: Verify same-source signed runtime input")

@@ -177,7 +177,21 @@ runtime installation without changed inputs, a failure, or a concrete concern.
 Publication still checks signatures and artifact hashes; device acceptance is
 reported separately from source/build checks.
 
-Android uses the runner's explicit Java 17 toolchain. Native `.deb` inputs
+The Android job uses `ubuntu-24.04`. Before runtime packaging it verifies the
+runner's Java 17 executable and calls SDK manager by the absolute path
+`$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager`; an unset `ANDROID_HOME`
+falls back to `ANDROID_SDK_ROOT`. A missing tool fails before rootfs work.
+It explicitly ensures `platforms;android-34`, `build-tools;34.0.0`,
+`ndk;27.2.12479018`, and `cmake;3.22.1` through Google's SDK manager. Signing,
+alignment and APK version readback use Build Tools `34.0.0` explicitly. NDK
+revision readback and the three NDK environment aliases select `27.2.12479018`
+consistently with the product's Gradle `ndkVersion`.
+The preinstalled paths and SDK package inventory are documented by the
+[official runner image](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md)
+and its [SDK installation script](https://github.com/actions/runner-images/blob/main/images/ubuntu/scripts/build/install-android-sdk.sh).
+The workflow uses the [official SDK manager package installation syntax](https://developer.android.com/tools/sdkmanager).
+
+Native `.deb` inputs
 download directly from `https://packages.termux.dev/apt/termux-main/` using the
 exact `Filename` and SHA-256 in `native-packages.json`. The current PRoot pin is
 `5.1.107.101`. The producer verifies every package and includes upstream notices.
