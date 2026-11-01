@@ -1,0 +1,64 @@
+name: Habab Android compatibility smoke
+
+# Manual public-APK compatibility check; no release or deployment side effects.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact public release tag (not latest)
+        required: true
+        type: string
+      apk_sha256:
+        description: Reviewed SHA-256 of habab-home-arm64.apk
+        required: true
+        type: string
+      apk_bytes:
+        description: Reviewed byte size of habab-home-arm64.apk
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: habab-android-compat-smoke
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    name: Android API ${{ matrix.api }} ARM64 APK compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        api: [35, 36]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check runner contracts without SDK or network
+        run: >-
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=habab/android/tools
+          python3 -m unittest -q test_compat_smoke
+      - name: Check the unchanged public APK on an isolated emulator
+        env:
+          HABAB_COMPAT_RELEASE_TAG: ${{ inputs.release_tag }}
+          HABAB_COMPAT_APK_SHA256: ${{ inputs.apk_sha256 }}
+          HABAB_COMPAT_APK_BYTES: ${{ inputs.apk_bytes }}
+        run: >-
+          python3 habab/android/tools/compat_smoke.py
+          --api '${{ matrix.api }}'
+          --out "$RUNNER_TEMP/habab-android-compat-${{ matrix.api }}"
+      - name: Upload bounded compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-compat-api-${{ matrix.api }}
+          path: |
+            ${{ runner.temp }}/habab-android-compat-${{ matrix.api }}/report.json
+            ${{ runner.temp }}/habab-android-compat-${{ matrix.api }}/screen.png
+            ${{ runner.temp }}/habab-android-compat-${{ matrix.api }}/app-logcat.txt
+          if-no-files-found: warn
+          retention-days: 1
