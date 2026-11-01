@@ -347,11 +347,18 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(fake.closed)
 
     async def test_timeout_and_cancellation_propagate_safely(self):
+        started = asyncio.Event()
+
         async def stalled():
+            started.set()
             await asyncio.sleep(1)
 
+        async def immediate(function, *args, **kwargs):
+            return function(*args, **kwargs)
+
         fake, client_patch = self.make_client([stalled])
-        with client_patch, patch("homeassistant.components.habab_home.providers_gemini.REQUEST_TIMEOUT", 0.001):
+        with client_patch, patch("homeassistant.components.habab_home.providers_gemini.REQUEST_TIMEOUT", 0.001), \
+                patch("asyncio.to_thread", side_effect=immediate):
             with self.assertRaises(ProviderError) as raised:
                 await ProviderClient(None, self.settings()).complete(
                     [{"role": "user", "content": "hello"}], [],
@@ -359,12 +366,13 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, "timeout")
         self.assertTrue(fake.closed)
 
+        started.clear()
         fake, client_patch = self.make_client([stalled])
         with client_patch:
             task = asyncio.create_task(ProviderClient(None, self.settings()).complete(
                 [{"role": "user", "content": "hello"}], [],
             ))
-            await asyncio.sleep(0)
+            await asyncio.wait_for(started.wait(), timeout=5)
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
