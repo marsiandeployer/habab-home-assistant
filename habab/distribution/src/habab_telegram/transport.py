@@ -106,6 +106,13 @@ async def validate_relay_capabilities(session, service_key):
 
 
 def _selected_settings(hass):
+    # Telegram delivery uses the managed connection independently of the chat model.
+    entries = getattr(getattr(hass, "config_entries", None), "async_entries", None)
+    if callable(entries):
+        for entry in entries("habab_home"):
+            if (isinstance(entry.data, Mapping) and entry.data.get("provider") == "habab"
+                    and entry.data.get("api_key")):
+                return entry.data
     data = getattr(hass, "data", {}).get("habab_home", {})
     setup_agent = data.get("setup_agent") if isinstance(data, dict) else None
     settings_method = getattr(setup_agent, "settings", None)
