@@ -452,6 +452,21 @@ def main():
                         (args.out / "screen.png").write_bytes(screenshot.stdout)
                 except (OSError, subprocess.TimeoutExpired):
                     pass
+                # The first log snapshot is taken immediately after launch; a
+                # runtime failure can happen many minutes later. Refresh it
+                # before destroying the guest so the reported failure has logs
+                # from the actual failing period, restricted to this app's PID.
+                try:
+                    pids = set(device("shell", "pidof", PACKAGE, check=False, timeout=15).stdout.split())
+                    raw = device("logcat", "-d", "-v", "threadtime", "-b", "main", "-b", "crash",
+                                 check=False, timeout=25).stdout
+                    pids.update(re.findall(r"Process: " + re.escape(PACKAGE) + r", PID: (\d+)", raw))
+                    lines = [line for line in raw.splitlines() if (match := re.match(
+                        r"\d\d-\d\d\s+\S+\s+(\d+)\s+\d+\s+[VDIWEF]\s+", line)) and match[1] in pids]
+                    (args.out / "app-logcat.txt").write_text(safe_log("\n".join(lines[-2000:])) + "\n")
+                    report["failure_log_captured"] = True
+                except (OSError, subprocess.TimeoutExpired, Failure):
+                    report["failure_log_captured"] = False
         report.update(cleanup_emulator(emulator_process, adb))
         if not report["emulator_stopped"] and report["status"] == "PASS":
             report.update(status="FAIL", failure_category="INFRA_UNAVAILABLE",
