@@ -22,6 +22,20 @@ class CoreFailureSummaryTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(result))
         self.assertNotIn("token", json.dumps(result))
 
+    def test_process_summary_contains_only_normalized_app_descendants(self):
+        processes = """PID PPID STAT NAME
+10 1 S ru.habab.home
+11 10 S /private/path/proot
+12 11 D /private/path/python3
+13 12 R /private/secret
+14 1 S /unrelated/python3
+"""
+        result = smoke.process_failure_summary(processes)
+        self.assertEqual(result, {"app_found": True, "process_counts_by_state":
+                                  {"app:S": 1, "proot:S": 1, "python:D": 1, "other:R": 1}})
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("secret", json.dumps(result))
+
 
 class ArtifactTests(unittest.TestCase):
     def setUp(self):

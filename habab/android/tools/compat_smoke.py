@@ -230,6 +230,33 @@ def core_failure_summary(text):
             "markers": [marker for marker in markers if marker in text]}
 
 
+def process_failure_summary(text):
+    """Summarize the app's process tree without exposing guest command lines."""
+    processes = {}
+    for line in text.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) != 4 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        pid, parent, state, name = parts
+        processes[pid] = (parent, state[:1], name)
+    roots = {pid for pid, (_, _, name) in processes.items() if name == PACKAGE}
+    descendants = set(roots)
+    for _ in range(16):
+        children = {pid for pid, (parent, _, _) in processes.items() if parent in descendants}
+        if children <= descendants:
+            break
+        descendants.update(children)
+    counts = {}
+    for pid in descendants:
+        _, state, name = processes[pid]
+        base = name.rsplit("/", 1)[-1].lower()
+        kind = "app" if pid in roots else "proot" if "proot" in base else "python" if "python" in base else "other"
+        state = state if state in {"R", "S", "D", "T", "Z", "I"} else "unknown"
+        key = kind + ":" + state
+        counts[key] = counts.get(key, 0) + 1
+    return {"app_found": bool(roots), "process_counts_by_state": counts}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api", required=True, choices=("35", "36"))
@@ -489,6 +516,10 @@ def main():
                             report["core_log_summary"] = core_failure_summary(core.stdout)
                         else:
                             report["core_log_summary"] = {"available": False}
+                        processes = device("shell", "ps", "-A", "-o", "PID,PPID,STAT,NAME",
+                                           check=False, timeout=20)
+                        report["process_summary"] = (process_failure_summary(processes.stdout)
+                                                     if processes.returncode == 0 else {"available": False})
                     else:
                         report["core_log_summary"] = {"root_available": False}
                 except (OSError, subprocess.TimeoutExpired, Failure):
