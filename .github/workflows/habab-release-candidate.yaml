@@ -339,7 +339,7 @@ jobs:
             --build-arg HABAB_SOURCE_DIRTY=false \
             --build-arg "HABAB_FRONTEND_VERSION=$frontend_version" \
             --build-arg "HABAB_FRONTEND_SHA256=$frontend_sha" \
-            --output "type=oci,dest=candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar" \
+            --output "type=oci,dest=candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar,compression=gzip,force-compression=true" \
             habab/distribution
           python3 habab/scripts/release-candidate.py \
             --verify-linux-image "candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar" \
