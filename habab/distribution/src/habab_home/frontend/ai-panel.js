@@ -1,4 +1,4 @@
-import { strings } from "./strings.js?v=4";
+import { strings } from "./strings.js?v=5";
 import "./telemetry-panel.js";
 
 const providers = {

@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import json
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -155,9 +156,40 @@ def provider_api_base(provider: str) -> str:
 class ProviderError(Exception):
     """A safe error code; never include upstream bodies or credentials."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, diagnostics: dict | None = None) -> None:
         super().__init__(code)
         self.code = code
+        self.diagnostics = diagnostics or {}
+
+
+_WAIT_NAMES = frozenset({
+    "_request", "__aenter__", "connect", "_create_connection", "_create_direct_connection",
+    "_resolve_host", "_resolve_host_with_throttle", "_wrap_create_connection",
+    "create_connection", "sock_connect", "_sock_connect", "start", "read", "readany",
+    "_wait", "wait_for", "drain", "_drain_helper", "write_bytes", "_write_bytes",
+})
+
+
+def _safe_wait_chain(task: asyncio.Task) -> list[str]:
+    """Inspect only known coroutine names; never record frames, URLs or values."""
+    current = task.get_coro()
+    result = []
+    seen = set()
+    while current is not None and id(current) not in seen and len(seen) < 48:
+        seen.add(id(current))
+        code = getattr(current, "cr_code", None) or getattr(current, "gi_code", None)
+        name = getattr(code, "co_name", "")
+        if name in _WAIT_NAMES and name not in result:
+            result.append(name)
+        current = (getattr(current, "cr_await", None) or getattr(current, "gi_yieldfrom", None)
+                   or getattr(current, "ag_await", None))
+    return result[-16:]
+
+
+async def _observe_provider_wait(task: asyncio.Task, diagnostic: dict) -> None:
+    for delay in (3, 7, 10):
+        await asyncio.sleep(delay)
+        diagnostic["wait_chain"] = _safe_wait_chain(task)
 
 
 def validate_settings(data: dict[str, Any]) -> dict[str, str]:
@@ -235,6 +267,10 @@ class ProviderClient:
                 {"type": "function", "function": {"name": "habab_connection_test"}}
                 if probe else "required" if required_tool else "auto"
             )
+        started = time.monotonic()
+        diagnostic = {"stage": "await_headers", "request_bytes_estimate": len(json.dumps(body).encode("utf-8")),
+                      "wait_chain": []}
+        observer = asyncio.create_task(_observe_provider_wait(asyncio.current_task(), diagnostic))
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):
                 async with self.session.post(
@@ -243,6 +279,7 @@ class ProviderClient:
                     json=body,
                     allow_redirects=False,
                 ) as response:
+                    diagnostic["stage"] = "read_response"
                     if response.status == 403 and provider == "openai":
                         raw = bytearray()
                         async for chunk in response.content.iter_chunked(4096):
@@ -271,11 +308,14 @@ class ProviderClient:
                             raise ProviderError("invalid_response")
                     payload = json.loads(chunks)
         except TimeoutError:
-            raise ProviderError("timeout") from None
+            diagnostic["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+            raise ProviderError("timeout", diagnostic) from None
         except (aiohttp.ClientError, OSError):
             raise ProviderError("cannot_connect") from None
         except (ValueError, UnicodeError):
             raise ProviderError("invalid_response") from None
+        finally:
+            observer.cancel()
         try:
             choice = payload["choices"][0]
             message = choice["message"]

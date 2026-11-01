@@ -11,7 +11,7 @@ from homeassistant.components.habab_home.agent_diagnostics import AgentDiagnosti
 from homeassistant.components.habab_home.assistant import AssistantService
 from homeassistant.components.habab_home.fast_dialog import (
     DIALOGUE_METADATA_KEY, MAX_HISTORY_CHARS, bounded_history, decode_dialogue_part,
-    dialogue_part,
+    dialogue_part, complete_dialogue,
 )
 from homeassistant.components.habab_home.providers import ProviderError
 from homeassistant.components.habab_home.setup_agent import AgentError, SetupAgent
@@ -26,6 +26,26 @@ def delegate(arguments="{}", name="ask_home_assistant"):
 
 def direct(answer):
     return delegate(json.dumps({"answer": answer}, ensure_ascii=False), "reply_to_user")
+
+
+class FastDialogueTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_managed_provider_uses_fresh_closed_session_direct_provider_keeps_shared(self):
+        shared, fresh = object(), object()
+        context = AsyncMock()
+        context.__aenter__.return_value = fresh
+        provider = AsyncMock()
+        provider.complete.return_value = direct("Привет")
+        with patch("homeassistant.components.habab_home.fast_dialog.build_voice_context", return_value={}), \
+                patch("homeassistant.components.habab_home.fast_dialog.aiohttp.ClientSession", return_value=context) as factory, \
+                patch("homeassistant.components.habab_home.fast_dialog.ProviderClient", return_value=provider) as client:
+            self.assertEqual(await complete_dialogue(None, shared, {"provider": "habab"}, [], "Привет"),
+                             ("direct", "Привет"))
+            client.assert_called_with(fresh, {"provider": "habab"})
+            context.__aexit__.assert_awaited_once()
+            factory.assert_called_once_with(trust_env=False)
+            await complete_dialogue(None, shared, {"provider": "deepseek"}, [], "Привет")
+            client.assert_called_with(shared, {"provider": "deepseek"})
+            factory.assert_called_once()
 
 
 class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
@@ -262,6 +282,19 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
                 await self.service.run("alice", "web", "web", "hello")
         self.runtime.run.assert_not_awaited()
         self.assertEqual(self.histories["web"], [])
+
+    async def test_provider_timeout_metadata_reaches_owner_diagnostics(self):
+        self.provider.side_effect = ProviderError("timeout", {
+            "stage": "await_headers", "elapsed_ms": 25000,
+            "request_bytes_estimate": 1234, "wait_chain": ["_request", "_resolve_host"],
+        })
+        with self.assertRaisesRegex(AgentError, "timeout"):
+            await self.service.run("alice", "web", "web", "hello")
+        detail = self.service.diagnostics.get("alice", "web")["request_diagnostics"]
+        self.assertEqual(detail["stage"], "await_headers")
+        self.assertEqual(detail["wait_chain"], ["_request", "_resolve_host"])
+        self.assertEqual(detail["request_bytes_estimate"], 1234)
+        self.runtime.run.assert_not_awaited()
 
     async def test_selected_provider_change_discards_inflight_answer(self):
         async def changed(*args, **kwargs):

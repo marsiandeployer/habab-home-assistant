@@ -222,6 +222,33 @@ class HababTextContractTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RequiredToolChoiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_reports_only_safe_request_metadata(self):
+        from homeassistant.components.habab_home.agent_diagnostics import safe_error_summary
+
+        class HangingResponse:
+            async def __aenter__(self):
+                await asyncio.sleep(10)
+            async def __aexit__(self, *_):
+                return None
+
+        async def observe(_task, diagnostic):
+            diagnostic["wait_chain"] = ["_request", "_resolve_host", "secret fixture"]
+
+        session = _Session(post_response=HangingResponse())
+        client = ProviderClient(session, {"provider": "openai", "model": "fixture-model",
+                                          "api_key": "fixture-private-key"})
+        with patch.object(providers, "REQUEST_TIMEOUT", 0.03), \
+                patch.object(providers, "_observe_provider_wait", observe):
+            with self.assertRaises(ProviderError) as raised:
+                await client.complete([{"role": "user", "content": "private conversation"}], [])
+        self.assertEqual(raised.exception.code, "timeout")
+        safe = safe_error_summary({"name": "ProviderError", "code": "timeout",
+                                   "diagnostics": raised.exception.diagnostics})
+        self.assertEqual(safe["request_diagnostics"]["stage"], "await_headers")
+        self.assertEqual(safe["request_diagnostics"]["wait_chain"], ["_request", "_resolve_host"])
+        self.assertGreater(safe["request_diagnostics"]["elapsed_ms"], 0)
+        self.assertNotIn("private", json.dumps(safe))
+        self.assertNotIn("secret", json.dumps(safe))
     async def test_required_choice_is_opt_in_for_compatible_providers(self):
         tool = {"type": "function", "function": {
             "name": "reply_to_user", "description": "Reply without execution.",

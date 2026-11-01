@@ -3,6 +3,11 @@
 from collections import OrderedDict
 
 MAX_DIAGNOSTICS = 100
+_WAIT_NAMES = frozenset({"_request", "__aenter__", "connect", "_create_connection",
+    "_create_direct_connection", "_resolve_host", "_resolve_host_with_throttle",
+    "_wrap_create_connection", "create_connection", "sock_connect", "_sock_connect",
+    "start", "read", "readany", "_wait", "wait_for", "drain", "_drain_helper",
+    "write_bytes", "_write_bytes"})
 
 _KNOWN_ERROR_NAMES = {
     "APIError", "AuthenticationError", "ContextOverflowError", "InvalidModelError",
@@ -74,6 +79,19 @@ def safe_error_summary(error):
         flag: any(marker in technical_text for marker in markers)
         for flag, markers in _FLAG_MARKERS.items()
     })
+    detail = error.get("diagnostics") if isinstance(error, dict) else None
+    if isinstance(detail, dict):
+        stage = detail.get("stage")
+        if stage in {"await_headers", "read_response"}:
+            safe = {"stage": stage}
+            for key in ("elapsed_ms", "request_bytes_estimate"):
+                value = detail.get(key)
+                if type(value) is int and 0 <= value <= 1_000_000:
+                    safe[key] = value
+            chain = detail.get("wait_chain")
+            if isinstance(chain, list):
+                safe["wait_chain"] = [name for name in chain[:16] if isinstance(name, str) and name in _WAIT_NAMES]
+            result["request_diagnostics"] = safe
     return result
 
 

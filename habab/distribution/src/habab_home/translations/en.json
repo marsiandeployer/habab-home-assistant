@@ -19,7 +19,7 @@
       "region_unavailable": "The provider is unavailable from this network or region. Select Habab or connect from a supported region.",
       "tools_unsupported": "The model did not call the test tool. Choose a tool-capable model.",
       "quota": "The provider reported a balance or request limit. Check billing and quotas.",
-      "cannot_connect": "Could not connect to the provider.",
+      "cannot_connect": "Could not connect to the provider. Check your internet connection and system proxy settings if you use one.",
       "timeout": "The connection check timed out.",
       "invalid_response": "The provider returned an unexpected response.",
       "assistant_busy": "The assistant is busy. Wait for the current command to finish.",

@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 
+import aiohttp
+
 from .assistant_identity import ASSISTANT_CORE_IDENTITY
 from .providers import ProviderClient, ProviderContract, ProviderError
 from .voice_context import build_voice_context
@@ -108,10 +110,19 @@ async def complete_dialogue(hass, session, settings, history, text, *, contract=
     ]
     try:
         async with asyncio.timeout(DIALOGUE_TIMEOUT):
-            client = ProviderClient(session, settings)
-            if isinstance(contract, ProviderContract):
-                client.contract = contract
-            reply = await client.complete(messages, [DELEGATE_TOOL, REPLY_TOOL], required_tool=True)
+            async def complete(transport):
+                client = ProviderClient(transport, settings)
+                if isinstance(contract, ProviderContract):
+                    client.contract = contract
+                return await client.complete(messages, [DELEGATE_TOOL, REPLY_TOOL], required_tool=True)
+
+            if settings.get("provider") == "habab":
+                # Android can retain a dead pooled socket across network changes.
+                # The managed text origin is fixed and redirects are disabled.
+                async with aiohttp.ClientSession(trust_env=False) as fresh_session:
+                    reply = await complete(fresh_session)
+            else:
+                reply = await complete(session)
     except TimeoutError:
         raise ProviderError("timeout") from None
     if not isinstance(reply, dict) or reply.get("role") != "assistant":

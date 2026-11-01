@@ -492,7 +492,8 @@ class AssistantService:
                 "timeout", "quota", "invalid_auth", "invalid_model", "region_unavailable", "invalid_response",
                 "cannot_connect", "provider_not_ready", "tools_unsupported",
             } else "invalid_response"
-            self.diagnostics.record(owner, session_id, {"name": "ProviderError", "code": safe_code})
+            self.diagnostics.record(owner, session_id, {"name": "ProviderError", "code": safe_code,
+                                                         "diagnostics": error.diagnostics})
             trace.update(route="model_error", error=safe_code)
             raise AgentError(safe_code) from None
         except AgentError as error:

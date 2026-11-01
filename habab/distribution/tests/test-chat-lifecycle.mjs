@@ -1149,3 +1149,13 @@ test("microphone indicator follows an open audio capture and clears after it clo
   assert.equal(instance.q(".mic-live").hidden, true);
   assert.equal(instance.q(".mic").attrs["aria-pressed"], "false");
 });
+
+test("a connection failure explains the network and optional system proxy", async () => {
+  const instance = Object.create(setupChatElementClass.prototype);
+  instance.language = "ru";
+  instance.demo = false;
+  instance.sessionId = "test";
+  const message = await instance.errorMessage({code: "cannot_connect"});
+  assert.match(message, /Нет соединения/);
+  assert.match(message, /системного прокси/);
+});

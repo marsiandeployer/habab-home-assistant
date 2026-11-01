@@ -1,6 +1,6 @@
 // Independent downstream extension: no dependency on compiled HA internals.
 import { AssistVoice, BrowserGeminiVoice, BrowserOpenAIVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js?v=2";
-import { strings } from "./strings.js?v=6";
+import { strings } from "./strings.js?v=7";
 import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals } from "./chat-dismissal.js";
 import { createToolCalls } from "./chat-tools.js?v=1";
 export function visibleTextMessages(messages) {
@@ -191,6 +191,7 @@ function installChat() {
       habab_beta_issuance_disabled: "Выдача новых кодов беты завершена. Свой AI-провайдер можно подключить в разделе AI.",
       habab_beta_unavailable: "Не удалось подключить бету Habab. Повторите подключение.",
       habab_beta_cannot_connect: "Нет соединения с Habab. Проверьте интернет и повторите подключение.",
+      cannot_connect: "Нет соединения с провайдером. Проверьте интернет и настройки системного прокси, если он используется.",
       habab_beta_timeout: "Habab не ответил вовремя. Повторите подключение.",
       habab_beta_invalid_response: "Не удалось подтвердить подключение к Habab. Повторите попытку.",
       habab_beta_setup_failed: "Не удалось сохранить подключение Habab. Повторите попытку.",
@@ -257,6 +258,7 @@ function installChat() {
       habab_beta_issuance_disabled: "New beta registrations have closed. You can connect your own AI provider in AI settings.",
       habab_beta_unavailable: "Could not connect to the Habab beta. Try reconnecting.",
       habab_beta_cannot_connect: "Could not reach Habab. Check your internet connection and try again.",
+      cannot_connect: "Could not connect to the provider. Check your internet connection and system proxy settings if you use one.",
       habab_beta_timeout: "Habab did not respond in time. Try reconnecting.",
       habab_beta_invalid_response: "Could not verify the Habab connection. Try again.",
       habab_beta_setup_failed: "Could not save the Habab connection. Try again.",
@@ -1289,6 +1291,7 @@ function installChat() {
     }
 
     async errorMessage(error) {
+      if (error?.code === "cannot_connect") return this.t.cannot_connect;
       if (this.demo || !this.sessionId) return this.t[error?.code] || this.t.failed;
       try {
         const result = await this.hass.callWS({type: "habab_home/agent/diagnostics", session_id: this.sessionId});
