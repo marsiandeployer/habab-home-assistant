@@ -14,13 +14,14 @@ public final class MaintenanceService extends Service {
     interface Work { void run() throws Exception; }
     static volatile boolean active;
     static volatile String status = "";
+    static volatile long transientNetworkFailureAt = -1;
     private static Work pending;
     private Thread worker;
     private PowerManager.WakeLock wakeLock;
 
     static synchronized void start(Context context, Work work) {
         if (active || ServerService.active || ServerService.stopping) throw new IllegalStateException("Server or maintenance is active");
-        active = true; status = context.getString(R.string.working); pending = work;
+        active = true; status = context.getString(R.string.working); transientNetworkFailureAt = -1; pending = work;
         try { context.startForegroundService(new Intent(context, MaintenanceService.class)); }
         catch (RuntimeException error) { active = false; pending = null; throw error; }
     }
@@ -44,7 +45,11 @@ public final class MaintenanceService extends Service {
         if (work == null) { status = "Operation interrupted; please retry"; stopSelf(); return START_NOT_STICKY; }
         worker = new Thread(() -> {
             try { work.run(); status = getString(R.string.done); }
-            catch (Exception error) { status = getString(R.string.error, error.getMessage()); }
+            catch (Exception error) {
+                status = getString(R.string.error, error.getMessage());
+                if (LaunchStartup.transientNetworkFailure(error))
+                    transientNetworkFailureAt = android.os.SystemClock.elapsedRealtime();
+            }
             finally {
                 try {
                     JSONObject result = new JSONObject().put("status", status).put("recordedAt", System.currentTimeMillis());

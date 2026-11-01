@@ -4,6 +4,21 @@ import static org.junit.Assert.*;
 import org.junit.Test;
 
 public class LaunchStartupTest {
+    @Test public void transientNetworkFailureRetriesInstallationAfterDelay() {
+        LaunchStartup launch = new LaunchStartup();
+        launch.installAttempted = true;
+        assertTrue(LaunchStartup.transientNetworkFailure(new RuntimeException(new java.net.UnknownHostException())));
+        assertTrue(LaunchStartup.transientNetworkFailure(new java.net.SocketTimeoutException()));
+        assertTrue(LaunchStartup.transientNetworkFailure(new java.net.ConnectException()));
+        assertFalse(LaunchStartup.transientNetworkFailure(new java.io.IOException("invalid signature")));
+        assertFalse(LaunchStartup.transientNetworkFailure(new javax.net.ssl.SSLHandshakeException("untrusted certificate")));
+        assertFalse(launch.retryInstallAfterNetworkFailure(false, false, false, -1, 31000));
+        assertFalse(launch.retryInstallAfterNetworkFailure(false, false, false, 1000, 30999));
+        assertFalse(launch.retryInstallAfterNetworkFailure(false, true, false, 1000, 31000));
+        assertFalse(launch.retryInstallAfterNetworkFailure(false, false, true, 1000, 31000));
+        assertTrue(launch.retryInstallAfterNetworkFailure(false, false, false, 1000, 31000));
+        assertFalse(launch.installAttempted);
+    }
     private static LaunchStartup.Action next(LaunchStartup launch, boolean installed, boolean maintenance,
                                               boolean active, boolean ready, boolean foreground) {
         return launch.next(installed, maintenance, active, false, ready, false, false, foreground);

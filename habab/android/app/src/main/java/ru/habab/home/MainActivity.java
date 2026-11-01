@@ -497,6 +497,11 @@ public final class MainActivity extends Activity {
     private void ensureServerStarted() {
         SharedPreferences preferences = getSharedPreferences("server", 0);
         boolean manuallyStopped = preferences.getBoolean(ServerService.PREF_AUTO_START_SUPPRESSED, false);
+        if (startup.retryInstallAfterNetworkFailure(store.installed(), MaintenanceService.active,
+                manuallyStopped, MaintenanceService.transientNetworkFailureAt,
+                android.os.SystemClock.elapsedRealtime())) {
+            MaintenanceService.transientNetworkFailureAt = -1;
+        }
         LaunchStartup.Action next = startup.next(store.installed(), MaintenanceService.active,
                 ServerService.active, ServerService.stopping,
                 ServerService.active && "running".equals(ServerService.status),
