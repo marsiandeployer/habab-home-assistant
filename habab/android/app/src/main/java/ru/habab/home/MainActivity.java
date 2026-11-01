@@ -320,6 +320,8 @@ public final class MainActivity extends Activity {
         form.addView(wakeEngine);
         TextView engineHelp = new TextView(this); engineHelp.setText(R.string.voice_wake_engine_help); form.addView(engineHelp);
         if (!"experimental_models_installed".equals(WakeEngineFactory.bundleStatus(this))) {
+            wakeEngine.setSelection(0);
+            wakeEngine.setEnabled(false);
             TextView missingModels = new TextView(this); missingModels.setText(R.string.voice_wake_models_missing); form.addView(missingModels);
         }
         TextView routeHelp = new TextView(this); routeHelp.setText(R.string.voice_audio_route_help); form.addView(routeHelp);

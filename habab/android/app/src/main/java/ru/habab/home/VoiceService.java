@@ -514,6 +514,12 @@ public final class VoiceService extends Service {
         AcousticEchoCanceler echo = null; NoiseSuppressor noise = null;
         try {
             requestedWakeEngine = getSharedPreferences("voice", 0).getString("wake_engine", "vosk");
+            if (!"vosk".equals(requestedWakeEngine)
+                    && !"experimental_models_installed".equals(WakeEngineFactory.bundleStatus(this))) {
+                android.util.Log.w("HababWakeModel", "event=missing_bundle_fallback engine=vosk");
+                requestedWakeEngine = "vosk";
+                getSharedPreferences("voice", 0).edit().putString("wake_engine", "vosk").apply();
+            }
             activeWakeEngine = null;
             lifecycleTrace.setWakeEngine(null);
             phase("preparing"); writeStatus(true);
