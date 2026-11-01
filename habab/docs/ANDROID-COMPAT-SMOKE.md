@@ -6,7 +6,9 @@ Google APIs x86_64 API 35 and 36 images, one job at a time.
 The first run, `41292403474`, verified the public APK pins and offline contracts
 but stopped before guest startup because the hosted runner has no preinstalled
 emulator. The runner now installs the official emulator package with sdkmanager;
-real installation and launch acceptance remains pending.
+real installation and launch acceptance remains pending. A subsequent run
+identified the emulator's missing host `libpulse.so.0`; the workflow installs
+Ubuntu's `libpulse0` package, while guest audio remains disabled.
 
 The workflow, runner and offline tests are integrated separately from the
 product runtime and release pipeline. The workflow has only

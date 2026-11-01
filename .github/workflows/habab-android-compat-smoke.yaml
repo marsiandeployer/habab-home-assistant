@@ -42,6 +42,10 @@ jobs:
         run: >-
           PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=habab/android/tools
           python3 -m unittest -q test_compat_smoke
+      - name: Install emulator host library
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libpulse0
       - name: Check the unchanged public APK on an isolated emulator
         env:
           HABAB_COMPAT_RELEASE_TAG: ${{ inputs.release_tag }}

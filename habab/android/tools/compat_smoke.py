@@ -111,6 +111,11 @@ def download(tag, digest, size, destination):
         if created:
             destination.unlink(missing_ok=True)
         raise Failure("ARTIFACT_FAILED", "invalid_apk_archive") from None
+    except urllib.error.HTTPError as error:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise Failure("ARTIFACT_FAILED", "public_release_http_error",
+                      {"http_status": int(error.code)}) from None
     except (OSError, ValueError, urllib.error.URLError):
         if created:
             destination.unlink(missing_ok=True)
@@ -314,7 +319,7 @@ def main():
     except Failure as error:
         report.update(status="FAIL", failure_category=error.category, failure_code=error.code)
         if error.diagnostics:
-            report["tool_failure"] = error.diagnostics
+            report["failure_diagnostics"] = error.diagnostics
             print(json.dumps(error.diagnostics))
         print("::error title=Android compatibility smoke::" + error.category + ": " + error.code)
     except Exception as error:
