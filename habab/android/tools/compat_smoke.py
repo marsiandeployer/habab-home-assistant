@@ -504,6 +504,15 @@ def main():
                     report["failure_log_captured"] = True
                 except (OSError, subprocess.TimeoutExpired, Failure):
                     report["failure_log_captured"] = False
+                # Process names and states are summarized before requesting
+                # root: production-style emulator images can deny adb root.
+                try:
+                    processes = device("shell", "ps", "-A", "-o", "PID,PPID,STAT,NAME",
+                                       check=False, timeout=20)
+                    report["process_summary"] = (process_failure_summary(processes.stdout)
+                                                 if processes.returncode == 0 else {"available": False})
+                except (OSError, subprocess.TimeoutExpired, Failure):
+                    report["process_summary"] = {"available": False}
                 # The disposable emulator has no owner account. Read only a
                 # category summary, never upload its potentially sensitive log.
                 try:
@@ -516,10 +525,6 @@ def main():
                             report["core_log_summary"] = core_failure_summary(core.stdout)
                         else:
                             report["core_log_summary"] = {"available": False}
-                        processes = device("shell", "ps", "-A", "-o", "PID,PPID,STAT,NAME",
-                                           check=False, timeout=20)
-                        report["process_summary"] = (process_failure_summary(processes.stdout)
-                                                     if processes.returncode == 0 else {"available": False})
                     else:
                         report["core_log_summary"] = {"root_available": False}
                 except (OSError, subprocess.TimeoutExpired, Failure):
