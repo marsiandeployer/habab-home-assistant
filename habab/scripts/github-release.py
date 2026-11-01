@@ -33,6 +33,33 @@ def release_base(repository, tag, source_revision):
     return f'https://github.com/{repository}/releases/download/{tag}'
 
 
+def read_tag_reference(repository, tag):
+    result = subprocess.run(['gh', 'api', f'repos/{repository}/git/ref/tags/{tag}'],
+                            capture_output=True, text=True)
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+    try:
+        if str(json.loads(result.stdout).get('status')) == '404':
+            return None
+    except ValueError:
+        pass
+    raise RuntimeError('Cannot read release tag; only HTTP 404 means absent')
+
+
+def validate_tag_target(reference, source_revision):
+    if reference is None:
+        return False
+    target = reference.get('object', {})
+    if target.get('type') != 'commit' or target.get('sha') != source_revision:
+        raise ValueError('Existing release tag must be lightweight and point to the exact product SHA')
+    return True
+
+
+def reject_existing_release(releases, tag):
+    if any(item.get('tag_name') == tag for item in releases):
+        raise ValueError('A release/draft with this tag already exists; immutable releases cannot be overwritten')
+
+
 # Product builds may reuse a frozen SHA only across reviewed orchestration-only commits.
 CI_ONLY_PATHS = {
     '.github/workflows/habab-release.yaml',

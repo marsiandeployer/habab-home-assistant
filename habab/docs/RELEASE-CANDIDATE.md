@@ -47,9 +47,14 @@ range is in the narrow workflow/release-helper/test/docs allowlist. Intermediate
 product edits followed by a revert still fail this check. All platform payloads
 and signatures continue to bind the frozen product SHA. The publisher executes
 the corrected controller helper and verifies a separate checkout of that product.
-Both identities are recorded in the release receipt. The tag must be new and
-include the product SHA's first 12 characters. Existing releases, drafts, and tags
-are never overwritten. The workflow serializes public releases and requires all
+Both identities are recorded in the release receipt. The tag includes the
+product SHA's first 12 characters. An absent tag can be created; an existing
+lightweight tag is accepted only if its full target SHA equals the frozen product.
+Annotated tags and different targets fail. This permits an operator to prepare
+the exact tag when CI cannot create the frozen-product ref. The publisher
+rechecks the target and skips tag creation when it already matches. Existing
+releases or drafts are rejected using the full paginated inventory, including a
+second check with the publisher token. Tags and release assets are never overwritten. The workflow serializes public releases and requires all
 five existing Android signing secrets before starting platform builds.
 
 For a CI-only retry, optional `frontend_run_id` reuses a completed frontend

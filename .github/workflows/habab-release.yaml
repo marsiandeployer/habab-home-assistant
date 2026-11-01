@@ -81,6 +81,8 @@ jobs:
           from pathlib import Path
           helpers = runpy.run_path('habab/scripts/github-release.py')
           helpers['release_base'](os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG'], os.environ['SOURCE_REVISION'])
+          helpers['validate_tag_target'](helpers['read_tag_reference'](
+              os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG']), os.environ['SOURCE_REVISION'])
           helpers['validate_controller_range'](Path('.'), os.environ['SOURCE_REVISION'], os.environ['GITHUB_SHA'])
           candidate_run = os.environ['CANDIDATE_RUN_ID']
           identity = {'workflow_revision': os.environ['GITHUB_SHA'], 'workflow_run_id': os.environ['GITHUB_RUN_ID'],
@@ -119,17 +121,15 @@ jobs:
               output.write('producer_run_attempt=' + identity['workflow_run_attempt'] + '\n')
               output.write('candidate_manifest_sha256=' + manifest_sha + '\n')
           PY
-          [[ -z "$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")" ]] || {
-            echo '::error::Release tag already exists; immutable releases cannot be overwritten'; exit 1;
-          }
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
           python3 - <<'PY'
           import json
           import os
           from pathlib import Path
-          if any(item['tag_name'] == os.environ['RELEASE_TAG'] for item in json.loads(
-                  (Path(os.environ['RUNNER_TEMP']) / 'releases.json').read_text())):
-              raise SystemExit('A release/draft with this tag already exists; inspect it before retrying')
+          import runpy
+          pages = json.loads((Path(os.environ['RUNNER_TEMP']) / 'releases.json').read_text())
+          runpy.run_path('habab/scripts/github-release.py')['reject_existing_release'](
+              [item for page in pages for item in page], os.environ['RELEASE_TAG'])
           PY
           echo "source_revision=$SOURCE_REVISION" >> "$GITHUB_OUTPUT"
       - name: Require existing signing credentials before any platform build
@@ -240,15 +240,25 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import os
+          import json
           from pathlib import Path
           Path('release-notes.md').write_text(
               'Habab Home for Windows, Android, Linux amd64 and arm64.\n\n'
               + 'Source: `' + os.environ['SOURCE_REVISION'] + '`.\n\n'
               + 'Checksums and build provenance are in `SHA256SUMS` and `release-receipt.json`.\n'
               + 'Build verification does not replace physical device acceptance.\n')
+          import runpy
+          import subprocess
+          helpers = runpy.run_path('habab/scripts/github-release.py')
+          pages = json.loads(subprocess.check_output(['gh', 'api', '--paginate', '--slurp',
+              'repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases?per_page=100']))
+          helpers['reject_existing_release']([item for page in pages for item in page], os.environ['RELEASE_TAG'])
+          reference = helpers['read_tag_reference'](os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG'])
+          if not helpers['validate_tag_target'](reference, os.environ['SOURCE_REVISION']):
+              subprocess.run(['gh', 'api', '--method', 'POST', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/git/refs',
+                              '-f', 'ref=refs/tags/' + os.environ['RELEASE_TAG'],
+                              '-f', 'sha=' + os.environ['SOURCE_REVISION']], check=True, stdout=subprocess.DEVNULL)
           PY
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$SOURCE_REVISION" >/dev/null
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "Habab Home $RELEASE_TAG" --notes-file release-notes.md --draft
           gh release upload "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY"

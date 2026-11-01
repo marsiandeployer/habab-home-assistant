@@ -273,6 +273,39 @@ class GithubReleaseTests(unittest.TestCase):
         self.assertIn('--publisher-revision "$WORKFLOW_REVISION"', publish)
         self.assertIn('--workflow-revision "$PRODUCER_WORKFLOW_REVISION"', publish)
 
+    def test_release_tag_accepts_only_absent_or_exact_lightweight_source(self):
+        self.assertFalse(release.validate_tag_target(None, self.revision))
+        reference = {'object': {'type': 'commit', 'sha': self.revision}}
+        self.assertTrue(release.validate_tag_target(reference, self.revision))
+        for target in ({'type': 'commit', 'sha': 'a' * 40}, {'type': 'tag', 'sha': self.revision}, {}):
+            with self.assertRaisesRegex(ValueError, 'exact product SHA'):
+                release.validate_tag_target({'object': target}, self.revision)
+
+    def test_tag_lookup_treats_only_http_404_as_absence(self):
+        from unittest.mock import patch
+        for status in ('404', '403'):
+            response = subprocess.CompletedProcess([], 1, stdout=json.dumps({'status': status}), stderr='')
+            with patch.object(release.subprocess, 'run', return_value=response):
+                if status == '404':
+                    self.assertIsNone(release.read_tag_reference('org/repo', self.tag))
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'only HTTP 404'):
+                        release.read_tag_reference('org/repo', self.tag)
+
+    def test_matching_tag_never_allows_an_existing_release_or_draft(self):
+        self.assertTrue(release.validate_tag_target({'object': {'type': 'commit', 'sha': self.revision}}, self.revision))
+        for draft in (False, True):
+            with self.subTest(draft=draft), self.assertRaisesRegex(ValueError, 'release/draft'):
+                release.reject_existing_release([{'tag_name': 'other'}, {'tag_name': self.tag, 'draft': draft}], self.tag)
+        release.reject_existing_release([{'tag_name': 'other', 'draft': True}], self.tag)
+        workflow = (REPO / '.github/workflows/habab-release.yaml').read_text()
+        self.assertIn('gh api --paginate --slurp', workflow)
+        creation = workflow[workflow.index('      - name: Create draft and upload verified assets'):]
+        self.assertIn("if not helpers['validate_tag_target']", creation)
+        self.assertIn("helpers['reject_existing_release']", creation)
+        self.assertNotIn('--force', creation)
+        self.assertNotIn('--clobber', creation)
+
     def test_release_tag_must_pin_exact_source_and_have_no_url_components(self):
         for tag in ('latest', self.tag + '/extra', self.tag + '?x=1', 'habab-v0.3.6-' + 'a' * 12):
             with self.assertRaises(ValueError):
