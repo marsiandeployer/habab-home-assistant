@@ -33,10 +33,14 @@ INVALID_KEY = "ci-fixture-rejected-key-not-a-real-secret"
 class CheckFailed(Exception):
     """Fixed test identifiers only: never include server bodies or credentials."""
 
+    def __init__(self, code, *, http_status=None):
+        super().__init__(code)
+        self.http_status = http_status if type(http_status) is int and 100 <= http_status <= 599 else None
 
-def require(condition, code):
+
+def require(condition, code, *, http_status=None):
     if not condition:
-        raise CheckFailed(code)
+        raise CheckFailed(code, http_status=http_status)
 
 
 class ProviderFixture:
@@ -200,8 +204,6 @@ async def exercise(base, fixture, process, config):
         })
         require(status == 200 and bool(auth.get("access_token")), "owner_token_failed")
         api.token = auth["access_token"]
-        status, _ = await api.http("GET", "/api/habab_home/status", authenticated=False)
-        require(status == 401, "unauthenticated_status_allowed")
         bad = await session.ws_connect(base + "/api/websocket")
         await bad.receive_json()
         await bad.send_json({"type": "auth", "access_token": "ci-invalid-access-token"})
@@ -220,6 +222,8 @@ async def exercise(base, fixture, process, config):
                 require(reply.get("error", {}).get("code") == "unknown_command", "unexpected_component_startup_error")
             require(time.monotonic() < deadline, "habab_component_ready_timeout")
             await asyncio.sleep(0.5)
+        status, _ = await api.http("GET", "/api/habab_home/status", authenticated=False)
+        require(status == 401, "unauthenticated_status_allowed", http_status=status)
         passed("fresh_core_onboarding_owner_auth_and_component_ready")
 
         require(await api.entries() == [], "fresh_provider_entries_not_empty")
@@ -388,6 +392,8 @@ def main():
                     summary["ha_child_stopped"] = process.poll() is not None
     except CheckFailed as error:
         summary["failure_code"] = str(error)
+        if error.http_status is not None:
+            summary["failure_http_status"] = error.http_status
     except Exception as error:
         summary["failure_code"] = type(error).__name__
     finally:

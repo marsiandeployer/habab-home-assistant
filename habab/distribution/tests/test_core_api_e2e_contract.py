@@ -10,10 +10,22 @@ import unittest
 import urllib.error
 import urllib.request
 
-from run_core_api_e2e import INVALID_KEY, VALID_KEY, ProviderFixture, stop_child
+from run_core_api_e2e import CheckFailed, INVALID_KEY, VALID_KEY, ProviderFixture, require, stop_child
 
 
 class CoreAPIE2EHarnessTests(unittest.TestCase):
+    def test_http_failure_status_is_strict_and_only_retains_safe_integer_metadata(self):
+        for status in (200, 404, 503):
+            with self.subTest(status=status):
+                with self.assertRaises(CheckFailed) as caught:
+                    require(status == 401, "unauthenticated_status_allowed", http_status=status)
+                self.assertEqual(caught.exception.http_status, status)
+                self.assertEqual(str(caught.exception), "unauthenticated_status_allowed")
+        require(True, "unauthenticated_status_allowed", http_status=401)
+        with self.assertRaises(CheckFailed) as caught:
+            require(False, "fixed_error", http_status="response body must not be retained")
+        self.assertIsNone(caught.exception.http_status)
+
     def request(self, fixture, *, key=VALID_KEY, path="/openai/chat/completions"):
         payload = {"model": "fixture-model", "messages": [{"role": "user", "content": "probe"}],
                    "tools": [], "tool_choice": "required", "thinking": {"type": "disabled"}}
