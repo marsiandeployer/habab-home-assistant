@@ -140,6 +140,11 @@ public final class ServerService extends Service {
     private void setServerStatus(String value) {
         boolean changed = !value.equals(status);
         status = value;
+        if (changed) {
+            // Only the stage is public diagnostics; exception messages may contain private data.
+            android.util.Log.i("HababStartup", "server_status=" +
+                    (value.startsWith("error:") ? "error" : value.startsWith("restarting") ? "restarting" : value));
+        }
         if (changed && foregroundNotification) {
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) manager.notify(NOTIFICATION_ID, serverNotification(value));
