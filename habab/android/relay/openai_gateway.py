@@ -77,6 +77,13 @@ def exact_web_origin(value):
         return False
 
 
+def loopback_web_origin(value):
+    """Browser voice is also available from the owner's local HA interface."""
+    if not exact_web_origin(value):
+        return False
+    return urlsplit(value).hostname in {'localhost', '127.0.0.1', '::1'}
+
+
 async def redacted_stream(content, secret, max_bytes):
     """Stream upstream bytes while redacting a secret even across chunk boundaries."""
     pending = b''
@@ -1064,7 +1071,7 @@ class Gateway:
         item = None
         if browser_mode:
             origin = request.headers.get('Origin')
-            if origin not in self.browser_origins:
+            if not self.browser_origins or (origin not in self.browser_origins and not loopback_web_origin(origin)):
                 return web.json_response({'error': {'code': 'relay_origin_not_allowed'}}, status=403)
             if self.active_voice >= 2:
                 return web.json_response({'error': {'code': 'relay_voice_busy'}}, status=429)

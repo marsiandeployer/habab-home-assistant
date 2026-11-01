@@ -519,6 +519,9 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(WSServerHandshakeError) as disabled_ws:
                 await client.ws_connect('/gemini/ws', origin=self.browser_origin)
             self.assertEqual(disabled_ws.exception.status, 403)
+            with self.assertRaises(WSServerHandshakeError) as disabled_local:
+                await client.ws_connect('/gemini/ws', origin='http://127.0.0.1:8123')
+            self.assertEqual(disabled_local.exception.status, 403)
         payload = await self.browser_credential()
         with self.assertRaises(WSServerHandshakeError) as missing:
             await self.client.ws_connect('/gemini/ws')
@@ -534,6 +537,23 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
             Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), browser_origins=['https://example.test/path'])
         with self.assertRaises(ValueError):
             Gateway(hashlib.sha256(b'synthetic-owner').hexdigest(), browser_origins=['https://example.test:65536'])
+
+    async def test_browser_loopback_requires_real_one_use_credential(self):
+        for origin in ('http://127.0.0.1:8123', 'http://localhost:8123', 'http://[::1]:8123'):
+            with self.subTest(origin=origin):
+                payload = await self.browser_credential()
+                invalid = await self.browser_connect('invalid-synthetic-token', payload['setup'], origin=origin)
+                await self.assert_policy_close(invalid, 1008, 'relay_not_authorized')
+                ws = await self.browser_connect(payload['value'], payload['setup'], origin=origin)
+                self.assertEqual(await ws.receive_json(timeout=3), {'setup': payload['setup']})
+                await ws.close()
+                replay = await self.browser_connect(payload['value'], payload['setup'], origin=origin)
+                await self.assert_policy_close(replay, 1008, 'relay_not_authorized')
+        for origin in ('http://localhost.attacker.example:8123', 'http://127.0.0.1.attacker.example:8123',
+                       'http://192.168.1.2:8123', 'null', 'https://attacker.example'):
+            with self.subTest(origin=origin), self.assertRaises(WSServerHandshakeError) as rejected:
+                await self.client.ws_connect('/gemini/ws', origin=origin)
+            self.assertEqual(rejected.exception.status, 403)
 
     async def test_browser_invalid_expired_and_replayed_credentials_close_without_upstream(self):
         payload = await self.browser_credential()
