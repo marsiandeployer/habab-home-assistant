@@ -332,9 +332,13 @@ jobs:
           git diff --quiet && git diff --cached --quiet || { echo '::error::Linux checkout is dirty'; exit 1; }
           mkdir -p "candidate/$ARTIFACT" habab/distribution/product-tunnel
           cp habab/product-tunnel/web_tunnel.py habab/distribution/product-tunnel/web_tunnel.py
+          frontend_version=$(python3 -c 'import json;print(json.load(open("habab/distribution/native-frontend-release.json"))["version"])')
+          frontend_sha=$(python3 -c 'import json;print(json.load(open("habab/distribution/native-frontend-release.json"))["sha256"])')
           docker buildx build --platform "$PLATFORM" --pull=false \
             --build-arg "HABAB_SOURCE_REVISION=$SOURCE_REVISION" \
             --build-arg HABAB_SOURCE_DIRTY=false \
+            --build-arg "HABAB_FRONTEND_VERSION=$frontend_version" \
+            --build-arg "HABAB_FRONTEND_SHA256=$frontend_sha" \
             --output "type=oci,dest=candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar" \
             habab/distribution
           python3 habab/scripts/release-candidate.py \
@@ -342,6 +346,16 @@ jobs:
             --platform "$PLATFORM" \
             --source-revision "$SOURCE_REVISION" \
             --status-output "candidate/$ARTIFACT/status.json"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends skopeo
+          smoke_image="habab-home:smoke-${ARTIFACT}"
+          skopeo copy --override-os linux --override-arch "${PLATFORM#linux/}" \
+            "oci-archive:candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar:latest" "docker-daemon:$smoke_image"
+          python3 habab/scripts/docker-release-smoke.py \
+            --image "$smoke_image" --platform "$PLATFORM" --source-revision "$SOURCE_REVISION" \
+            --frontend-version "$frontend_version" --frontend-sha256 "$frontend_sha" \
+            --opencode-manifest habab/distribution/opencode-release.json \
+            --output "candidate/$ARTIFACT/smoke.json"
           gzip --no-name --fast "candidate/$ARTIFACT/habab-home-${ARTIFACT}.oci.tar"
           python3 - "$ARTIFACT/status.json" <<'PY'
           import json

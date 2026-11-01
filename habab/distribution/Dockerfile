@@ -6,6 +6,16 @@ LABEL org.opencontainers.image.title="Habab Home" \
 
 RUN apk add --no-cache nodejs=24.22.1-r1
 
+# Standalone OCI releases include their pinned executable. Windows mounts the
+# same verified binary from its existing read-only volume instead.
+ARG TARGETARCH
+ARG HABAB_EMBED_OPENCODE=1
+COPY install-opencode-image.py opencode-release.json /opt/habab-opencode-bootstrap/
+RUN if [ "$HABAB_EMBED_OPENCODE" = 1 ]; then \
+      python3 /opt/habab-opencode-bootstrap/install-opencode-image.py \
+        --arch "$TARGETARCH" --output-dir /opt/habab-opencode; \
+    fi
+
 # Same upstream frontend version as Core, with the downstream Assist entry and
 # native-form bridge. The installer verifies the complete public wheel first.
 COPY install-native-frontend.py native-frontend-release.json /opt/habab-frontend/
@@ -38,5 +48,9 @@ CMD ["/init"]
 # remain cacheable; release builds must pass the full source commit explicitly.
 ARG HABAB_SOURCE_REVISION=unknown
 ARG HABAB_SOURCE_DIRTY=unknown
+ARG HABAB_FRONTEND_VERSION=unknown
+ARG HABAB_FRONTEND_SHA256=unknown
 LABEL org.opencontainers.image.revision="${HABAB_SOURCE_REVISION}" \
-      io.habab.source.dirty="${HABAB_SOURCE_DIRTY}"
+      io.habab.source.dirty="${HABAB_SOURCE_DIRTY}" \
+      io.habab.frontend.version="${HABAB_FRONTEND_VERSION}" \
+      io.habab.frontend.sha256="${HABAB_FRONTEND_SHA256}"

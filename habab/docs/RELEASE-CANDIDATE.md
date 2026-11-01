@@ -102,6 +102,9 @@ Windows runs the existing ZIP packager and Inno Setup compiler on
 The EXE embeds its installation payload. Linux keeps the existing OCI builder
 and compresses the resulting archive with `gzip --no-name`; each architecture's
 OCI descriptors, layers, revision label and clean-source label are verified.
+Each Linux image embeds the integrity-pinned OpenCode executable and is booted
+on its target architecture for owner-onboarding, API and restart smoke checks.
+Windows continues to use its read-only OpenCode volume.
 The common source SHA binds distribution code and its dependency pins. The
 Windows/Linux Docker builder installs the frontend wheel pinned in
 `native-frontend-release.json`; it does not freshly compile that frontend. The

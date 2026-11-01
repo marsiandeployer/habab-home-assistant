@@ -95,6 +95,7 @@ class WindowsPackageFilesTests(unittest.TestCase):
         self.assertIn('Resolve-Path -LiteralPath $stagedTunnel', startup)
         compose = (DISTRIBUTION / 'compose.windows.yaml').read_text()
         self.assertIn('context: .', compose)
+        self.assertIn("HABAB_EMBED_OPENCODE: '0'", compose)
 
 
 if __name__ == '__main__':

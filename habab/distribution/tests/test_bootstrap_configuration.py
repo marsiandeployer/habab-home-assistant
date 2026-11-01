@@ -15,17 +15,26 @@ class BootstrapConfigurationTests(unittest.TestCase):
         self.directory = Path(temporary.name)
         self.config = self.directory / "config"
         self.config.mkdir()
+        self.opencode = self.directory / "opencode"
+        self.opencode.mkdir()
         # Change filesystem roots only. Execute the actual shell branch and
         # commands, ending with /bin/true instead of starting Home Assistant.
         script = (DISTRIBUTION / "docker-entrypoint.sh").read_text()
         script = script.replace("/config/", str(self.config) + "/")
         script = script.replace("mkdir -p /config\n", "mkdir -p " + str(self.config) + "\n")
         script = script.replace("/usr/local/share/habab-home/configuration.yaml", str(DISTRIBUTION / "config/configuration.yaml"))
+        script = script.replace("/opt/habab-opencode/opencode.sha256", str(self.opencode / "opencode.sha256"))
         self.entrypoint = self.directory / "entrypoint.sh"
         self.entrypoint.write_text(script)
 
     def run_bootstrap(self):
         subprocess.run(["sh", str(self.entrypoint), "/bin/true"], check=True, capture_output=True)
+
+    def test_embedded_checksum_is_exported_and_explicit_checksum_takes_priority(self):
+        (self.opencode / "opencode.sha256").write_text("embedded\n")
+        command = ["sh", str(self.entrypoint), "sh", "-c", 'printf %s "$HABAB_OPENCODE_SHA256"']
+        self.assertEqual(subprocess.check_output(command, env={}).decode(), "embedded")
+        self.assertEqual(subprocess.check_output(command, env={"HABAB_OPENCODE_SHA256": "volume"}).decode(), "volume")
 
     def test_fresh_first_boot_creates_native_include_and_empty_automation_list(self):
         self.run_bootstrap()

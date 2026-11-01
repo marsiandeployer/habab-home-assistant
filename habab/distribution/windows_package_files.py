@@ -10,7 +10,7 @@ _WINDOWS_PACKAGE_FILES = (
     'support_tunnel.bat', 'support_tunnel.ps1', 'support-relay.json',
     'diagnose-assistant.bat', 'diagnose-assistant.ps1', 'diagnose-assistant.py',
     'install-native-frontend.py', 'native-frontend-release.json',
-    'install-opencode-volume.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
+    'install-opencode-volume.py', 'install-opencode-image.py', 'opencode-release.json', 'release.json', 'README-WINDOWS.md', 'LICENSE', 'NOTICE',
     'source_provenance.py', 'config/configuration.yaml',
     'product-tunnel/web_tunnel.py',
 )
