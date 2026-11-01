@@ -7,14 +7,30 @@ import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock
 import urllib.error
 import urllib.request
 
-from run_core_api_e2e import CheckFailed, INVALID_KEY, VALID_KEY, ProviderFixture, require, startup_log_excerpt, stop_child
+from run_core_api_e2e import CheckFailed, CoreAPI, INVALID_KEY, VALID_KEY, ProviderFixture, require, startup_log_excerpt, stop_child
 
 
 class CoreAPIE2EHarnessTests(unittest.TestCase):
+    def test_ws_failure_diagnostics_keep_only_bounded_error_code(self):
+        for code, expected in (("invalid_response", "invalid_response"),
+                               ("unsafe credential/body", "redacted_unknown"),
+                               ("a" * 65, "redacted_unknown")):
+            with self.subTest(code=code):
+                diagnostics = {}
+                api = CoreAPI(None, "http://fixture", diagnostics)
+                api.ws = SimpleNamespace(send_json=AsyncMock(), receive_json=AsyncMock(return_value={
+                    "id": 1, "success": False, "error": {"code": code, "message": "private body"},
+                }))
+                with self.assertRaises(CheckFailed):
+                    asyncio.run(api.command("habab_home/providers/save"))
+                self.assertEqual(diagnostics, {"last_ws_error_code": expected})
+
     def test_startup_excerpt_keeps_import_failure_and_redacts_credentials_and_dumps(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "synthetic.log"
@@ -73,6 +89,7 @@ class CoreAPIE2EHarnessTests(unittest.TestCase):
         with ProviderFixture() as fixture:
             status, body = self.request(fixture)
             self.assertEqual(status, 200)
+            self.assertEqual(body["choices"][0]["finish_reason"], "tool_calls")
             function = body["choices"][0]["message"]["tool_calls"][0]["function"]
             self.assertEqual(function["name"], "habab_connection_test")
             self.assertEqual(json.loads(function["arguments"]), {"ok": True})
@@ -93,6 +110,7 @@ class CoreAPIE2EHarnessTests(unittest.TestCase):
             fixture.mode = "no_tools"
             status, body = self.request(fixture)
             self.assertEqual(status, 200)
+            self.assertEqual(body["choices"][0]["finish_reason"], "stop")
             self.assertNotIn("tool_calls", body["choices"][0]["message"])
             fixture.mode = "invalid_response"
             self.assertEqual(self.request(fixture), (200, []))

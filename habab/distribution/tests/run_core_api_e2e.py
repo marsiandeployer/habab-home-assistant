@@ -144,7 +144,8 @@ class ProviderFixture:
                     "name": "habab_connection_test", "arguments": '{"ok":true}',
                 },
             }]
-        return 200, {"choices": [{"message": message}]}
+        return 200, {"choices": [{"message": message,
+                                  "finish_reason": "tool_calls" if message.get("tool_calls") else "stop"}]}
 
     def __enter__(self):
         self.thread.start()
@@ -201,6 +202,11 @@ class CoreAPI:
             reply = await self.ws.receive_json()
             if reply.get("id") == self.sequence:
                 break
+        if not reply.get("success"):
+            code = reply.get("error", {}).get("code")
+            self.diagnostics["last_ws_error_code"] = (
+                code if isinstance(code, str) and re.fullmatch(r"[a-z_]{1,64}", code)
+                else "redacted_unknown")
         if error is not None:
             require(not reply.get("success") and reply.get("error", {}).get("code") == error,
                     "ws_expected_error_" + error)
