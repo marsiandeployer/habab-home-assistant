@@ -97,6 +97,23 @@ class CoreAPIE2EHarnessTests(unittest.TestCase):
             self.assertTrue(fixture.requests[0]["thinking_disabled"])
             self.assertNotIn(VALID_KEY, json.dumps(fixture.requests))
 
+    def test_beta_fixture_enrolls_and_accepts_only_its_issued_key(self):
+        with ProviderFixture() as fixture:
+            installation_id = "7c5cc9d6-1ee3-4b1d-9a1f-13c3e154226f"
+            request = urllib.request.Request(
+                fixture.base + "/beta/enroll",
+                data=json.dumps({"installation_id": installation_id}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=3) as response:
+                enrollment = json.load(response)
+            self.assertEqual(enrollment["installation_id"], installation_id)
+            self.assertTrue(enrollment["code"].startswith("hb1.7c5cc9d61ee34b1d9a1f13c3e154226f."))
+            status, body = self.request(fixture, key=enrollment["code"], path="/v1/chat/completions")
+            self.assertEqual(status, 200)
+            self.assertEqual(body["choices"][0]["finish_reason"], "tool_calls")
+            self.assertNotIn(enrollment["code"], json.dumps(fixture.requests))
+
     def test_fixture_rejects_auth_and_unknown_transport(self):
         with ProviderFixture() as fixture:
             self.assertEqual(self.request(fixture, key=INVALID_KEY)[0], 401)

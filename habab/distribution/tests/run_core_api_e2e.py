@@ -4,7 +4,7 @@
 Run after run_release_candidate_backend_tests.py in the same disposable Actions
 container (--memory=2g --cpus=2 --pids-limit=256) on a private Docker --internal
 bridge with no external route. Core runs as a child process in that container.
-The only patched product input is the two provider URLs in the child process; native Core startup,
+Provider and beta-enrollment URLs are pointed at the local fixture; native Core startup,
 onboarding, authentication, config flows, HTTP/WebSocket handlers and storage run
 normally. OpenCode/model chat and physical/audio acceptance are NOT tested here.
 """
@@ -89,11 +89,27 @@ class ProviderFixture:
     def __init__(self):
         self.mode = "ok"
         self.requests = []
+        self.beta_keys = set()
         fixture = self
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args):
                 pass
+
+            def do_GET(self):
+                if self.path != "/text/capabilities":
+                    self.send_error(404)
+                    return
+                result = {"protocol": "openai_compatible", "model": "habab-chat",
+                          "api_path": "/v1", "managed": True, "configured": True,
+                          "ready": True, "configured_upstream_provider": "deepseek",
+                          "configured_upstream_model": "deepseek-flash"}
+                encoded = json.dumps(result).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
 
             def do_POST(self):
                 length = int(self.headers.get("Content-Length", "0"))
@@ -127,9 +143,18 @@ class ProviderFixture:
         return f"http://127.0.0.1:{self.server.server_port}"
 
     def response(self, path, authorization, body):
-        if path not in ("/openai/chat/completions", "/deepseek/chat/completions"):
+        if path == "/beta/enroll":
+            try:
+                installation_id = str(uuid.UUID(body.get("installation_id", "")))
+            except (ValueError, TypeError, AttributeError):
+                return 400, {"error": {"code": "fixture_id"}}
+            code = "hb1." + uuid.UUID(installation_id).hex + "." + "A" * 43
+            self.beta_keys.add(code)
+            return 200, {"installation_id": installation_id, "code": code}
+        if path not in ("/openai/chat/completions", "/deepseek/chat/completions", "/v1/chat/completions"):
             return 404, {"error": {"code": "fixture_route"}}
-        if authorization != "Bearer " + VALID_KEY:
+        if (path == "/v1/chat/completions" and authorization not in {"Bearer " + key for key in self.beta_keys}
+                or path != "/v1/chat/completions" and authorization != "Bearer " + VALID_KEY):
             return 401, {"error": {"code": "fixture_auth"}}
         if self.mode == "quota":
             return 429, {"error": {"code": "fixture_quota"}}
@@ -161,8 +186,11 @@ def run_ha_child(config, fixture_base):
     import homeassistant.components
 
     homeassistant.components.__path__.insert(0, str(DIST / "src"))
-    from homeassistant.components.habab_home import providers
+    from homeassistant.components.habab_home import beta, providers
 
+    beta.ENROLL_URL = fixture_base + "/beta/enroll"
+    providers.HABAB_TEXT_ORIGIN = fixture_base
+    providers.HABAB_TEXT_CAPABILITIES_URL = fixture_base + "/text/capabilities"
     providers.PROVIDERS["openai"]["url"] = fixture_base + "/openai/chat/completions"
     providers.PROVIDERS["deepseek"]["url"] = fixture_base + "/deepseek/chat/completions"
     from homeassistant.__main__ import main
@@ -292,6 +320,23 @@ async def exercise(base, fixture, process, config, diagnostics, secret_values):
                           api_key=VALID_KEY, error="invalid_provider")
         require(await api.entries() == [], "invalid_provider_was_persisted")
         passed("unconfigured_chat_voice_and_invalid_config_errors")
+
+        activation = await api.command("habab_home/beta/activate")
+        require(activation.get("status") == "ready" and activation.get("activated") is True,
+                "keyless_habab_activation_failed")
+        entries = await api.entries()
+        require(len(entries) == 1 and entries[0]["provider"] == "habab"
+                and entries[0]["assistant_selected"] and entries[0]["state"] == "loaded",
+                "keyless_habab_entry_not_ready")
+        beta_id = entries[0]["entry_id"]
+        checked = await api.command("habab_home/providers/check", entry_id=beta_id)
+        require(checked.get("tool_call_verified") is True, "keyless_habab_tool_check_failed")
+        again = await api.command("habab_home/beta/activate")
+        require(again.get("status") == "existing" and again.get("entry_id") == beta_id,
+                "keyless_habab_activation_not_idempotent")
+        status, _ = await api.http("DELETE", "/api/config/config_entries/entry/" + beta_id)
+        require(status == 200 and await api.entries() == [], "keyless_fixture_cleanup_failed")
+        passed("fresh_keyless_habab_activation_and_tool_check")
 
         settings = {"provider": "openai", "model": "gpt-4.1-mini", "api_key": VALID_KEY}
         saved = await api.command("habab_home/providers/save", **settings)
