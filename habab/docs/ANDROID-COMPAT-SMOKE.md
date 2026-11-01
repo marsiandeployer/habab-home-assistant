@@ -9,6 +9,9 @@ emulator. The runner now installs the official emulator package with sdkmanager;
 real installation and launch acceptance remains pending. A subsequent run
 identified the emulator's missing host `libpulse.so.0`; the workflow installs
 Ubuntu's `libpulse0` package, while guest audio remains disabled.
+Startup diagnostics then identified different default AVD directories between
+avdmanager and emulator. Both now use one explicit owned `ANDROID_AVD_HOME`
+under the job's temporary output directory.
 
 The workflow, runner and offline tests are integrated separately from the
 product runtime and release pipeline. The workflow has only

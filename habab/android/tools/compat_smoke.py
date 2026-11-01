@@ -274,6 +274,9 @@ def main():
                                   "properties": system_image_metadata(
                                       properties.read_text() if properties.is_file() else "")}
         avd = "habab_compat_api" + args.api
+        avd_home = args.out.resolve() / "avd"
+        avd_home.mkdir(exist_ok=True)
+        os.environ["ANDROID_AVD_HOME"] = str(avd_home)
         run([str(avdmanager), "create", "avd", "--force", "--name", avd, "--package", image],
             input="no\n", timeout=120)
         emulator_log = (args.out / "emulator-private.log").open("w")
