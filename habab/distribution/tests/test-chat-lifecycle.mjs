@@ -1159,3 +1159,23 @@ test("a connection failure explains the network and optional system proxy", asyn
   assert.match(message, /Нет соединения/);
   assert.match(message, /системного прокси/);
 });
+
+test("failed requests release reconnect while setup refresh is still pending", async () => {
+  // Registered below the module-install test so the real component class is available.
+  await new Promise(setImmediate);
+  const chat = Object.create(setupChatElementClass.prototype);
+  Object.assign(chat, {
+    isCurrentOwnerContext: () => true, sessionId: "session", busy: false,
+    messages: [], _hass: {callWS: async () => { throw {code: "failed"}; }},
+    draw() {}, status() {}, controls() {}, startPendingAssist() {},
+    errorMessage: async () => "Failed", q: () => ({open: false}),
+    loadSetup: () => new Promise(() => {}),
+  });
+  Object.defineProperty(chat, "t", {value: {working: "Working"}});
+  await Promise.race([chat.send("request"), new Promise((_, reject) => {
+    const timeout = setTimeout(() => reject(new Error("reconnect remained blocked")), 500);
+    timeout.unref();
+  })]);
+  assert.equal(chat.busy, false);
+  assert.equal(chat.running, false);
+});

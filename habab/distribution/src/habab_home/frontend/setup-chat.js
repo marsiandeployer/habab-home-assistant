@@ -1261,7 +1261,7 @@ function installChat() {
         this.messages = result.messages;
         this.draw();
         this.status("");
-        await this.loadSetup();
+        void this.loadSetup();
       } catch (error) { this.status(this.t[error.code] || this.t.failed, true); }
       finally {
         this.busy = false; this.controls();
@@ -1893,8 +1893,8 @@ function installChat() {
         if (voiceReply) await this.speakReply(result.messages);
       } catch (error) { this.status(this.stopped ? this.t.stopped : await this.errorMessage(error), true); }
       finally {
-        if (!this.demo) await this.loadSetup(true);
         this.busy = false; this.running = false; this.controls();
+        if (!this.demo) void this.loadSetup(true);
         if (this.q("dialog").open && this.focusComposerOnOpen && !matchMedia("(max-width: 720px)").matches) this.q(".composer-textarea").focus({preventScroll: true});
         this.startPendingAssist();
       }
