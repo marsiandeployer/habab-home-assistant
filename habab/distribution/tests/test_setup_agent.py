@@ -919,7 +919,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         agent.request.side_effect = [[], {"info": {"error": {
             "name": "UnknownError", "data": {"code": "SELF_SIGNED_CERT_IN_CHAIN",
                                              "message": "private detail"},
-        }}}]
+        }}}, None]
         with self.assertRaises(AgentError) as error:
             await agent.run("alice", "ses_alice", "test")
         self.assertEqual(error.exception.code, "model_error")
