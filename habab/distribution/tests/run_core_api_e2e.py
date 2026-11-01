@@ -2,8 +2,9 @@
 """Real Core API smoke tests with a local deterministic provider, never live-model QA.
 
 Run after run_release_candidate_backend_tests.py in the same disposable Actions
-container (--network none --memory=2g --cpus=2 --pids-limit=256). The only patched
-product input is the two provider URLs in the child process; native Core startup,
+container (--memory=2g --cpus=2 --pids-limit=256) on a private Docker --internal
+bridge with no external route. Core runs as a child process in that container.
+The only patched product input is the two provider URLs in the child process; native Core startup,
 onboarding, authentication, config flows, HTTP/WebSocket handlers and storage run
 normally. OpenCode/model chat and physical/audio acceptance are NOT tested here.
 """

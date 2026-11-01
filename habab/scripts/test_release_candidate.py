@@ -489,7 +489,7 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
             preflight,
         )
         for value in (
-            "--network none", "--memory=2g", "--memory-swap=2g", "--cpus=2",
+            '--network "$network_name"', "--memory=2g", "--memory-swap=2g", "--cpus=2",
             "--pids-limit=256", "--entrypoint /bin/sh", ":ro", "--env GITHUB_ACTIONS=true",
             "tests/run_release_candidate_backend_tests.py",
             "tests/run_core_api_e2e.py",
@@ -508,6 +508,49 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
         ):
             self.assertIn(test, js_step)
         self.assertNotRegex(preflight, r"(?m)^\s*continue-on-error:")
+
+    def test_both_core_workflows_require_internal_bridge_and_clean_up_on_failure(self):
+        repository = Path(__file__).resolve().parents[2]
+        for filename, step in (
+            ('habab-core-e2e.yaml', 'Run backend suites and real Core API acceptance in one isolated container'),
+            ('habab-release-candidate.yaml', 'Run focused backend tests in isolated Home Assistant image'),
+        ):
+            workflow = (repository / '.github/workflows' / filename).read_text()
+            start = workflow.index('        run: |\n', workflow.index('      - name: ' + step)) + len('        run: |\n')
+            script = workflow[start:]
+            if filename == 'habab-release-candidate.yaml':
+                script = script[:script.index('\n\n  windows-source:')]
+            script = textwrap.dedent(script)
+            for internal, run_exit, expected_exit in (('true', 0, 0), ('true', 23, 23), ('false', 0, 1)):
+                with self.subTest(workflow=filename, internal=internal, run_exit=run_exit), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    docker = root / 'docker'
+                    docker.write_text("""#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ['DOCKER_LOG'], 'a') as output:
+    output.write(json.dumps(sys.argv[1:]) + '\\n')
+if sys.argv[1:3] == ['network', 'inspect']:
+    print(os.environ['INTERNAL'])
+if sys.argv[1:2] == ['run']:
+    sys.exit(int(os.environ['RUN_EXIT']))
+""")
+                    docker.chmod(0o755)
+                    log = root / 'docker.jsonl'
+                    env = {**os.environ, 'PATH': str(root) + os.pathsep + os.environ['PATH'],
+                           'DOCKER_LOG': str(log), 'INTERNAL': internal, 'RUN_EXIT': str(run_exit),
+                           'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '1',
+                           'GITHUB_WORKSPACE': str(root), 'HA_TEST_IMAGE': 'pinned-ci-image'}
+                    result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected_exit, result.stderr)
+                    calls = [json.loads(line) for line in log.read_text().splitlines()]
+                    self.assertEqual(calls[0][:5], ['network', 'create', '--driver', 'bridge', '--internal'])
+                    self.assertEqual(calls[-2][:2], ['rm', '-f'], 'Stop own container before removing its network')
+                    self.assertEqual(calls[-1][:2], ['network', 'rm'])
+                    self.assertEqual(calls[0][-1], calls[-1][-1], 'Only the created network may be removed')
+                    run_calls = [call for call in calls if call[0] == 'run']
+                    self.assertEqual(len(run_calls), int(internal == 'true'), 'Refuse non-internal network before container start')
+                    if run_calls:
+                        self.assertEqual(run_calls[0][run_calls[0].index('--network') + 1], calls[0][-1])
 
     def test_preflight_requires_runner_and_approved_tracked_public_trust_anchor(self):
         repository = Path(__file__).resolve().parents[2]

@@ -16,9 +16,12 @@ day.
 `.github/workflows/habab-core-e2e.yaml` runs the same backend suites and real
 Core API acceptance runner on pushes to `main`, pull requests touching
 `habab/**` or these workflow files, and manual dispatch. It uses the release
-preflight's pinned Home Assistant image in one offline container, with read-only
+preflight's pinned Home Assistant image in one isolated container, with read-only
 source mounts, 2 GiB memory, two CPUs and a 256-process limit. The timeout is
-20 minutes. Five harness contract checks run before the container in this
+20 minutes. Its temporary Docker bridge is created with `--internal`, which
+provides a real network interface without external egress; the step verifies
+`Internal=true`. Cleanup stops its own container before removing its own network.
+Five harness contract checks run before the container in this
 workflow and the release preflight. Tests use disposable local configuration and
 a local provider fixture. No provider secrets or public model requests are needed. Only a newer
 check for the same PR cancels its previous check; pushes and manual checks keep
@@ -146,8 +149,9 @@ path when runtime/frontend inputs change.
 Run the changed component's fast checks before a large build. The full workflow's
 preflight now runs the relay tests (including concurrent HTTP with an open
 WebSocket) and the real Core API acceptance runner inside its existing bounded
-HA test container before compiling any Android frontend. The same offline
-container has a 2 GiB memory limit, two CPUs and 256-process limit. The Core
+HA test container before compiling any Android frontend. The same container
+uses an ephemeral internal Docker bridge and has a 2 GiB memory limit, two CPUs
+and 256-process limit. The Core
 runner creates disposable configuration and uses a local provider fixture for
 onboarding, authentication, provider save/check/reload and a virtual-helper
 service cycle. Do not repeat a completed build, archive scan, or device
