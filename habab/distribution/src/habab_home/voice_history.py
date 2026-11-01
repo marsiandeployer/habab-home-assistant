@@ -6,6 +6,7 @@ import re
 
 
 VOICE_EVENT_PROTOCOL = "native_gemini_event.v1"
+VOICE_EVENT_PROTOCOL_OPENAI = "browser_openai_event.v1"
 VOICE_EVENT_PROTOCOL_KEY = "habab_voice_event_protocol"
 VOICE_EVENT_METADATA_KEY = VOICE_EVENT_PROTOCOL_KEY
 VOICE_EVENT_ID_KEY = "habab_voice_event_id"
@@ -20,7 +21,7 @@ def valid_voice_event_fields(event_id, role, text, provider="gemini", correlatio
             or not isinstance(role, str) or role not in {"user", "assistant"}
             or not isinstance(text, str) or not text.strip()
             or len(text) > (4000 if role == "user" else 12000)
-            or provider != "gemini" or correlation is not None):
+            or provider not in {"gemini", "openai"} or correlation is not None):
         return False
     try:
         text.encode("utf-8")
@@ -31,8 +32,9 @@ def valid_voice_event_fields(event_id, role, text, provider="gemini", correlatio
 
 def encode_voice_event(event_id, role, text, provider="gemini", correlation=None):
     """Return canonical synthetic-part text, digest, and integrity metadata."""
+    protocol = VOICE_EVENT_PROTOCOL if provider == "gemini" else VOICE_EVENT_PROTOCOL_OPENAI
     payload = {
-        "protocol": VOICE_EVENT_PROTOCOL,
+        "protocol": protocol,
         "event_id": event_id,
         "role": role,
         "text": text,
@@ -42,7 +44,7 @@ def encode_voice_event(event_id, role, text, provider="gemini", correlation=None
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     metadata = {
-        VOICE_EVENT_PROTOCOL_KEY: VOICE_EVENT_PROTOCOL,
+        VOICE_EVENT_PROTOCOL_KEY: protocol,
         VOICE_EVENT_ID_KEY: event_id,
         VOICE_EVENT_HASH_KEY: digest,
         VOICE_EVENT_PROVIDER_KEY: provider,
@@ -59,7 +61,7 @@ def decode_voice_event_part(part):
     if (not isinstance(metadata, dict)
             or set(metadata) != {VOICE_EVENT_PROTOCOL_KEY, VOICE_EVENT_ID_KEY,
                                  VOICE_EVENT_HASH_KEY, VOICE_EVENT_PROVIDER_KEY}
-            or metadata.get(VOICE_EVENT_PROTOCOL_KEY) != VOICE_EVENT_PROTOCOL):
+            or metadata.get(VOICE_EVENT_PROTOCOL_KEY) not in {VOICE_EVENT_PROTOCOL, VOICE_EVENT_PROTOCOL_OPENAI}):
         return None
     event_id = metadata.get(VOICE_EVENT_ID_KEY)
     digest = metadata.get(VOICE_EVENT_HASH_KEY)
@@ -67,7 +69,8 @@ def decode_voice_event_part(part):
     raw = part.get("text")
     if (not isinstance(event_id, str) or not VOICE_EVENT_ID_PATTERN.fullmatch(event_id)
             or not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest)
-            or provider != "gemini"
+            or (provider, metadata.get(VOICE_EVENT_PROTOCOL_KEY)) not in {
+                ("gemini", VOICE_EVENT_PROTOCOL), ("openai", VOICE_EVENT_PROTOCOL_OPENAI)}
             or not isinstance(raw, str)):
         return None
     try:
@@ -82,7 +85,7 @@ def decode_voice_event_part(part):
         return None
     if (not isinstance(payload, dict)
             or set(payload) != {"protocol", "event_id", "role", "text", "provider", "correlation"}
-            or payload.get("protocol") != VOICE_EVENT_PROTOCOL
+            or payload.get("protocol") != metadata.get(VOICE_EVENT_PROTOCOL_KEY)
             or payload.get("event_id") != event_id
             or payload.get("provider") != provider
             or not valid_voice_event_fields(

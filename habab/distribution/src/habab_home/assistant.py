@@ -32,6 +32,7 @@ from .voice_history import (
     VOICE_EVENT_HASH_KEY,
     VOICE_EVENT_METADATA_KEY,
     VOICE_EVENT_PROTOCOL,
+    VOICE_EVENT_PROTOCOL_OPENAI,
     encode_voice_event,
     decode_voice_event_part,
     valid_voice_event_fields,
@@ -537,16 +538,17 @@ class AssistantService:
                 or not valid_voice_event_fields(event_id, role, text, provider, correlation)
                 or type(history_epoch) is not int or history_epoch < 0):
             raise AgentError("invalid_voice_event")
-        _payload, payload_digest, _metadata = encode_voice_event(
+        _payload, payload_digest, metadata = encode_voice_event(
             event_id, role, text, provider, correlation)
+        event_protocol = metadata[VOICE_EVENT_METADATA_KEY]
         receipt_key = json.dumps(
-            [owner, history_epoch, VOICE_EVENT_PROTOCOL, event_id],
+            [owner, history_epoch, event_protocol, event_id],
             ensure_ascii=False, separators=(",", ":"))
         return await self._record_voice_receipt(
             owner, session_id, event_id, history_epoch, receipt_key, payload_digest,
-            {"protocol": VOICE_EVENT_PROTOCOL, "role": role, "text": text,
+            {"protocol": event_protocol, "role": role, "text": text,
              "provider": provider, "correlation": correlation},
-            protocol=VOICE_EVENT_PROTOCOL,
+            protocol=event_protocol,
         )
 
     async def _record_voice_receipt(self, owner, session_id, event_id, history_epoch,
@@ -615,7 +617,7 @@ class AssistantService:
             if (isinstance(receipt, dict) and receipt.get("state") == "pending"
                     and receipt.get("owner") == owner and receipt.get("epoch") == epoch
                     and receipt.get("session_id") == session_id):
-                if receipt.get("protocol") == VOICE_EVENT_PROTOCOL:
+                if receipt.get("protocol") in {VOICE_EVENT_PROTOCOL, VOICE_EVENT_PROTOCOL_OPENAI}:
                     try:
                         self._voice_materialization(receipt)
                     except (AgentError, KeyError, TypeError, ValueError):
@@ -692,7 +694,7 @@ class AssistantService:
     @staticmethod
     def _voice_materialization(receipt):
         event_id = receipt.get("event_id")
-        if receipt.get("protocol") == VOICE_EVENT_PROTOCOL:
+        if receipt.get("protocol") in {VOICE_EVENT_PROTOCOL, VOICE_EVENT_PROTOCOL_OPENAI}:
             if not valid_voice_event_fields(
                     event_id, receipt.get("role"), receipt.get("text"),
                     receipt.get("provider"), receipt.get("correlation")):
@@ -700,7 +702,7 @@ class AssistantService:
             transcript, digest, metadata = encode_voice_event(
                 event_id, receipt["role"], receipt["text"],
                 receipt["provider"], receipt["correlation"])
-            if digest != receipt.get("payload_sha256"):
+            if digest != receipt.get("payload_sha256") or metadata[VOICE_EVENT_METADATA_KEY] != receipt["protocol"]:
                 raise AgentError("voice_event_conflict")
             return transcript, digest, metadata, True
         if receipt.get("protocol") is not None:
@@ -732,7 +734,7 @@ class AssistantService:
                 if not isinstance(metadata, dict):
                     continue
                 if is_event:
-                    if (metadata.get(VOICE_EVENT_METADATA_KEY) != VOICE_EVENT_PROTOCOL
+                    if (metadata.get(VOICE_EVENT_METADATA_KEY) not in {VOICE_EVENT_PROTOCOL, VOICE_EVENT_PROTOCOL_OPENAI}
                             or metadata.get(VOICE_EVENT_ID_KEY) != event_id):
                         continue
                     decoded = decode_voice_event_part(part)

@@ -52,7 +52,6 @@ from .runtime_context import (
     runtime_prompt,
 )
 from .voice_history import (
-    VOICE_EVENT_PROTOCOL,
     VOICE_EVENT_PROTOCOL_KEY,
     decode_voice_event_part,
 )
@@ -557,8 +556,7 @@ class SetupAgent:
                     for turn in decode_dialogue_part(part) or []:
                         result.append({"role": turn["role"], "text": self.clean(turn["text"])})
                     continue
-                if (isinstance(metadata, dict)
-                        and metadata.get(VOICE_EVENT_PROTOCOL_KEY) == VOICE_EVENT_PROTOCOL):
+                if isinstance(metadata, dict) and VOICE_EVENT_PROTOCOL_KEY in metadata:
                     event = decode_voice_event_part(part)
                     if event is not None:
                         result.append({"role": event["role"],

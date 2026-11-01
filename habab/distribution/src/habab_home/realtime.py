@@ -313,7 +313,7 @@ def schedule_browser_lease_expiry(hass, session_id, lease):
 
 def browser_lease(hass, owner, session_id):
     lease = voice_lease(hass, owner, session_id)
-    if lease.get("client", "native_v2") != BROWSER_CLIENT or lease.get("provider") != "gemini":
+    if lease.get("client", "native_v2") != BROWSER_CLIENT or lease.get("provider") not in {"gemini", "openai"}:
         raise AgentError("invalid_session")
     return lease
 
@@ -460,6 +460,14 @@ class RealtimeSessionView(HomeAssistantView):
                                 "auth": {"mode": "ephemeral_query"}})
             result.headers["Cache-Control"] = "no-store"
             return result
+        if settings.get("provider") == "openai":
+            result = self.json({"available": True, "client": BROWSER_CLIENT,
+                                "provider": "openai", "realtime_provider": "openai",
+                                "transport": "direct",
+                                "websocket_url": "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini",
+                                "auth": {"mode": "ephemeral_subprotocol"}})
+            result.headers["Cache-Control"] = "no-store"
+            return result
         if settings.get("provider") != "habab":
             result = self.json(browser_assist_fallback("selected_provider_requires_ha_assist_stt"))
             result.headers["Cache-Control"] = "no-store"
@@ -491,11 +499,11 @@ class RealtimeSessionView(HomeAssistantView):
             selected_provider = settings.get("provider")
             gemini = selected_provider in {"gemini", "habab"}
             browser = client_kind == BROWSER_CLIENT
-            if browser and selected_provider not in {"habab", "gemini"}:
+            if browser and selected_provider not in {"habab", "gemini", "openai"}:
                 return self.json_message("unsupported_voice_protocol", status_code=400)
             if gemini and client_kind != "native_v2" and not browser:
                 return self.json_message("unsupported_voice_protocol", status_code=400)
-            if gemini and not callable(getattr(hass.data[DOMAIN]["assistant"], "record_voice_event", None)):
+            if (gemini or browser) and not callable(getattr(hass.data[DOMAIN]["assistant"], "record_voice_event", None)):
                 return self.json_message("voice_history_protocol_required", status_code=400)
             base = None if selected_provider == "gemini" else realtime_base(settings)
         except AgentError as error:
@@ -784,7 +792,8 @@ class RealtimeTranscriptView(HomeAssistantView):
                 lease = await validate_browser_lease_history(hass, assistant, owner.id, session_id)
             if data.get("kind") == "event":
                 role, text = data.get("role"), data.get("text")
-                if (lease.get("provider") != "gemini" or role not in ("user", "assistant")
+                if (not (lease.get("provider") == "gemini" or
+                         browser and lease.get("provider") == "openai") or role not in ("user", "assistant")
                         or not isinstance(text, str) or not text.strip()
                         or len(text) > (4000 if role == "user" else 12000)):
                     return self.json_message("invalid_voice_turn", status_code=400)
@@ -792,7 +801,7 @@ class RealtimeTranscriptView(HomeAssistantView):
                     return self.json_message("voice_history_protocol_required", status_code=400)
                 result = await assistant.record_voice_event(
                     owner.id, lease["history_session"], event_id, role, text,
-                    history_epoch=lease["history_epoch"], provider="gemini", correlation=None)
+                    history_epoch=lease["history_epoch"], provider=lease["provider"], correlation=None)
             else:
                 user_text, assistant_text = data.get("user_text"), data.get("assistant_text")
                 if (lease.get("provider") == "gemini"

@@ -654,6 +654,11 @@ test("browser voice capability selects explicit provider realtime or HA Assist f
     auth: {mode: "ephemeral_query"}};
   assert.equal(setupChatModule.selectBrowserVoiceRoute(direct), "gemini_browser_v1");
   assert.equal(setupChatModule.selectBrowserVoiceRoute({...direct, websocket_url: "wss://example.test"}), undefined);
+  const openai = {available: true, client: "browser_v1", provider: "openai", realtime_provider: "openai",
+    transport: "direct", websocket_url: "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini",
+    auth: {mode: "ephemeral_subprotocol"}};
+  assert.equal(setupChatModule.selectBrowserVoiceRoute(openai), "openai_browser_v1");
+  assert.equal(setupChatModule.selectBrowserVoiceRoute({...openai, websocket_url: "wss://example.test"}), undefined);
   assert.equal(setupChatModule.selectBrowserVoiceRoute({
     available: false, reason: "selected_provider_requires_ha_assist_stt",
     browser: {transport: "ha_assist_pipeline", requires_ha_stt: true},

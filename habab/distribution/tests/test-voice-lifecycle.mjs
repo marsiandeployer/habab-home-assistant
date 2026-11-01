@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AssistVoice, BrowserGeminiVoice, bootstrapAfterStartCue } from "../src/habab_home/frontend/voice.js";
+import { AssistVoice, BrowserGeminiVoice, BrowserOpenAIVoice, bootstrapAfterStartCue } from "../src/habab_home/frontend/voice.js";
 
 test("a finished subscription can be released twice without an unhandled rejection", async () => {
   const events = [];
@@ -311,7 +311,7 @@ test("browser start cue completes before bootstrap and stale bootstrap revokes i
   assert.deepEqual(staleOrder, ["start:end", "bootstrap", "stop:voice2_late"]);
 });
 
-function browserVoiceHarness(t, {ttl = 180, onTurn, getUserMedia,
+function browserVoiceHarness(t, {ttl = 180, onTurn, getUserMedia, Voice = BrowserGeminiVoice,
   expiresAt = Math.floor(Date.now() / 1000) + 60} = {}) {
   const keys = ["window", "navigator", "AudioContext", "AudioWorkletNode", "WebSocket"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -339,7 +339,7 @@ function browserVoiceHarness(t, {ttl = 180, onTurn, getUserMedia,
   class Recorder { constructor() { this.port = {onmessage: null}; state.recorder = this; } }
   class Socket {
     static OPEN = 1;
-    constructor(url) { this.url = url; this.readyState = 0; this.sent = []; state.sockets.push(this); }
+    constructor(url, protocols) { this.url = url; this.protocols = protocols; this.readyState = 0; this.sent = []; state.sockets.push(this); }
     send(value) { this.sent.push(value); }
     close() { this.readyState = 3; }
   }
@@ -354,7 +354,7 @@ function browserVoiceHarness(t, {ttl = 180, onTurn, getUserMedia,
   Object.defineProperty(globalThis, "AudioContext", {configurable: true, value: Context});
   Object.defineProperty(globalThis, "AudioWorkletNode", {configurable: true, value: Recorder});
   Object.defineProperty(globalThis, "WebSocket", {configurable: true, value: Socket});
-  const voice = new BrowserGeminiVoice({
+  const voice = new Voice({
     client: "browser_v1", session_id: "voice2_test", value: "opaque-test-credential",
     setup: {model: "models/test"}, websocket_url: "wss://habab-voice.wpmix.net/gemini/ws",
     lease_ttl_seconds: ttl, expires_at: expiresAt,
@@ -430,6 +430,92 @@ test("direct Gemini uses a single-use token with the official endpoint and start
   await h.voice.finish();
   assert.equal(h.state.captureStopped, 1);
   assert.deepEqual(h.state.stops, ["voice2_test"]);
+});
+
+async function connectOpenAIVoice(h) {
+  Object.assign(h.voice.session, {provider: "openai", websocket_url: "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini",
+    auth: {mode: "ephemeral_subprotocol"}});
+  const started = h.voice.start();
+  const socket = h.state.sockets[0];
+  assert.deepEqual(socket.protocols, ["realtime", "openai-insecure-api-key.opaque-test-credential"]);
+  socket.readyState = 1;
+  socket.onopen();
+  assert.equal(socket.sent.length, 0);
+  socket.onmessage({data: JSON.stringify({type: "session.created"})});
+  await started;
+  return socket;
+}
+
+test("OpenAI direct voice captures, resamples and journals only played responses", async (t) => {
+  const h = browserVoiceHarness(t, {Voice: BrowserOpenAIVoice});
+  const socket = await connectOpenAIVoice(h);
+  h.state.recorder.port.onmessage({data: new Int16Array([0, 900])});
+  const audio = JSON.parse(socket.sent[0]);
+  assert.equal(audio.type, "input_audio_buffer.append");
+  assert.deepEqual([...Uint8Array.from(atob(audio.audio), c => c.charCodeAt(0))], [0, 0, 88, 2, 132, 3]);
+  await h.voice.receive({type: "input_audio_buffer.speech_started"});
+  await h.voice.receive({type: "conversation.item.input_audio_transcription.completed", transcript: "Привет"});
+  await h.voice.receive({type: "response.created", response: {id: "r1"}});
+  await h.voice.receive({type: "response.output_audio_transcript.delta", response_id: "r1", delta: "Здравствуйте"});
+  await h.voice.receive({type: "response.output_audio.delta", response_id: "r1", delta: "AQI="});
+  await h.voice.receive({type: "response.done", response: {id: "r1", status: "completed"}});
+  for (const source of h.state.sources) source.onended?.();
+  await h.voice.transcriptQueue;
+  assert.deepEqual(h.state.transcripts.map(e => [e.role, e.text]), [["user", "Привет"], ["assistant", "Здравствуйте"]]);
+  await h.voice.finish();
+  assert.equal(h.state.captureStopped, 1);
+});
+
+test("OpenAI tool output waits for its response and ignores interrupted follow-up", async (t) => {
+  let resolveTurn;
+  const h = browserVoiceHarness(t, {Voice: BrowserOpenAIVoice, onTurn: () => new Promise(r => {resolveTurn = r;})});
+  const socket = await connectOpenAIVoice(h);
+  await h.voice.receive({type: "response.created", response: {id: "r1"}});
+  await h.voice.receive({type: "response.function_call_arguments.done", response_id: "r1", call_id: "c1",
+    name: "ask_home_assistant", arguments: JSON.stringify({text: "Проверь свет"})});
+  await h.voice.receive({type: "response.done", response: {id: "r1", status: "completed"}});
+  resolveTurn({text: "Свет включён"});
+  await new Promise(setImmediate);
+  assert.deepEqual(socket.sent.map(s => JSON.parse(s).type), ["conversation.item.create", "response.create"]);
+  await h.voice.receive({type: "input_audio_buffer.speech_started"});
+  await h.voice.receive({type: "response.output_audio.delta", response_id: "r1", delta: "AQI="});
+  assert.equal(h.state.sources.length, 0, "late audio from interrupted response is ignored");
+  await h.voice.finish();
+});
+
+test("OpenAI never runs a cancelled tool and combines parallel results into one follow-up", async (t) => {
+  const h = browserVoiceHarness(t, {Voice: BrowserOpenAIVoice});
+  const socket = await connectOpenAIVoice(h);
+  const tool = (response_id, call_id) => ({type: "response.function_call_arguments.done", response_id, call_id,
+    name: "ask_home_assistant", arguments: JSON.stringify({text: "Проверь"})});
+  await h.voice.receive({type: "response.created", response: {id: "cancelled"}});
+  await h.voice.receive(tool("cancelled", "cancelled-call"));
+  await h.voice.receive({type: "response.done", response: {id: "cancelled", status: "cancelled"}});
+  assert.equal(h.state.turns.length, 0);
+  await h.voice.receive({type: "response.created", response: {id: "two"}});
+  await h.voice.receive(tool("two", "first"));
+  await h.voice.receive(tool("two", "second"));
+  await h.voice.receive({type: "response.done", response: {id: "two", status: "completed"}});
+  await new Promise(setImmediate);
+  const kinds = socket.sent.map(s => JSON.parse(s).type);
+  assert.equal(kinds.filter(x => x === "conversation.item.create").length, 2);
+  assert.equal(kinds.filter(x => x === "response.create").length, 1);
+  await h.voice.finish();
+});
+
+test("OpenAI does not start a tool follow-up after the user interrupts", async (t) => {
+  let resolveTurn;
+  const h = browserVoiceHarness(t, {Voice: BrowserOpenAIVoice, onTurn: () => new Promise(r => {resolveTurn = r;})});
+  const socket = await connectOpenAIVoice(h);
+  await h.voice.receive({type: "response.created", response: {id: "r1"}});
+  await h.voice.receive({type: "response.function_call_arguments.done", response_id: "r1", call_id: "c1",
+    name: "ask_home_assistant", arguments: JSON.stringify({text: "Проверь свет"})});
+  await h.voice.receive({type: "response.done", response: {id: "r1", status: "completed"}});
+  await h.voice.receive({type: "input_audio_buffer.speech_started"});
+  resolveTurn({text: "Готово"});
+  await new Promise(setImmediate);
+  assert.equal(socket.sent.map(s => JSON.parse(s).type).includes("response.create"), false);
+  await h.voice.finish();
 });
 
 test("browser Gemini accepts binary JSON setup and turn frames in order", async (t) => {

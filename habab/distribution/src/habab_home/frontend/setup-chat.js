@@ -1,5 +1,5 @@
 // Independent downstream extension: no dependency on compiled HA internals.
-import { AssistVoice, BrowserGeminiVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js";
+import { AssistVoice, BrowserGeminiVoice, BrowserOpenAIVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js";
 import { strings } from "./strings.js?v=6";
 import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals } from "./chat-dismissal.js";
 import { createToolCalls } from "./chat-tools.js?v=1";
@@ -125,6 +125,10 @@ export function chooseAssistPipeline(requestedId, pipelines, preferredId, lastUs
 }
 
 export function selectBrowserVoiceRoute(capability) {
+  if (capability?.available === true && capability.client === "browser_v1" &&
+      capability.provider === "openai" && capability.realtime_provider === "openai" &&
+      capability.transport === "direct" && capability.websocket_url === "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini" &&
+      capability.auth?.mode === "ephemeral_subprotocol") return "openai_browser_v1";
   if (capability?.available === true && capability.client === "browser_v1" &&
       capability.provider === "gemini" && capability.realtime_provider === "gemini" &&
       capability.transport === "direct" && capability.websocket_url === "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained" &&
@@ -1330,7 +1334,7 @@ function installChat() {
           const capability = await this.realtimeRequest("session", "GET");
           if (generation !== this.voiceGeneration || !this.q("dialog").open || !this.isCurrentOwnerContext()) return;
           route = selectBrowserVoiceRoute(capability);
-          if (route === "habab_browser_v1" || route === "gemini_browser_v1") {
+          if (["habab_browser_v1", "gemini_browser_v1", "openai_browser_v1"].includes(route)) {
             await this.startBrowserVoice(capability, generation);
             return;
           }
@@ -1406,7 +1410,7 @@ function installChat() {
       if (!session) return;
       if (session?.client !== "browser_v1" ||
           session.websocket_url !== capability.websocket_url || typeof session.session_id !== "string" ||
-          typeof session.value !== "string" || !session.value || !session.setup ||
+          typeof session.value !== "string" || !session.value || (capability.provider !== "openai" && !session.setup) ||
           !Number.isFinite(session.lease_ttl_seconds) ||
           !(Number.isSafeInteger(session.expires_at) ||
             (capability.provider === "gemini" && typeof session.expires_at === "string" && Number.isFinite(Date.parse(session.expires_at))))) {
@@ -1415,7 +1419,8 @@ function installChat() {
         }
         throw {code: "browserVoiceFailed"};
       }
-      const voice = new BrowserGeminiVoice({...session, auth: capability.auth}, {
+      const Voice = capability.provider === "openai" ? BrowserOpenAIVoice : BrowserGeminiVoice;
+      const voice = new Voice({...session, auth: capability.auth}, {
         onEvent: (event) => {
           if (generation !== this.voiceGeneration || !this.isCurrentOwnerContext()) return;
           this.onBrowserVoiceEvent(voice, event);

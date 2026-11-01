@@ -284,7 +284,7 @@ function pcm16Base64(samples) {
   return btoa(binary);
 }
 
-const MAX_GEMINI_FRAME_BYTES = 256 * 1024;
+const MAX_REALTIME_FRAME_BYTES = 256 * 1024;
 const TRANSCRIPT_DRAIN_TIMEOUT_MS = 5000;
 
 function decodeBase64(value) {
@@ -328,7 +328,10 @@ export class BrowserGeminiVoice {
       this.session.auth?.mode === "first_text_frame" && this.session.auth?.type === "habab.voice.auth.v1";
     const direct = this.session?.websocket_url === "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained" &&
       this.session.auth?.mode === "ephemeral_query" && this.session.provider === "gemini" && this.session.transport === undefined;
-    if ((!relay && !direct) ||
+    const openai = this instanceof BrowserOpenAIVoice && this.session?.provider === "openai" &&
+      this.session.websocket_url === "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini" &&
+      this.session.auth?.mode === "ephemeral_subprotocol";
+    if ((!relay && !direct && !openai) ||
         this.session.client !== "browser_v1" || !this.session.value ||
         typeof WebSocket !== "function") {
       throw { code: "browserVoiceFailed" };
@@ -340,7 +343,8 @@ export class BrowserGeminiVoice {
     if (!Number.isSafeInteger(credentialExpiry) || credentialExpiry <= Date.now()) {
       throw { code: "browserVoiceFailed" };
     }
-    this.socket = new WebSocket(direct ? `${this.session.websocket_url}?access_token=${encodeURIComponent(this.session.value)}` : this.session.websocket_url);
+    this.socket = openai ? new WebSocket(this.session.websocket_url, ["realtime", `openai-insecure-api-key.${this.session.value}`])
+      : new WebSocket(direct ? `${this.session.websocket_url}?access_token=${encodeURIComponent(this.session.value)}` : this.session.websocket_url);
     const messageGeneration = ++this.messageGeneration;
     this.socket.binaryType = "arraybuffer";
     this.expiryTimer = setTimeout(() => {
@@ -357,6 +361,7 @@ export class BrowserGeminiVoice {
       this.startReject = reject;
       this.socket.onopen = () => {
         if (this.closed) return;
+        if (openai) return; // The ephemeral secret already contains the configured session.
         try {
           // Direct Gemini gets its single-use token in the URL; the relay uses a first frame.
           this.socket.send(JSON.stringify(direct ? {setup: this.session.setup} : {
@@ -393,22 +398,22 @@ export class BrowserGeminiVoice {
   async decodeSocketMessage(data) {
     let bytes;
     if (typeof data === "string") {
-      if (data.length > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      if (data.length > MAX_REALTIME_FRAME_BYTES) throw new Error("invalid_frame");
       bytes = new TextEncoder().encode(data);
     } else if (data instanceof ArrayBuffer) {
-      if (data.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      if (data.byteLength > MAX_REALTIME_FRAME_BYTES) throw new Error("invalid_frame");
       bytes = new Uint8Array(data);
     } else if (ArrayBuffer.isView(data)) {
-      if (data.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      if (data.byteLength > MAX_REALTIME_FRAME_BYTES) throw new Error("invalid_frame");
       bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     } else if (typeof Blob === "function" && data instanceof Blob) {
-      if (data.size > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      if (data.size > MAX_REALTIME_FRAME_BYTES) throw new Error("invalid_frame");
       bytes = new Uint8Array(await data.arrayBuffer());
-      if (bytes.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+      if (bytes.byteLength > MAX_REALTIME_FRAME_BYTES) throw new Error("invalid_frame");
     } else {
       throw new Error("invalid_frame");
     }
-    if (bytes.byteLength > MAX_GEMINI_FRAME_BYTES) throw new Error("invalid_frame");
+    if (bytes.byteLength > MAX_REALTIME_FRAME_BYTES) throw new Error("invalid_frame");
     return new TextDecoder("utf-8", {fatal: true}).decode(bytes);
   }
 
@@ -699,5 +704,125 @@ export class BrowserGeminiVoice {
 
   close() {
     return this.finish({ cue: false });
+  }
+}
+
+/** Direct OpenAI Realtime transport, sharing capture, playback and chat history. */
+export class BrowserOpenAIVoice extends BrowserGeminiVoice {
+  constructor(session, callbacks) {
+    super(session, callbacks);
+    this.openaiEpoch = 0;
+    this.openaiResponses = new Map();
+    this.openaiToolCalls = new Map();
+  }
+
+  sendAudio(samples) {
+    if (!this.accepting || this.closed || this.socket?.readyState !== WebSocket.OPEN) return;
+    // The shared recorder produces 16 kHz; OpenAI Realtime accepts 24 kHz PCM.
+    const output = new Int16Array(Math.round(samples.length * 1.5));
+    for (let i = 0; i < output.length; i++) {
+      const position = i * 2 / 3;
+      const left = Math.floor(position), right = Math.min(left + 1, samples.length - 1);
+      output[i] = samples[left] + (samples[right] - samples[left]) * (position - left);
+    }
+    this.socket.send(JSON.stringify({type: "input_audio_buffer.append", audio: pcm16Base64(output)}));
+  }
+
+  async receive(event) {
+    if (this.closed || !event || typeof event !== "object") return;
+    const type = event.type;
+    if (type === "error") { this.fail({code: "browserVoiceFailed"}); return; }
+    if (type === "session.created") return super.receive({setupComplete: {}});
+    if (type === "input_audio_buffer.speech_started") {
+      this.openaiEpoch++;
+      this.openaiToolCalls.clear();
+      return super.receive({voiceActivity: {type: "ACTIVITY_START"}});
+    }
+    if (type === "input_audio_buffer.speech_stopped") return super.receive({voiceActivity: {type: "ACTIVITY_END"}});
+    if (type === "conversation.item.input_audio_transcription.completed") {
+      if (typeof event.transcript === "string" && event.transcript.trim())
+        return super.receive({serverContent: {inputTranscription: {text: event.transcript}}});
+      return;
+    }
+    if (type === "response.created") {
+      if (typeof event.response?.id !== "string") { this.fail({code: "browserVoiceFailed"}); return; }
+      this.openaiResponses.set(event.response.id, this.openaiEpoch);
+      return;
+    }
+    const responseId = event.response_id || event.response?.id;
+    if (typeof responseId !== "string" || this.openaiResponses.get(responseId) !== this.openaiEpoch) return;
+    if (type === "response.output_audio.delta" && typeof event.delta === "string")
+      return super.receive({serverContent: {modelTurn: {parts: [{inlineData: {mimeType: "audio/pcm;rate=24000", data: event.delta}}]}}});
+    if (type === "response.output_audio_transcript.delta" && typeof event.delta === "string")
+      return super.receive({serverContent: {outputTranscription: {text: event.delta}}});
+    if (type === "response.function_call_arguments.done") {
+      let args;
+      try { args = JSON.parse(event.arguments); } catch (_) { this.fail({code: "browserVoiceFailed"}); return; }
+      if (typeof event.call_id !== "string" || typeof event.name !== "string") { this.fail({code: "browserVoiceFailed"}); return; }
+      const calls = this.openaiToolCalls.get(responseId) || [];
+      if (calls.length >= 32) { this.fail({code: "browserVoiceFailed"}); return; }
+      calls.push({id: event.call_id, name: event.name, args});
+      this.openaiToolCalls.set(responseId, calls);
+      return;
+    }
+    if (type === "response.done") {
+      const completed = event.response?.status === "completed";
+      if (completed) await super.receive({serverContent: {turnComplete: true}});
+      else {
+        this.openaiEpoch++;
+        this.interruptPlayback();
+        for (const pending of this.pendingTools.values()) {
+          if (pending.responseId === responseId) pending.controller.abort();
+        }
+      }
+      const calls = this.openaiToolCalls.get(responseId) || [];
+      this.openaiToolCalls.delete(responseId);
+      if (completed && calls.length) {
+        if (new Set(calls.map(call => call.id)).size !== calls.length) { this.fail({code: "browserVoiceFailed"}); return; }
+        const ending = calls.find(call => call.name === "end_voice_session");
+        const selected = ending ? [ending] : calls;
+        const group = {remaining: selected.length, epoch: this.openaiEpoch, bargedIn: false};
+        for (const call of selected) void this.handleOpenAITool(call, responseId, group);
+      }
+    }
+  }
+
+  continueOpenAI(pending) {
+    if (this.closed || !this.accepting || pending.bargedIn || pending.epoch !== this.openaiEpoch ||
+        this.socket?.readyState !== WebSocket.OPEN) return;
+    this.canonicalFollowupPending = true;
+    this.socket.send(JSON.stringify({type: "response.create"}));
+  }
+
+  async handleOpenAITool(call, responseId, group) {
+    if (!this.accepting || this.closed) return;
+    if (this.callIds.has(call.id) || this.callIds.size >= 32) { this.fail({code: "browserVoiceFailed"}); return; }
+    this.callIds.add(call.id);
+    if (call.name === "end_voice_session") {
+      if (!call.args || typeof call.args !== "object" || Array.isArray(call.args) || Object.keys(call.args).some(k => k !== "review_wake") ||
+          ("review_wake" in call.args && typeof call.args.review_wake !== "boolean")) {
+        this.fail({code: "browserVoiceFailed"}); return;
+      }
+      await this.finish(); return;
+    }
+    if (call.name !== "ask_home_assistant" || typeof call.args?.text !== "string" ||
+        !call.args.text.trim() || call.args.text.length > 4000) { this.fail({code: "browserVoiceFailed"}); return; }
+    const pending = {controller: new AbortController(), bargedIn: false, epoch: this.openaiEpoch, responseId};
+    this.pendingTools.set(call.id, pending);
+    try {
+      const result = await this.onTurn(call.args.text, pending.controller.signal);
+      if (this.closed || !this.accepting || pending.controller.signal.aborted) return;
+      if (typeof result?.text !== "string") throw {code: "invalid_voice_turn"};
+      if (this.socket?.readyState !== WebSocket.OPEN) return;
+      this.socket.send(JSON.stringify({type: "conversation.item.create", item: {
+        type: "function_call_output", call_id: call.id, output: JSON.stringify({answer: result.text}),
+      }}));
+    } catch (_) {
+      if (!pending.controller.signal.aborted && !this.closed) this.fail({code: "browserVoiceTurnFailed"});
+    } finally {
+      this.pendingTools.delete(call.id);
+      group.bargedIn ||= pending.bargedIn;
+      if (--group.remaining === 0) this.continueOpenAI(group);
+    }
   }
 }

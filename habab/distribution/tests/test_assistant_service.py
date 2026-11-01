@@ -217,6 +217,20 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(paired["duplicate"])
         self.assertEqual(len(self.service.voice_receipts), 2)
 
+    async def test_openai_browser_events_are_recorded_and_replayed_once(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 0}}
+        first = await self.service.record_voice_event("alice", "canonical-session", "openai-event", "user",
+                                                      "Привет", history_epoch=0, provider="openai")
+        replay = await self.service.record_voice_event("alice", "canonical-session", "openai-event", "user",
+                                                       "Привет", history_epoch=0, provider="openai")
+        self.assertFalse(first["duplicate"])
+        self.assertTrue(replay["duplicate"])
+        receipt = next(iter(self.service.voice_receipts.values()))
+        self.assertEqual(receipt["protocol"], "browser_openai_event.v1")
+        self.assertEqual(self.service._voice_materialization(receipt)[3], True)
+
     async def test_unknown_receipt_protocol_is_not_projected_as_a_legacy_pair(self):
         await self.service.setup()
         self.service.web_sessions = {"alice": "canonical-session"}
@@ -233,7 +247,7 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.service.web_sessions = {"alice": "canonical-session"}
         self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 4}}
         invalid = (
-            {"role": "tool"}, {"role": {}}, {"provider": "openai"},
+            {"role": "tool"}, {"role": {}}, {"provider": "unknown"},
             {"correlation": "not-observed"}, {"event_id": "not an id"},
         )
         for changes in invalid:

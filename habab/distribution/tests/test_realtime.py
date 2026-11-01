@@ -248,6 +248,22 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.status, 400)
             assistant.record_voice_turn.assert_not_awaited(); assistant.record_voice_event.assert_not_awaited()
 
+    async def test_browser_openai_journals_observed_event_with_server_provider(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(record_voice_event=AsyncMock(return_value={
+            'recorded': True, 'duplicate': False, 'messages': []}),
+            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 1}))
+        request = Request(owner, {'kind': 'event', 'session_id': 'voice2_test',
+            'event_id': 'event_openai', 'role': 'user', 'text': 'Привет', 'provider': 'gemini'}, assistant)
+        request.app['hass'].data['habab_home']['voice_sessions'] = {'voice2_test': {
+            'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() + 60,
+            'history_session': None, 'history_epoch': 1, 'provider': 'openai'}}
+        with patch.object(realtime, 'async_dispatcher_send'):
+            result = await realtime.RealtimeTranscriptView().post(request)
+        self.assertEqual(result.status, 200)
+        assistant.record_voice_event.assert_awaited_once_with('alice', None, 'event_openai', 'user', 'Привет',
+            history_epoch=1, provider='openai', correlation=None)
+
     async def test_gemini_invalid_protocol_or_model_never_falls_back_or_calls_provider(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         for data in [{}, {'client': 'native_v2', 'model': 'gpt-realtime-mini'},
@@ -963,20 +979,29 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 400)
         dispatch.assert_not_called()
 
-    async def test_browser_openai_never_falls_back_to_habab_relay(self):
+    async def test_browser_openai_uses_its_own_direct_ephemeral_secret(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
-        for provider in ('openai',):
-            with self.subTest(provider=provider):
-                assistant = SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock())
-                request = Request(owner, {'client': 'browser_v1'}, assistant)
-                request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
-                    'provider': provider, 'api_key': 'synthetic-selected-' + provider})
-                with patch.object(realtime, 'async_get_clientsession') as client:
-                    response = await realtime.RealtimeSessionView().post(request)
-                self.assertEqual(response.status, 400)
-                self.assertEqual(json.loads(response.body)['message'], 'unsupported_voice_protocol')
-                client.assert_not_called()
-                assistant.web_session.assert_not_awaited()
+        assistant = SimpleNamespace(record_voice_event=AsyncMock(),
+            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 7}))
+        request = Request(owner, {'client': 'browser_v1'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'openai', 'api_key': 'synthetic-openai-key'})
+        response = SimpleNamespace(status=200, json=AsyncMock(return_value={
+            'value': 'synthetic-ephemeral', 'expires_at': int(time.time()) + 60}))
+        client = SimpleNamespace(post=Mock(return_value=AsyncContext(response)))
+        with patch.object(realtime, 'voice_context', return_value={}), \
+             patch.object(realtime, 'async_get_clientsession', return_value=client), \
+             patch.object(realtime, 'schedule_browser_lease_expiry'):
+            capability = await realtime.RealtimeSessionView().get(request)
+            result = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(result.status, 200)
+        payload = json.loads(result.body)
+        self.assertEqual(payload['websocket_url'], json.loads(capability.body)['websocket_url'])
+        self.assertEqual(payload['websocket_url'], 'wss://api.openai.com/v1/realtime?model=gpt-realtime-mini')
+        self.assertEqual(client.post.call_args.args[0], 'https://api.openai.com/v1/realtime/client_secrets')
+        self.assertNotIn('synthetic-openai-key', result.body.decode())
+        lease = request.app['hass'].data['habab_home']['voice_sessions'][payload['session_id']]
+        self.assertEqual((lease['client'], lease['provider']), ('browser_v1', 'openai'))
 
     async def test_browser_direct_gemini_mints_own_token_and_creates_browser_lease(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
@@ -1236,7 +1261,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             ('voice2_provider_unsupported', {'owner': 'alice', 'client': 'native_v2', 'provider': 'deepseek',
                                            'expires': time.monotonic() + 60}),
             ('voice2_browser_provider_unsupported', {'owner': 'alice', 'client': 'browser_v1',
-                                                   'provider': 'openai', 'expires': time.monotonic() + 60}),
+                                                   'provider': 'deepseek', 'expires': time.monotonic() + 60}),
             ('voice2_foreign', {'owner': 'bob', 'client': 'browser_v1', 'expires': time.monotonic() + 60}),
             ('voice2_expired', {'owner': 'alice', 'client': 'browser_v1', 'expires': time.monotonic() - 1}),
         ]:

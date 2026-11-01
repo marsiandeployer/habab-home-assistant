@@ -335,6 +335,26 @@ class VoiceEventCodecTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 self.assertIsNone(decode_voice_event_part(part))
 
+    def test_openai_event_is_visible_in_canonical_chat_without_exposing_raw_json(self):
+        agent = object.__new__(SetupAgent)
+        agent.password = "fixture"
+        agent.control_token = "fixture"
+        agent._runtime_secrets = set()
+        agent.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _domain: []))
+        raw, _digest, metadata = encode_voice_event("evt_openai", "user", "Привет", provider="openai")
+        message = {"info": {"role": "user"}, "parts": [{"type": "text", "text": raw,
+                    "synthetic": True, "metadata": metadata}]}
+        self.assertEqual(agent.visible([message]), [{"role": "user", "text": "Привет"}])
+
+
+class OpenAIVoiceEventCodecTests(unittest.TestCase):
+    def test_openai_event_round_trips_and_cannot_claim_gemini_protocol(self):
+        raw, _digest, metadata = encode_voice_event("evt_openai", "user", "Привет", provider="openai")
+        part = {"type": "text", "text": raw, "synthetic": True, "metadata": metadata}
+        self.assertEqual(decode_voice_event_part(part), {"role": "user", "text": "Привет"})
+        part["metadata"][VOICE_EVENT_METADATA_KEY] = VOICE_EVENT_PROTOCOL
+        self.assertIsNone(decode_voice_event_part(part))
+
 
 if __name__ == "__main__":
     unittest.main()
