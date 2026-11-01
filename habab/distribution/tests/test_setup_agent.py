@@ -950,6 +950,18 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         agent.abort.assert_awaited_once_with("alice", "ses_alice", record_context=False)
         self.assertIsNone(agent.active)
 
+    def test_certificate_diagnostic_exposes_only_a_boolean(self):
+        diagnostics = AgentDiagnostics()
+        diagnostics.record("alice", "session", {"name": "UnknownError", "data": {
+            "message": "self-signed certificate in certificate chain PRIVATE_SECRET",
+            "code": "SELF_SIGNED_CERT_IN_CHAIN",
+        }})
+        result = diagnostics.get("alice", "session")
+        self.assertTrue(result["untrusted_certificate"])
+        self.assertNotIn("PRIVATE_SECRET", str(result))
+        diagnostics.record("alice", "session", {"name": "UnknownError", "message": "other error"})
+        self.assertFalse(diagnostics.get("alice", "session")["untrusted_certificate"])
+
     def test_history_omits_tool_outputs_reasoning_and_synthetic_secrets(self):
         agent = self.agent()
         messages = [{"info": {"role": "assistant"}, "parts": [

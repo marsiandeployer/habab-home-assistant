@@ -143,6 +143,7 @@ export function selectBrowserVoiceRoute(capability) {
 export function assistantDiagnosticMessage(diagnostic, copy) {
   if (!diagnostic || typeof diagnostic !== "object") return "";
   const flags = diagnostic.flags && typeof diagnostic.flags === "object" ? diagnostic.flags : diagnostic;
+  if (flags.untrusted_certificate) return copy.diagnosticCertificate;
   if (flags.invalid_model || diagnostic.name === "InvalidModelError" || diagnostic.name === "ModelNotFoundError") return copy.diagnosticInvalidModel;
   if (flags.quota || diagnostic.http_status === 429 || diagnostic.name === "RateLimitError") return copy.diagnosticQuota;
   if ([401, 403].includes(diagnostic.http_status) || ["AuthenticationError", "ProviderAuthError"].includes(diagnostic.name)) return copy.diagnosticAuth;
@@ -204,6 +205,7 @@ function installChat() {
       diagnosticAuth: " Проверьте API-ключ и доступ к модели в настройках провайдера.",
       diagnosticContext: " Сократите запрос или начните новый чат.",
       diagnosticTimeout: " Запрос превысил время ожидания; действия могли выполниться. Проверьте состояние дома перед повтором команды.",
+      diagnosticCertificate: " Соединение с провайдером отклонено: сертификат не вызывает доверия. Проверьте настройки сети и доверенные сертификаты системы.",
       diagnosticReasoning: " Проверьте, что выбранная модель совместима с OpenCode.",
       diagnosticTools: " Выберите модель с поддержкой инструментов.",
       diagnosticGeneric: " Проверьте подключение и настройки провайдера.",
@@ -269,6 +271,7 @@ function installChat() {
       diagnosticAuth: " Check the API key and model access in provider settings.",
       diagnosticContext: " Shorten the request or start a new chat.",
       diagnosticTimeout: " The request timed out; actions may have run. Check the home state before repeating the command.",
+      diagnosticCertificate: " The provider connection was rejected because its certificate is not trusted. Check your network and system trusted certificates.",
       diagnosticReasoning: " Check that the selected model works with OpenCode.",
       diagnosticTools: " Choose a model that supports tools.",
       diagnosticGeneric: " Check your connection and provider settings.",

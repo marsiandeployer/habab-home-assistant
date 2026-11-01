@@ -664,9 +664,10 @@ test("browser voice capability selects only explicit Habab realtime or HA Assist
 });
 
 test("assistant diagnostics use only bounded safe fields and never provider response text", async () => {
-  const copy = {diagnosticAuth: "Check your key.", diagnosticQuota: "Check your limits.", diagnosticGeneric: "Check settings."};
+  const copy = {diagnosticAuth: "Check your key.", diagnosticQuota: "Check your limits.", diagnosticCertificate: "Check certificates.", diagnosticGeneric: "Check settings."};
   assert.equal(setupChatModule.assistantDiagnosticMessage({name: "AuthenticationError", http_status: 401, response: "secret key"}, copy), "Check your key.");
   assert.equal(setupChatModule.assistantDiagnosticMessage({name: "other", http_status: 429, mentions_timeout: true}, copy), "Check your limits.");
+  assert.equal(setupChatModule.assistantDiagnosticMessage({name: "UnknownError", untrusted_certificate: true}, copy), "Check certificates.");
   assert.equal(setupChatModule.assistantDiagnosticMessage({name: "other", raw: "provider secret"}, copy), "Check settings.");
 });
 

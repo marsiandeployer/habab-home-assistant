@@ -59,6 +59,7 @@ try {
             mentions_tool_calls = ($item.mentions_tool_calls -is [bool] -and $item.mentions_tool_calls)
             mentions_context_limit = ($item.mentions_context_limit -is [bool] -and $item.mentions_context_limit)
             mentions_timeout = ($item.mentions_timeout -is [bool] -and $item.mentions_timeout)
+            untrusted_certificate = ($item.untrusted_certificate -is [bool] -and $item.untrusted_certificate)
         }
     }
     [ordered]@{

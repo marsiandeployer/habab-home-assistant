@@ -22,6 +22,14 @@ def create_database(path):
 
 
 class DiagnoseAssistantTests(unittest.TestCase):
+    def test_certificate_error_is_detected_without_exposing_details(self):
+        result = diagnose_assistant._error_summary({'name': 'UnknownError', 'data': {
+            'message': 'self-signed certificate in certificate chain PRIVATE_SECRET',
+            'code': 'SELF_SIGNED_CERT_IN_CHAIN',
+        }})
+        self.assertTrue(result['untrusted_certificate'])
+        self.assertNotIn('PRIVATE_SECRET', str(result))
+
     def test_redacts_error_payload_and_user_message_and_keeps_only_whitelisted_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'opencode.db'
@@ -54,7 +62,7 @@ class DiagnoseAssistantTests(unittest.TestCase):
                 'assistant_errors': [{
                     'name': 'APIError', 'http_status': 400,
                     'missing_reasoning_content': True, 'mentions_reasoning_content': True, 'invalid_model': False, 'quota': True,
-                    'mentions_tool_calls': False, 'mentions_context_limit': False, 'mentions_timeout': False,
+                    'mentions_tool_calls': False, 'mentions_context_limit': False, 'mentions_timeout': False, 'untrusted_certificate': False,
                 }],
             })
             self.assertFalse(set(('session_id', 'text', 'message', 'headers', 'path')) & set(result))
@@ -76,7 +84,7 @@ class DiagnoseAssistantTests(unittest.TestCase):
             self.assertEqual(result['assistant_errors'][0], {
                 'name': 'other', 'http_status': None,
                 'missing_reasoning_content': False, 'mentions_reasoning_content': False, 'invalid_model': True, 'quota': True,
-                'mentions_tool_calls': True, 'mentions_context_limit': True, 'mentions_timeout': True,
+                'mentions_tool_calls': True, 'mentions_context_limit': True, 'mentions_timeout': True, 'untrusted_certificate': False,
             })
 
     def test_part_error_is_reported_when_assistant_message_has_no_error_object(self):

@@ -17,6 +17,9 @@ _FLAG_MARKERS = {
     "mentions_tool_calls": ("tool_calls", "tool calls"),
     "mentions_context_limit": ("context_length_exceeded", "maximum context length", "context_limit"),
     "mentions_timeout": ("timeout", "timed out", "etimedout"),
+    "untrusted_certificate": ("self-signed certificate", "self signed certificate",
+                              "self_signed_cert_in_chain", "depth_zero_self_signed_cert",
+                              "unable to verify the first certificate"),
 }
 
 
@@ -60,7 +63,7 @@ def safe_error_summary(error):
     # never copied to the record or returned to the client.
     searchable = []
     for key, value in values:
-        if key.lower() in ("message", "responsebody", "response_body", "body", "code"):
+        if key.lower() in ("message", "responsebody", "response_body", "body", "code", "stack"):
             if isinstance(value, str):
                 searchable.append(value[:128 * 1024].lower())
             elif isinstance(value, (dict, list)):
