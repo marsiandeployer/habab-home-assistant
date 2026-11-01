@@ -334,7 +334,7 @@ jobs:
           cp habab/product-tunnel/web_tunnel.py habab/distribution/product-tunnel/web_tunnel.py
           frontend_version=$(python3 -c 'import json;print(json.load(open("habab/distribution/native-frontend-release.json"))["version"])')
           frontend_sha=$(python3 -c 'import json;print(json.load(open("habab/distribution/native-frontend-release.json"))["sha256"])')
-          docker buildx build --platform "$PLATFORM" --pull=false \
+          docker buildx build --platform "$PLATFORM" --pull=false --tag habab-home:latest \
             --build-arg "HABAB_SOURCE_REVISION=$SOURCE_REVISION" \
             --build-arg HABAB_SOURCE_DIRTY=false \
             --build-arg "HABAB_FRONTEND_VERSION=$frontend_version" \
