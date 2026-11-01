@@ -518,6 +518,22 @@ jobs:
       SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
       ANDROID_PUBLIC_BASE: ${{ inputs.release_tag != '' && format('https://github.com/{0}/releases/download/{1}', github.repository, inputs.release_tag) || 'https://habab-demo.wpmix.net/downloads/android' }}
     steps:
+      - name: Set up host Python 3.14
+        if: ${{ needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate' }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+          check-latest: false
+      - name: Verify host Python and pip before runtime packaging
+        if: ${{ needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate' }}
+        run: |
+          python3 - <<'PY'
+          import sys
+          if sys.version_info[:2] != (3, 14):
+              raise SystemExit('Android runtime packaging requires host Python 3.14')
+          print('Host Python:', sys.version.split()[0], sys.executable)
+          PY
+          python3 -m pip --version
       - name: Select the supported Java 17 toolchain and verify Android SDK tools
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         shell: bash

@@ -177,7 +177,11 @@ runtime installation without changed inputs, a failure, or a concrete concern.
 Publication still checks signatures and artifact hashes; device acceptance is
 reported separately from source/build checks.
 
-The Android job uses `ubuntu-24.04`. Before runtime packaging it verifies the
+The Android job uses `ubuntu-24.04` with explicit host Python `3.14` through the
+same pinned official `actions/setup-python` used by the frontend producer,
+with `check-latest: false`. It checks the actual `python3` minor version and pip
+before packaging; the wheel's Python requirement remains enforced.
+Before runtime packaging it verifies the
 runner's Java 17 executable and calls SDK manager by the absolute path
 `$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager`; an unset `ANDROID_HOME`
 falls back to `ANDROID_SDK_ROOT`. A missing tool fails before rootfs work.

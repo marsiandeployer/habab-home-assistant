@@ -606,6 +606,33 @@ if sys.argv[1:2] == ['run']:
             "ee1c6fbd9f95d1a3396cc68c103195e6e4fdd17349476c6599e7efad5ace9069",
         )
 
+    def test_android_host_python_is_pinned_and_checked_before_packaging(self):
+        workflow = self.workflow_text()
+        android = workflow[workflow.index('  android:\n'):workflow.index('  assemble-candidate:\n')]
+        setup = android.index('      - name: Set up host Python 3.14')
+        check = android.index('      - name: Verify host Python and pip before runtime packaging')
+        source = android.index('      - name: Fetch only Android and distribution source blobs')
+        package = android.index('      - name: Build fresh same-source runtime with the compiled frontend')
+        self.assertLess(setup, check)
+        self.assertLess(check, source)
+        self.assertLess(check, package)
+        self.assertIn('actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97', android[setup:check])
+        self.assertIn("python-version: '3.14'", android[setup:check])
+        self.assertIn('check-latest: false', android[setup:check])
+        self.assertIn('python3 -m pip --version', android[check:source])
+        self.assertNotIn('--ignore-requires-python', android)
+        code = re.search(r"python3 - <<'PY'\n(.*?)          PY", android[check:source], re.S).group(1)
+        code = textwrap.dedent(code).replace('import sys', '', 1)
+        from types import SimpleNamespace
+        for version in ((3, 14, 9), (3, 12, 3)):
+            with self.subTest(version=version):
+                fake_sys = SimpleNamespace(version_info=version, version='fixture', executable='/fixture/python3')
+                if version[:2] == (3, 14):
+                    exec(code, {'sys': fake_sys, 'print': lambda *args: None})
+                else:
+                    with self.assertRaisesRegex(SystemExit, 'requires host Python 3.14'):
+                        exec(code, {'sys': fake_sys})
+
     def test_android_sdk_preflight_uses_absolute_tools_and_runs_before_runtime_packaging(self):
         workflow = self.workflow_text()
         android = workflow[workflow.index('  android:\n'):workflow.index('  assemble-candidate:\n')]
