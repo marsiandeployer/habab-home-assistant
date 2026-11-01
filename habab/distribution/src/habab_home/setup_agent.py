@@ -339,6 +339,9 @@ class SetupAgent:
 
     async def request(self, method, route, body=None, timeout=15):
         session = async_get_clientsession(self.hass)
+        history = re.fullmatch(r"session/[A-Za-z0-9_-]+/message\?limit=(\d+)", route)
+        # Tool output can make a short conversation much larger than ordinary API data.
+        response_limit = 16_000_000 if history else 2_000_000
         try:
             async with session.request(
                 method, f"http://127.0.0.1:{PORT}/{route}", json=body,
@@ -350,9 +353,16 @@ class SetupAgent:
                 raw = bytearray()
                 async for chunk in response.content.iter_chunked(65536):
                     raw.extend(chunk)
-                    if len(raw) > 2_000_000:
+                    if len(raw) > response_limit:
                         raise AgentError("response_too_large")
                 return json.loads(raw) if raw else None
+        except AgentError as error:
+            if method == "GET" and history and error.code == "response_too_large":
+                count = int(history[1])
+                if count > 1:
+                    smaller = route.rsplit("=", 1)[0] + "=" + str(max(1, count // 3))
+                    return await self.request(method, smaller, timeout=timeout)
+            raise
         except TimeoutError as error:
             raise AgentError("runtime_timeout") from error
         except (ClientError, ValueError) as error:

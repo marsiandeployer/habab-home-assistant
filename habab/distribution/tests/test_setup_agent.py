@@ -927,6 +927,32 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(diagnostic["untrusted_certificate"])
         self.assertNotIn("private detail", str(diagnostic))
 
+    async def test_large_history_can_reconnect_without_relaxing_other_api_limits(self):
+        agent = self.agent()
+        del agent.request
+        payload = b'["' + b'x' * 2_000_001 + b'"]'
+
+        class Content:
+            async def iter_chunked(self, size):
+                for offset in range(0, len(payload), size):
+                    yield payload[offset:offset + size]
+
+        class Response:
+            status = 200
+            content = Content()
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *_):
+                pass
+
+        with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
+                   return_value=SimpleNamespace(request=Mock(return_value=Response()))):
+            history = await agent.request("GET", "session/ses_test/message?limit=60")
+            self.assertEqual(len(history[0]), 2_000_001)
+            with self.assertRaises(AgentError) as error:
+                await agent.request("GET", "global/health")
+            self.assertEqual(error.exception.code, "response_too_large")
+
     async def test_runtime_request_timeout_keeps_safe_code_and_original_cause(self):
         agent = self.agent()
         del agent.request
