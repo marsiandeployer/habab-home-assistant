@@ -177,6 +177,13 @@ public final class VoiceService extends Service {
         ServerService.startVoiceIfReady(context, true);
     }
 
+    static boolean conversationMicrophoneActive() {
+        VoiceService service = instance;
+        AudioRecord input = service == null ? null : service.recorder;
+        return service != null && service.running && service.realtime != null && input != null
+                && input.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING;
+    }
+
     static boolean hasActiveConversation() {
         VoiceService service = instance;
         return service != null && service.realtime != null;

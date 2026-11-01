@@ -51,7 +51,7 @@
     <string name="short_password">Пароль слишком короткий</string>
     <string name="no_link_handler">Нет приложения для открытия этой ссылки</string>
     <string name="phase_running">Работает</string>
-    <string name="phase_starting">Запускается</string>
+    <string name="phase_starting">Запускается (может занять несколько минут)</string>
     <string name="phase_stopping">Останавливается</string>
     <string name="phase_long_start">Запуск занимает больше пяти минут — проверьте диагностику</string>
     <string name="phase_restarting">Повторный запуск</string>
@@ -61,6 +61,7 @@
     <string name="tunnel_disconnected">Переподключение SSH</string>
     <string name="check_compatibility">Проверка совместимости телефона…</string>
     <string name="voice_title">Голосовой помощник</string>
+    <string name="voice_microphone_active">🔴 Микрофон включён</string>
     <string name="voice_authorize">Подключить голос к этому аккаунту</string>
     <string name="voice_login_help">Войдите в умный дом своим аккаунтом администратора. Голос подключится автоматически; для микрофона нажмите «Включить голос».</string>
     <string name="voice_privacy">Фраза активации распознаётся на телефоне. Короткий пик открывает голосовой сеанс, два понижающихся — завершают его. Речь передаётся выбранному голосовому сервису во время сеанса; команда и ответ сохраняются в общем чате. Микрофон работает с погашенным экраном. Отключить его можно здесь или в уведомлении.</string>

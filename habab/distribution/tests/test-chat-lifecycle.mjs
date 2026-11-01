@@ -1125,3 +1125,27 @@ test("reading older history keeps its position until the setup jump is chosen", 
   assert.equal(jump.hidden, true);
   assert.equal(instance.followSetupForms, true);
 });
+
+test("microphone indicator follows an open audio capture and clears after it closes", () => {
+  const instance = Object.create(setupChatElementClass.prototype);
+  const nodes = new Map();
+  const element = () => ({hidden: false, disabled: false, attrs: {}, classList: {toggle() {}},
+    setAttribute(key, value) { this.attrs[key] = value; }});
+  instance.q = (selector) => {
+    if (!nodes.has(selector)) nodes.set(selector, element());
+    return nodes.get(selector);
+  };
+  instance.shadowRoot = {querySelectorAll: () => []};
+  instance.syncReloadState = () => {};
+  instance.language = "ru";
+  instance.sessionId = "test";
+  instance.voiceBusy = true;
+  instance.voice = {capture: {stream: {getAudioTracks: () => [{readyState: "live"}]}, closed: false}};
+  instance.controls();
+  assert.equal(instance.q(".mic-live").hidden, false);
+  assert.equal(instance.q(".mic").attrs["aria-pressed"], "true");
+  instance.voice.capture.closed = true;
+  instance.controls();
+  assert.equal(instance.q(".mic-live").hidden, true);
+  assert.equal(instance.q(".mic").attrs["aria-pressed"], "false");
+});

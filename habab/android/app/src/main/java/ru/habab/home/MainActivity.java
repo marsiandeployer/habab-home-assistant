@@ -393,7 +393,8 @@ public final class MainActivity extends Activity {
     private void updateVoiceButton() {
         if (voiceButton == null) return;
         boolean enabled = getSharedPreferences("voice", 0).getBoolean("enabled", false);
-        voiceButton.setText(enabled && microphoneGranted() && voiceAuthorization.nativeAllowed() ? R.string.voice_title : R.string.voice_enable_action);
+        voiceButton.setText(VoiceService.conversationMicrophoneActive() ? R.string.voice_microphone_active
+                : enabled && microphoneGranted() && voiceAuthorization.nativeAllowed() ? R.string.voice_title : R.string.voice_enable_action);
     }
 
     private boolean microphoneGranted() {

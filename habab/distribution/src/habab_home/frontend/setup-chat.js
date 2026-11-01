@@ -221,7 +221,7 @@ function installChat() {
       speechRequired: "Выбранный голосовой помощник не настроен для распознавания речи. Выберите другой в настройках голосовых помощников.",
       transcriptEmpty: "Не удалось распознать речь. Попробуйте ещё раз или введите запрос.",
       voiceReplyFailed: "Не удалось воспроизвести голосовой ответ. Ответ остался в чате.",
-      mic: "Сказать запрос помощнику", stopVoice: "Завершить запись", listening: "Слушаю. Завершу запись после паузы в речи.",
+      micActive: "Микрофон включён", mic: "Сказать запрос помощнику", stopVoice: "Завершить запись", listening: "Слушаю. Завершу запись после паузы в речи.",
       voiceModeLabel: "Режим голоса",
       voiceModeHabab: "Habab",
       voiceModeAssist: "Assist",
@@ -287,7 +287,7 @@ function installChat() {
       speechRequired: "The selected voice assistant is not configured for speech recognition. Choose another in Voice assistant settings.",
       transcriptEmpty: "Speech could not be recognized. Try again or enter a request.",
       voiceReplyFailed: "The spoken reply could not play. The response is still in chat.",
-      mic: "Send a voice request to the assistant", stopVoice: "Finish recording", listening: "Listening. Recording ends after a pause in speech.",
+      micActive: "Microphone on", mic: "Send a voice request to the assistant", stopVoice: "Finish recording", listening: "Listening. Recording ends after a pause in speech.",
       voiceModeLabel: "Voice mode",
       voiceModeHabab: "Habab",
       voiceModeAssist: "Assist",
@@ -863,8 +863,9 @@ function installChat() {
       this.shadowRoot.innerHTML = `<style>
         :host{position:fixed;z-index:10;inset-inline-end:max(16px,env(safe-area-inset-right));bottom:calc(16px + var(--safe-area-inset-bottom,0px) + 72px);display:block;white-space:normal;pointer-events:none;color:var(--primary-text-color,#212121);font:14px/1.55 var(--paper-font-body1_-_font-family,Roboto,system-ui,sans-serif)}
         :host([data-context-unavailable]){display:none !important;pointer-events:none !important}
-        *{box-sizing:border-box}button,textarea,select{font:inherit}button{cursor:pointer;color:inherit;background:transparent;border:0;min-height:44px;border-radius:8px;padding:8px 12px}button:hover{background:var(--secondary-background-color,#f0f2f4)}button:disabled,select:disabled{opacity:.5;cursor:default}.voice-mode{max-width:104px;min-height:44px;padding:5px 6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:inherit;background:var(--card-background-color,#fff);font-size:12px}
+        *{box-sizing:border-box}button,textarea,select{font:inherit}button{cursor:pointer;color:inherit;background:transparent;border:0;min-height:44px;border-radius:8px;padding:8px 12px}button:hover{background:var(--secondary-background-color,#f0f2f4)}button:disabled,select:disabled{opacity:.5;cursor:default}
         :is(button,textarea,a):focus-visible{outline:3px solid var(--primary-color,#007a9e);outline-offset:2px}::selection{background:var(--primary-color,#007a9e);color:#fff}
+        .mic.active{color:#b3261e;background:#fce8e6}.mic-live{padding:6px 16px;background:#fce8e6;color:#8c1d18;font-size:13px;font-weight:600}.mic-live::before{content:"●";margin-inline-end:8px}
         .icon{width:56px;height:56px;padding:16px;display:grid;place-items:center}.launcher{position:relative;z-index:1;pointer-events:auto;border-radius:50%;background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff);box-shadow:0 3px 12px #0003}.launcher:hover{background:var(--dark-primary-color,#006686)}svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
         dialog{pointer-events:auto;position:fixed;inset:auto max(16px,env(safe-area-inset-right)) max(84px,calc(env(safe-area-inset-bottom) + 72px)) auto;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e3e6e8);border-radius:16px;padding:0;width:min(420px,calc(100vw - 32px));height:min(680px,calc(100dvh - 120px));max-width:none;max-height:none;margin:0;box-shadow:0 12px 36px #0003}
         dialog::backdrop{background:transparent}.layout{height:100%;display:flex;flex-direction:column;min-width:0}header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-block-end:1px solid var(--divider-color,#e3e6e8)}h2{font-size:18px;font-weight:500;margin:0;flex:1}.fresh{font-size:13px}.collapse{display:none}
@@ -890,7 +891,7 @@ function installChat() {
         .answer-feedback-send{background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff)}
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
-        <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><select class="voice-mode" aria-label="${t.voiceModeLabel}" title="${t.nativeAssistTitle}"><option value="habab">${t.voiceModeHabab}</option><option value="assist">${t.voiceModeAssist}</option></select><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+        <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><div class="mic-live" role="status" aria-live="polite" hidden>${t.micActive}</div>
       <div id="log"><div id="messages" role="log" aria-live="polite" aria-label="${t.title}"></div><div id="setup-cards"></div></div><footer><label class="assist-pipeline-control" hidden>${t.assistPipelineLabel}<select class="assist-pipeline"><option value="">${t.assistPipelineDefault}</option></select></label><p id="voice-mode-help" class="help" hidden></p><p id="status" role="status"></p><button class="setup-jump" type="button" hidden>${t.showSetupForm}</button><div class="recovery" hidden><a href="/habab-ai">${t.settings}</a><button type="button" class="retry">${t.retry}</button></div>
       <form class="composer-form"><textarea class="composer-textarea" aria-label="${t.placeholder}" placeholder="${t.placeholder}" maxlength="4000" rows="2"></textarea><button class="send icon" type="submit" aria-label="${t.send}" title="${t.send}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button><button class="stop" type="button" hidden>${t.stop}</button></form></footer></div></dialog>`;
       this.q(".launcher").onclick = () => this.open();
@@ -900,14 +901,6 @@ function installChat() {
         this.onClose();
       });
       this.q(".collapse").onclick = () => this.collapseMobileChat();
-      this.q(".voice-mode").value = this.voiceMode;
-      this.q(".voice-mode").addEventListener("change", (event) => {
-        this.voiceMode = event.currentTarget.value === "assist" ? "assist" : "habab";
-        this.updatePipelineControl();
-        if (this.voiceMode === "assist") void this.loadPipelineOptions();
-        this.updateVoiceModeHelp();
-        this.controls();
-      });
       this.q(".assist-pipeline").addEventListener("change", (event) => {
         this.assistPipelineChoiceSet = true;
         this.assistPipelineId = event.currentTarget.value || undefined;
@@ -1089,11 +1082,7 @@ function installChat() {
       this.q(".collapse").setAttribute("aria-label", t.collapseChat);
       this.q(".mic").title = t.mic;
       this.q(".mic").setAttribute("aria-label", t.mic);
-      const voiceMode = this.q(".voice-mode");
-      voiceMode.setAttribute("aria-label", t.voiceModeLabel);
-      voiceMode.title = t.nativeAssistTitle;
-      voiceMode.options[0].textContent = t.voiceModeHabab;
-      voiceMode.options[1].textContent = t.voiceModeAssist;
+      this.q(".mic-live").textContent = t.micActive;
       const pipelineSelect = this.q(".assist-pipeline");
       pipelineSelect.options[0].textContent = t.assistPipelineDefault;
       this.q(".assist-pipeline-control").firstChild.textContent = t.assistPipelineLabel;
@@ -1159,8 +1148,11 @@ function installChat() {
 
     controls() {
       this.q(".composer-textarea").disabled = !this.sessionId || this.busy || this.setupRestarting;
-      this.q(".voice-mode").disabled = this.demo || !this.sessionId || this.busy || this.setupRestarting;
-      this.q(".voice-mode").hidden = this.demo;
+      const capture = this.voice?.capture;
+      const microphoneActive = Boolean(!capture?.closed && capture?.stream?.getAudioTracks().some((track) => track.readyState === "live"));
+      this.q(".mic-live").hidden = !microphoneActive;
+      this.q(".mic").classList.toggle("active", microphoneActive);
+      this.q(".mic").setAttribute("aria-pressed", String(microphoneActive));
       this.q(".mic").disabled = this.demo || !this.sessionId || (this.busy && !this.voiceBusy) || this.setupRestarting;
       this.q(".mic").hidden = this.demo;
       this.q(".assist-pipeline").disabled = this.busy || this.setupRestarting;
@@ -1365,6 +1357,7 @@ function installChat() {
           this.onVoiceEvent(event);
         }, nativeAssist ? {runConversation: true, conversationId} : undefined);
         await this.voice.start();
+        this.controls();
       } catch (error) {
         if (generation !== this.voiceGeneration) return;
         this.voice?.close();
@@ -1438,7 +1431,7 @@ function installChat() {
     }
 
     onBrowserVoiceEvent(voice, event) {
-      if (event.type === "ready") this.status(this.t.listening);
+      if (event.type === "ready") { this.status(this.t.listening); this.controls(); }
       if (event.type === "speech-start") this.status(this.t.speechStart);
       if (event.type === "speech-end") this.status(this.t.speechEnd);
       if (event.type === "error") {
@@ -1459,9 +1452,11 @@ function installChat() {
     finishVoice() {
       if (this.voice instanceof BrowserGeminiVoice) void this.voice.finish();
       else this.voice?.finishRecording();
+      this.controls();
     }
 
     onVoiceEvent(event) {
+      if (["stt-start", "stt-vad-end", "stt-end", "recording-ended"].includes(event.type)) this.controls();
       if (event.type === "stt-vad-start") this.status(this.t.speechStart);
       if (event.type === "stt-vad-end" || event.type === "recording-ended") this.status(this.t.speechEnd);
       if (event.type === "stt-end") {
