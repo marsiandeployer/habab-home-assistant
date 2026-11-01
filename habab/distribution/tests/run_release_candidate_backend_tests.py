@@ -35,6 +35,7 @@ def main() -> int:
         "test_assistant_service",
         "test_realtime",
         "test_provider_transport",
+        "test_gemini_provider",
         "test_beta",
         "test_tool_history",
         "test_diagnostic_redaction",
