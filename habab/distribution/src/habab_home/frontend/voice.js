@@ -294,7 +294,7 @@ function decodeBase64(value) {
   return bytes;
 }
 
-/** Habab's constrained Gemini Live WebSocket adapter for the unified browser chat. */
+/** Gemini Live WebSocket adapter for Habab relay and direct user credentials. */
 export class BrowserGeminiVoice {
   constructor(session, { onEvent, onTurn, onTranscript, onStop, playCue }) {
     this.session = session;
@@ -324,8 +324,11 @@ export class BrowserGeminiVoice {
   }
 
   async start() {
-    if (!this.session || this.session.websocket_url !== "wss://habab-voice.wpmix.net/gemini/ws" ||
-        this.session.auth?.mode !== "first_text_frame" || this.session.auth?.type !== "habab.voice.auth.v1" ||
+    const relay = this.session?.websocket_url === "wss://habab-voice.wpmix.net/gemini/ws" &&
+      this.session.auth?.mode === "first_text_frame" && this.session.auth?.type === "habab.voice.auth.v1";
+    const direct = this.session?.websocket_url === "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained" &&
+      this.session.auth?.mode === "ephemeral_query" && this.session.provider === "gemini" && this.session.transport === undefined;
+    if ((!relay && !direct) ||
         this.session.client !== "browser_v1" || !this.session.value ||
         typeof WebSocket !== "function") {
       throw { code: "browserVoiceFailed" };
@@ -333,14 +336,11 @@ export class BrowserGeminiVoice {
     const ttl = this.session.lease_ttl_seconds;
     if (!Number.isFinite(ttl) || ttl <= 0 || ttl > 3600) throw { code: "browserVoiceFailed" };
     const expiresAt = this.session.expires_at;
-    if (typeof expiresAt !== "number" || !Number.isSafeInteger(expiresAt) || expiresAt <= 0) {
-      throw { code: "browserVoiceFailed" };
-    }
-    const credentialExpiry = expiresAt * 1000;
+    const credentialExpiry = direct && typeof expiresAt === "string" ? Date.parse(expiresAt) : expiresAt * 1000;
     if (!Number.isSafeInteger(credentialExpiry) || credentialExpiry <= Date.now()) {
       throw { code: "browserVoiceFailed" };
     }
-    this.socket = new WebSocket(this.session.websocket_url);
+    this.socket = new WebSocket(direct ? `${this.session.websocket_url}?access_token=${encodeURIComponent(this.session.value)}` : this.session.websocket_url);
     const messageGeneration = ++this.messageGeneration;
     this.socket.binaryType = "arraybuffer";
     this.expiryTimer = setTimeout(() => {
@@ -358,8 +358,8 @@ export class BrowserGeminiVoice {
       this.socket.onopen = () => {
         if (this.closed) return;
         try {
-          // The opaque credential is sent only in the relay's first text frame.
-          this.socket.send(JSON.stringify({
+          // Direct Gemini gets its single-use token in the URL; the relay uses a first frame.
+          this.socket.send(JSON.stringify(direct ? {setup: this.session.setup} : {
             type: this.session.auth.type,
             credential: this.session.value,
             setup: this.session.setup,

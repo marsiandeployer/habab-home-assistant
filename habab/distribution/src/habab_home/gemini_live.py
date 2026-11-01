@@ -56,6 +56,8 @@ async def create_connection(client, api_key, model, conversation):
         token = await response.json()
     if not isinstance(token.get("name"), str) or not token["name"]:
         raise ValueError("invalid_realtime_response")
+    # Google may return only the token name. The requested new-session deadline
+    # is known locally and is the relevant deadline for opening the WebSocket.
     return {"provider": "gemini", "value": token["name"],
-            "expires_at": token.get("expireTime"), "model": model,
+            "expires_at": int((now + timedelta(seconds=60)).timestamp()), "model": model,
             "websocket_url": WEBSOCKET_URL, "setup": setup}

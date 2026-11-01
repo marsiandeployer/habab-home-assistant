@@ -410,6 +410,28 @@ test("browser Gemini auth is the first WS frame and capture waits for setupCompl
   assert.deepEqual(h.state.cues, ["end"]);
 });
 
+test("direct Gemini uses a single-use token with the official endpoint and starts capture after setup", async (t) => {
+  const h = browserVoiceHarness(t);
+  Object.assign(h.voice.session, {
+    provider: "gemini", websocket_url: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained",
+    value: "auth_tokens/test+fixture", expires_at: new Date(Date.now() + 60000).toISOString(),
+    auth: {mode: "ephemeral_query"},
+  });
+  const started = h.voice.start();
+  const socket = h.state.sockets[0];
+  assert.ok(socket.url.endsWith("?access_token=auth_tokens%2Ftest%2Bfixture"));
+  socket.readyState = 1;
+  socket.onopen();
+  assert.deepEqual(JSON.parse(socket.sent[0]), {setup: {model: "models/test"}});
+  assert.equal(h.state.captureCount || 0, 0);
+  socket.onmessage({data: JSON.stringify({setupComplete: {}})});
+  await started;
+  assert.equal(h.state.captureCount, 1);
+  await h.voice.finish();
+  assert.equal(h.state.captureStopped, 1);
+  assert.deepEqual(h.state.stops, ["voice2_test"]);
+});
+
 test("browser Gemini accepts binary JSON setup and turn frames in order", async (t) => {
   const h = browserVoiceHarness(t);
   const started = h.voice.start();

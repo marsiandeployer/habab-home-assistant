@@ -642,13 +642,18 @@ test("native pipeline selection honors an explicit ID and never falls back when 
   assert.equal(setupChatModule.chooseAssistPipeline("last_used", [], undefined, undefined), undefined);
 });
 
-test("browser voice capability selects only explicit Habab realtime or HA Assist fallback", () => {
+test("browser voice capability selects explicit provider realtime or HA Assist fallback", () => {
   const capability = {
     available: true, client: "browser_v1", provider: "habab", realtime_provider: "gemini",
     transport: "habab", websocket_url: "wss://habab-voice.wpmix.net/gemini/ws",
     auth: {mode: "first_text_frame", type: "habab.voice.auth.v1"},
   };
   assert.equal(setupChatModule.selectBrowserVoiceRoute(capability), "habab_browser_v1");
+  const direct = {available: true, client: "browser_v1", provider: "gemini", realtime_provider: "gemini",
+    transport: "direct", websocket_url: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained",
+    auth: {mode: "ephemeral_query"}};
+  assert.equal(setupChatModule.selectBrowserVoiceRoute(direct), "gemini_browser_v1");
+  assert.equal(setupChatModule.selectBrowserVoiceRoute({...direct, websocket_url: "wss://example.test"}), undefined);
   assert.equal(setupChatModule.selectBrowserVoiceRoute({
     available: false, reason: "selected_provider_requires_ha_assist_stt",
     browser: {transport: "ha_assist_pipeline", requires_ha_stt: true},

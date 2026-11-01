@@ -453,6 +453,13 @@ class RealtimeSessionView(HomeAssistantView):
             settings = request.app["hass"].data[DOMAIN]["setup_agent"].settings()
         except AgentError as error:
             return self.json_message(error.code, status_code=400)
+        if settings.get("provider") == "gemini":
+            result = self.json({"available": True, "client": BROWSER_CLIENT,
+                                "provider": "gemini", "realtime_provider": "gemini",
+                                "transport": "direct", "websocket_url": gemini_live.WEBSOCKET_URL,
+                                "auth": {"mode": "ephemeral_query"}})
+            result.headers["Cache-Control"] = "no-store"
+            return result
         if settings.get("provider") != "habab":
             result = self.json(browser_assist_fallback("selected_provider_requires_ha_assist_stt"))
             result.headers["Cache-Control"] = "no-store"
@@ -484,7 +491,7 @@ class RealtimeSessionView(HomeAssistantView):
             selected_provider = settings.get("provider")
             gemini = selected_provider in {"gemini", "habab"}
             browser = client_kind == BROWSER_CLIENT
-            if browser and selected_provider != "habab":
+            if browser and selected_provider not in {"habab", "gemini"}:
                 return self.json_message("unsupported_voice_protocol", status_code=400)
             if gemini and client_kind != "native_v2" and not browser:
                 return self.json_message("unsupported_voice_protocol", status_code=400)

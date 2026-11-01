@@ -180,17 +180,29 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('ha_assist_pipeline', result.body.decode())
                 self.assertNotIn('synthetic-selected-habab', result.body.decode())
 
-    async def test_non_habab_browser_capability_explicitly_requires_ha_assist_stt(self):
+    async def test_deepseek_browser_capability_explicitly_requires_ha_assist_stt(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
         request = Request(owner)
         request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
-            'provider': 'gemini', 'api_key': 'synthetic-selected-gemini'})
+            'provider': 'deepseek', 'api_key': 'synthetic-selected-deepseek'})
         with patch.object(realtime, 'async_get_clientsession') as client:
             result = await realtime.RealtimeSessionView().get(request)
         self.assertEqual(json.loads(result.body), {
             'available': False, 'reason': 'selected_provider_requires_ha_assist_stt',
             'browser': {'transport': 'ha_assist_pipeline', 'requires_ha_stt': True}})
         client.assert_not_called()
+
+    async def test_direct_gemini_browser_capability_contains_no_provider_key(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        request = Request(owner)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'gemini', 'api_key': 'synthetic-selected-gemini'})
+        result = await realtime.RealtimeSessionView().get(request)
+        body = json.loads(result.body)
+        self.assertEqual((body['available'], body['transport'], body['auth']['mode']),
+                         (True, 'direct', 'ephemeral_query'))
+        self.assertEqual(body['websocket_url'], realtime.gemini_live.WEBSOCKET_URL)
+        self.assertNotIn('synthetic-selected-gemini', result.body.decode())
 
     async def test_browser_capability_requires_active_ha_admin(self):
         for owner in [None, SimpleNamespace(id='alice', is_active=False, is_admin=True),
@@ -315,6 +327,8 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, 200)
         payload = json.loads(result.body)
         self.assertEqual(payload['provider'], 'gemini')
+        self.assertGreater(payload['expires_at'], time.time())
+        self.assertLessEqual(payload['expires_at'], time.time() + 60)
         self.assertEqual(payload['model'], 'gemini-3.8-live')
         self.assertTrue(payload['websocket_url'].endswith('BidiGenerateContentConstrained'))
         args = client.post.call_args
@@ -949,9 +963,9 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 400)
         dispatch.assert_not_called()
 
-    async def test_browser_direct_gemini_and_openai_never_fall_back_to_habab_relay(self):
+    async def test_browser_openai_never_falls_back_to_habab_relay(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
-        for provider in ('gemini', 'openai'):
+        for provider in ('openai',):
             with self.subTest(provider=provider):
                 assistant = SimpleNamespace(web_session=AsyncMock(), record_voice_event=AsyncMock())
                 request = Request(owner, {'client': 'browser_v1'}, assistant)
@@ -963,6 +977,30 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(json.loads(response.body)['message'], 'unsupported_voice_protocol')
                 client.assert_not_called()
                 assistant.web_session.assert_not_awaited()
+
+    async def test_browser_direct_gemini_mints_own_token_and_creates_browser_lease(self):
+        owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)
+        assistant = SimpleNamespace(record_voice_event=AsyncMock(),
+            voice_history_context=AsyncMock(return_value={'session_id': None, 'epoch': 7}))
+        request = Request(owner, {'client': 'browser_v1'}, assistant)
+        request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
+            'provider': 'gemini', 'api_key': 'synthetic-own-key'})
+        connection = {'provider': 'gemini', 'value': 'synthetic-single-use-token',
+            'expires_at': '2030-01-01T00:00:00Z', 'model': 'gemini-3.8-live',
+            'websocket_url': realtime.gemini_live.WEBSOCKET_URL, 'setup': {'model': 'test'}}
+        with patch.object(realtime, 'voice_context', return_value={}), \
+             patch.object(realtime, 'async_get_clientsession', return_value=object()), \
+             patch.object(realtime.gemini_live, 'create_connection', AsyncMock(return_value=connection)) as create, \
+             patch.object(realtime, 'schedule_browser_lease_expiry'):
+            response = await realtime.RealtimeSessionView().post(request)
+        self.assertEqual(response.status, 200)
+        body = json.loads(response.body)
+        self.assertEqual(body['websocket_url'], realtime.gemini_live.WEBSOCKET_URL)
+        self.assertEqual(body['value'], 'synthetic-single-use-token')
+        self.assertNotIn('synthetic-own-key', response.body.decode())
+        self.assertEqual(create.await_args.args[1], 'synthetic-own-key')
+        lease = request.app['hass'].data['habab_home']['voice_sessions'][body['session_id']]
+        self.assertEqual((lease['client'], lease['provider']), ('browser_v1', 'gemini'))
 
     async def test_browser_stop_cancels_only_its_pending_turn_and_revokes_lease(self):
         owner = SimpleNamespace(id='alice', is_active=True, is_admin=True)

@@ -126,6 +126,10 @@ export function chooseAssistPipeline(requestedId, pipelines, preferredId, lastUs
 
 export function selectBrowserVoiceRoute(capability) {
   if (capability?.available === true && capability.client === "browser_v1" &&
+      capability.provider === "gemini" && capability.realtime_provider === "gemini" &&
+      capability.transport === "direct" && capability.websocket_url === "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained" &&
+      capability.auth?.mode === "ephemeral_query") return "gemini_browser_v1";
+  if (capability?.available === true && capability.client === "browser_v1" &&
       capability.provider === "habab" && capability.realtime_provider === "gemini" &&
       capability.transport === "habab" && capability.websocket_url === "wss://habab-voice.wpmix.net/gemini/ws" &&
       capability.auth?.mode === "first_text_frame" && capability.auth?.type === "habab.voice.auth.v1") {
@@ -1326,7 +1330,7 @@ function installChat() {
           const capability = await this.realtimeRequest("session", "GET");
           if (generation !== this.voiceGeneration || !this.q("dialog").open || !this.isCurrentOwnerContext()) return;
           route = selectBrowserVoiceRoute(capability);
-          if (route === "habab_browser_v1") {
+          if (route === "habab_browser_v1" || route === "gemini_browser_v1") {
             await this.startBrowserVoice(capability, generation);
             return;
           }
@@ -1403,8 +1407,9 @@ function installChat() {
       if (session?.client !== "browser_v1" ||
           session.websocket_url !== capability.websocket_url || typeof session.session_id !== "string" ||
           typeof session.value !== "string" || !session.value || !session.setup ||
-          !Number.isFinite(session.lease_ttl_seconds) || typeof session.expires_at !== "number" ||
-          !Number.isSafeInteger(session.expires_at)) {
+          !Number.isFinite(session.lease_ttl_seconds) ||
+          !(Number.isSafeInteger(session.expires_at) ||
+            (capability.provider === "gemini" && typeof session.expires_at === "string" && Number.isFinite(Date.parse(session.expires_at))))) {
         if (typeof session?.session_id === "string") {
           void this.realtimeRequest("stop", "POST", {session_id: session.session_id}).catch(() => {});
         }
