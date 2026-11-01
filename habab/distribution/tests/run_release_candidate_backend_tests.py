@@ -34,6 +34,7 @@ def main() -> int:
         "test_assistant_status",
         "test_assistant_service",
         "test_realtime",
+        "test_realtime_progress",
         "test_provider_transport",
         "test_gemini_provider",
         "test_beta",

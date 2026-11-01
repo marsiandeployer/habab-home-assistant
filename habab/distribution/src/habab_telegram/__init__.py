@@ -265,6 +265,10 @@ class TelegramManager:
             result["pairing_url"] = pair["url"]
         if state and state.get("error"):
             result["error"] = state["error"]
+            if "exit_code" in state:
+                result["worker_exit_code"] = state["exit_code"]
+            if state.get("startup_error"):
+                result["worker_startup_error"] = state["startup_error"]
         elif self.transport_errors.get(entry.entry_id):
             result["error"] = self.transport_errors[entry.entry_id]
         return result
@@ -939,7 +943,7 @@ class TelegramManager:
             env.update(proxy_env)
         proc = await asyncio.create_subprocess_exec(
             "node", "/opt/habab-telegram/worker.mjs", stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env=env, start_new_session=True,
         )
         proc.stdin.write((json.dumps({
@@ -1057,9 +1061,26 @@ class TelegramManager:
             return False
         return True
 
+    async def _read_worker_errors(self, state):
+        stream = getattr(state["process"], "stderr", None)
+        if stream is None:
+            return
+        tail = ""
+        while chunk := await stream.read(4096):
+            tail = (tail + chunk.decode("utf-8", "replace").lower())[-8192:]
+            # Only fixed categories are retained; stderr can contain credentials.
+            for marker, category in (("err_module_not_found", "module_missing"),
+                                     ("cannot find module", "module_missing"),
+                                     ("error loading shared library", "native_dependency_missing"),
+                                     ("syntaxerror", "javascript_syntax_error"),
+                                     ("eacces", "permission_denied")):
+                if marker in tail:
+                    state["startup_error"] = category
+
     async def _reader(self, entry, state):
         if self.maintenance:
             return
+        errors = asyncio.create_task(self._read_worker_errors(state))
         try:
             while line := await state["process"].stdout.readline():
                 if len(line) > MAX_LINE:
@@ -1138,12 +1159,19 @@ class TelegramManager:
                     pass
                 await asyncio.wait_for(state["process"].wait(), timeout=1)
             state["error"] = "worker_stopped"
+            state["exit_code"] = state["process"].returncode
             state["ready"] = False
         except asyncio.CancelledError:
             raise
         except Exception:
             state["error"] = "worker_error"
             state["ready"] = False
+        finally:
+            errors.cancel()
+            try:
+                await errors
+            except (asyncio.CancelledError, Exception):
+                pass
 
     def _waiting_payload(self, entry):
         waiting = self.waiting_updates.get(entry.entry_id)

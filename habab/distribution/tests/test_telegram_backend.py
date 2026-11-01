@@ -31,6 +31,17 @@ class SessionBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TelegramManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_stderr_keeps_only_fixed_error_category(self):
+        stream = asyncio.StreamReader()
+        stream.feed_data(b"Error [ERR_MODULE_NOT_FOUND]: private-token private-path\n")
+        stream.feed_eof()
+        state = {"process": SimpleNamespace(stderr=stream)}
+        manager = object.__new__(TelegramManager)
+        await manager._read_worker_errors(state)
+        self.assertEqual(state["startup_error"], "module_missing")
+        self.assertNotIn("private-token", str(state))
+        self.assertNotIn("private-path", str(state))
+
     def manager(self):
         manager = object.__new__(TelegramManager)
         manager.hass = SimpleNamespace(

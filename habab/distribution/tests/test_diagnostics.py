@@ -139,8 +139,8 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
     async def test_diagnostics_runtime_request_uses_existing_streamed_response_cap(self):
         class Content:
             async def iter_chunked(self, _chunk_size):
-                yield b"x" * 1_000_001
-                yield b"y" * 1_000_000
+                yield b"x" * 8_000_001
+                yield b"y" * 8_000_000
 
         class ResponseContext:
             status = 200
@@ -160,7 +160,7 @@ class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(AgentError) as raised:
                 await runtime.request("GET", "session/example/message?limit=60")
         self.assertEqual(raised.exception.code, "response_too_large")
-        self.assertEqual(diagnostics.MAX_RUNTIME_RESPONSE_BYTES, 2_000_000)
+        self.assertEqual(diagnostics.MAX_RUNTIME_RESPONSE_BYTES, 16_000_000)
 
     async def test_detail_redacts_messages_and_separates_assistant_text_tool_call_and_result(self):
         owner, hass, _assistant, runtime = runtime_fixture(tool_messages())
