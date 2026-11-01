@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import signal
 import socket
@@ -41,6 +42,44 @@ class CheckFailed(Exception):
 def require(condition, code, *, http_status=None):
     if not condition:
         raise CheckFailed(code, http_status=http_status)
+
+
+def startup_log_excerpt(path, secret_values):
+    """Read only the disposable child's bounded tail; redact before retaining lines."""
+    with path.open("rb") as stream:
+        stream.seek(0, 2)
+        stream.seek(max(0, stream.tell() - 128 * 1024))
+        lines = stream.read().decode("utf-8", errors="replace").splitlines()
+    selected = set()
+    for index, line in enumerate(lines):
+        if re.search(r"\b(?:ERROR|CRITICAL|Traceback)\b|\b\w+(?:Error|Exception):", line):
+            selected.update(range(max(0, index - 1), min(len(lines), index + 18)))
+    candidates = [lines[index] for index in sorted(selected)] if selected else lines[-15:]
+    result, remaining = [], 12 * 1024
+    for line in reversed(candidates[-60:]):
+        for secret in sorted(set(secret_values), key=len, reverse=True):
+            if secret:
+                line = line.replace(secret, "[REDACTED]")
+        if re.search(r"\b(?:environ|env|sessions?)\b\s*[:=]\s*[\[{]", line, re.I):
+            line = "[omitted environment/session dump]"
+        if "{" in line and re.search(r"access_token|refresh_token|auth_code", line, re.I):
+            line = "[omitted auth payload]"
+        line = re.sub(r"\b(Authorization|Proxy-Authorization|Cookie|Set-Cookie)\s*:[^\r\n]*",
+                      r"\1: [REDACTED]", line, flags=re.I)
+        line = re.sub(r"\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+", "[REDACTED credential]", line, flags=re.I)
+        line = re.sub(r'''(["']?(?:password|access_token|refresh_token|auth_code|api_key|client_secret|control_token|token|secret)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)''',
+                      r"\1[REDACTED]", line, flags=re.I)
+        line = re.sub(r"(https?://)[^/@\s]+:[^/@\s]+@", r"\1[REDACTED]@", line)
+        line = re.sub(r"([?&](?:code|token|api_key|access_token|refresh_token)=)[^&\s]+",
+                      r"\1[REDACTED]", line, flags=re.I)
+        line = re.sub(r"(?:sk-[A-Za-z0-9_-]{12,}|AIza[A-Za-z0-9_-]{20,}|hb1\.[A-Za-z0-9_.-]+|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)",
+                      "[REDACTED credential]", line)
+        encoded = line[:768].encode("utf-8")[:remaining]
+        if not encoded:
+            break
+        result.append(encoded.decode("utf-8", errors="ignore"))
+        remaining -= len(encoded)
+    return list(reversed(result))
 
 
 class ProviderFixture:
@@ -131,8 +170,9 @@ def run_ha_child(config, fixture_base):
 
 
 class CoreAPI:
-    def __init__(self, session, base):
+    def __init__(self, session, base, diagnostics=None):
         self.session, self.base, self.token = session, base, None
+        self.diagnostics = diagnostics if diagnostics is not None else {}
         self.ws = None
         self.sequence = 0
 
@@ -140,6 +180,7 @@ class CoreAPI:
         headers = {"Authorization": "Bearer " + self.token} if authenticated and self.token else {}
         async with self.session.request(method, self.base + path, json=body,
                                         data=form, headers=headers) as response:
+            self.diagnostics["last_http_status"] = response.status
             try:
                 result = await response.json(content_type=None)
             except ValueError:
@@ -170,7 +211,7 @@ class CoreAPI:
         return (await self.command("habab_home/providers/list"))["connections"]
 
 
-async def exercise(base, fixture, process, config):
+async def exercise(base, fixture, process, config, diagnostics, secret_values):
     import aiohttp
 
     results = []
@@ -180,7 +221,7 @@ async def exercise(base, fixture, process, config):
         print(json.dumps(results[-1]), flush=True)
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-        api = CoreAPI(session, base)
+        api = CoreAPI(session, base, diagnostics)
         deadline = time.monotonic() + 90
         while True:
             require(process.poll() is None, "core_exited_before_onboarding")
@@ -194,15 +235,20 @@ async def exercise(base, fixture, process, config):
             await asyncio.sleep(0.5)
         require(any(row.get("step") == "user" and not row.get("done") for row in flows),
                 "fresh_owner_onboarding_missing")
+        password = secrets.token_urlsafe(24)
+        secret_values.append(password)
         status, owner = await api.http("POST", "/api/onboarding/users", authenticated=False, body={
             "client_id": base + "/", "name": "CI fixture owner", "username": "ci_fixture_owner",
-            "password": secrets.token_urlsafe(24), "language": "en",
+            "password": password, "language": "en",
         })
         require(status == 200 and bool(owner.get("auth_code")), "owner_onboarding_failed")
+        secret_values.append(owner["auth_code"])
         status, auth = await api.http("POST", "/auth/token", authenticated=False, form={
             "grant_type": "authorization_code", "code": owner["auth_code"], "client_id": base + "/",
         })
         require(status == 200 and bool(auth.get("access_token")), "owner_token_failed")
+        secret_values.extend(value for key, value in auth.items()
+                             if key in {"access_token", "refresh_token"} and isinstance(value, str))
         api.token = auth["access_token"]
         bad = await session.ws_connect(base + "/api/websocket")
         await bad.receive_json()
@@ -212,11 +258,16 @@ async def exercise(base, fixture, process, config):
         await api.connect()
         while True:
             status, product = await api.http("GET", "/api/habab_home/status")
-            if status == 200 and product.get("product") == "Habab Home":
+            product_ready = status == 200 and isinstance(product, dict) and product.get("product") == "Habab Home"
+            diagnostics.update(product_http_status=status, product_ready=product_ready)
+            if product_ready:
                 # HTTP can become ready before this component registers its WS commands.
                 api.sequence += 1
                 await api.ws.send_json({"id": api.sequence, "type": "habab_home/providers/list"})
                 reply = await api.ws.receive_json()
+                code = reply.get("error", {}).get("code")
+                diagnostics["ws_ready_code"] = ("ready" if reply.get("success") else
+                    code if code in {"unknown_command", "not_allowed", "unauthorized"} else "other_error")
                 if reply.get("success"):
                     break
                 require(reply.get("error", {}).get("code") == "unknown_command", "unexpected_component_startup_error")
@@ -366,6 +417,8 @@ def main():
                "live_model_acceptance": "NOT_RUN", "opencode_chat_tool_trace": "NOT_RUN",
                "physical_devices_audio": "NOT_RUN", "status": "FAIL"}
     process = None
+    diagnostics = {"product_ready": False, "ws_ready_code": "not_attempted"}
+    secret_values = [VALID_KEY, INVALID_KEY, "ci-invalid-access-token"]
     try:
         with tempfile.TemporaryDirectory(prefix="habab-core-api-e2e-") as directory, ProviderFixture() as fixture:
             config = Path(directory)
@@ -384,9 +437,23 @@ def main():
                     "--config", directory, "--fixture-base", fixture.base], stdout=log, stderr=log,
                     env=env, start_new_session=True)
                 try:
-                    summary["cases"] = asyncio.run(exercise(f"http://127.0.0.1:{port}", fixture, process, config))
+                    summary["cases"] = asyncio.run(exercise(
+                        f"http://127.0.0.1:{port}", fixture, process, config, diagnostics, secret_values))
                     summary["status"] = "PASS"
                     summary["provider_http_requests"] = len(fixture.requests)
+                except Exception as error:
+                    summary["failure_code"] = str(error) if isinstance(error, CheckFailed) else type(error).__name__
+                    diagnostics["core_child_exit_before_cleanup"] = process.poll()
+                    log.flush()
+                    summary["startup_diagnostics"] = {
+                        **diagnostics,
+                        "log_lines": startup_log_excerpt(config / "private-child-output.log", secret_values),
+                    }
+                    # Evidence is sanitized before printing or retaining it, while
+                    # the disposable config still exists. No raw logs are uploaded.
+                    print(json.dumps({"failure_code": summary["failure_code"],
+                                      "startup_diagnostics": summary["startup_diagnostics"]}), flush=True)
+                    raise
                 finally:
                     stop_child(process)
                     summary["ha_child_stopped"] = process.poll() is not None

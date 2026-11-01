@@ -5,15 +5,46 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 import urllib.error
 import urllib.request
 
-from run_core_api_e2e import CheckFailed, INVALID_KEY, VALID_KEY, ProviderFixture, require, stop_child
+from run_core_api_e2e import CheckFailed, INVALID_KEY, VALID_KEY, ProviderFixture, require, startup_log_excerpt, stop_child
 
 
 class CoreAPIE2EHarnessTests(unittest.TestCase):
+    def test_startup_excerpt_keeps_import_failure_and_redacts_credentials_and_dumps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.log"
+            path.write_text(
+                "ERROR Could not import habab_home: generated-password\n"
+                "Traceback (most recent call last):\n"
+                "  File '/workspace/habab/fixture.py', line 7\n"
+                "ModuleNotFoundError: missing_ci_dependency\n"
+                "Authorization: Bearer unknown-header-value\n"
+                "api_key='unknown-key-value' password=unknown-password\n"
+                "session={'access_token': 'unknown-session-value'}\n"
+                "env={'PRIVATE_VALUE': 'unknown-environment-value'}\n"
+                "callback=http://user:unknown-url-password@localhost/?token=unknown-query-value\n"
+            )
+            text = "\n".join(startup_log_excerpt(path, ["generated-password"]))
+            self.assertIn("ModuleNotFoundError: missing_ci_dependency", text)
+            for value in ("generated-password", "unknown-header-value", "unknown-key-value",
+                          "unknown-password", "unknown-session-value", "unknown-environment-value",
+                          "unknown-url-password", "unknown-query-value"):
+                self.assertNotIn(value, text)
+
+    def test_startup_excerpt_is_bounded_even_with_many_large_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "synthetic.log"
+            path.write_text("\n".join("ERROR line " + str(i) + " x" * 1000 for i in range(600)))
+            lines = startup_log_excerpt(path, [])
+            self.assertLessEqual(len(lines), 60)
+            self.assertLessEqual(sum(len(line.encode()) for line in lines), 12 * 1024)
+            self.assertIn("599", lines[-1])
+
     def test_http_failure_status_is_strict_and_only_retains_safe_integer_metadata(self):
         for status in (200, 404, 503):
             with self.subTest(status=status):
