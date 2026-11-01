@@ -1,0 +1,57 @@
+name: Habab Core API checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'habab/**'
+      - '.github/workflows/habab-core-e2e.yaml'
+      - '.github/workflows/habab-release-candidate.yaml'
+  pull_request:
+    paths:
+      - 'habab/**'
+      - '.github/workflows/habab-core-e2e.yaml'
+      - '.github/workflows/habab-release-candidate.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: habab-core-api-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  core-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HA_TEST_IMAGE: ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          filter: blob:none
+          sparse-checkout: |
+            habab/distribution
+            habab/product-tunnel
+      - name: Require the checked-out source and both existing runners
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          git diff --quiet && git diff --cached --quiet
+          test -f habab/distribution/tests/run_release_candidate_backend_tests.py
+          test -f habab/distribution/tests/run_core_api_e2e.py
+      - name: Test Core API harness contract
+        run: PYTHONPATH=habab/distribution/tests python3 -m unittest -q test_core_api_e2e_contract
+      - name: Run backend suites and real Core API acceptance in one offline container
+        run: |
+          set -euo pipefail
+          docker run --rm --pull=missing \
+            --network none --memory=2g --memory-swap=2g --cpus=2 --pids-limit=256 \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --env GITHUB_ACTIONS=true \
+            --volume "$GITHUB_WORKSPACE/habab/distribution:/workspace/habab/distribution:ro" \
+            --volume "$GITHUB_WORKSPACE/habab/product-tunnel:/workspace/habab/product-tunnel:ro" \
+            --workdir /tmp --entrypoint /bin/sh "$HA_TEST_IMAGE" \
+            -ec 'python3 /workspace/habab/distribution/tests/run_release_candidate_backend_tests.py && python3 /workspace/habab/distribution/tests/run_core_api_e2e.py'

@@ -489,9 +489,10 @@ class ReleasePreflightWorkflowTests(unittest.TestCase):
             preflight,
         )
         for value in (
-            "--network none", "--memory=1g", "--memory-swap=1g", "--cpus=1",
-            "--pids-limit=64", "--entrypoint python3", ":ro",
+            "--network none", "--memory=2g", "--memory-swap=2g", "--cpus=2",
+            "--pids-limit=256", "--entrypoint /bin/sh", ":ro", "--env GITHUB_ACTIONS=true",
             "tests/run_release_candidate_backend_tests.py",
+            "tests/run_core_api_e2e.py",
             "$GITHUB_WORKSPACE/habab/product-tunnel:/workspace/habab/product-tunnel:ro",
         ):
             with self.subTest(value=value):

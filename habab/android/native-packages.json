@@ -1,9 +1,9 @@
 {
   "proot": {
     "Package": "proot",
-    "Version": "5.1.107.99",
-    "Filename": "pool/main/p/proot/proot_5.1.107.99_aarch64.deb",
-    "SHA256": "0c31d50e9c0fc201347ef541b482c1cae055944dfcac5f881a0d2932a32bb90d",
+    "Version": "5.1.107.101",
+    "Filename": "pool/main/p/proot/proot_5.1.107.101_aarch64.deb",
+    "SHA256": "a28355e9be257e1f87f4e9294b3118470d4fd7a5442fed8b278f4443c83407d7",
     "Depends": "libandroid-shmem, libtalloc"
   },
   "libandroid-shmem": {

@@ -11,6 +11,19 @@ an image, updates `main`/`latest`, uploads to the public download host, or
 creates a GitHub Release. Candidate artifacts stay in GitHub Actions for one
 day.
 
+## Core API checks on commits
+
+`.github/workflows/habab-core-e2e.yaml` runs the same backend suites and real
+Core API acceptance runner on pushes to `main`, pull requests touching
+`habab/**` or these workflow files, and manual dispatch. It uses the release
+preflight's pinned Home Assistant image in one offline container, with read-only
+source mounts, 2 GiB memory, two CPUs and a 256-process limit. The timeout is
+20 minutes. Five harness contract checks run before the container in this
+workflow and the release preflight. Tests use disposable local configuration and
+a local provider fixture. No provider secrets or public model requests are needed. Only a newer
+check for the same PR cancels its previous check; pushes and manual checks keep
+separate run identities. This workflow does not publish release assets.
+
 ## Publish all platforms to GitHub
 
 `.github/workflows/habab-release.yaml` is the public release entrypoint. Dispatch
@@ -132,21 +145,43 @@ path when runtime/frontend inputs change.
 
 Run the changed component's fast checks before a large build. The full workflow's
 preflight now runs the relay tests (including concurrent HTTP with an open
-WebSocket) inside its existing bounded HA test container before compiling any
-Android frontend. Do not repeat a completed build, archive scan, or device
+WebSocket) and the real Core API acceptance runner inside its existing bounded
+HA test container before compiling any Android frontend. The same offline
+container has a 2 GiB memory limit, two CPUs and 256-process limit. The Core
+runner creates disposable configuration and uses a local provider fixture for
+onboarding, authentication, provider save/check/reload and a virtual-helper
+service cycle. Do not repeat a completed build, archive scan, or device
 runtime installation without changed inputs, a failure, or a concrete concern.
 Publication still checks signatures and artifact hashes; device acceptance is
 reported separately from source/build checks.
 
-Android uses the runner's explicit Java 17 toolchain, rather than its changing
-default JDK. APK native `.deb` inputs are served by SHA-256 from
-`https://habab-demo.wpmix.net/downloads/android/native-inputs/<SHA256>.deb`.
-The producer still verifies every file against `native-packages.json` and
-includes the upstream notices. Publish the verified pinned inputs before changing
-that lock: upstream Termux repositories remove older package revisions. These
-small shared build dependencies and the pinned voice-model ZIP (`<SHA256>.zip`)
-remain available while a retained APK release
-uses them; they are not a replacement for a signed server runtime.
+Android uses the runner's explicit Java 17 toolchain. Native `.deb` inputs
+download directly from `https://packages.termux.dev/apt/termux-main/` using the
+exact `Filename` and SHA-256 in `native-packages.json`. The current PRoot pin is
+`5.1.107.101`. The producer verifies every package and includes upstream notices.
+The public Vosk model downloads from its locked official `alphacephei.com` URL
+and retains its size/SHA-256 check. These producers have no Habab mirror fallback.
+
+Android runtime Node APKs download directly from the official Alpine
+`v3.24/main/aarch64` repository. The lock now pins Node `24.22.1-r1` with
+`ada-libs 4.0.0-r0`, which provides its required `libada.so.4`; the other 19
+packages retain their verified versions and SHA-256 values. The lock records
+exact URLs, full archive SHA-256/bytes, official APKINDEX control checksums, and
+the reviewed index/key fingerprints. Original runtime-derived metadata is
+labelled as the baseline rather than as provenance for the updated transaction.
+
+Before frontend compilation, the input checker fetches the official APKINDEX
+and its public key from `alpinelinux.org/keys`, verifies the pinned key
+fingerprint and index signature, checks every locked package against that signed
+index, verifies the complete dependency closure, and checks all 21 official
+package URLs and sizes. The same early checker verifies availability of the
+four locked Termux `.deb` URLs and the official Vosk model URL/size. Downloads
+still undergo full archive byte/SHA-256 checks and the existing signed APK
+installation transaction. No Habab package mirror
+is used for these Alpine dependencies.
+
+Upstream repositories can remove older versions. An unavailable pin fails the
+early check and requires a reviewed official-source lock update before rebuilding.
 
 
 ## Targets

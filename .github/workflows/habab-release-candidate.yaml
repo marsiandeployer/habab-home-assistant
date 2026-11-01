@@ -150,6 +150,9 @@ jobs:
           [[ -f habab/distribution/tests/run_release_candidate_backend_tests.py ]] || {
             echo '::error::Selected source does not contain the release preflight runner; choose a revision with release fast checks'; exit 1;
           }
+          [[ -f habab/distribution/tests/run_core_api_e2e.py ]] || {
+            echo '::error::Selected source lacks the real Core API acceptance runner'; exit 1;
+          }
           grep -Fq 'class ReleasePreflightWorkflowTests' habab/scripts/test_release_candidate.py || {
             echo '::error::Selected source does not contain the release preflight workflow tests; choose a revision with release fast checks'; exit 1;
           }
@@ -166,7 +169,7 @@ jobs:
       - name: Test release preflight workflow gates
         run: PYTHONPATH=habab/scripts python3 -m unittest -v test_release_candidate.ReleasePreflightWorkflowTests
       - name: Test Android runtime source payload
-        run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_package_runtime_sources test_package_runtime_serialx
+        run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_package_runtime_sources test_package_runtime_serialx test_node_inputs test_official_native_inputs
       - name: Test optional private wake model pack validation
         run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_prepare_wake_experiments
       - name: Set up Node 24.21.0
@@ -185,16 +188,19 @@ jobs:
           habab/distribution/tests/test-chat-tools.mjs
           habab/distribution/tests/telegram-panel-qr.test.mjs
           habab/distribution/tests/telegram-qr.test.mjs
+      - name: Test Core API harness contract
+        run: PYTHONPATH=habab/distribution/tests python3 -m unittest -q test_core_api_e2e_contract
       - name: Run focused backend tests in isolated Home Assistant image
         run: |
           set -euo pipefail
           docker run --rm --pull=missing \
-            --network none --memory=1g --memory-swap=1g --cpus=1 --pids-limit=64 \
+            --network none --memory=2g --memory-swap=2g --cpus=2 --pids-limit=256 \
             --env PYTHONDONTWRITEBYTECODE=1 \
+            --env GITHUB_ACTIONS=true \
             --volume "$GITHUB_WORKSPACE/habab/distribution:/workspace/habab/distribution:ro" \
             --volume "$GITHUB_WORKSPACE/habab/product-tunnel:/workspace/habab/product-tunnel:ro" \
-            --workdir /tmp --entrypoint python3 "$HA_TEST_IMAGE" \
-            /workspace/habab/distribution/tests/run_release_candidate_backend_tests.py
+            --workdir /tmp --entrypoint /bin/sh "$HA_TEST_IMAGE" \
+            -ec 'python3 /workspace/habab/distribution/tests/run_release_candidate_backend_tests.py && python3 /workspace/habab/distribution/tests/run_core_api_e2e.py'
 
   windows-source:
     needs: [resolve-source, release-preflight]
@@ -449,6 +455,17 @@ jobs:
               raise SystemExit('::error::Base runtime must use the canonical HTTPS Android downloads path')
           PY
           echo 'state=unsigned_candidate' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: Fetch pinned Android runtime input checker
+        if: ${{ steps.inputs.outputs.state == 'built' }}
+        with:
+          ref: ${{ needs.resolve-source.outputs.source_revision }}
+          persist-credentials: false
+          sparse-checkout: habab/android/tools
+      - name: Check locked runtime download availability before compiling frontend
+        if: ${{ steps.inputs.outputs.state == 'built' }}
+        run: python3 habab/android/tools/check_node_inputs.py
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         if: ${{ steps.inputs.outputs.state == 'blocked' }}

@@ -188,13 +188,25 @@ def link_telegram_vendor(rootfs):
         link.symlink_to('../vendor/noxon-telegram')
 
 
+def node_package_url(name, record, repository):
+    """Return only the exact locked package URL in the official Alpine repository."""
+    if (repository != NODE_APK_REPOSITORY or Path(name).name != name or not name.endswith('.apk')
+            or not re.fullmatch(r'[0-9a-f]{64}', record.get('sha256', ''))
+            or type(record.get('bytes')) is not int or record['bytes'] <= 0
+            or 'mirrorUrl' in record
+            or record.get('url') != repository.rstrip('/') + '/' + urllib.parse.quote(name)):
+        raise ValueError('Malformed official pinned Node APK record: ' + name)
+
+    return record['url']
+
+
 def install_node(rootfs, cache, helper_image, network_tools=False):
     """Install hash-pinned foreign Alpine packages through the guest APK database."""
     lock_path = ROOT / 'tools/network_tools/node-apks.lock.json'
     lock = json.loads(lock_path.read_text())
     if (lock.get('schema') != 1 or lock.get('architecture') != 'aarch64'
             or lock.get('repository') != NODE_APK_REPOSITORY
-            or lock.get('nodeVersion') != '24.18.1-r0'):
+            or lock.get('nodeVersion') != '24.22.1-r1'):
         raise ValueError('Unsupported pinned Node APK lock')
     if helper_image != NODE_APK_HELPER:
         raise ValueError('Unexpected Node APK resolver image pin')
@@ -210,18 +222,15 @@ def install_node(rootfs, cache, helper_image, network_tools=False):
     if unexpected:
         raise ValueError('Unexpected files in pinned Node APK cache: ' + ', '.join(sorted(unexpected)))
     for name, record in sorted(records.items()):
-        if (Path(name).name != name or not name.endswith('.apk')
-                or not re.fullmatch(r'[0-9a-f]{64}', record.get('sha256', ''))
-                or not isinstance(record.get('bytes'), int)
-                or record.get('url') != lock['repository'].rstrip('/') + '/' + urllib.parse.quote(name)):
-            raise ValueError('Malformed pinned Node APK record: ' + name)
+        download_url = node_package_url(name, record, lock['repository'])
         package = packages / name
         if package.is_symlink():
             raise ValueError('Pinned Node APK cache contains a symlink: ' + name)
         if not package.exists():
             partial = package.with_suffix(package.suffix + '.partial')
             try:
-                urllib.request.urlretrieve(record['url'], partial)
+                print('Downloading pinned Node APK: ' + name, flush=True)
+                urllib.request.urlretrieve(download_url, partial)
                 if partial.stat().st_size != record['bytes'] or sha256(partial) != record['sha256']:
                     raise ValueError('Pinned Node APK checksum mismatch: ' + name)
                 partial.replace(package)
