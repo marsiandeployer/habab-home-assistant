@@ -220,6 +220,16 @@ def emulator_tail(path):
     return safe_log("\n".join(lines))[-6000:]
 
 
+def core_failure_summary(text):
+    """Report failure categories, never raw Core logs from the guest."""
+    names = re.findall(r"\b(?:[A-Za-z_][A-Za-z0-9_]*\.)*"
+                       r"([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception))\s*:", text)
+    markers = ("Traceback (most recent call last)", "Exec format error", "Segmentation fault",
+               "Permission denied", "Illegal instruction", "No space left on device")
+    return {"bytes": len(text.encode("utf-8")), "exception_types": sorted(set(names))[:30],
+            "markers": [marker for marker in markers if marker in text]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api", required=True, choices=("35", "36"))
@@ -467,6 +477,22 @@ def main():
                     report["failure_log_captured"] = True
                 except (OSError, subprocess.TimeoutExpired, Failure):
                     report["failure_log_captured"] = False
+                # The disposable emulator has no owner account. Read only a
+                # category summary, never upload its potentially sensitive log.
+                try:
+                    root = device("root", check=False, timeout=20)
+                    if root.returncode == 0 and "cannot run as root" not in root.stdout + root.stderr:
+                        device("wait-for-device", timeout=30)
+                        core = device("shell", "cat", "/data/user/0/ru.habab.home/files/core.log",
+                                      check=False, timeout=20)
+                        if core.returncode == 0:
+                            report["core_log_summary"] = core_failure_summary(core.stdout)
+                        else:
+                            report["core_log_summary"] = {"available": False}
+                    else:
+                        report["core_log_summary"] = {"root_available": False}
+                except (OSError, subprocess.TimeoutExpired, Failure):
+                    report["core_log_summary"] = {"available": False}
         report.update(cleanup_emulator(emulator_process, adb))
         if not report["emulator_stopped"] and report["status"] == "PASS":
             report.update(status="FAIL", failure_category="INFRA_UNAVAILABLE",

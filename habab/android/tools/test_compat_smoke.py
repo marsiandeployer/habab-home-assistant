@@ -13,6 +13,16 @@ import zipfile
 import compat_smoke as smoke
 
 
+class CoreFailureSummaryTests(unittest.TestCase):
+    def test_reports_categories_without_log_contents(self):
+        log = "Traceback (most recent call last):\nOSError: private path /data/token\nPermission denied\n"
+        result = smoke.core_failure_summary(log)
+        self.assertEqual(result["exception_types"], ["OSError"])
+        self.assertIn("Permission denied", result["markers"])
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("token", json.dumps(result))
+
+
 class ArtifactTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
