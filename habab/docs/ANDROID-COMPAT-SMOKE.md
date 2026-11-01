@@ -3,15 +3,27 @@
 This manual workflow uses `ubuntu-24.04` standard hosted
 runners in the public repository. It checks the unchanged public ARM64 APK on
 Google APIs x86_64 API 35 and 36 images, one job at a time.
-The first run, `41292403474`, verified the public APK pins and offline contracts
-but stopped before guest startup because the hosted runner has no preinstalled
-emulator. The runner now installs the official emulator package with sdkmanager;
-real installation and launch acceptance remains pending. A subsequent run
-identified the emulator's missing host `libpulse.so.0`; the workflow installs
-Ubuntu's `libpulse0` package, while guest audio remains disabled.
-Startup diagnostics then identified different default AVD directories between
-avdmanager and emulator. Both now use one explicit owned `ANDROID_AVD_HOME`
-under the job's temporary output directory.
+The accepted [run 41293944520](https://github.com/marsiandeployer/habab-home-assistant/actions/runs/41293944520)
+completed on runner source `6c4609532f9743b24447cd24e3a9f778bd40ecee` with the
+unchanged public APK59 (`0.1.59-usb-zigbee`), release
+`habab-v0.3.6-6a15321f46e3`, SHA-256
+`d5e4b983eab6c98acbc171ea136f795638632436b82c24414e52dde40ed0c9af`,
+60187091 bytes. This workflow does not rebuild or republish the APK.
+
+| Guest API | Google APIs x86_64 image revision | Install and MainActivity | Emulator cleanup |
+| --- | --- | --- | --- |
+| 35 | 9 | PASS | PASS |
+| 36 | 7 | PASS | PASS |
+
+Both guests reported `x86_64,arm64-v8a`, `libndk_translation.so`, native bridge
+exec enabled and 4096-byte pages. Both screenshots were opened and visually
+inspected: the Habab Home native screen was visible, with the server runtime
+uninstalled/stopped as expected for this offline test. No fatal exception or
+signal was captured; runtime and voice services were absent.
+
+The emulator and avdmanager share one explicit owned `ANDROID_AVD_HOME` under
+the job's temporary output directory. Ubuntu's `libpulse0` supplies the host
+library required by the emulator; guest audio remains disabled.
 
 The workflow, runner and offline tests are integrated separately from the
 product runtime and release pipeline. The workflow has only
