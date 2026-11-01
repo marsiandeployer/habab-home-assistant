@@ -40,7 +40,8 @@ public final class MainActivity extends Activity {
             authorizeVoice(false);
             updateVoiceButton();
             if (state != null && !busy) state.setText(getString(R.string.status, phaseText())
-                    + "\n" + getString(R.string.remote_access_title) + ": " + WebTunnel.status + "\n" + MaintenanceService.status);
+                    + "\n" + getString(R.string.remote_access_title) + ": " + WebTunnel.status
+                    + "\n" + getString(R.string.voice_home_status, voiceStatusText()) + "\n" + MaintenanceService.status);
             handler.postDelayed(this, 2000);
         }
     };
@@ -791,6 +792,15 @@ public final class MainActivity extends Activity {
         return String.join("\n", addresses);
     }
     private void message(String value) { new AlertDialog.Builder(this).setMessage(value).setPositiveButton(android.R.string.ok, null).show(); }
+    private String voiceStatusText() {
+        String phase = VoiceService.status;
+        if ("error".equals(phase) && VoiceService.lastError != null)
+            return VoiceService.failureLabel(this, VoiceService.lastError);
+        if (VoiceService.active && "wake".equals(phase) && VoiceService.lastError != null)
+            return getString(R.string.voice_wait_after_error, VoiceService.label(this, phase),
+                    VoiceService.failureLabel(this, VoiceService.lastError));
+        return VoiceService.label(this, VoiceService.active ? phase : "off");
+    }
     private String phaseText() {
         String phase = ServerService.status;
         if (phase.equals("running")) return getString(ServerService.networkConnected(this)

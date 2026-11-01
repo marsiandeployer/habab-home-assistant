@@ -63,6 +63,7 @@
     <string name="tunnel_disconnected">Переподключение SSH</string>
     <string name="check_compatibility">Проверка совместимости телефона…</string>
     <string name="voice_title">Голосовой помощник</string>
+    <string name="voice_home_status">Голосовой помощник: %1$s</string>
     <string name="voice_microphone_active">🔴 Микрофон включён</string>
     <string name="voice_authorize">Подключить голос к этому аккаунту</string>
     <string name="voice_login_help">Войдите в умный дом своим аккаунтом администратора. Голос подключится автоматически; для микрофона нажмите «Включить голос».</string>
