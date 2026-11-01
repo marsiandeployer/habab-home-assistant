@@ -4,7 +4,8 @@ LABEL org.opencontainers.image.title="Habab Home" \
       org.opencontainers.image.version="0.3.6" \
       org.opencontainers.image.description="Local Home Assistant Core distribution maintained by Habab"
 
-RUN apk add --no-cache nodejs=24.22.1-r1
+# Keep the supported Node major while allowing Alpine package revisions and patches.
+RUN apk add --no-cache 'nodejs~24'
 
 # Standalone OCI releases include their pinned executable. Windows mounts the
 # same verified binary from its existing read-only volume instead.

@@ -155,8 +155,9 @@ https://github.com/marsiandeployer/habab-home-assistant/releases/latest/download
 
 The receipt records immutable tag URLs. Release creation/build checks and public
 download availability are separate from Windows installation and physical
-Android acceptance. A source build still depends on the pinned upstream Alpine
-packages being available; Dockerfiles currently pin Node `24.22.1-r1`.
+Android acceptance. A source build still depends on upstream Alpine packages
+being available; Dockerfiles require Node 24 and allow Alpine package revisions
+and patch updates. Published image digests identify the exact built artifacts.
 
 If upload or checksum verification fails, the release remains a draft. Inspect
 the draft and Actions artifacts before any cleanup or retry. Do not overwrite a
