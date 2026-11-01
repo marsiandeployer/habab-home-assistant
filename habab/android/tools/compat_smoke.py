@@ -36,13 +36,20 @@ def require(condition, category, code):
 
 
 def run(command, timeout=30, input=None, check=True):
+    tool = {"tool": Path(command[0]).name}
+    subcommand = 3 if tool["tool"] == "adb" and len(command) > 3 and command[1] == "-s" else 1
+    if len(command) > subcommand and re.fullmatch(r"[-a-z_]+", str(command[subcommand])):
+        tool["subcommand"] = str(command[subcommand])
     try:
         result = subprocess.run(command, input=input, text=True, capture_output=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
-        raise Failure("INFRA_UNAVAILABLE", "tool_unavailable_or_timed_out") from None
+    except subprocess.TimeoutExpired:
+        raise Failure("INFRA_UNAVAILABLE", "tool_timed_out",
+                      {**tool, "timeout_seconds": timeout}) from None
+    except OSError:
+        raise Failure("INFRA_UNAVAILABLE", "tool_unavailable", tool) from None
     if check and result.returncode:
         raise Failure("INFRA_UNAVAILABLE", "tool_exit_nonzero", {
-            "tool": Path(command[0]).name, "exit_code": result.returncode,
+            **tool, "exit_code": result.returncode,
             "output_tail": safe_log((result.stdout + "\n" + result.stderr)[-4000:])})
     return result
 
@@ -183,6 +190,13 @@ def safe_log(value):
                   r"\1[redacted]", value)
 
 
+def emulator_tail(path):
+    lines = path.read_text(errors="replace").splitlines()[-60:]
+    lines = ["[credential-related log line removed]" if re.search(
+        r"token|secret|authorization|password|\bkey\b", line, re.I) else line for line in lines]
+    return safe_log("\n".join(lines))[-6000:]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api", required=True, choices=("35", "36"))
@@ -268,11 +282,13 @@ def main():
             "-accel", "on", "-memory", "2048", "-cores", "2", "-partition-size", "2048",
             "-camera-back", "none", "-camera-front", "none"],
             stdout=emulator_log, stderr=subprocess.STDOUT, start_new_session=True)
-        device("wait-for-device", timeout=180)
         deadline = time.monotonic() + 180
-        while device("shell", "getprop", "sys.boot_completed", check=False).stdout.strip() != "1":
+        while True:
             require(emulator_process.poll() is None and time.monotonic() < deadline,
                     "INFRA_UNAVAILABLE", "emulator_boot_failed")
+            connected = device("get-state", check=False).stdout.strip() == "device"
+            if connected and device("shell", "getprop", "sys.boot_completed", check=False).stdout.strip() == "1":
+                break
             time.sleep(2)
         stage = report["stage"] = "guest_preflight"
         actual_api = device("shell", "getprop", "ro.build.version.sdk").stdout.strip()
@@ -346,12 +362,18 @@ def main():
         report.update(status="FAIL", failure_category="RUNNER_FAILED", failure_code=type(error).__name__)
         print("::error title=Android compatibility smoke::RUNNER_FAILED: " + type(error).__name__)
     finally:
+        if emulator_process and report["status"] != "PASS":
+            report["emulator_exit_code"] = emulator_process.poll()
         report.update(cleanup_emulator(emulator_process, adb))
         if not report["emulator_stopped"] and report["status"] == "PASS":
             report.update(status="FAIL", failure_category="INFRA_UNAVAILABLE",
                           failure_code="emulator_cleanup_failed")
         if emulator_log:
             emulator_log.close()
+            if report["status"] != "PASS":
+                tail = emulator_tail(args.out / "emulator-private.log")
+                (args.out / "emulator-failure.txt").write_text(tail + "\n")
+                print(json.dumps({"emulator_failure_tail": tail}))
         save()
         # Public APK bytes and raw emulator output are deliberately not uploaded as evidence.
         if owned_apk is not None:

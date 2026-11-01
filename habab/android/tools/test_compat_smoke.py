@@ -102,6 +102,26 @@ class ArtifactTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_emulator_failure_tail_is_bounded_and_redacted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "emulator-private.log"
+            log.write_text("ignored old line\n" * 70 + "missing library libpulse.so.0\n"
+                           "auth token: private-token\nhttps://example.org/signed?private=value\n")
+            tail = smoke.emulator_tail(log)
+        self.assertIn("missing library libpulse.so.0", tail)
+        self.assertNotIn("private-token", tail)
+        self.assertNotIn("private=value", tail)
+        self.assertLessEqual(len(tail.splitlines()), 60)
+        self.assertLessEqual(len(tail), 6000)
+
+    def test_timeout_identifies_only_tool_and_safe_subcommand(self):
+        with patch.object(smoke.subprocess, "run", side_effect=subprocess.TimeoutExpired("sdkmanager", 30)):
+            with self.assertRaises(smoke.Failure) as caught:
+                smoke.run(["/sdk/bin/sdkmanager", "--install", "sensitive argument"], timeout=30)
+        self.assertEqual(caught.exception.code, "tool_timed_out")
+        self.assertEqual(caught.exception.diagnostics,
+                         {"tool": "sdkmanager", "subcommand": "--install", "timeout_seconds": 30})
+
     def test_public_http_retry_is_once_and_only_transient(self):
         for status in (429, 500, 503, 404, 403):
             error = smoke.urllib.error.HTTPError("https://example.org", status, "fixture", {}, None)

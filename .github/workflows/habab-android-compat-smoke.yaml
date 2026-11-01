@@ -64,5 +64,6 @@ jobs:
             ${{ runner.temp }}/habab-android-compat-${{ matrix.api }}/report.json
             ${{ runner.temp }}/habab-android-compat-${{ matrix.api }}/screen.png
             ${{ runner.temp }}/habab-android-compat-${{ matrix.api }}/app-logcat.txt
+            ${{ runner.temp }}/habab-android-compat-${{ matrix.api }}/emulator-failure.txt
           if-no-files-found: warn
           retention-days: 1

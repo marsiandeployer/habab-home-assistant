@@ -53,7 +53,9 @@ human visual inspection after the first real run. The exact owned emulator is
 stopped in cleanup, including its owned QEMU process group if the launcher exits
 first. Existing APK files in the output directory are preserved and cause an
 input failure. Evidence retention is one day; APK and raw emulator output
-are not uploaded.
+are not uploaded. Failures retain the tool name, safe subcommand, timeout or
+exit status, and a redacted emulator stderr tail (60 lines, at most 6000 chars).
+An exited emulator fails the boot loop immediately.
 
 The workflow runs offline runner contracts before downloading SDK images. Run
 them locally without ADB, an emulator or network access:
