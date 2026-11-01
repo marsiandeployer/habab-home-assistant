@@ -145,20 +145,16 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 2)
         fetch.assert_not_called()
 
-    def test_official_image_metadata_matches_requested_api(self):
+    def test_image_metadata_records_fields_without_rejecting_optional_format(self):
         values = {"AndroidVersion.ApiLevel": "35", "SystemImage.Abi": "x86_64",
                   "SystemImage.TagId": "google_apis", "SystemImage.VendorId": "google", "Pkg.Revision": "1"}
         for api in ("35", "36"):
             values["AndroidVersion.ApiLevel"] = api
             for separator in ("=", " = "):
                 text = "\n".join(key + separator + value for key, value in values.items())
-                self.assertEqual(smoke.system_image_metadata(text, api), values)
-        for key, value in (("AndroidVersion.ApiLevel", "34"), ("SystemImage.Abi", "arm64-v8a"),
-                           ("SystemImage.TagId", "default"), ("SystemImage.VendorId", "other")):
-            with self.subTest(key=key), self.assertRaises(smoke.Failure) as caught:
-                smoke.system_image_metadata("\n".join(k + "=" + (value if k == key else v)
-                                                       for k, v in values.items()), "36")
-            self.assertEqual(caught.exception.code, "system_image_identity_mismatch")
+                self.assertEqual(smoke.system_image_metadata(text), values)
+        self.assertEqual(smoke.system_image_metadata("AndroidVersion.ApiLevel=36")['SystemImage.VendorId'], "")
+        self.assertEqual(smoke.system_image_metadata("")['AndroidVersion.ApiLevel'], "")
 
     def test_cleanup_still_stops_group_after_launcher_exit(self):
         process = Mock(pid=1234)

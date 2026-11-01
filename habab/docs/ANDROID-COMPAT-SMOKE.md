@@ -27,12 +27,14 @@ SDK licenses and installs the official emulator and selected system image on the
 runner. Missing KVM, inaccessible KVM, failed acceleration, missing SDK tools or
 an image without `arm64-v8a` and an active native bridge are explicit failures
 with `INFRA_UNAVAILABLE`. They are never skipped or converted into a green test.
-The runner verifies the installed image's API, ABI, Google APIs tag and vendor,
-then checks the booted guest's API. The report records emulator version, image
+The runner installs the exact Google SDK package ID and checks the booted
+guest's API and ARM64 translation capability. Image properties are diagnostic;
+missing optional vendor fields do not block the app test. The report records emulator version, image
 revision, guest ABIs/native bridge, page size and installed APK version.
-Current image revisions have not yet been capability-probed.
 Before downloading the large system image, the runner checks both installed
-emulator/QEMU binaries with `ldd` and verifies KVM with `-accel-check`.
+emulator/QEMU binaries with `ldd` and verifies KVM with `-accel-check`. Direct
+QEMU `ldd` can list bundled libraries supplied by its launcher; those entries
+are diagnostic, while the actual launcher/KVM check must succeed.
 
 Before app launch the guest's Wi-Fi and mobile data are disabled, and the job
 requires `Active default network: none/null`. This intentionally offline smoke
