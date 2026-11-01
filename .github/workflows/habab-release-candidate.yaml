@@ -228,7 +228,8 @@ jobs:
           set -euo pipefail
           [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]] || { echo '::error::Windows checkout does not match the selected source'; exit 1; }
           git diff --quiet && git diff --cached --quiet || { echo '::error::Windows checkout is dirty'; exit 1; }
-          snapshot=$(mktemp -d "$RUNNER_TEMP/habab-source.XXXXXX")
+          runner_temp=$(cygpath -u "$RUNNER_TEMP")
+          snapshot=$(mktemp -d "$runner_temp/habab-source.XXXXXX")
           trap 'rm -rf "$snapshot"' EXIT
           git archive "$SOURCE_REVISION" habab/distribution habab/product-tunnel | tar -x -C "$snapshot"
           export HABAB_SOURCE_REVISION="$SOURCE_REVISION" HABAB_SOURCE_DIRTY=false
