@@ -204,7 +204,9 @@ def main():
         adb, emulator = sdk / "platform-tools/adb", sdk / "emulator/emulator"
         manager = sdk / "cmdline-tools/latest/bin/sdkmanager"
         avdmanager = sdk / "cmdline-tools/latest/bin/avdmanager"
-        require(all(p.is_file() and os.access(p, os.X_OK) for p in (adb, emulator, manager, avdmanager)),
+        report["missing_sdk_tools"] = [p.name for p in (adb, manager, avdmanager)
+                                       if not (p.is_file() and os.access(p, os.X_OK))]
+        require(not report["missing_sdk_tools"],
                 "INFRA_UNAVAILABLE", "preinstalled_sdk_tools_missing")
         kvm = Path("/dev/kvm")
         require(kvm.is_char_device(), "INFRA_UNAVAILABLE", "kvm_missing")
@@ -213,16 +215,18 @@ def main():
             run(["sudo", "chgrp", grp.getgrgid(os.getgid()).gr_name, str(kvm)], timeout=10)
             run(["sudo", "chmod", "g+rw", str(kvm)], timeout=10)
         require(os.access(kvm, os.R_OK | os.W_OK), "INFRA_UNAVAILABLE", "kvm_not_accessible")
-        acceleration = run([str(emulator), "-accel-check"])
-        require("KVM" in acceleration.stdout + acceleration.stderr,
-                "INFRA_UNAVAILABLE", "kvm_not_reported_by_emulator")
-        report["emulator_version"] = run([str(emulator), "-version"]).stdout.splitlines()[:2]
         require(len(run([str(adb), "devices"]).stdout.strip().splitlines()) == 1,
                 "INFRA_UNAVAILABLE", "unexpected_existing_adb_target")
         stage = report["stage"] = "system_image"
         image = "system-images;android-" + args.api + ";google_apis;x86_64"
         run([str(manager), "--licenses"], input="y\n" * 100, timeout=120)
-        run([str(manager), "--install", image], timeout=600)
+        run([str(manager), "--install", "emulator", image], timeout=600)
+        require(emulator.is_file() and os.access(emulator, os.X_OK),
+                "INFRA_UNAVAILABLE", "installed_emulator_missing")
+        acceleration = run([str(emulator), "-accel-check"])
+        require("KVM" in acceleration.stdout + acceleration.stderr,
+                "INFRA_UNAVAILABLE", "kvm_not_reported_by_emulator")
+        report["emulator_version"] = run([str(emulator), "-version"]).stdout.splitlines()[:2]
         properties = sdk / "system-images" / ("android-" + args.api) / "google_apis/x86_64/source.properties"
         require(properties.is_file(), "INFRA_UNAVAILABLE", "system_image_metadata_missing")
         report["system_image"] = {"package": image,

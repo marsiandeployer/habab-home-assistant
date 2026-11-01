@@ -3,7 +3,10 @@
 This manual workflow uses `ubuntu-24.04` standard hosted
 runners in the public repository. It checks the unchanged public ARM64 APK on
 Google APIs x86_64 API 35 and 36 images, one job at a time.
-The first real run is pending; local runner contracts have passed.
+The first run, `41292403474`, verified the public APK pins and offline contracts
+but stopped before guest startup because the hosted runner has no preinstalled
+emulator. The runner now installs the official emulator package with sdkmanager;
+real installation and launch acceptance remains pending.
 
 The workflow, runner and offline tests are integrated separately from the
 product runtime and release pipeline. The workflow has only
@@ -15,8 +18,8 @@ metadata, the expected asset URL, downloaded bytes and SHA-256. It does not use
 a GitHub API token or any provider credential. A missing or mismatched artifact
 fails. Use only a public release; do not upload the private APK/model/audio pack.
 
-The job uses preinstalled SDK command-line tools, ADB and emulator. It accepts
-SDK licenses and installs the selected official system image on the disposable
+The job uses preinstalled SDK command-line tools and ADB. It accepts
+SDK licenses and installs the official emulator and selected system image on the disposable
 runner. Missing KVM, inaccessible KVM, failed acceleration, missing SDK tools or
 an image without `arm64-v8a` and an active native bridge are explicit failures
 with `INFRA_UNAVAILABLE`. They are never skipped or converted into a green test.
