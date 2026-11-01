@@ -102,6 +102,19 @@ class ArtifactTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_failed_tool_retains_bounded_redacted_diagnostics(self):
+        failed = subprocess.CompletedProcess(["sdkmanager"], 1, "x" * 5000,
+                                             "password=private https://example.org/signed?secret=value")
+        with patch.object(smoke.subprocess, "run", return_value=failed):
+            with self.assertRaises(smoke.Failure) as caught:
+                smoke.run(["/sdk/cmdline-tools/latest/bin/sdkmanager", "--install", "emulator"])
+        info = caught.exception.diagnostics
+        self.assertEqual(info["tool"], "sdkmanager")
+        self.assertEqual(info["exit_code"], 1)
+        self.assertLessEqual(len(info["output_tail"]), 4000)
+        self.assertNotIn("private", info["output_tail"])
+        self.assertNotIn("secret=value", info["output_tail"])
+
     def test_api_argument_rejected_before_work(self):
         with patch("sys.argv", ["compat_smoke.py", "--api", "34", "--out", "/unused"]), \
                 patch("sys.stderr", new_callable=io.StringIO), patch.object(smoke, "download") as fetch:

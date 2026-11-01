@@ -24,8 +24,9 @@ SERIAL = "emulator-5554"
 
 
 class Failure(Exception):
-    def __init__(self, category, code):
+    def __init__(self, category, code, diagnostics=None):
         self.category, self.code = category, code
+        self.diagnostics = diagnostics
         super().__init__(code)
 
 
@@ -40,7 +41,9 @@ def run(command, timeout=30, input=None, check=True):
     except (OSError, subprocess.TimeoutExpired):
         raise Failure("INFRA_UNAVAILABLE", "tool_unavailable_or_timed_out") from None
     if check and result.returncode:
-        raise Failure("INFRA_UNAVAILABLE", "tool_exit_nonzero")
+        raise Failure("INFRA_UNAVAILABLE", "tool_exit_nonzero", {
+            "tool": Path(command[0]).name, "exit_code": result.returncode,
+            "output_tail": safe_log((result.stdout + "\n" + result.stderr)[-4000:])})
     return result
 
 
@@ -310,6 +313,9 @@ def main():
         report["status"] = "PASS"
     except Failure as error:
         report.update(status="FAIL", failure_category=error.category, failure_code=error.code)
+        if error.diagnostics:
+            report["tool_failure"] = error.diagnostics
+            print(json.dumps(error.diagnostics))
         print("::error title=Android compatibility smoke::" + error.category + ": " + error.code)
     except Exception as error:
         report.update(status="FAIL", failure_category="RUNNER_FAILED", failure_code=type(error).__name__)
