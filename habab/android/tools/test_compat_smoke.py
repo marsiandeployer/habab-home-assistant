@@ -102,6 +102,12 @@ class ArtifactTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_notification_permission_button_uses_platform_id_and_bounds(self):
+        xml = '<hierarchy><node resource-id="com.android.permissioncontroller:id/permission_allow_button" bounds="[40,300][260,400]"/></hierarchy>'
+        self.assertEqual(smoke.notification_allow_coordinates(xml), (150, 350))
+        self.assertIsNone(smoke.notification_allow_coordinates('<hierarchy><node resource-id="other"/></hierarchy>'))
+        self.assertIsNone(smoke.notification_allow_coordinates('not xml'))
+
     def test_fresh_onboarding_requires_unfinished_owner_step(self):
         self.assertTrue(smoke.fresh_onboarding([{"step": "user", "done": False}]))
         for value in (None, {}, [], [{"step": "user", "done": True}],

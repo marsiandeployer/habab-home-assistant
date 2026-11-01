@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+import xml.etree.ElementTree as ET
 
 REPOSITORY = "marsiandeployer/habab-home-assistant"
 ASSET = "habab-home-arm64.apk"
@@ -40,6 +41,21 @@ def fresh_onboarding(value):
     return isinstance(value, list) and any(
         isinstance(step, dict) and step.get("step") == "user" and step.get("done") is False
         for step in value)
+
+
+def notification_allow_coordinates(ui_xml):
+    """Find the platform permission button without depending on screen size or language."""
+    try:
+        root = ET.fromstring(ui_xml)
+    except ET.ParseError:
+        return None
+    for node in root.iter("node"):
+        if node.get("resource-id", "").endswith(":id/permission_allow_button"):
+            match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+            if match:
+                x1, y1, x2, y2 = map(int, match.groups())
+                return (x1 + x2) // 2, (y1 + y2) // 2
+    return None
 
 
 def run(command, timeout=30, input=None, check=True):
@@ -343,6 +359,18 @@ def main():
         launched = device(*launch, timeout=60, check=False)
         require(launched.returncode == 0 and "Status: ok" in launched.stdout,
                 "APP_FAILED", "main_activity_start_failed")
+        if args.runtime:
+            # Android can display its own notification-permission dialog when
+            # the foreground service starts; handle it as a first-run user would.
+            for _ in range(4):
+                time.sleep(2)
+                device("shell", "uiautomator", "dump", "/sdcard/habab-smoke-ui.xml", check=False, timeout=20)
+                ui = device("shell", "cat", "/sdcard/habab-smoke-ui.xml", check=False).stdout
+                coords = notification_allow_coordinates(ui)
+                if coords:
+                    device("shell", "input", "tap", str(coords[0]), str(coords[1]))
+                    report["notification_permission_dialog_accepted"] = True
+                    break
         time.sleep(5)
         pids = device("shell", "pidof", PACKAGE, check=False).stdout.split()
         activities = device("shell", "dumpsys", "activity", "activities").stdout
