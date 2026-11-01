@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manual, offline UI smoke of an unchanged public ARM64 APK; no native-runtime claim."""
+"""Check an unchanged public ARM64 APK on an isolated Android emulator."""
 import argparse
 import grp
 import hashlib
@@ -33,6 +33,13 @@ class Failure(Exception):
 def require(condition, category, code):
     if not condition:
         raise Failure(category, code)
+
+
+def fresh_onboarding(value):
+    """Require the real Core onboarding API to offer the unfinished owner step."""
+    return isinstance(value, list) and any(
+        isinstance(step, dict) and step.get("step") == "user" and step.get("done") is False
+        for step in value)
 
 
 def run(command, timeout=30, input=None, check=True):
@@ -201,10 +208,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api", required=True, choices=("35", "36"))
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--runtime", action="store_true", help="Also provision the bundled runtime and check fresh HA onboarding")
     args = parser.parse_args()
     os.umask(0o077)
     args.out.mkdir(parents=True, exist_ok=True)
-    report = {"status": "RUNNING", "api": int(args.api), "scope": "offline MainActivity survival",
+    report = {"status": "RUNNING", "api": int(args.api), "scope": "fresh runtime onboarding" if args.runtime else "offline MainActivity survival",
               "native_runtime_tested": False, "page_size_compatibility_proven": False,
               "microphone_or_audio_tested": False, "workflow_source": os.environ.get("GITHUB_SHA"),
               "screenshots_require_human_review": True}
@@ -279,10 +287,13 @@ def main():
         os.environ["ANDROID_AVD_HOME"] = str(avd_home)
         run([str(avdmanager), "create", "avd", "--force", "--name", avd, "--package", image],
             input="no\n", timeout=120)
+        if args.runtime:
+            with (avd_home / (avd + ".avd") / "config.ini").open("a") as config:
+                config.write("\ndisk.dataPartition.size=8G\n")
         emulator_log = (args.out / "emulator-private.log").open("w")
         emulator_process = subprocess.Popen([str(emulator), "-avd", avd, "-port", "5554",
             "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot", "-gpu", "software",
-            "-accel", "on", "-memory", "2048", "-cores", "2", "-partition-size", "2048",
+            "-accel", "on", "-memory", "2048", "-cores", "2", "-partition-size", "8192" if args.runtime else "2048",
             "-camera-back", "none", "-camera-front", "none"],
             stdout=emulator_log, stderr=subprocess.STDOUT, start_new_session=True)
         deadline = time.monotonic() + 180
@@ -304,15 +315,16 @@ def main():
                 "INFRA_UNAVAILABLE", "arm64_translator_not_available")
         report["translator"] = props
         report["guest_page_size"] = device("shell", "getconf", "PAGE_SIZE").stdout.strip()
-        # Offline guest is deliberate: no factory archive, account or voice request can download.
-        device("shell", "svc", "wifi", "disable")
-        device("shell", "svc", "data", "disable")
-        deadline = time.monotonic() + 30
-        while not re.search(r"Active default network:\s*(?:none|null)\b",
-                            device("shell", "dumpsys", "connectivity").stdout, re.I):
-            require(time.monotonic() < deadline, "INFRA_UNAVAILABLE", "guest_network_not_disabled")
-            time.sleep(2)
-        report["guest_offline_before_app_launch"] = True
+        if not args.runtime:
+            # Offline guest: no factory archive, account or voice request can download.
+            device("shell", "svc", "wifi", "disable")
+            device("shell", "svc", "data", "disable")
+            deadline = time.monotonic() + 30
+            while not re.search(r"Active default network:\s*(?:none|null)\b",
+                                device("shell", "dumpsys", "connectivity").stdout, re.I):
+                require(time.monotonic() < deadline, "INFRA_UNAVAILABLE", "guest_network_not_disabled")
+                time.sleep(2)
+            report["guest_offline_before_app_launch"] = True
         device("logcat", "-c")
         stage = report["stage"] = "application"
         installed = device("install", "--no-streaming", str(apk), timeout=120, check=False)
@@ -324,9 +336,11 @@ def main():
         require(code is not None and name is not None, "APP_FAILED", "installed_package_metadata_missing")
         report["installed_app"] = {"package": PACKAGE, "version_code": int(code[1]),
                                    "version_name": name[1]}
-        # No CATEGORY_LAUNCHER: current launcher auto-provisioning is deliberately not requested.
-        launched = device("shell", "am", "start", "-W", "-a", "android.intent.action.MAIN",
-                          "-n", COMPONENT, timeout=60, check=False)
+        launch = ["shell", "am", "start", "-W", "-a", "android.intent.action.MAIN"]
+        if args.runtime:
+            launch.extend(["-c", "android.intent.category.LAUNCHER"])
+        launch.extend(["-n", COMPONENT])
+        launched = device(*launch, timeout=60, check=False)
         require(launched.returncode == 0 and "Status: ok" in launched.stdout,
                 "APP_FAILED", "main_activity_start_failed")
         time.sleep(5)
@@ -343,9 +357,10 @@ def main():
         fatal = bool(re.search(r"FATAL EXCEPTION|Fatal signal", log, re.I))
         report["activity_alive"], report["fatal_exception_or_signal"] = alive, fatal
         services = device("shell", "dumpsys", "activity", "services", PACKAGE).stdout
-        require(not any(name in services for name in (".ServerService", ".MaintenanceService", ".VoiceService")),
-                "APP_FAILED", "unexpected_runtime_or_voice_service")
-        report["runtime_and_voice_services_absent"] = True
+        if not args.runtime:
+            require(not any(name in services for name in (".ServerService", ".MaintenanceService", ".VoiceService")),
+                    "APP_FAILED", "unexpected_runtime_or_voice_service")
+            report["runtime_and_voice_services_absent"] = True
         screenshot = subprocess.run([str(adb), "-s", SERIAL, "exec-out", "screencap", "-p"],
                                     capture_output=True, timeout=30)
         require(screenshot.returncode == 0 and screenshot.stdout.startswith(b"\x89PNG\r\n\x1a\n"),
@@ -354,6 +369,26 @@ def main():
         alive = alive and bool(device("shell", "pidof", PACKAGE, check=False).stdout.split())
         report["activity_alive"] = alive
         require(alive and not fatal, "APP_FAILED", "activity_dead_or_fatal_exception")
+        if args.runtime:
+            stage = report["stage"] = "fresh_home_assistant"
+            device("forward", "tcp:18131", "tcp:8123")
+            deadline = time.monotonic() + 900
+            while time.monotonic() < deadline:
+                require(emulator_process.poll() is None, "INFRA_UNAVAILABLE", "emulator_stopped_during_runtime")
+                try:
+                    with urllib.request.urlopen("http://127.0.0.1:18131/api/onboarding", timeout=5) as response:
+                        report["last_onboarding_http_status"] = response.status
+                        onboarding = json.loads(response.read(65536))
+                    if fresh_onboarding(onboarding):
+                        report["native_runtime_tested"] = True
+                        report["fresh_user_onboarding_available"] = True
+                        break
+                except urllib.error.HTTPError as error:
+                    report["last_onboarding_http_status"] = error.code
+                except (OSError, ValueError, urllib.error.URLError):
+                    pass
+                time.sleep(5)
+            require(report["native_runtime_tested"], "APP_FAILED", "fresh_onboarding_not_available")
         report["status"] = "PASS"
     except Failure as error:
         report.update(status="FAIL", failure_category=error.category, failure_code=error.code)

@@ -16,6 +16,11 @@ on:
         description: Reviewed byte size of habab-home-arm64.apk
         required: true
         type: string
+      runtime:
+        description: Start the fresh Home Assistant runtime (takes longer)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,7 +33,7 @@ jobs:
   compatibility:
     name: Android API ${{ matrix.api }} ARM64 APK compatibility
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -51,10 +56,12 @@ jobs:
           HABAB_COMPAT_RELEASE_TAG: ${{ inputs.release_tag }}
           HABAB_COMPAT_APK_SHA256: ${{ inputs.apk_sha256 }}
           HABAB_COMPAT_APK_BYTES: ${{ inputs.apk_bytes }}
-        run: >-
-          python3 habab/android/tools/compat_smoke.py
-          --api '${{ matrix.api }}'
-          --out "$RUNNER_TEMP/habab-android-compat-${{ matrix.api }}"
+          HABAB_COMPAT_RUNTIME: ${{ inputs.runtime }}
+        run: |
+          args=()
+          if [ "$HABAB_COMPAT_RUNTIME" = "true" ]; then args+=(--runtime); fi
+          python3 habab/android/tools/compat_smoke.py --api '${{ matrix.api }}' \
+            --out "$RUNNER_TEMP/habab-android-compat-${{ matrix.api }}" "${args[@]}"
       - name: Upload bounded compatibility evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

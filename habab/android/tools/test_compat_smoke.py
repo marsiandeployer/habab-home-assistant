@@ -102,6 +102,12 @@ class ArtifactTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_fresh_onboarding_requires_unfinished_owner_step(self):
+        self.assertTrue(smoke.fresh_onboarding([{"step": "user", "done": False}]))
+        for value in (None, {}, [], [{"step": "user", "done": True}],
+                      [{"step": "integration", "done": False}], [{"step": "user", "done": 0}]):
+            self.assertFalse(smoke.fresh_onboarding(value))
+
     def test_emulator_failure_tail_is_bounded_and_redacted(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "emulator-private.log"
