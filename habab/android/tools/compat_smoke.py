@@ -310,6 +310,7 @@ def main():
         emulator_process = subprocess.Popen([str(emulator), "-avd", avd, "-port", "5554",
             "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot", "-gpu", "software",
             "-accel", "on", "-memory", "2048", "-cores", "2", "-partition-size", "6144" if args.runtime else "2048",
+            *(["-dns-server", "8.8.8.8,8.8.4.4"] if args.runtime else []),
             "-camera-back", "none", "-camera-front", "none"],
             stdout=emulator_log, stderr=subprocess.STDOUT, start_new_session=True)
         deadline = time.monotonic() + 180
@@ -331,6 +332,17 @@ def main():
                 "INFRA_UNAVAILABLE", "arm64_translator_not_available")
         report["translator"] = props
         report["guest_page_size"] = device("shell", "getconf", "PAGE_SIZE").stdout.strip()
+        if args.runtime:
+            # Fail early as infrastructure, not as an app failure, if the
+            # emulator cannot resolve the public release host.
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                dns = device("shell", "ping", "-c", "1", "-W", "2", "github.com", timeout=10, check=False)
+                if re.search(r"^PING github\.com\s+\(", dns.stdout, re.M):
+                    report["guest_release_dns_ready"] = True
+                    break
+                time.sleep(3)
+            require(report.get("guest_release_dns_ready") is True, "INFRA_UNAVAILABLE", "guest_release_dns_unavailable")
         if not args.runtime:
             # Offline guest: no factory archive, account or voice request can download.
             device("shell", "svc", "wifi", "disable")
@@ -430,6 +442,16 @@ def main():
     finally:
         if emulator_process and report["status"] != "PASS":
             report["emulator_exit_code"] = emulator_process.poll()
+            if args.runtime and adb and emulator_process.poll() is None:
+                # Capture the final error screen rather than the initial
+                # provisioning screen; this disposable guest has no user data.
+                try:
+                    screenshot = subprocess.run([str(adb), "-s", SERIAL, "exec-out", "screencap", "-p"],
+                                                capture_output=True, timeout=20)
+                    if screenshot.returncode == 0 and screenshot.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+                        (args.out / "screen.png").write_bytes(screenshot.stdout)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
         report.update(cleanup_emulator(emulator_process, adb))
         if not report["emulator_stopped"] and report["status"] == "PASS":
             report.update(status="FAIL", failure_category="INFRA_UNAVAILABLE",
