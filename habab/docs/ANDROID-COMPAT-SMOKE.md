@@ -19,6 +19,8 @@ and exact `apk_bytes` for `habab-home-arm64.apk`. The script checks public relea
 metadata, the expected asset URL, downloaded bytes and SHA-256. It does not use
 a GitHub API token or any provider credential. A missing or mismatched artifact
 fails. Use only a public release; do not upload the private APK/model/audio pack.
+HTTP 429 and 5xx receive one explicit retry; other HTTP errors fail immediately
+with their numeric status. No credential or alternate download source is used.
 
 The job uses preinstalled SDK command-line tools and ADB. It accepts
 SDK licenses and installs the official emulator and selected system image on the disposable
@@ -29,6 +31,8 @@ The runner verifies the installed image's API, ABI, Google APIs tag and vendor,
 then checks the booted guest's API. The report records emulator version, image
 revision, guest ABIs/native bridge, page size and installed APK version.
 Current image revisions have not yet been capability-probed.
+Before downloading the large system image, the runner checks both installed
+emulator/QEMU binaries with `ldd` and verifies KVM with `-accel-check`.
 
 Before app launch the guest's Wi-Fi and mobile data are disabled, and the job
 requires `Active default network: none/null`. This intentionally offline smoke

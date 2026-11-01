@@ -102,6 +102,28 @@ class ArtifactTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_public_http_retry_is_once_and_only_transient(self):
+        for status in (429, 500, 503, 404, 403):
+            error = smoke.urllib.error.HTTPError("https://example.org", status, "fixture", {}, None)
+            opener = Mock(side_effect=[error, "success"])
+            with self.subTest(status=status), patch.object(smoke.time, "sleep") as pause, \
+                    patch("sys.stdout", new_callable=io.StringIO):
+                if status == 429 or status >= 500:
+                    self.assertEqual(smoke.public_open(opener, "request", 30), "success")
+                    self.assertEqual(opener.call_count, 2)
+                    pause.assert_called_once_with(2)
+                else:
+                    with self.assertRaises(smoke.urllib.error.HTTPError):
+                        smoke.public_open(opener, "request", 30)
+                    self.assertEqual(opener.call_count, 1)
+                    pause.assert_not_called()
+        error = smoke.urllib.error.HTTPError("https://example.org", 503, "fixture", {}, None)
+        opener = Mock(side_effect=[error, error])
+        with patch.object(smoke.time, "sleep"), patch("sys.stdout", new_callable=io.StringIO), \
+                self.assertRaises(smoke.urllib.error.HTTPError):
+            smoke.public_open(opener, "request", 30)
+        self.assertEqual(opener.call_count, 2)
+
     def test_failed_tool_retains_bounded_redacted_diagnostics(self):
         failed = subprocess.CompletedProcess(["sdkmanager"], 1, "x" * 5000,
                                              "password=private https://example.org/signed?secret=value")
@@ -128,8 +150,9 @@ class RunnerTests(unittest.TestCase):
                   "SystemImage.TagId": "google_apis", "SystemImage.VendorId": "google", "Pkg.Revision": "1"}
         for api in ("35", "36"):
             values["AndroidVersion.ApiLevel"] = api
-            text = "\n".join(key + "=" + value for key, value in values.items())
-            self.assertEqual(smoke.system_image_metadata(text, api), values)
+            for separator in ("=", " = "):
+                text = "\n".join(key + separator + value for key, value in values.items())
+                self.assertEqual(smoke.system_image_metadata(text, api), values)
         for key, value in (("AndroidVersion.ApiLevel", "34"), ("SystemImage.Abi", "arm64-v8a"),
                            ("SystemImage.TagId", "default"), ("SystemImage.VendorId", "other")):
             with self.subTest(key=key), self.assertRaises(smoke.Failure) as caught:

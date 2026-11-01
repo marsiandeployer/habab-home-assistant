@@ -57,6 +57,18 @@ class PublicRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def public_open(open_url, request, timeout):
+    """Retry a public HTTP open once, only for 429 or server errors."""
+    for attempt in range(2):
+        try:
+            return open_url(request, timeout=timeout)
+        except urllib.error.HTTPError as error:
+            if attempt or not (error.code == 429 or 500 <= error.code <= 599):
+                raise
+            print("Public release HTTP retry: status=" + str(error.code) + " attempt=2/2")
+            time.sleep(2)
+
+
 def download(tag, digest, size, destination):
     """No token or credential is read; explicit public release and caller pins are mandatory."""
     require(bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", tag)) and tag != "latest",
@@ -70,7 +82,7 @@ def download(tag, digest, size, destination):
                                                        "Accept": "application/vnd.github+json"})
     created = False
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with public_open(urllib.request.urlopen, request, 30) as response:
             raw = response.read(2_000_001)
         require(len(raw) <= 2_000_000, "ARTIFACT_FAILED", "release_metadata_too_large")
         release = json.loads(raw)
@@ -90,7 +102,7 @@ def download(tag, digest, size, destination):
                 "ARTIFACT_FAILED", "unexpected_release_apk_url")
         opener = urllib.request.build_opener(PublicRedirect())
         hashed, count = hashlib.sha256(), 0
-        with opener.open(expected_url, timeout=60) as response, destination.open("xb") as output:
+        with public_open(opener.open, expected_url, 60) as response, destination.open("xb") as output:
             created = True
             while block := response.read(1024 * 1024):
                 count += len(block)
@@ -125,12 +137,14 @@ def download(tag, digest, size, destination):
 
 
 def system_image_metadata(text, api):
-    values = dict(line.split("=", 1) for line in text.splitlines()
-                  if "=" in line and not line.lstrip().startswith("#"))
+    values = dict(tuple(part.strip() for part in line.split("=", 1))
+                  for line in text.splitlines() if "=" in line and not line.lstrip().startswith("#"))
     expected = {"AndroidVersion.ApiLevel": str(api), "SystemImage.Abi": "x86_64",
                 "SystemImage.TagId": "google_apis", "SystemImage.VendorId": "google"}
-    require(all(values.get(key) == value for key, value in expected.items()),
-            "INFRA_UNAVAILABLE", "system_image_identity_mismatch")
+    if not all(values.get(key) == value for key, value in expected.items()):
+        raise Failure("INFRA_UNAVAILABLE", "system_image_identity_mismatch", {
+            "expected_image": expected,
+            "actual_image": {key: safe_log(values.get(key, ""))[:128] for key in expected}})
     return {**expected, "Pkg.Revision": values.get("Pkg.Revision")}
 
 
@@ -228,13 +242,23 @@ def main():
         stage = report["stage"] = "system_image"
         image = "system-images;android-" + args.api + ";google_apis;x86_64"
         run([str(manager), "--licenses"], input="y\n" * 100, timeout=120)
-        run([str(manager), "--install", "emulator", image], timeout=600)
+        run([str(manager), "--install", "emulator"], timeout=300)
         require(emulator.is_file() and os.access(emulator, os.X_OK),
                 "INFRA_UNAVAILABLE", "installed_emulator_missing")
+        qemu = sdk / "emulator/qemu/linux-x86_64/qemu-system-x86_64"
+        require(qemu.is_file(), "INFRA_UNAVAILABLE", "installed_qemu_missing")
+        report["host_libraries"] = {}
+        for binary in (emulator, qemu):
+            libraries = run(["ldd", str(binary)])
+            report["host_libraries"][binary.name] = re.findall(
+                r"^\s*(\S+)\s+=>\s+not found\s*$", libraries.stdout, re.M)
+        require(not any(report["host_libraries"].values()),
+                "INFRA_UNAVAILABLE", "emulator_host_libraries_missing")
         acceleration = run([str(emulator), "-accel-check"])
         require("KVM" in acceleration.stdout + acceleration.stderr,
                 "INFRA_UNAVAILABLE", "kvm_not_reported_by_emulator")
         report["emulator_version"] = run([str(emulator), "-version"]).stdout.splitlines()[:2]
+        run([str(manager), "--install", image], timeout=600)
         properties = sdk / "system-images" / ("android-" + args.api) / "google_apis/x86_64/source.properties"
         require(properties.is_file(), "INFRA_UNAVAILABLE", "system_image_metadata_missing")
         report["system_image"] = {"package": image,
