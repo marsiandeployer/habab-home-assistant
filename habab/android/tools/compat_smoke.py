@@ -305,11 +305,11 @@ def main():
             input="no\n", timeout=120)
         if args.runtime:
             with (avd_home / (avd + ".avd") / "config.ini").open("a") as config:
-                config.write("\ndisk.dataPartition.size=8G\n")
+                config.write("\ndisk.dataPartition.size=6G\n")
         emulator_log = (args.out / "emulator-private.log").open("w")
         emulator_process = subprocess.Popen([str(emulator), "-avd", avd, "-port", "5554",
             "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot", "-gpu", "software",
-            "-accel", "on", "-memory", "2048", "-cores", "2", "-partition-size", "8192" if args.runtime else "2048",
+            "-accel", "on", "-memory", "2048", "-cores", "2", "-partition-size", "6144" if args.runtime else "2048",
             "-camera-back", "none", "-camera-front", "none"],
             stdout=emulator_log, stderr=subprocess.STDOUT, start_new_session=True)
         deadline = time.monotonic() + 180
