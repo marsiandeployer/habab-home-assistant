@@ -858,6 +858,8 @@ function installChat() {
         #log{flex:1;min-height:0;overflow:auto;padding:24px;scrollbar-color:var(--secondary-text-color,#6b7279) transparent;scrollbar-width:thin}.empty{height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;max-width:440px;margin:auto}.empty h3{font-size:24px;line-height:1.3;font-weight:500;margin:0 0 16px}
         .tool-calls{margin-block:12px 4px;border:1px solid var(--divider-color,#c8cccf);border-radius:10px;padding:8px 12px;max-inline-size:100%;font-size:13px;white-space:normal}.tool-calls summary{cursor:pointer;min-height:32px;align-content:center;overflow-wrap:anywhere}.tool-calls summary:focus-visible{outline:2px solid var(--primary-color,#007a9e);outline-offset:2px}.tool-call{margin-block-start:8px;padding-block-start:4px;border-block-start:1px solid var(--divider-color,#c8cccf)}.tool-calls .tool-caption{margin-block:8px 4px;color:var(--secondary-text-color,#5f6368);font-size:12px}.tool-calls pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;max-block-size:18rem;max-inline-size:100%;margin:0;padding:8px;border-radius:6px;background:var(--secondary-background-color,#f0f2f4);font:12px/1.5 ui-monospace,monospace}.tool-calls a{color:var(--primary-color,#007a9e)}
         .message{white-space:pre-wrap;overflow-wrap:anywhere;max-width:65ch;margin-block-end:24px}.message.user{margin-inline-start:auto;background:var(--secondary-background-color,#f0f2f4);border-radius:16px;padding:12px 16px;width:fit-content;max-width:85%}.message.assistant{padding-inline:4px}.name{font-size:12px;font-weight:500;color:var(--secondary-text-color,#5f6368);margin-block-end:5px}.message p{margin:0}ha-markdown{display:block;white-space:normal;overflow:auto;max-width:100%}.answer-feedback{display:flex;align-items:center;gap:6px;margin-block-start:8px;color:var(--secondary-text-color,#5f6368);font-size:12px}.answer-feedback button{min-width:40px;min-height:36px;padding:4px 8px;border:1px solid var(--divider-color,#c8cccf);border-radius:18px}.answer-feedback button[aria-pressed="true"]{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}.answer-feedback [role="status"]{margin:0;white-space:normal}
+        #status.working::before{content:"";display:inline-block;inline-size:12px;block-size:12px;margin-inline-end:8px;vertical-align:-1px;border:2px solid var(--divider-color,#c8cccf);border-block-start-color:var(--primary-color,#007a9e);border-radius:50%;animation:habab-working-spin .8s linear infinite}
+        @keyframes habab-working-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){#status.working::before{animation:none}}
         .quick-replies{display:flex;flex-wrap:wrap;gap:8px;margin-block-start:16px}.quick-reply{border:1px solid var(--divider-color,#c8cccf);border-radius:18px;padding:7px 12px;min-height:40px;background:var(--card-background-color,#fff)}.quick-reply:hover{border-color:var(--primary-color,#007a9e);background:var(--secondary-background-color,#f0f2f4)}
         footer{padding:12px 20px 20px}.assist-pipeline-control{display:block;margin:0 0 8px;font-size:12px;color:var(--secondary-text-color,#5f6368)}.assist-pipeline{display:block;width:100%;min-height:40px;margin-block-start:4px;padding:6px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;color:var(--primary-text-color,#212121);background:var(--card-background-color,#fff)}#voice-mode-help{font-size:12px;color:var(--secondary-text-color,#5f6368);margin:0 0 8px}#status{font-size:13px;color:var(--secondary-text-color,#5f6368);margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}#status.error{color:var(--error-color,#b3261e)}.recovery{display:flex;gap:12px;align-items:center;margin-block-end:12px}a{color:var(--primary-color,#007a9e);text-underline-offset:3px}.recovery button{text-decoration:underline}
         form{border:1px solid var(--secondary-text-color,#81868b);border-radius:14px;padding:8px;display:flex;gap:8px;align-items:flex-end}textarea{color:inherit;caret-color:var(--primary-color,#007a9e);background:transparent;border:0;resize:none;min-width:0;flex:1;min-height:64px;max-height:128px;padding:8px;line-height:1.5}textarea::placeholder{color:var(--secondary-text-color,#5f6368);opacity:1}textarea:focus-visible{outline-offset:0}.send{color:var(--text-primary-color,#fff);background:var(--primary-color,#007a9e)}.send:hover{background:var(--dark-primary-color,#006686)}[hidden]{display:none!important}
@@ -1134,9 +1136,10 @@ function installChat() {
       else this.q(".launcher").focus();
     }
 
-    status(text, error = false) {
+    status(text, error = false, working = false) {
       this.q("#status").textContent = text;
       this.q("#status").classList.toggle("error", error);
+      this.q("#status").classList.toggle("working", working);
       this.q(".recovery").hidden = !error;
       this.q(".recovery a").hidden = this.demo;
     }
@@ -1864,7 +1867,7 @@ function installChat() {
       this.busy = true; this.running = true; this.stopped = false;
       this.messages.push({role: "user", text});
       if (typeof textValue !== "string" || clearDraft) this.q(".composer-textarea").value = "";
-      this.draw(); this.status(this.t.working); this.controls();
+      this.draw(); this.status(this.t.working, false, true); this.controls();
       try {
         const result = this.demo ? await this.demoRequest("", "POST", text)
           : await this.hass.callWS({type: "habab_home/agent/run", session_id: this.sessionId, text});
