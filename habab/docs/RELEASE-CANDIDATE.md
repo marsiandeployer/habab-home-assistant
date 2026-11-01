@@ -40,10 +40,28 @@ gh workflow run habab-release.yaml --ref main \
   -f android_version_name=<REVIEWED_NAME>
 ```
 
-The source SHA must equal the workflow's own dispatch SHA. The tag must be new
-and include that SHA's first 12 characters. Existing releases, drafts, and tags
+The product SHA is frozen independently of the controller workflow SHA. They
+normally match. A corrected controller may target an earlier product commit
+only when every changed path in every commit of the complete product-to-controller
+range is in the narrow workflow/release-helper/test/docs allowlist. Intermediate
+product edits followed by a revert still fail this check. All platform payloads
+and signatures continue to bind the frozen product SHA. The publisher executes
+the corrected controller helper and verifies a separate checkout of that product.
+Both identities are recorded in the release receipt. The tag must be new and
+include the product SHA's first 12 characters. Existing releases, drafts, and tags
 are never overwritten. The workflow serializes public releases and requires all
 five existing Android signing secrets before starting platform builds.
+
+For a CI-only retry, optional `frontend_run_id` reuses a completed frontend
+artifact from the same repository's trusted manual producer workflow at the
+exact product SHA. For example, the verified frontend from run `41282055361`
+belongs to product `f5ac8458dd1d05084035cb7ac24b4ae8fb9a8c28`. Its original
+manifest and producer identity remain unchanged. The artifact's exact wheel
+bytes, version and manifest source are rechecked before runtime packaging, and
+the original artifact run ID is recorded. The frontend compilation job is
+skipped; Windows/Linux builds and runtime/APK packaging continue. A prior signed
+runtime that was never uploaded by its failed job cannot be recovered from the
+completed hosted runner and must be rebuilt.
 
 The release reuses the candidate producer with `target_scope=all`. This caller
 requires a built Windows EXE, both Linux OCI images, and a signed public Android
@@ -209,8 +227,9 @@ early check and requires a reviewed official-source lock update before rebuildin
 - **Android:** prerequisites are checked before any frontend build. With all
   explicitly reviewed Android version code/name, APK signing secrets and
   `HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64`, the workflow
-  calls the existing native frontend compiler at the selected source SHA,
-  downloads its actual wheel and provenance manifest, packages a fresh ARM64
+  calls the existing native frontend compiler at the selected product SHA, or
+  reuses its verified same-product artifact for a CI-only retry. It downloads the
+  actual wheel and original provenance manifest, packages a fresh ARM64
   runtime using that local wheel, and signs it with the existing trusted runtime
   RSA key. The derived public key must equal the checked-in trusted key; no key
   is generated or rotated. The wheel remains content addressed by SHA-256 in its
@@ -235,7 +254,9 @@ early check and requires a reviewed official-source lock update before rebuildin
   manifest exactly, as well as the selected source tree. A same-version wheel or
   matching backend source alone is insufficient. Old manifests without this
   frontend provenance fail; there is no published-frontend fallback. The workflow
-  retains its sourceFiles, launcher, configuration and Node APK inventory checks,
+  derives `sourceFiles` through the producer's canonical `copy_sources()` in a
+  temporary directory, including component services and bundled license files.
+  It retains strict sourceFiles, launcher, configuration and Node APK inventory checks,
   including `.vtt` captions and the network-tools `icu-data-en` exclusion.
 
   In `all`, missing prerequisites produce an explicit Android `blocked` record

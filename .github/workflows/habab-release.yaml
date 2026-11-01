@@ -4,12 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       source_revision:
-        description: Frozen full SHA of this workflow on main (all products build from it)
+        description: Frozen product SHA on main (controller may add only reviewed CI changes)
         required: true
         type: string
       release_tag:
         description: Immutable habab-v<VERSION>-<first 12 source SHA characters>
         required: true
+        type: string
+      frontend_run_id:
+        description: Optional completed exact-product frontend producer run; preserves its original manifest
+        required: false
+        default: ''
         type: string
       android_version_code:
         description: New reviewed Android versionCode, greater than distributed builds
@@ -22,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: habab-public-release
@@ -35,6 +41,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
+          filter: blob:none
           sparse-checkout: |
             habab/scripts
             habab/distribution
@@ -47,15 +55,27 @@ jobs:
         env:
           SOURCE_REVISION: ${{ inputs.source_revision }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          FRONTEND_RUN_ID: ${{ inputs.frontend_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == refs/heads/main && "$SOURCE_REVISION" == "$GITHUB_SHA" ]]
+          [[ "$GITHUB_REF" == refs/heads/main ]]
           python3 - <<'PY'
           import os
           import runpy
-          runpy.run_path('habab/scripts/github-release.py')['release_base'](
-              os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG'], os.environ['SOURCE_REVISION'])
+          import json
+          import subprocess
+          from pathlib import Path
+          helpers = runpy.run_path('habab/scripts/github-release.py')
+          helpers['release_base'](os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG'], os.environ['SOURCE_REVISION'])
+          helpers['validate_controller_range'](Path('.'), os.environ['SOURCE_REVISION'], os.environ['GITHUB_SHA'])
+          frontend_run = os.environ['FRONTEND_RUN_ID']
+          if frontend_run:
+              if not frontend_run.isdecimal() or int(frontend_run) <= 0:
+                  raise SystemExit('Frontend run ID must be a positive integer')
+              producer = json.loads(subprocess.check_output([
+                  'gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + frontend_run]))
+              helpers['validate_frontend_run'](producer, os.environ['GITHUB_REPOSITORY'], os.environ['SOURCE_REVISION'])
           PY
           [[ -z "$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")" ]] || {
             echo '::error::Release tag already exists; immutable releases cannot be overwritten'; exit 1;
@@ -83,7 +103,7 @@ jobs:
             [[ -n "${!name}" ]] || { echo "::error::Missing required signing secret: $name"; exit 1; }
           done
       - name: Test strict release gates
-        run: PYTHONPATH=habab/scripts python3 -m unittest -v test_github_release
+        run: PYTHONPATH=habab/scripts python3 -m unittest -v test_github_release test_release_candidate.ReleaseCandidateTests.test_android_workflow_accepts_and_rejects_locked_node_inventory
 
   candidate:
     needs: validate
@@ -92,6 +112,7 @@ jobs:
       target_scope: all
       source_ref: ${{ needs.validate.outputs.source_revision }}
       release_tag: ${{ inputs.release_tag }}
+      frontend_run_id: ${{ inputs.frontend_run_id }}
       android_version_code: ${{ inputs.android_version_code }}
       android_version_name: ${{ inputs.android_version_name }}
     secrets:
@@ -111,13 +132,25 @@ jobs:
       SOURCE_REVISION: ${{ needs.validate.outputs.source_revision }}
       RELEASE_TAG: ${{ inputs.release_tag }}
       GH_TOKEN: ${{ github.token }}
+      WORKFLOW_REVISION: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.validate.outputs.source_revision }}
+          ref: ${{ github.sha }}
           persist-credentials: false
           sparse-checkout: |
             habab/scripts
+            habab/distribution
+            habab/android/tools
+            habab/android/app/src/main/assets/release
+            habab/native-frontend
+      - name: Check out the frozen product separately from controller tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.source_revision }}
+          path: product-source
+          persist-credentials: false
+          sparse-checkout: |
             habab/distribution
             habab/android/tools
             habab/android/app/src/main/assets/release
@@ -134,10 +167,12 @@ jobs:
       - name: Verify exact payloads and signatures before creating a draft
         run: |
           set -euo pipefail
-          [[ "$(git rev-parse HEAD)" == "$SOURCE_REVISION" ]]
+          [[ "$(git rev-parse HEAD)" == "$WORKFLOW_REVISION" ]]
+          [[ "$(git -C product-source rev-parse HEAD)" == "$SOURCE_REVISION" ]]
           git diff --quiet && git diff --cached --quiet
-          python3 habab/scripts/github-release.py --root candidate --source-tree . \
-            --source-revision "$SOURCE_REVISION" --repository "$GITHUB_REPOSITORY" \
+          git -C product-source diff --quiet && git -C product-source diff --cached --quiet
+          python3 habab/scripts/github-release.py --root candidate --source-tree product-source \
+            --source-revision "$SOURCE_REVISION" --workflow-revision "$WORKFLOW_REVISION" --repository "$GITHUB_REPOSITORY" \
             --tag "$RELEASE_TAG" --output release --receipt upload-receipt.json
           (cd release && sha256sum --check SHA256SUMS)
       - name: Create draft and upload verified assets without replacement

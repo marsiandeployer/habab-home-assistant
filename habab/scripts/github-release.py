@@ -33,6 +33,45 @@ def release_base(repository, tag, source_revision):
     return f'https://github.com/{repository}/releases/download/{tag}'
 
 
+# Product builds may reuse a frozen SHA only across reviewed orchestration-only commits.
+CI_ONLY_PATHS = {
+    '.github/workflows/habab-release.yaml',
+    '.github/workflows/habab-release-candidate.yaml',
+    'habab/scripts/github-release.py',
+    'habab/scripts/test_github_release.py',
+    'habab/scripts/test_release_candidate.py',
+    'habab/docs/RELEASE-CANDIDATE.md',
+}
+
+
+def validate_controller_range(repository, product_revision, workflow_revision):
+    if not all(re.fullmatch(r'[0-9a-f]{40}', value) for value in (product_revision, workflow_revision)):
+        raise ValueError('Product and controller revisions must be full lowercase SHAs')
+    def git(*arguments):
+        return subprocess.check_output(['git', '-C', str(repository), *arguments])
+    try:
+        git('merge-base', '--is-ancestor', product_revision, workflow_revision)
+        commits = git('rev-list', product_revision + '..' + workflow_revision).decode().splitlines()
+        touched = set()
+        for commit in commits:
+            touched.update(path.decode() for path in git('diff-tree', '--no-commit-id', '--name-only',
+                                                         '--no-renames', '-r', '-m', '-z', commit).split(b'\0') if path)
+    except subprocess.CalledProcessError as error:
+        raise ValueError('Frozen product must be an ancestor of the controller revision') from error
+    unexpected = touched - CI_ONLY_PATHS
+    if unexpected:
+        raise ValueError('Product changed in the complete controller range: ' + ', '.join(sorted(unexpected)))
+
+
+def validate_frontend_run(run, repository, product_revision):
+    if (run.get('head_sha') != product_revision or run.get('status') != 'completed'
+            or run.get('event') != 'workflow_dispatch'
+            or run.get('repository', {}).get('full_name') != repository
+            or run.get('path') not in {'.github/workflows/habab-release.yaml',
+                                       '.github/workflows/habab-native-frontend-candidate.yaml'}):
+        raise ValueError('Frontend reuse requires a completed trusted workflow run at the exact product SHA')
+
+
 def verify_uploaded(receipt, remote):
     """GitHub's digest is the checksum computed from actual uploaded asset bytes."""
     expected = {item['name']: item for item in receipt['assets']}
@@ -46,11 +85,14 @@ def verify_uploaded(receipt, remote):
             raise ValueError(f"GitHub asset checksum/size mismatch: {item['name']}")
 
 
-def stage(root, source_tree, source_revision, repository, tag, output):
+def stage(root, source_tree, source_revision, repository, tag, output, workflow_revision=None):
     base = release_base(repository, tag, source_revision)
+    workflow_revision = workflow_revision or source_revision
+    if not re.fullmatch(r'[0-9a-f]{40}', workflow_revision):
+        raise ValueError('Expected controller workflow revision must be a full SHA')
     manifest = json.loads((root / 'release-candidate.json').read_text())
     if (manifest.get('source_revision') != source_revision or manifest.get('source_dirty') is not False
-            or manifest.get('workflow_revision') != source_revision
+            or manifest.get('workflow_revision') != workflow_revision
             or set(manifest.get('targets', {})) != TARGETS):
         raise ValueError('Release requires all four targets at the exact clean source SHA')
     for name, status in manifest['targets'].items():
@@ -156,6 +198,7 @@ def main():
     parser.add_argument('--root', type=Path)
     parser.add_argument('--source-tree', type=Path, default=Path('.'))
     parser.add_argument('--source-revision')
+    parser.add_argument('--workflow-revision')
     parser.add_argument('--repository')
     parser.add_argument('--tag')
     parser.add_argument('--output', type=Path)
@@ -166,7 +209,7 @@ def main():
         verify_uploaded(json.loads(args.receipt.read_text()), json.loads(args.verify_uploaded.read_text()))
     else:
         args.receipt.write_text(json.dumps(stage(args.root, args.source_tree, args.source_revision,
-                                                args.repository, args.tag, args.output), indent=2) + '\n')
+                                                args.repository, args.tag, args.output, args.workflow_revision), indent=2) + '\n')
 
 
 if __name__ == '__main__':

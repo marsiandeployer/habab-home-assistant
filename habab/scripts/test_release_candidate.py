@@ -279,6 +279,15 @@ class ReleaseCandidateTests(unittest.TestCase):
             }
             for name, content in fixed.items():
                 (distribution / name).write_bytes(content)
+            required_metadata = {
+                'src/habab_home/services.yaml': b'feedback:\n',
+                'src/habab_home/frontend/vendor/qrcode.LICENSE': b'MIT license fixture\n',
+                'src/habab_telegram/services.yaml': b'send_message:\n',
+            }
+            for name, content in required_metadata.items():
+                path = distribution / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
             config = "default_config:\n"
             (distribution / "config/configuration.yaml").write_text(config)
             launcher = root / "habab/android/runtime/launch.py"
@@ -294,9 +303,15 @@ class ReleaseCandidateTests(unittest.TestCase):
             }}
             node_lock_path.write_text(json.dumps(node_lock))
             appended_config = config + "\nscript: !include scripts.yaml\nscene: !include scenes.yaml\nrecorder:\nhistory:\n"
+            import runpy
+            producer = runpy.run_path(str(root / 'habab/android/tools/package_runtime.py'))
+            with tempfile.TemporaryDirectory(prefix='canonical-source-fixture-') as directory:
+                expected_sources = producer['copy_sources'](Path(directory))
+            for name, content in required_metadata.items():
+                self.assertEqual(expected_sources[name], hashlib.sha256(content).hexdigest())
             release = {
                 "sourceRevision": revision,
-                "sourceFiles": {name: hashlib.sha256(content).hexdigest() for name, content in fixed.items()},
+                "sourceFiles": expected_sources,
                 "nodePackages": {name: item["sha256"] for name, item in node_lock["packages"].items()},
                 "androidLauncherSha256": hashlib.sha256(launcher.read_bytes()).hexdigest(),
                 "configurationSha256": hashlib.sha256(appended_config.encode()).hexdigest(),
@@ -317,6 +332,16 @@ class ReleaseCandidateTests(unittest.TestCase):
                                       capture_output=True, text=True, check=False)
             self.assertNotEqual(rejected.returncode, 0)
             self.assertIn("Node APK inventory does not match", rejected.stderr)
+
+            for name in required_metadata:
+                with self.subTest(missing_source_metadata=name):
+                    changed = {**release, 'sourceFiles': dict(expected_sources)}
+                    del changed['sourceFiles'][name]
+                    runtime.write_text(json.dumps(changed))
+                    rejected = subprocess.run([sys.executable, '-c', validator], cwd=root, env=environment,
+                                              capture_output=True, text=True, check=False)
+                    self.assertNotEqual(rejected.returncode, 0)
+                    self.assertIn('Runtime sourceFiles do not match', rejected.stderr)
 
     def test_all_scope_attempts_android_and_records_missing_inputs_as_blocked(self):
         repository = Path(__file__).resolve().parents[2]

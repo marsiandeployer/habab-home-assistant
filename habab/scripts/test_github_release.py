@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import unittest
 import zipfile
 
@@ -160,6 +161,59 @@ class GithubReleaseTests(unittest.TestCase):
         for assets in ([], remote['assets'] * 2, remote['assets'] + [{'name': 'unreviewed'}]):
             with self.assertRaisesRegex(ValueError, 'inventory differs'):
                 release.verify_uploaded(receipt, {'assets': assets})
+
+    def test_distinct_controller_sha_preserves_the_frozen_product_identity(self):
+        self.populate()
+        controller = 'f' * 40
+        self.fixture.workflow_identity['workflow_revision'] = controller
+        for target in release.TARGETS:
+            path = self.root / target / 'status.json'
+            status = json.loads(path.read_text())
+            status['workflow_revision'] = controller
+            path.write_text(json.dumps(status))
+        self.record_manifest()
+        receipt = release.stage(self.root, self.source, self.revision, 'org/repo', self.tag, self.output, controller)
+        self.assertEqual(receipt['source_revision'], self.revision)
+        self.assertEqual(receipt['workflow_revision'], controller)
+        self.assertTrue(all(status['source_revision'] == self.revision for status in receipt['targets'].values()))
+
+    def test_controller_range_rejects_intermediate_product_change_even_when_reverted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            def git(*arguments):
+                return subprocess.check_output(['git', '-C', str(root), *arguments], stderr=subprocess.DEVNULL).decode().strip()
+            git('init', '-b', 'main')
+            git('config', 'user.name', 'CI fixture')
+            git('config', 'user.email', 'ci@example.invalid')
+            product = root / 'habab/distribution/product.py'
+            product.parent.mkdir(parents=True)
+            product.write_text('frozen product\n')
+            git('add', '.')
+            git('commit', '-qm', 'Frozen product')
+            frozen = git('rev-parse', 'HEAD')
+            workflow = root / '.github/workflows/habab-release.yaml'
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text('reviewed CI correction\n')
+            git('add', '.')
+            git('commit', '-qm', 'CI only')
+            controller = git('rev-parse', 'HEAD')
+            release.validate_controller_range(root, frozen, controller)
+            product.write_text('changed product\n')
+            git('commit', '-qam', 'Product changed')
+            product.write_text('frozen product\n')
+            git('commit', '-qam', 'Product reverted')
+            with self.assertRaisesRegex(ValueError, 'complete controller range'):
+                release.validate_controller_range(root, frozen, git('rev-parse', 'HEAD'))
+
+    def test_frontend_reuse_requires_completed_trusted_run_at_exact_product_sha(self):
+        producer = {'head_sha': self.revision, 'status': 'completed', 'event': 'workflow_dispatch',
+                    'repository': {'full_name': 'org/repo'}, 'path': '.github/workflows/habab-release.yaml',
+                    'conclusion': 'failure'}  # Another platform may fail after the frontend artifact is complete.
+        release.validate_frontend_run(producer, 'org/repo', self.revision)
+        for field, value in (('head_sha', 'a' * 40), ('status', 'in_progress'), ('event', 'pull_request'),
+                             ('repository', {'full_name': 'other/repo'}), ('path', '.github/workflows/untrusted.yaml')):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'exact product SHA'):
+                release.validate_frontend_run({**producer, field: value}, 'org/repo', self.revision)
 
     def test_release_tag_must_pin_exact_source_and_have_no_url_components(self):
         for tag in ('latest', self.tag + '/extra', self.tag + '?x=1', 'habab-v0.3.6-' + 'a' * 12):

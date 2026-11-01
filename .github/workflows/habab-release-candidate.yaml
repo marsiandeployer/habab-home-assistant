@@ -55,6 +55,9 @@ on:
       android_base_runtime_manifest_url:
         type: string
         default: ''
+      frontend_run_id:
+        type: string
+        default: ''
       release_tag:
         type: string
         required: true
@@ -75,6 +78,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   resolve-source:
@@ -90,7 +94,7 @@ jobs:
           TARGET_SCOPE: ${{ inputs.target_scope }}
         run: |
           set -euo pipefail
-          [[ "$TARGET_SCOPE" == all && "$SOURCE_REF" == "$GITHUB_SHA" ]]
+          [[ "$TARGET_SCOPE" == all && "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
           [[ "$RELEASE_TAG" =~ ^habab-v[0-9][0-9A-Za-z.+_-]{0,62}-[0-9a-f]{12}$ ]]
           [[ "$RELEASE_TAG" == *"-${SOURCE_REF:0:12}" ]]
       - id: resolve
@@ -369,6 +373,7 @@ jobs:
       state: ${{ steps.inputs.outputs.state || steps.unsigned.outputs.state }}
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
+      FRONTEND_RUN_ID: ${{ inputs.frontend_run_id || github.run_id }}
       RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
       ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
       ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
@@ -490,7 +495,7 @@ jobs:
 
   android-frontend:
     needs: [resolve-source, android-inputs]
-    if: ${{ needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate' }}
+    if: ${{ inputs.frontend_run_id == '' && (needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate') }}
     uses: ./.github/workflows/habab-native-frontend-candidate.yaml
     with:
       source_ref: ${{ needs.resolve-source.outputs.source_revision }}
@@ -498,13 +503,14 @@ jobs:
 
   android:
     needs: [resolve-source, android-inputs, android-frontend]
-    if: ${{ always() && needs.resolve-source.result == 'success' && needs.android-inputs.result == 'success' && (needs.android-inputs.outputs.state == 'blocked' || needs.android-frontend.result == 'success') }}
+    if: ${{ always() && needs.resolve-source.result == 'success' && needs.android-inputs.result == 'success' && (needs.android-inputs.outputs.state == 'blocked' || needs.android-frontend.result == 'success' || (inputs.frontend_run_id != '' && needs.android-frontend.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
       state: ${{ needs.android-inputs.outputs.state }}
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
+      FRONTEND_RUN_ID: ${{ inputs.frontend_run_id || github.run_id }}
       RUNTIME_MANIFEST_URL: ${{ inputs.android_runtime_manifest_url }}
       ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
       ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
@@ -534,8 +540,19 @@ jobs:
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         if: ${{ needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate' }}
         with:
-          name: ${{ needs.android-frontend.outputs.artifact_name }}
+          name: ${{ needs.android-frontend.outputs.artifact_name || 'habab-native-frontend-20260930.4+habab.20' }}
           path: frontend-input
+          run-id: ${{ inputs.frontend_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify the original frontend manifest and wheel against the frozen product source
+        if: ${{ needs.android-inputs.outputs.state == 'built' || needs.android-inputs.outputs.state == 'unsigned_candidate' }}
+        run: |
+          python3 - "$SOURCE_REVISION" <<'PY'
+          import sys
+          sys.path.insert(0, 'habab/native-frontend')
+          from candidate import load_candidate
+          load_candidate('frontend-input', sys.argv[1])
+          PY
       - name: Fetch and validate signed base runtime for unsigned candidate reuse
         if: ${{ needs.android-inputs.outputs.state == 'unsigned_candidate' }}
         env:
@@ -694,23 +711,11 @@ jobs:
           import os
           from pathlib import Path
           from urllib.parse import urlsplit
-          distribution = Path('habab/distribution')
-          expected = {}
-          allowed = {'.py', '.js', '.mjs', '.json', '.svg', '.md', '.png', '.webp', '.jpg', '.css', '.vtt'}
-          source_dirs = [distribution / 'src/habab_home', distribution / 'src/habab_telegram',
-                         distribution / 'src/habab_yandex_speech', distribution / 'src/idigital_sms',
-                         distribution / 'telegram-agent']
-          for source_dir in source_dirs:
-              for path in sorted(source_dir.rglob('*')):
-                  relative = path.relative_to(distribution)
-                  include_services = relative.as_posix() == 'src/idigital_sms/services.yaml'
-                  if path.is_file() and (path.suffix in allowed or include_services) and not {
-                      '__pycache__', 'node_modules', 'tests', 'test', '.git'
-                  }.intersection(relative.parts):
-                      expected[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-          for name in ('habab-ha.py', 'install-xiaomi-home.py', 'xiaomi-home-release.json'):
-              path = distribution / name
-              expected[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+          import runpy
+          import tempfile
+          producer = runpy.run_path('habab/android/tools/package_runtime.py')
+          with tempfile.TemporaryDirectory(prefix='habab-source-readback-') as directory:
+              expected = producer['copy_sources'](Path(directory))
           release = json.loads(Path('runtime-input/release.json').read_text())
           if release.get('sourceRevision') != os.environ['SOURCE_REVISION']:
               raise SystemExit('::error::Signed runtime manifest must attest this exact sourceRevision')
@@ -735,8 +740,7 @@ jobs:
           if release.get('androidLauncherSha256') != hashlib.sha256(launcher.read_bytes()).hexdigest():
               raise SystemExit('::error::Android runtime launcher does not match this exact checkout')
           # Use the producer's canonical seed; do not duplicate its YAML assembly.
-          import runpy
-          config = runpy.run_path('habab/android/tools/package_runtime.py')['initial_configuration']()
+          config = producer['initial_configuration']()
           if release.get('configurationSha256') != hashlib.sha256(config.encode()).hexdigest():
               raise SystemExit('::error::Android runtime seed configuration does not match this exact checkout')
           if network_tools := release.get('networkTools'):
@@ -880,6 +884,7 @@ jobs:
           status['apk_version'] = runpy.run_path('habab/android/tools/verify_runtime.py')['verify_apk_version'](
               Path('candidate/android/habab-home-arm64.apk'), os.environ['ANDROID_AAPT'],
               os.environ['ANDROID_VERSION_CODE'], os.environ['ANDROID_VERSION_NAME'])
+          status['frontend_artifact_run_id'] = os.environ['FRONTEND_RUN_ID']
           status['apk_signature'] = 'verified-release'
           status['publishable'] = True
           status['native_frontend'] = release['nativeFrontend']
