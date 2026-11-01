@@ -913,6 +913,20 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.code, "model_error")
         agent.diagnostics.record.assert_called_once()
 
+    async def test_model_certificate_error_reaches_redacted_diagnostics(self):
+        agent = self.agent()
+        agent.diagnostics = AgentDiagnostics()
+        agent.request.side_effect = [[], {"info": {"error": {
+            "name": "UnknownError", "data": {"code": "SELF_SIGNED_CERT_IN_CHAIN",
+                                             "message": "private detail"},
+        }}}]
+        with self.assertRaises(AgentError) as error:
+            await agent.run("alice", "ses_alice", "test")
+        self.assertEqual(error.exception.code, "model_error")
+        diagnostic = agent.diagnostics.get("alice", "ses_alice")
+        self.assertTrue(diagnostic["untrusted_certificate"])
+        self.assertNotIn("private detail", str(diagnostic))
+
     async def test_runtime_request_timeout_keeps_safe_code_and_original_cause(self):
         agent = self.agent()
         del agent.request
