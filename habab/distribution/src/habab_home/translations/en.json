@@ -16,6 +16,7 @@
       "invalid_provider": "Choose one of the supported providers.",
       "invalid_auth": "The key was rejected. Check API access and your key.",
       "invalid_model": "The model request was rejected. Check its name and tool support.",
+      "region_unavailable": "The provider is unavailable from this network or region. Select Habab or connect from a supported region.",
       "tools_unsupported": "The model did not call the test tool. Choose a tool-capable model.",
       "quota": "The provider reported a balance or request limit. Check billing and quotas.",
       "cannot_connect": "Could not connect to the provider.",

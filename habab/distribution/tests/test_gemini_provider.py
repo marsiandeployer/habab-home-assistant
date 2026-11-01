@@ -332,6 +332,20 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
         }})
         self.assertEqual(GeminiProvider._error_code(generic_bad_request), "invalid_model")
 
+    async def test_google_location_restriction_is_not_reported_as_invalid_model(self):
+        error = errors.ClientError(400, {"error": {
+            "code": 400, "status": "FAILED_PRECONDITION",
+            "message": "User location is not supported for the API use.",
+        }})
+        fake, client_patch = self.make_client([error])
+        with client_patch:
+            with self.assertRaises(ProviderError) as raised:
+                await ProviderClient(None, self.settings()).complete(
+                    [{"role": "user", "content": "hello"}], [],
+                )
+        self.assertEqual(raised.exception.code, "region_unavailable")
+        self.assertTrue(fake.closed)
+
     async def test_timeout_and_cancellation_propagate_safely(self):
         async def stalled():
             await asyncio.sleep(1)

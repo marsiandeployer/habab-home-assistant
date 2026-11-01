@@ -24,7 +24,7 @@ from .setup_agent import AgentError
 _API_CHECK_OPTION = "habab_api_check"
 _API_CHECK_STATUSES = {"verified", "rejected", "unknown"}
 _API_CHECK_REASONS = {
-    "invalid_provider", "invalid_auth", "quota", "invalid_model", "cannot_connect", "timeout",
+    "invalid_provider", "invalid_auth", "quota", "invalid_model", "region_unavailable", "cannot_connect", "timeout",
     "invalid_response", "provider_not_ready", "tools_unsupported",
 }
 

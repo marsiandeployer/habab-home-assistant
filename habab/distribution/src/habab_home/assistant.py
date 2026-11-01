@@ -488,7 +488,7 @@ class AssistantService:
         except ProviderError as error:
             # Provider codes are internal enums. Never retain provider response text.
             safe_code = error.code if error.code in {
-                "timeout", "quota", "invalid_auth", "invalid_model", "invalid_response",
+                "timeout", "quota", "invalid_auth", "invalid_model", "region_unavailable", "invalid_response",
                 "cannot_connect", "provider_not_ready", "tools_unsupported",
             } else "invalid_response"
             self.diagnostics.record(owner, session_id, {"name": "ProviderError", "code": safe_code})

@@ -88,6 +88,19 @@ class HababTextContractTests(unittest.IsolatedAsyncioTestCase):
     def settings():
         return {"provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-project-key"}
 
+    async def test_openai_regional_rejection_is_distinct_from_invalid_key(self):
+        settings = {"provider": "openai", "model": "gpt-4.1-mini", "api_key": "fixture-project-key"}
+        for payload, expected in [
+            ({"error": {"code": "unsupported_country_region_territory"}}, "region_unavailable"),
+            ({"error": {"code": "invalid_api_key"}}, "invalid_auth"),
+            ([], "invalid_auth"),
+        ]:
+            with self.subTest(expected=expected, payload=payload):
+                session = _Session(post_response=_Response(403, json.dumps(payload).encode()))
+                with self.assertRaises(ProviderError) as raised:
+                    await ProviderClient(session, settings).complete([], [])
+                self.assertEqual(raised.exception.code, expected)
+
     async def test_real_fragmented_http_capabilities_are_read_to_eof(self):
         payload = json.dumps({
             "protocol": "openai_compatible", "model": "habab-chat", "api_path": "/v1",

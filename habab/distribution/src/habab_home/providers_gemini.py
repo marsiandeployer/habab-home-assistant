@@ -259,6 +259,8 @@ class GeminiProvider:
         status = code if isinstance(code, int) else getattr(error, "status_code", None)
         if status == 400 and GeminiProvider._invalid_api_key_detail(error):
             return "invalid_auth"
+        if status == 400 and GeminiProvider._location_not_supported(error):
+            return "region_unavailable"
         if status in (401, 403):
             return "invalid_auth"
         if status in (402, 429):
@@ -270,6 +272,18 @@ class GeminiProvider:
         if isinstance(error, genai_errors.APIError):
             return "cannot_connect"
         return "cannot_connect"
+
+    @staticmethod
+    def _location_not_supported(error: Exception) -> bool:
+        """Recognize Google's regional restriction without exposing its response."""
+        details = getattr(error, "details", None)
+        api_error = details.get("error") if isinstance(details, dict) else None
+        if not isinstance(api_error, dict):
+            return False
+        message = api_error.get("message")
+        return (api_error.get("status") == "FAILED_PRECONDITION"
+                and isinstance(message, str)
+                and "user location is not supported" in message.lower())
 
     @staticmethod
     def _invalid_api_key_detail(error: Exception) -> bool:

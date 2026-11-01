@@ -243,6 +243,19 @@ class ProviderClient:
                     json=body,
                     allow_redirects=False,
                 ) as response:
+                    if response.status == 403 and provider == "openai":
+                        raw = bytearray()
+                        async for chunk in response.content.iter_chunked(4096):
+                            raw.extend(chunk)
+                            if len(raw) > 4096:
+                                break
+                        try:
+                            payload = json.loads(raw) if len(raw) <= 4096 else {}
+                            error = payload.get("error", {}) if isinstance(payload, dict) else {}
+                        except (ValueError, UnicodeError):
+                            error = {}
+                        if isinstance(error, dict) and error.get("code") == "unsupported_country_region_territory":
+                            raise ProviderError("region_unavailable")
                     if response.status in (401, 403):
                         raise ProviderError("invalid_auth")
                     if response.status in (402, 429):
