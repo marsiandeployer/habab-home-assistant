@@ -745,9 +745,14 @@ function installChat() {
       if (!connection) return;
       connection.subscribeMessage((result) => {
         if (this.historyAttempt !== attempt || result.session_id !== sessionId ||
-            sessionId !== this.sessionId || !Array.isArray(result.messages)) return;
-        this.messages = result.messages;
-        this.draw();
+            sessionId !== this.sessionId) return;
+        if (typeof result.working === "boolean") {
+          this.status(result.working ? this.t.working : "", false, result.working);
+        }
+        if (Array.isArray(result.messages)) {
+          this.messages = result.messages;
+          this.draw();
+        }
       }, {type: "habab_home/realtime/subscribe"}).then((unsubscribe) => {
         if (this.historyAttempt === attempt) this.historyUnsubscribe = unsubscribe;
         else unsubscribe();

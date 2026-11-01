@@ -83,7 +83,8 @@ CONVERSATION_INSTRUCTIONS = (
     "отказывайся только потому, что у тебя нет прямого инструмента, и не обещай "
     "наличие доступа. Попроси общего исполнителя проверить доступность именно "
     "этой задачи и выполнить её в разрешённых пределах. Перед вызовом сразу "
-    "произнеси одну короткую фразу, например: «Секунду, сейчас проверю». Затем "
+    "произнеси одну короткую фразу по смыслу просьбы: для проверки — «Секунду, сейчас проверю», "
+    "для действия — «Сейчас сделаю», для настройки — «Сейчас настрою». Затем "
     "вызывай инструмент, не ожидая новой реплики, передавая исходную просьбу и "
     "необходимый контекст без добавления действий. Подтверждай результат только "
     "по ответу инструмента; если ресурс или возможность недоступны, сообщи это "
@@ -387,7 +388,8 @@ def session_config(model, *, client=None, context=None, selected_provider=None,
             "даже если realtime-клиент не имеет прямого инструмента; исполнитель сам проверит "
             "доступность и вернёт фактический результат. Не обещай доступ или успех заранее. "
             "Не использовать для приветствия, обычной беседы или ответа из актуальной сводки. "
-            "Перед вызовом скажи: «Секунду, сейчас проверю»."
+            "Перед вызовом коротко сообщи о начале работы: «Сейчас проверю», «Сейчас сделаю» "
+            "или «Сейчас настрою» — по смыслу просьбы. Не утверждай, что работа уже выполнена."
         )
         config["tools"].append({
             "type": "function", "name": "end_voice_session",
@@ -662,6 +664,51 @@ class RealtimeStopView(HomeAssistantView):
         return result
 
 
+async def run_voice_task(hass, assistant, owner, session_id, text, **kwargs):
+    """Publish owner-scoped execution progress using the existing history channel."""
+    signal = "habab_voice_history_" + owner
+    observed = False
+
+    def publish(**data):
+        async_dispatcher_send(hass, signal, {"session_id": session_id, **data})
+
+    async def observe():
+        nonlocal observed
+        while True:
+            await asyncio.sleep(1.5)
+            runtime = getattr(assistant, "runtime", None)
+            if runtime is None or runtime.active != (owner, session_id):
+                continue
+            observed = True
+            publish(working=True)
+            try:
+                messages = await assistant.runtime.request(
+                    "GET", f"session/{session_id}/message?limit=60", timeout=3)
+                if isinstance(messages, list):
+                    async with assistant.voice_journal_lock:
+                        context = assistant._web_context(owner)
+                        if context["session_id"] != session_id:
+                            return
+                        visible = assistant._project_pending_voice(
+                            owner, session_id, assistant.runtime.visible(messages), context["epoch"])
+                    publish(working=True, messages=visible)
+            except Exception:
+                # Progress is best effort; the actual execution reports its own error.
+                pass
+
+    observer = asyncio.create_task(observe())
+    try:
+        return await assistant.run(owner, "web", session_id, text, **kwargs)
+    finally:
+        observer.cancel()
+        try:
+            await observer
+        except asyncio.CancelledError:
+            pass
+        if observed:
+            publish(working=False)
+
+
 class RealtimeTurnView(HomeAssistantView):
     url = "/api/habab_home/realtime/turn"
     name = "api:habab_home:realtime:turn"
@@ -699,7 +746,7 @@ class RealtimeTurnView(HomeAssistantView):
                         lease = await validate_browser_lease_history(hass, assistant, owner.id, session_id)
                         if lease.get("history_session") != canonical_id:
                             raise AgentError("invalid_session")
-                    result = await assistant.run(owner.id, "web", canonical_id, text,
+                    result = await run_voice_task(hass, assistant, owner.id, canonical_id, text,
                                                  expected_history_epoch=lease["history_epoch"],
                                                  executor_only=True)
                     if browser:
@@ -709,7 +756,7 @@ class RealtimeTurnView(HomeAssistantView):
                         untrack_browser_task(hass, tracked_session, tracked_task)
                         tracked_session = tracked_task = None
             else:
-                result = await assistant.run(owner.id, "web", canonical_id, text, executor_only=True)
+                result = await run_voice_task(hass, assistant, owner.id, canonical_id, text, executor_only=True)
             async_dispatcher_send(hass, "habab_voice_history_" + owner.id, result)
         except (ValueError, AttributeError):
             return self.json_message("invalid_voice_turn", status_code=400)
