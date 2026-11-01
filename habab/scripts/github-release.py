@@ -72,6 +72,38 @@ def validate_frontend_run(run, repository, product_revision):
         raise ValueError('Frontend reuse requires a completed trusted workflow run at the exact product SHA')
 
 
+def validate_candidate_reuse(run, manifest, jobs, repository, product_revision, run_id,
+                             version_code, version_name):
+    if (run.get('id') != int(run_id) or run.get('status') != 'completed'
+            or run.get('event') != 'workflow_dispatch' or run.get('head_branch') != 'main'
+            or run.get('repository', {}).get('full_name') != repository
+            or run.get('path') != '.github/workflows/habab-release.yaml'
+            or type(run.get('run_attempt')) is not int or run['run_attempt'] <= 0
+            or not re.fullmatch(r'[0-9a-f]{40}', run.get('head_sha', ''))):
+        raise ValueError('Candidate reuse requires the exact completed trusted public workflow producer')
+    required_jobs = {'candidate / windows-source', 'candidate / android', 'candidate / assemble-candidate',
+                     'candidate / linux-image (linux/amd64, linux-amd64)',
+                     'candidate / linux-image (linux/arm64, linux-arm64)'}
+    if not required_jobs <= {job['name'] for job in jobs if job.get('conclusion') == 'success'}:
+        raise ValueError('Reused candidate requires all platform and aggregate jobs to have succeeded')
+    identity = {'workflow_revision': run['head_sha'], 'workflow_run_id': str(run['id']),
+                'workflow_run_attempt': str(run['run_attempt'])}
+    if (manifest.get('source_revision') != product_revision or manifest.get('source_dirty') is not False
+            or any(manifest.get(key) != value for key, value in identity.items())
+            or set(manifest.get('targets', {})) != TARGETS):
+        raise ValueError('Reused candidate manifest does not match the product and producer run identity')
+    for status in manifest['targets'].values():
+        if (status.get('state') != 'built' or status.get('source_revision') != product_revision
+                or status.get('source_dirty') is not False
+                or any(status.get(key) != value for key, value in identity.items())):
+            raise ValueError('Reused candidate target is incomplete or has another producer identity')
+    android = manifest['targets']['android']
+    if (android.get('apk_signature') != 'verified-release' or android.get('publishable') is not True
+            or android.get('apk_version') != {'version_code': int(version_code), 'version_name': version_name}):
+        raise ValueError('Reused candidate APK signing/version does not match this release')
+    return identity
+
+
 def verify_uploaded(receipt, remote):
     """GitHub's digest is the checksum computed from actual uploaded asset bytes."""
     expected = {item['name']: item for item in receipt['assets']}
@@ -85,12 +117,19 @@ def verify_uploaded(receipt, remote):
             raise ValueError(f"GitHub asset checksum/size mismatch: {item['name']}")
 
 
-def stage(root, source_tree, source_revision, repository, tag, output, workflow_revision=None):
+def stage(root, source_tree, source_revision, repository, tag, output, workflow_revision=None,
+          publisher_revision=None, producer_run_id=None, producer_run_attempt=None):
     base = release_base(repository, tag, source_revision)
     workflow_revision = workflow_revision or source_revision
     if not re.fullmatch(r'[0-9a-f]{40}', workflow_revision):
         raise ValueError('Expected controller workflow revision must be a full SHA')
+    publisher_revision = publisher_revision or workflow_revision
+    if not re.fullmatch(r'[0-9a-f]{40}', publisher_revision):
+        raise ValueError('Publisher revision must be a full SHA')
     manifest = json.loads((root / 'release-candidate.json').read_text())
+    for key, expected in (('workflow_run_id', producer_run_id), ('workflow_run_attempt', producer_run_attempt)):
+        if expected is not None and manifest.get(key) != str(expected):
+            raise ValueError('Candidate manifest does not match expected producer run/attempt')
     if (manifest.get('source_revision') != source_revision or manifest.get('source_dirty') is not False
             or manifest.get('workflow_revision') != workflow_revision
             or set(manifest.get('targets', {})) != TARGETS):
@@ -182,6 +221,7 @@ def stage(root, source_tree, source_revision, repository, tag, output, workflow_
                'source_dirty': False, 'targets': manifest['targets'], 'assets': assets,
                'workflow_revision': manifest['workflow_revision'], 'workflow_run_id': manifest['workflow_run_id'],
                'workflow_run_attempt': manifest['workflow_run_attempt']}
+    receipt['publisher_workflow_revision'] = publisher_revision
     receipt['windows_linux_frontend_dependency'] = frontend_pin
     (output / 'release-receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
     sha, size = digest(output / 'release-receipt.json')
@@ -199,6 +239,9 @@ def main():
     parser.add_argument('--source-tree', type=Path, default=Path('.'))
     parser.add_argument('--source-revision')
     parser.add_argument('--workflow-revision')
+    parser.add_argument('--publisher-revision')
+    parser.add_argument('--producer-run-id')
+    parser.add_argument('--producer-run-attempt')
     parser.add_argument('--repository')
     parser.add_argument('--tag')
     parser.add_argument('--output', type=Path)
@@ -209,7 +252,8 @@ def main():
         verify_uploaded(json.loads(args.receipt.read_text()), json.loads(args.verify_uploaded.read_text()))
     else:
         args.receipt.write_text(json.dumps(stage(args.root, args.source_tree, args.source_revision,
-                                                args.repository, args.tag, args.output, args.workflow_revision), indent=2) + '\n')
+                                                args.repository, args.tag, args.output, args.workflow_revision, args.publisher_revision,
+                                                args.producer_run_id, args.producer_run_attempt), indent=2) + '\n')
 
 
 if __name__ == '__main__':

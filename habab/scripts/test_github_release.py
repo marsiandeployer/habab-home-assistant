@@ -215,6 +215,64 @@ class GithubReleaseTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'exact product SHA'):
                 release.validate_frontend_run({**producer, field: value}, 'org/repo', self.revision)
 
+    def test_whole_candidate_reuse_checks_api_run_attempt_jobs_and_apk_version(self):
+        self.populate()
+        path = self.root / 'android/status.json'
+        status = json.loads(path.read_text())
+        status['apk_version'] = {'version_code': 58, 'version_name': '0.1.58'}
+        path.write_text(json.dumps(status))
+        self.record_manifest()
+        manifest = json.loads((self.root / 'release-candidate.json').read_text())
+        run = {'id': 12345, 'run_attempt': 1, 'head_sha': self.revision, 'head_branch': 'main',
+               'status': 'completed', 'event': 'workflow_dispatch', 'repository': {'full_name': 'org/repo'},
+               'path': '.github/workflows/habab-release.yaml'}
+        names = ['candidate / windows-source', 'candidate / android', 'candidate / assemble-candidate',
+                 'candidate / linux-image (linux/amd64, linux-amd64)',
+                 'candidate / linux-image (linux/arm64, linux-arm64)']
+        jobs = [{'name': name, 'conclusion': 'success'} for name in names]
+        identity = release.validate_candidate_reuse(run, manifest, jobs, 'org/repo', self.revision, '12345', '58', '0.1.58')
+        self.assertEqual(identity, self.fixture.workflow_identity)
+        for bad_run, bad_manifest, bad_jobs, version in (
+            ({**run, 'id': 999}, manifest, jobs, '58'),
+            ({**run, 'run_attempt': 2}, manifest, jobs, '58'),
+            ({**run, 'head_sha': 'a' * 40}, manifest, jobs, '58'),
+            (run, manifest, jobs[:-1], '58'),
+            (run, manifest, jobs, '59'),
+        ):
+            with self.assertRaises(ValueError):
+                release.validate_candidate_reuse(bad_run, bad_manifest, bad_jobs, 'org/repo', self.revision, '12345', version, '0.1.58')
+        changed = copy.deepcopy(manifest)
+        changed['targets']['linux-amd64']['workflow_run_id'] = '999'
+        with self.assertRaisesRegex(ValueError, 'producer identity'):
+            release.validate_candidate_reuse(run, changed, jobs, 'org/repo', self.revision, '12345', '58', '0.1.58')
+
+    def test_publish_only_keeps_original_producer_and_separate_publisher_revision(self):
+        self.populate()
+        receipt = release.stage(self.root, self.source, self.revision, 'org/repo', self.tag, self.output,
+                                self.revision, 'f' * 40, '12345', '1')
+        self.assertEqual(receipt['workflow_revision'], self.revision)
+        self.assertEqual(receipt['workflow_run_id'], '12345')
+        self.assertEqual(receipt['workflow_run_attempt'], '1')
+        self.assertEqual(receipt['publisher_workflow_revision'], 'f' * 40)
+        self.assertTrue(all(item['workflow_run_id'] == '12345' for item in receipt['targets'].values()))
+        with self.assertRaisesRegex(ValueError, 'expected producer run/attempt'):
+            release.stage(self.root, self.source, self.revision, 'org/repo', self.tag, self.output,
+                          self.revision, 'f' * 40, '12345', '2')
+
+    def test_publish_only_workflow_has_windows_sources_and_skipped_candidate_guard(self):
+        workflow = (REPO / '.github/workflows/habab-release.yaml').read_text()
+        product_checkout = workflow[workflow.index('      - name: Check out the frozen product separately'):]
+        product_checkout = product_checkout[:product_checkout.index('      - uses: actions/download-artifact')]
+        self.assertIn('habab/product-tunnel', product_checkout)
+        publish = workflow[workflow.index('  publish:\n'):]
+        self.assertIn("always() && needs.validate.result == 'success'", publish)
+        self.assertIn("needs.validate.outputs.reuse_candidate == 'true' && needs.candidate.result == 'skipped'", publish)
+        self.assertIn('actions: read', publish)
+        self.assertEqual(publish.count('run-id: ${{ needs.validate.outputs.producer_run_id }}'), 2)
+        self.assertEqual(publish.count('github-token: ${{ github.token }}'), 2)
+        self.assertIn('--publisher-revision "$WORKFLOW_REVISION"', publish)
+        self.assertIn('--workflow-revision "$PRODUCER_WORKFLOW_REVISION"', publish)
+
     def test_release_tag_must_pin_exact_source_and_have_no_url_components(self):
         for tag in ('latest', self.tag + '/extra', self.tag + '?x=1', 'habab-v0.3.6-' + 'a' * 12):
             with self.assertRaises(ValueError):

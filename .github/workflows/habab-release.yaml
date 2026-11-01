@@ -11,6 +11,11 @@ on:
         description: Immutable habab-v<VERSION>-<first 12 source SHA characters>
         required: true
         type: string
+      candidate_run_id:
+        description: Optional completed whole candidate run for publish-only retry (no builds)
+        required: false
+        default: ''
+        type: string
       frontend_run_id:
         description: Optional completed exact-product frontend producer run; preserves its original manifest
         required: false
@@ -38,6 +43,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       source_revision: ${{ steps.source.outputs.source_revision }}
+      reuse_candidate: ${{ steps.source.outputs.reuse_candidate }}
+      producer_revision: ${{ steps.source.outputs.producer_revision }}
+      producer_run_id: ${{ steps.source.outputs.producer_run_id }}
+      producer_run_attempt: ${{ steps.source.outputs.producer_run_attempt }}
+      candidate_manifest_sha256: ${{ steps.source.outputs.candidate_manifest_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,6 +66,9 @@ jobs:
           SOURCE_REVISION: ${{ inputs.source_revision }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           FRONTEND_RUN_ID: ${{ inputs.frontend_run_id }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          ANDROID_VERSION_CODE: ${{ inputs.android_version_code }}
+          ANDROID_VERSION_NAME: ${{ inputs.android_version_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -69,13 +82,42 @@ jobs:
           helpers = runpy.run_path('habab/scripts/github-release.py')
           helpers['release_base'](os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG'], os.environ['SOURCE_REVISION'])
           helpers['validate_controller_range'](Path('.'), os.environ['SOURCE_REVISION'], os.environ['GITHUB_SHA'])
+          candidate_run = os.environ['CANDIDATE_RUN_ID']
+          identity = {'workflow_revision': os.environ['GITHUB_SHA'], 'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+                      'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}
+          manifest_sha = ''
+          if candidate_run:
+              if not candidate_run.isdecimal() or int(candidate_run) <= 0:
+                  raise SystemExit('Candidate run ID must be a positive integer')
+              import hashlib
+              repository = os.environ['GITHUB_REPOSITORY']
+              producer = json.loads(subprocess.check_output(['gh', 'api', 'repos/' + repository + '/actions/runs/' + candidate_run]))
+              helpers['validate_controller_range'](Path('.'), os.environ['SOURCE_REVISION'], producer['head_sha'])
+              pages = json.loads(subprocess.check_output(['gh', 'api', '--paginate', '--slurp',
+                  'repos/' + repository + '/actions/runs/' + candidate_run + '/jobs?filter=latest&per_page=100']))
+              jobs = [job for page in pages for job in page['jobs']]
+              directory = Path(os.environ['RUNNER_TEMP']) / 'reused-candidate-manifest'
+              directory.mkdir(parents=True, exist_ok=True)
+              subprocess.run(['gh', 'run', 'download', candidate_run, '--repo', repository,
+                  '--name', 'habab-release-candidate-' + os.environ['SOURCE_REVISION'], '--dir', str(directory)], check=True)
+              manifest_path = directory / 'release-candidate.json'
+              identity = helpers['validate_candidate_reuse'](producer, json.loads(manifest_path.read_text()), jobs,
+                  repository, os.environ['SOURCE_REVISION'], candidate_run,
+                  os.environ['ANDROID_VERSION_CODE'], os.environ['ANDROID_VERSION_NAME'])
+              manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
           frontend_run = os.environ['FRONTEND_RUN_ID']
-          if frontend_run:
+          if frontend_run and not candidate_run:
               if not frontend_run.isdecimal() or int(frontend_run) <= 0:
                   raise SystemExit('Frontend run ID must be a positive integer')
               producer = json.loads(subprocess.check_output([
                   'gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + frontend_run]))
               helpers['validate_frontend_run'](producer, os.environ['GITHUB_REPOSITORY'], os.environ['SOURCE_REVISION'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('reuse_candidate=' + ('true' if candidate_run else 'false') + '\n')
+              output.write('producer_revision=' + identity['workflow_revision'] + '\n')
+              output.write('producer_run_id=' + identity['workflow_run_id'] + '\n')
+              output.write('producer_run_attempt=' + identity['workflow_run_attempt'] + '\n')
+              output.write('candidate_manifest_sha256=' + manifest_sha + '\n')
           PY
           [[ -z "$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")" ]] || {
             echo '::error::Release tag already exists; immutable releases cannot be overwritten'; exit 1;
@@ -91,6 +133,7 @@ jobs:
           PY
           echo "source_revision=$SOURCE_REVISION" >> "$GITHUB_OUTPUT"
       - name: Require existing signing credentials before any platform build
+        if: ${{ inputs.candidate_run_id == '' }}
         env:
           HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64: ${{ secrets.HABAB_ANDROID_RUNTIME_SIGNING_KEY_BASE64 }}
           HABAB_ANDROID_KEYSTORE_BASE64: ${{ secrets.HABAB_ANDROID_KEYSTORE_BASE64 }}
@@ -107,6 +150,7 @@ jobs:
 
   candidate:
     needs: validate
+    if: ${{ inputs.candidate_run_id == '' }}
     uses: ./.github/workflows/habab-release-candidate.yaml
     with:
       target_scope: all
@@ -124,15 +168,21 @@ jobs:
 
   publish:
     needs: [validate, candidate]
+    if: ${{ always() && needs.validate.result == 'success' && (needs.candidate.result == 'success' || (needs.validate.outputs.reuse_candidate == 'true' && needs.candidate.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
+      actions: read
     env:
       SOURCE_REVISION: ${{ needs.validate.outputs.source_revision }}
       RELEASE_TAG: ${{ inputs.release_tag }}
       GH_TOKEN: ${{ github.token }}
       WORKFLOW_REVISION: ${{ github.sha }}
+      PRODUCER_WORKFLOW_REVISION: ${{ needs.validate.outputs.producer_revision }}
+      PRODUCER_RUN_ID: ${{ needs.validate.outputs.producer_run_id }}
+      PRODUCER_RUN_ATTEMPT: ${{ needs.validate.outputs.producer_run_attempt }}
+      EXPECTED_MANIFEST_SHA256: ${{ needs.validate.outputs.candidate_manifest_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -152,6 +202,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             habab/distribution
+            habab/product-tunnel
             habab/android/tools
             habab/android/app/src/main/assets/release
             habab/native-frontend
@@ -160,10 +211,14 @@ jobs:
           pattern: candidate-*
           path: candidate
           merge-multiple: true
+          run-id: ${{ needs.validate.outputs.producer_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: habab-release-candidate-${{ needs.validate.outputs.source_revision }}
           path: candidate
+          run-id: ${{ needs.validate.outputs.producer_run_id }}
+          github-token: ${{ github.token }}
       - name: Verify exact payloads and signatures before creating a draft
         run: |
           set -euo pipefail
@@ -171,8 +226,13 @@ jobs:
           [[ "$(git -C product-source rev-parse HEAD)" == "$SOURCE_REVISION" ]]
           git diff --quiet && git diff --cached --quiet
           git -C product-source diff --quiet && git -C product-source diff --cached --quiet
+          if [[ -n "$EXPECTED_MANIFEST_SHA256" ]]; then
+            printf '%s  candidate/release-candidate.json\n' "$EXPECTED_MANIFEST_SHA256" | sha256sum --check
+          fi
           python3 habab/scripts/github-release.py --root candidate --source-tree product-source \
-            --source-revision "$SOURCE_REVISION" --workflow-revision "$WORKFLOW_REVISION" --repository "$GITHUB_REPOSITORY" \
+            --source-revision "$SOURCE_REVISION" --workflow-revision "$PRODUCER_WORKFLOW_REVISION" \
+            --publisher-revision "$WORKFLOW_REVISION" --producer-run-id "$PRODUCER_RUN_ID" \
+            --producer-run-attempt "$PRODUCER_RUN_ATTEMPT" --repository "$GITHUB_REPOSITORY" \
             --tag "$RELEASE_TAG" --output release --receipt upload-receipt.json
           (cd release && sha256sum --check SHA256SUMS)
       - name: Create draft and upload verified assets without replacement

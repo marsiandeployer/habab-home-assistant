@@ -63,6 +63,19 @@ skipped; Windows/Linux builds and runtime/APK packaging continue. A prior signed
 runtime that was never uploaded by its failed job cannot be recovered from the
 completed hosted runner and must be rebuilt.
 
+For a completed whole-candidate retry, set `candidate_run_id`, for example
+`41285741688` for product `f5ac8458dd1d05084035cb7ac24b4ae8fb9a8c28`.
+Validation checks the trusted public workflow's run ID, attempt and controller
+SHA against the original aggregate and every target status, requires successful
+Windows/Android/both-Linux/aggregate jobs, and checks the requested APK version.
+The candidate build job is skipped. The publisher downloads those exact platform
+artifacts and aggregate from the producer run, then repeats the existing payload,
+source, RSA signature and checksum gates. The aggregate's bytes are pinned across
+validation and publication. Its original `workflow_revision`, run ID and attempt
+remain producer metadata; `publisher_workflow_revision` records the current
+publisher separately. The frozen product checkout includes `habab/product-tunnel`
+for strict Windows ZIP source verification. No platform is rebuilt or re-signed.
+
 The release reuses the candidate producer with `target_scope=all`. This caller
 requires a built Windows EXE, both Linux OCI images, and a signed public Android
 APK/runtime. A blocked, skipped, unsigned, failed, or missing platform cannot
