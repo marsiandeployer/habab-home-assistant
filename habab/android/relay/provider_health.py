@@ -145,11 +145,12 @@ class EndpointHealth:
             health = ProviderHealth("сервер", check["name"],
                 Path(state_dir) / (identity + ".json"), notify_command, recipient)
             self.checks.append({"url": check["url"], "expected": expected,
+                                "headers": dict(check.get("headers", {})),
                                 "health": health, "failures": 0})
 
     async def check_one(self, client, check):
         try:
-            async with client.get(check["url"], allow_redirects=False,
+            async with client.get(check["url"], headers=check["headers"], allow_redirects=False,
                                   timeout=ClientTimeout(total=8)) as response:
                 ready = response.status == check["expected"]
         except Exception:
