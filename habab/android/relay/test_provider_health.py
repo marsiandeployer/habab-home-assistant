@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
-from provider_health import ProviderHealth
+from provider_health import ProviderHealth, EndpointHealth
 
 class Response:
     def __init__(self, status): self.status=status
@@ -12,6 +12,31 @@ class Response:
     async def __aexit__(self,*args): pass
 
 class HealthTests(unittest.IsolatedAsyncioTestCase):
+    async def test_endpoint_alert_requires_two_failures_and_recovers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            monitor = EndpointHealth([{'name': 'Telegram', 'url': 'https://example.org/health'}], directory)
+            check = monitor.checks[0]
+            check['health'].notify = AsyncMock()
+            client = SimpleNamespace(get=Mock(return_value=Response(503)))
+            await monitor.check_one(client, check)
+            check['health'].notify.assert_not_awaited()
+            await monitor.check_one(client, check)
+            self.assertEqual(check['health'].snapshot()['reason'], 'provider_unavailable')
+            client.get.return_value = Response(200)
+            await monitor.check_one(client, check)
+            self.assertEqual(check['health'].snapshot()['reason'], 'ready')
+
+    async def test_endpoint_probe_accepts_explicit_unauthenticated_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            monitor = EndpointHealth([{'name': 'Protected route', 'url': 'https://example.org/telegram/getMe',
+                                       'expected_status': 401}], directory)
+            await monitor.check_one(SimpleNamespace(get=Mock(return_value=Response(401))), monitor.checks[0])
+            self.assertTrue(monitor.checks[0]['health'].snapshot()['ready'])
+
+    def test_monitor_rejects_credentials_in_endpoint_urls(self):
+        with self.assertRaises(ValueError):
+            EndpointHealth([{'name': 'bad', 'url': 'https://secret@example.org/health'}], '/tmp/unused')
+
     async def test_missing_rejected_and_limited_are_distinct_and_no_body_is_read(self):
         with tempfile.TemporaryDirectory() as directory:
             health=ProviderHealth('gemini','gemini-3.8-live',Path(directory)/'state.json')

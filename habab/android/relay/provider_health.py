@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 from aiohttp import ClientTimeout
 
@@ -96,7 +97,7 @@ class ProviderHealth:
                   'missing_credential': 'серверный ключ отсутствует',
                   'credential_rejected': 'ключ или права доступа отклонены',
                   'rate_limited': 'запросы ограничены (HTTP 429), проверьте лимиты',
-                  'provider_unavailable': 'провайдер не отвечает или вернул ошибку',
+                  'provider_unavailable': 'сервис не отвечает или вернул ошибку',
                   'stale_check': 'проверка провайдера давно не обновлялась',
                   'not_checked': 'провайдер ещё не проверен'}
         message = f'Habab Home: {self.provider} / {self.model} — {labels[reason]}.'
@@ -124,4 +125,45 @@ class ProviderHealth:
         while True:
             await self.probe(client, key_getter())
             await self.notify()
+            await asyncio.sleep(60)
+
+
+class EndpointHealth:
+    """Check public endpoints and notify only sustained failures and recovery."""
+
+    def __init__(self, checks, state_dir, notify_command=(), recipient=None):
+        import hashlib
+        self.checks = []
+        for check in checks:
+            url = urlsplit(check["url"])
+            if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
+                raise ValueError("Invalid public health endpoint")
+            expected = check.get("expected_status", 200)
+            if type(expected) is not int or not 100 <= expected <= 599:
+                raise ValueError("Invalid health status")
+            identity = hashlib.sha256(check["url"].encode()).hexdigest()[:16]
+            health = ProviderHealth("сервер", check["name"],
+                Path(state_dir) / (identity + ".json"), notify_command, recipient)
+            self.checks.append({"url": check["url"], "expected": expected,
+                                "health": health, "failures": 0})
+
+    async def check_one(self, client, check):
+        try:
+            async with client.get(check["url"], allow_redirects=False,
+                                  timeout=ClientTimeout(total=8)) as response:
+                ready = response.status == check["expected"]
+        except Exception:
+            ready = False
+        check["failures"] = 0 if ready else check["failures"] + 1
+        if not ready and check["failures"] < 2:
+            return
+        health = check["health"]
+        health.reason = "ready" if ready else "provider_unavailable"
+        health.checked_at = int(time.time())
+        health.save()
+        await health.notify()
+
+    async def run(self, client):
+        while True:
+            await asyncio.gather(*(self.check_one(client, check) for check in self.checks))
             await asyncio.sleep(60)

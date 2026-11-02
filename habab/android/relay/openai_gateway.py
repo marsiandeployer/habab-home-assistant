@@ -25,7 +25,7 @@ from aiohttp import ClientSession, ClientResponseError, ClientTimeout, ClientWST
 
 from beta_codes import BetaCodes
 from usage_stats import UsageJournal, StreamUsage, token_counts
-from provider_health import ProviderHealth
+from provider_health import ProviderHealth, EndpointHealth
 from telegram_speech import capability as speech_capability, telegram_voice_capability, register_routes as register_speech_routes
 
 logger = logging.getLogger(__name__)
@@ -184,6 +184,7 @@ class Gateway:
             raise ValueError('Invalid voice relay service credential')
         self.voice_service_key = voice_service_key
         self.provider_health = None
+        self.endpoint_health = None
         self.voice_diagnostics = False
         self.usage_journal = usage_journal
         self.credential_store = credential_store
@@ -336,6 +337,7 @@ class Gateway:
         self.client = ClientSession(timeout=ClientTimeout(total=60), trust_env=False)
         control = None
         health_task = None
+        endpoint_task = None
         try:
             if self.control_socket:
                 if self.control_socket.exists():
@@ -348,8 +350,13 @@ class Gateway:
             if self.provider_health is not None:
                 key = (lambda: self.text_upstream_key) if self.voice_service_key else (lambda: self.upstream_key)
                 health_task = asyncio.create_task(self.provider_health.run(self.client, key))
+            if self.endpoint_health is not None:
+                endpoint_task = asyncio.create_task(self.endpoint_health.run(self.client))
             yield
         finally:
+            if endpoint_task is not None:
+                endpoint_task.cancel()
+                await asyncio.gather(endpoint_task, return_exceptions=True)
             if health_task is not None:
                 health_task.cancel()
                 await asyncio.gather(health_task, return_exceptions=True)
@@ -1310,6 +1317,10 @@ def main():
     model = DEEPSEEK_TEXT_MODEL if provider == 'deepseek' else GEMINI_MODEL
     gateway.provider_health = ProviderHealth(provider, model, args.config.parent / 'health-state.json',
         notify_command=config.get('health_notify_command', []), recipient=config.get('health_notify_recipient'))
+    if config.get('endpoint_health_checks'):
+        gateway.endpoint_health = EndpointHealth(config['endpoint_health_checks'],
+            args.config.parent / 'endpoint-health', config.get('health_notify_command', []),
+            config.get('endpoint_health_recipient'))
     web.run_app(gateway.app(), host='127.0.0.1', port=config.get('port', 8326), access_log=None, print=None, handler_cancellation=True)
 
 
