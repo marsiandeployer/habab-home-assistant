@@ -70,11 +70,11 @@ class NodeInputTests(unittest.TestCase):
     def test_native_and_vosk_preflight_uses_official_urls_and_locked_voice_size(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / 'native-packages.json').write_text(json.dumps({'proot': {'Filename': 'pool/main/p/proot/proot_5.1.107.101_aarch64.deb'}}))
+            (root / 'native-packages.json').write_text(json.dumps({'proot': {'Filename': 'pool/main/p/proot/proot_5.1.107.102_aarch64.deb'}}))
             (root / 'voice-model.json').write_text(json.dumps({'name': 'model', 'url': 'https://alphacephei.com/vosk/models/model.zip', 'bytes': 42}))
             with patch.object(check_node_inputs, 'ROOT', root), patch.object(check_node_inputs, 'check_url') as check:
                 check_node_inputs.check_native_and_voice_inputs()
-                self.assertEqual(check.call_args_list[0].args, ('Termux proot', 'https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.101_aarch64.deb'))
+                self.assertEqual(check.call_args_list[0].args, ('Termux proot', 'https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.102_aarch64.deb'))
                 self.assertEqual(check.call_args_list[1].args, ('Vosk model', 'https://alphacephei.com/vosk/models/model.zip', 42))
             voice = json.loads((root / 'voice-model.json').read_text())
             voice['url'] = 'https://habab-demo.wpmix.net/model.zip'

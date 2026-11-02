@@ -220,7 +220,7 @@ The workflow uses the [official SDK manager package installation syntax](https:/
 Native `.deb` inputs
 download directly from `https://packages.termux.dev/apt/termux-main/` using the
 exact `Filename` and SHA-256 in `native-packages.json`. The current PRoot pin is
-`5.1.107.101`. The producer verifies every package and includes upstream notices.
+`5.1.107.102`. The producer verifies every package and includes upstream notices.
 The public Vosk model downloads from its locked official `alphacephei.com` URL
 and retains its size/SHA-256 check. These producers have no Habab mirror fallback.
 
