@@ -11,7 +11,7 @@ import shutil
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGINES = {"microwakeword", "openwakeword", "livekit"}
+ENGINES = {"openwakeword", "livekit"}
 ONNX_FILES = {"classifier.onnx", "melspectrogram.onnx", "embedding_model.onnx"}
 
 
@@ -24,8 +24,8 @@ def validate_pack(pack):
     if manifest.get("schema") != 1:
         raise ValueError("Unsupported model pack schema")
     entries = manifest.get("engines", [])
-    if len(entries) != 3 or {e.get("engine_id") for e in entries} != ENGINES:
-        raise ValueError("Expected all three experimental engines exactly once")
+    if len(entries) != len(ENGINES) or {e.get("engine_id") for e in entries} != ENGINES:
+        raise ValueError("Expected openwakeword and livekit exactly once")
     verified, total = [], 0
     for engine in entries:
         eid = engine["engine_id"]
@@ -86,6 +86,8 @@ def main():
         raise ValueError("Output must not be a symlink")
     output = validate_output(args.pack_dir, args.output)
     manifest, files = validate_pack(args.pack_dir)
+    files = [(source, relative) for source, relative in files
+             if relative.split("/", 1)[0] in ENGINES]
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".wake-model-build-", dir=output.parent) as temporary:
         stage = Path(temporary) / "experiments"

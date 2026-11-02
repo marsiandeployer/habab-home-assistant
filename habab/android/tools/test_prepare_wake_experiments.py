@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("prepare_wake_experiments", Path(__file__).with_name("prepare_wake_experiments.py"))
 producer = importlib.util.module_from_spec(spec)
@@ -38,16 +39,16 @@ class PrivateWakePackTest(unittest.TestCase):
         for eid in sorted(producer.ENGINES):
             directory = root / eid
             directory.mkdir()
-            names = {"classifier.tflite"} if eid == "microwakeword" else producer.ONNX_FILES
+            names = producer.ONNX_FILES
             files = []
             for name in sorted(names):
                 data = (eid + name).encode()
                 (directory / name).write_bytes(data)
                 files.append({"name": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
             entries.append({"engine_id": eid, "model_id": eid, "version": "test", "phrase": "эй дом",
-                    "threshold": 0.97 if eid == "microwakeword" else 0.5,
-                    "sliding_window": 5 if eid == "microwakeword" else 1,
-                    "context_frames": 204 if eid == "microwakeword" else 16,
+                    "threshold": 0.5,
+                    "sliding_window": 1,
+                    "context_frames": 16,
                     "hop_ms": {"microwakeword": 30, "openwakeword": 80, "livekit": 160}[eid],
                     "model_sha256": next(x["sha256"] for x in files if x["name"].startswith("classifier.")),
                     "frontend_sha256": "a" * 64, "files": files})
@@ -55,19 +56,44 @@ class PrivateWakePackTest(unittest.TestCase):
         (root / "manifest.json").write_text(json.dumps(manifest))
         return manifest
 
-    def test_valid_pack_has_all_three_engines_without_real_weights(self):
+    def test_valid_pack_has_only_openwakeword_and_livekit_without_real_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.pack(root)
             manifest, files = producer.validate_pack(root)
-            self.assertEqual(3, len(manifest["engines"]))
-            self.assertEqual(7, len(files))
+            self.assertEqual(producer.ENGINES, {e["engine_id"] for e in manifest["engines"]})
+            self.assertEqual(6, len(files))
+
+    def test_pack_with_microwakeword_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.pack(root)
+            manifest["engines"].append({"engine_id": "microwakeword"})
+            (root / "manifest.json").write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "openwakeword and livekit"):
+                producer.validate_pack(root)
+
+    def test_staging_excludes_microwakeword_and_keeps_two_selected_engines(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output = root / "source", root / "output"
+            source.mkdir()
+            self.pack(source)
+            with patch("sys.argv", ["prepare_wake_experiments.py",
+                    "--pack-dir", str(source), "--output", str(output)]):
+                producer.main()
+                producer.main()
+            manifest, files = producer.validate_pack(output)
+            self.assertEqual(producer.ENGINES,
+                             {engine["engine_id"] for engine in manifest["engines"]})
+            self.assertEqual(6, len(files))
+            self.assertFalse((output / "microwakeword").exists())
 
     def test_corrupt_classifier_is_rejected_before_staging(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.pack(root)
-            path = root / "microwakeword/classifier.tflite"
+            path = root / "openwakeword/classifier.onnx"
             data = path.read_bytes()
             path.write_bytes(b"x" + data[1:])
             with self.assertRaisesRegex(ValueError, "checksum"):

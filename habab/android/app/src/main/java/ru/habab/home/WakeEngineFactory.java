@@ -12,7 +12,7 @@ import org.json.JSONObject;
 
 /** Selects exactly one detector. Experimental weights are an explicit, checked build input. */
 final class WakeEngineFactory {
-    static final String[] IDS = {"vosk", "microwakeword", "openwakeword", "livekit"};
+    static final String[] IDS = {"vosk", "openwakeword", "livekit"};
     private static final String BUNDLE = "voice/experiments/";
 
     static boolean known(String id) {
@@ -69,7 +69,12 @@ final class WakeEngineFactory {
     static String bundleStatus(Context context) {
         try {
             JSONArray entries = readJson(context, BUNDLE + "manifest.json").getJSONArray("engines");
-            return entries.length() == 3 ? "experimental_models_installed" : "experimental_models_incomplete";
+            if (entries.length() != 2) return "experimental_models_incomplete";
+            java.util.Set<String> installed = new java.util.HashSet<>();
+            for (int i = 0; i < entries.length(); i++)
+                installed.add(entries.getJSONObject(i).optString("engine_id"));
+            return installed.contains("openwakeword") && installed.contains("livekit")
+                    ? "experimental_models_installed" : "experimental_models_incomplete";
         } catch (Exception error) { return "experimental_models_missing"; }
     }
 
