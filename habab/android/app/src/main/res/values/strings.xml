@@ -116,6 +116,14 @@
     <string name="remote_access_invalid">Проверьте адрес дома и ключ подключения Habab.</string>
     <string name="voice_wake_engine">Активация голосом</string>
     <string name="voice_wake_engine_help">Работает один выбранный движок. Экспериментальные модели обучены на фразе «эй дом». Это локальная активация; голосовой AI-провайдер настраивается отдельно в Home Assistant.</string>
+    <string name="voice_wake_sensitivity">Чувствительность активации</string>
+    <string name="voice_wake_sensitivity_help">Срабатывает сам — уменьшите чувствительность. Не слышит „эй дом“ — увеличьте</string>
+    <string name="voice_wake_sensitivity_less_false">Меньше ложных срабатываний</string>
+    <string name="voice_wake_sensitivity_easier">Легче разбудить</string>
+    <string name="voice_wake_sensitivity_vosk_threshold">Минимальная уверенность Vosk: %1$s</string>
+    <string name="voice_wake_sensitivity_model_threshold">Порог оценки модели: %1$s</string>
+    <string name="voice_wake_sensitivity_custom_phrase">Для своей фразы порог Vosk не применяется.</string>
+    <string name="voice_wake_sensitivity_reset">По умолчанию</string>
     <string name="voice_wake_models_missing">В этой сборке экспериментальные модели не установлены. Доступен Vosk.</string>
     <string name="voice_error_wake_engine">Не удалось запустить выбранный движок активации. Откройте голосовые настройки и выберите другой движок. Подробности сохранены в диагностике.</string>
     <string name="voice_error_experimental_phrase">Экспериментальная модель поддерживает только фразу «эй дом».</string>

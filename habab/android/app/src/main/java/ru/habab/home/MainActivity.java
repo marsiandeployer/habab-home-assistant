@@ -319,6 +319,18 @@ public final class MainActivity extends Activity {
             if (WakeEngineFactory.IDS[i].equals(selectedEngine)) wakeEngine.setSelection(i);
         form.addView(wakeEngine);
         TextView engineHelp = new TextView(this); engineHelp.setText(R.string.voice_wake_engine_help); form.addView(engineHelp);
+        TextView sensitivityTitle = new TextView(this); sensitivityTitle.setText(R.string.voice_wake_sensitivity); form.addView(sensitivityTitle);
+        TextView sensitivityThreshold = new TextView(this); form.addView(sensitivityThreshold);
+        SeekBar sensitivity = new SeekBar(this); sensitivity.setMax(WakeSensitivity.MAX_PROGRESS); form.addView(sensitivity);
+        LinearLayout sensitivityLabels = new LinearLayout(this); sensitivityLabels.setOrientation(LinearLayout.HORIZONTAL);
+        TextView lessFalse = new TextView(this); lessFalse.setText(R.string.voice_wake_sensitivity_less_false);
+        TextView easierWake = new TextView(this); easierWake.setText(R.string.voice_wake_sensitivity_easier);
+        sensitivityLabels.addView(lessFalse, new LinearLayout.LayoutParams(0, -2, 1));
+        sensitivityLabels.addView(easierWake, new LinearLayout.LayoutParams(0, -2, 1));
+        easierWake.setGravity(Gravity.RIGHT);
+        form.addView(sensitivityLabels);
+        TextView sensitivityHelp = new TextView(this); sensitivityHelp.setText(R.string.voice_wake_sensitivity_help); form.addView(sensitivityHelp);
+        Button resetSensitivity = new Button(this); resetSensitivity.setText(R.string.voice_wake_sensitivity_reset); form.addView(resetSensitivity);
         if (!"experimental_models_installed".equals(WakeEngineFactory.bundleStatus(this))) {
             wakeEngine.setSelection(0);
             wakeEngine.setEnabled(false);
@@ -344,6 +356,38 @@ public final class MainActivity extends Activity {
         EditText phrase = new EditText(this); phrase.setHint(R.string.voice_phrase);
         phrase.setText(getSharedPreferences("voice", 0).getString("phrase", "эй дом"));
         phrase.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(64)}); form.addView(phrase);
+        android.content.SharedPreferences voicePreferences = getSharedPreferences("voice", 0);
+        int[] sensitivityPositions = new int[WakeEngineFactory.IDS.length];
+        for (int i = 0; i < sensitivityPositions.length; i++)
+            sensitivityPositions[i] = WakeSensitivity.clampProgress(voicePreferences.getInt(
+                    WakeSensitivity.preferenceKey(WakeEngineFactory.IDS[i]), WakeSensitivity.DEFAULT_PROGRESS));
+        Runnable updateSensitivity = () -> {
+            String engine = WakeEngineFactory.IDS[wakeEngine.getSelectedItemPosition()];
+            int position = sensitivityPositions[wakeEngine.getSelectedItemPosition()];
+            double modelDefault = "vosk".equals(engine) ? WakeSensitivity.defaultThreshold(engine) : 0.500;
+            double threshold = WakeSensitivity.threshold(engine, position, modelDefault);
+            boolean customVoskPhrase = "vosk".equals(engine)
+                    && !"эй дом".equals(WakeDetector.normalize(phrase.getText().toString()));
+            java.text.DecimalFormat number = new java.text.DecimalFormat("0.000",
+                    java.text.DecimalFormatSymbols.getInstance(new java.util.Locale("ru")));
+            sensitivityThreshold.setText(customVoskPhrase
+                    ? getString(R.string.voice_wake_sensitivity_custom_phrase)
+                    : getString("vosk".equals(engine) ? R.string.voice_wake_sensitivity_vosk_threshold
+                            : R.string.voice_wake_sensitivity_model_threshold, number.format(threshold)));
+            sensitivity.setEnabled(!customVoskPhrase);
+            resetSensitivity.setEnabled(!customVoskPhrase);
+            if (sensitivity.getProgress() != position) sensitivity.setProgress(position);
+        };
+        sensitivity.setProgress(sensitivityPositions[wakeEngine.getSelectedItemPosition()]);
+        sensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                sensitivityPositions[wakeEngine.getSelectedItemPosition()] = WakeSensitivity.clampProgress(progress);
+                updateSensitivity.run();
+            }
+            public void onStartTrackingTouch(SeekBar bar) { }
+            public void onStopTrackingTouch(SeekBar bar) { }
+        });
+        resetSensitivity.setOnClickListener(view -> sensitivity.setProgress(WakeSensitivity.DEFAULT_PROGRESS));
         String[] voskPhrase = {phrase.getText().toString()};
         wakeEngine.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -351,9 +395,17 @@ public final class MainActivity extends Activity {
                 if (!custom && phrase.isEnabled()) voskPhrase[0] = phrase.getText().toString();
                 phrase.setEnabled(custom);
                 phrase.setText(custom ? voskPhrase[0] : "эй дом");
+                sensitivity.setProgress(sensitivityPositions[position]);
+                updateSensitivity.run();
             }
             public void onNothingSelected(AdapterView<?> parent) { }
         });
+        phrase.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            public void onTextChanged(CharSequence text, int start, int before, int count) { updateSensitivity.run(); }
+            public void afterTextChanged(android.text.Editable text) { }
+        });
+        updateSensitivity.run();
         CheckBox enabled = new CheckBox(this); enabled.setText(R.string.voice_enable);
         enabled.setChecked(getSharedPreferences("voice", 0).getBoolean("enabled", false)); form.addView(enabled);
         CheckBox wakeClips = new CheckBox(this); wakeClips.setText(R.string.voice_record_wake_clips);
@@ -363,12 +415,15 @@ public final class MainActivity extends Activity {
                 .setPositiveButton(R.string.configure, (dialog, which) -> {
                     String value = WakeDetector.normalize(phrase.getText().toString());
                     if (value.isEmpty()) { message(getString(R.string.voice_invalid_phrase)); return; }
-                    getSharedPreferences("voice", 0).edit().putString("phrase", value)
+                    SharedPreferences.Editor save = getSharedPreferences("voice", 0).edit().putString("phrase", value)
                             .putString("wake_engine", WakeEngineFactory.IDS[wakeEngine.getSelectedItemPosition()])
                             .putBoolean("enabled", enabled.isChecked())
                             .putBoolean("record_wake_clips", wakeClips.isChecked())
                             .putString("audio_route_mode", audioRouteGroup.findViewById(audioRouteGroup.getCheckedRadioButtonId()).getTag().toString())
-                            .remove("bluetooth_audio").apply();
+                            .remove("bluetooth_audio");
+                    for (int i = 0; i < WakeEngineFactory.IDS.length; i++)
+                        save.putInt(WakeSensitivity.preferenceKey(WakeEngineFactory.IDS[i]), sensitivityPositions[i]);
+                    save.apply();
                     if (enabled.isChecked()) {
                         startServerManually();
                         VoiceService.restartAfterConfiguration(this);

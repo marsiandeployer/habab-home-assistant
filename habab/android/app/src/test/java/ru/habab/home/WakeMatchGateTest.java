@@ -9,6 +9,12 @@ public class WakeMatchGateTest {
         assertTrue(WakeMatchGate.confidenceAccepted(800));
         assertTrue(WakeMatchGate.confidenceAccepted(-1));
     }
+
+    @Test public void configuredConfidenceThresholdChangesVoskAcceptance() {
+        assertFalse(WakeMatchGate.confidenceAccepted(699, 700));
+        assertTrue(WakeMatchGate.confidenceAccepted(700, 700));
+        assertTrue(WakeMatchGate.confidenceAccepted(-1, 950));
+    }
     @Test public void partialExactThenDifferentEndpointFinalDoesNotMatch() {
         WakeMatchGate gate = new WakeMatchGate("эй дом");
         assertFalse(gate.accept("эй дом", WakeMatchGate.ResultKind.PARTIAL));

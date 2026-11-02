@@ -23,14 +23,20 @@ final class WakeEngineFactory {
     static WakeEngine create(Context context, String id, String phrase,
             WakeDetector.Diagnostics diagnostics) throws Exception {
         if (!known(id)) throw new VoiceFailure("unsupported_wake_engine");
+        android.content.SharedPreferences preferences = context.getSharedPreferences("voice", 0);
+        int sensitivity = WakeSensitivity.clampProgress(preferences.getInt(
+                WakeSensitivity.preferenceKey(id), WakeSensitivity.DEFAULT_PROGRESS));
         if ("vosk".equals(id)) {
             JSONObject model = readJson(context, "voice/model.json");
+            double threshold = "эй дом".equals(phrase)
+                    ? WakeSensitivity.threshold(id, sensitivity, WakeSensitivity.defaultThreshold(id)) : 0.0;
             WakeEngineInfo info = new WakeEngineInfo(id, model.getString("name"), "vosk-0.3.75",
                     model.getString("sha256"), model.getString("sha256"),
-                    "эй дом".equals(phrase) ? WakeMatchGate.MIN_WORD_CONFIDENCE_PERMILLE / 1000.0 : 0.0,
+                    threshold,
                     1, phrase, 0, 20);
             File directory = VoiceModel.prepare(context);
-            return new VoskEngine(new WakeDetector(directory.toString(), phrase, diagnostics), info);
+            return new VoskEngine(new WakeDetector(directory.toString(), phrase, diagnostics,
+                    (int) Math.round(threshold * 1000)), info);
         }
         if (!"эй дом".equals(WakeDetector.normalize(phrase)))
             throw new VoiceFailure("wake_model_phrase");
@@ -44,9 +50,10 @@ final class WakeEngineFactory {
             if (!id.equals(entry.optString("engine_id"))) continue;
             if (!entry.optString("frontend_sha256").matches("[a-f0-9]{64}"))
                 throw new VoiceFailure("wake_model_checksum");
+            double threshold = WakeSensitivity.threshold(id, sensitivity, entry.getDouble("threshold"));
             WakeEngineInfo info = new WakeEngineInfo(id, entry.getString("model_id"),
                     entry.getString("version"), entry.getString("model_sha256"),
-                    entry.getString("frontend_sha256"), entry.getDouble("threshold"),
+                    entry.getString("frontend_sha256"), threshold,
                     entry.getInt("sliding_window"), entry.getString("phrase"),
                     entry.getInt("context_frames"), entry.getInt("hop_ms"));
             if (!phrase.equals(info.phrase)) throw new VoiceFailure("wake_model_phrase");

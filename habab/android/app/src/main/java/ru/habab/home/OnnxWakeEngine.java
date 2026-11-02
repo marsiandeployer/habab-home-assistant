@@ -107,6 +107,7 @@ final class OnnxWakeEngine implements WakeEngine {
         catch (RuntimeException | Error error) { frontend.close(); throw error; }
         android.util.Log.i("HababWakeModel", "event=engine_ready engine=" + info.engineId
                 + " model=" + info.modelId + " hop_ms=" + frontend.cadenceMs()
+                + " threshold=" + info.threshold
                 + " context_frames=" + info.contextFrames
                 + " mel_context_frames=" + OnnxWakeFrontend.MEL_WINDOW
                 + " audio_window_ms=" + ("livekit".equals(modeId) ? 2000 : -1));

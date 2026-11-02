@@ -26,7 +26,11 @@ final class WakeMatchGate {
 
     /** Missing confidence must not silently prevent a valid wake. */
     static boolean confidenceAccepted(int minimumPermille) {
-        return minimumPermille < 0 || minimumPermille >= MIN_WORD_CONFIDENCE_PERMILLE;
+        return confidenceAccepted(minimumPermille, MIN_WORD_CONFIDENCE_PERMILLE);
+    }
+
+    static boolean confidenceAccepted(int minimumPermille, int thresholdPermille) {
+        return minimumPermille < 0 || minimumPermille >= thresholdPermille;
     }
 
     static String normalize(String value) {

@@ -19,6 +19,7 @@ final class WakeDetector implements AutoCloseable {
     private final Model model;
     private final Recognizer recognizer;
     private final String phrase;
+    private final int minimumWordConfidencePermille;
     private final WakeMatchGate matchGate;
     private final WakeVerifier verifier;
     private final VoiceActivityGate gate = new VoiceActivityGate();
@@ -44,9 +45,15 @@ final class WakeDetector implements AutoCloseable {
     }
 
     WakeDetector(String directory, String requested, Diagnostics diagnostics) throws Exception {
+        this(directory, requested, diagnostics, WakeMatchGate.MIN_WORD_CONFIDENCE_PERMILLE);
+    }
+
+    WakeDetector(String directory, String requested, Diagnostics diagnostics,
+            int minimumWordConfidencePermille) throws Exception {
         phrase = normalize(requested);
         if (phrase.isEmpty() || phrase.length() > 64 || phrase.split(" ").length > 5) throw new IOException("invalid_wake_phrase");
         this.diagnostics = diagnostics;
+        this.minimumWordConfidencePermille = Math.max(0, Math.min(1000, minimumWordConfidencePermille));
         matchGate = new WakeMatchGate(phrase);
         LibVosk.vosk_set_log_level(-1);
         model = new Model(directory);
@@ -134,7 +141,8 @@ final class WakeDetector implements AutoCloseable {
         boolean exact = phrase.equals(normalize(text));
         int confidence = confidencePermille(result);
         int minimumConfidence = minimumConfidencePermille(result);
-        boolean confidenceAccepted = !phrase.equals("эй дом") || WakeMatchGate.confidenceAccepted(minimumConfidence);
+        boolean confidenceAccepted = !phrase.equals("эй дом")
+                || WakeMatchGate.confidenceAccepted(minimumConfidence, minimumWordConfidencePermille);
         boolean detected = confidenceAccepted && matchGate.accept(text, kind);
         record(VoiceLifecycleTrace.Event.WAKE_FINAL, reason, now, rms, vadSpeech,
                 -1, exact ? 1 : 0, confidence);
