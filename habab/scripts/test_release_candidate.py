@@ -204,6 +204,23 @@ class ReleaseCandidateTests(unittest.TestCase):
             release_candidate.assemble(self.root, self.revision, "blocked", self.source_tree,
                                       workflow_identity=self.workflow_identity)
 
+    def test_same_run_retry_preserves_previously_built_target_identity(self):
+        self.fill_targets()
+        identity = {**self.workflow_identity, "workflow_run_attempt": "2"}
+        result = release_candidate.assemble(self.root, self.revision, "blocked", self.source_tree,
+                                            workflow_identity=identity)
+        self.assertEqual(result["targets"]["windows"]["workflow_run_attempt"], "1")
+
+    def test_future_attempt_is_rejected(self):
+        self.fill_targets()
+        path = self.root / "windows/status.json"
+        status = json.loads(path.read_text())
+        status["workflow_run_attempt"] = "2"
+        path.write_text(json.dumps(status))
+        with self.assertRaisesRegex(ValueError, "workflow identity does not match"):
+            release_candidate.assemble(self.root, self.revision, "blocked", self.source_tree,
+                                      workflow_identity=self.workflow_identity)
+
     def test_windows_scope_omits_unselected_platforms(self):
         self.add_windows_package()
 

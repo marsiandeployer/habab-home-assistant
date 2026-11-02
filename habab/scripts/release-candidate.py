@@ -322,7 +322,12 @@ def assemble(root: Path, source_revision: str, android_state: str,
             raise ValueError(f"{target} was built from another source revision")
         if status.get("source_dirty") is not False:
             raise ValueError(f"{target} does not prove a clean source tree")
-        if any(status.get(field) != workflow_identity[field] for field in identity_fields):
+        attempt = status.get("workflow_run_attempt")
+        aggregate_attempt = workflow_identity["workflow_run_attempt"]
+        if (any(status.get(field) != workflow_identity[field] for field in identity_fields[:2])
+                or not isinstance(attempt, str) or not attempt.isdecimal()
+                or not aggregate_attempt.isdecimal()
+                or not 1 <= int(attempt) <= int(aggregate_attempt)):
             raise ValueError(f"{target} workflow identity does not match the aggregate job")
         if status.get("state") != ("blocked" if target == "android" and android_state == "blocked" else "built"):
             raise ValueError(f"{target} status does not match requested candidate state")
