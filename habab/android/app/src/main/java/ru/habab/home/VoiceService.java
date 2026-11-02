@@ -214,8 +214,8 @@ public final class VoiceService extends Service {
                     && !"bluetooth_unavailable".equals(service.audioRoute) ? "bluetooth"
                     : "bluetooth_unavailable";
         } else {
-            actual = "phone".equals(service.audioRoute) && type >= 0
-                    && type == VoiceRouteTarget.BUILTIN_MIC_INPUT ? "phone" : "phone_unavailable";
+            // audioRoute is a localized display label, not a route identifier.
+            actual = type == VoiceRouteTarget.BUILTIN_MIC_INPUT ? "phone" : "phone_unavailable";
         }
         return new JSONObject().put("phase", status).put("actual_route", actual)
                 .put("input_type", type);
