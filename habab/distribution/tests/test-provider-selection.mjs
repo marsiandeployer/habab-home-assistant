@@ -11,10 +11,11 @@ Object.defineProperty(globalThis, "customElements", {
   configurable: true,
   value: { get: (name) => definitions.get(name), define: (name, value) => definitions.set(name, value) },
 });
-const { assistantProviderPresentation, assistantRoutingSummary, providerModelPresentation, strings } = await Promise.all([
+const { assistantModelRoles, assistantProviderPresentation, assistantRoutingSummary, providerModelPresentation, strings } = await Promise.all([
   import("../src/habab_home/frontend/ai-panel.js?provider-selection-test"),
   import("../src/habab_home/frontend/strings.js?provider-selection-test"),
 ]).then(([panelModule, stringModule]) => ({
+  assistantModelRoles: panelModule.assistantModelRoles,
   assistantProviderPresentation: panelModule.assistantProviderPresentation,
   assistantRoutingSummary: panelModule.assistantRoutingSummary,
   providerModelPresentation: panelModule.providerModelPresentation,
@@ -737,3 +738,30 @@ for (const [name, failure, expectedMessage] of [
     assert.ok(nodes.has("#feedback"));
   });
 }
+
+
+test("model roles show the confirmed OpenCode model even with fast dialog enabled", () => {
+  const roles = assistantModelRoles({
+    provider: "habab", model: "stale-saved-model", fast_dialog: true,
+    managed_model: "habab-chat", text_ready: true,
+    configured_upstream_provider: "deepseek", configured_upstream_model: "deepseek-flash",
+    voice_ready: true, voice_provider: "habab", default_voice_model: "gemini-3.8-live",
+  }, "ru");
+  assert.equal(roles[0], "Агент OpenCode: DeepSeek · deepseek-flash");
+  assert.equal(roles[1], "Realtime-голос по умолчанию: Habab / Google Gemini · gemini-3.8-live");
+  assert.doesNotMatch(roles.join(" "), /stale-saved-model|habab-chat/);
+});
+
+test("model roles do not invent a managed upstream or a voice route for DeepSeek", () => {
+  const unconfirmed = assistantModelRoles({
+    provider: "habab", managed_model: "habab-chat", model: "stale-model", text_ready: false,
+    voice_ready: false,
+  }, "ru");
+  assert.match(unconfirmed[0], /модель пока не подтверждена/);
+  assert.doesNotMatch(unconfirmed[0], /stale-model|habab-chat/);
+  const direct = assistantModelRoles({
+    provider: "deepseek", effective_model: "deepseek-flash", voice_ready: false,
+  }, "en");
+  assert.equal(direct[0], "OpenCode agent: DeepSeek · deepseek-flash");
+  assert.equal(direct[1], "Default Realtime voice: not configured for the selected connection");
+});

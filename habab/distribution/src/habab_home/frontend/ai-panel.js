@@ -1,4 +1,4 @@
-import { strings } from "./strings.js?v=5";
+import { strings } from "./strings.js?v=6";
 import "./telemetry-panel.js";
 
 const providers = {
@@ -99,6 +99,18 @@ export function assistantRoutingSummary(entry, pipelines, language, isChecking =
     lines.push(copy.assistTTSConfigured.replace("{engine}", ttsEngines.join(", ")));
   }
   return lines;
+}
+
+export function assistantModelRoles(entry, language) {
+  const copy = strings[language === "ru" ? "ru" : "en"];
+  const agent = assistantProviderPresentation({...entry, fast_dialog: false});
+  const provider = agent.provider || providers[entry?.provider]?.name || entry?.provider || "";
+  const model = agent.model || copy.modelRoleUnconfirmed;
+  const voice = entry?.voice_ready === true && entry.voice_provider && entry.default_voice_model
+    ? `${entry.voice_provider === "habab" ? "Habab / Google Gemini" : providers[entry.voice_provider]?.name || entry.voice_provider} · ${entry.default_voice_model}`
+    : copy.modelRoleVoiceUnavailable;
+  return [copy.modelRoleAgent.replace("{provider}", provider).replace("{model}", model),
+    copy.modelRoleVoice.replace("{route}", voice)];
 }
 
 export function providerModelPresentation(provider, entry, language) {
@@ -221,6 +233,7 @@ class HababAIPanel extends HTMLElement {
       <p class="help" id="key-help">${this.t("keyHelp")}</p></div><div class="actions"><button class="primary" type="submit">${this.t("save")}</button><button type="button" id="check">${this.t("check")}</button></div><p class="help" id="cost-help">${this.t("cost")}</p></form>
       <div id="feedback" role="status" aria-live="polite" hidden></div></section></div>
       <section class="assistant" aria-labelledby="assistant-title"><h2 id="assistant-title">${this.t("assistantTitle")}</h2><p>${this.t("assistantHelp")}</p>
+      <p class="status routing-summary" id="assistant-model-roles" role="status" aria-live="polite"></p>
       <p class="status routing-summary" id="assistant-provider-status" role="status" aria-live="polite"></p>
       <label><input id="fast-dialog" type="checkbox"> ${this.t("fastDialogLabel")}</label>
       <p class="help" id="fast-dialog-help">${this.t("fastDialogHelp")}</p>
@@ -400,6 +413,8 @@ class HababAIPanel extends HTMLElement {
     const entry = this.entry();
     const selected = this.connections.filter((item) => item.assistant_selected);
     const currentProvider = selected.length === 1 ? selected[0] : null;
+    this.q("#assistant-model-roles").textContent = currentProvider
+      ? assistantModelRoles(currentProvider, this.language).join("\n") : "";
     this.q("#assistant-provider-status").textContent = !this.connectionsLoaded
       ? this.t("assistantProviderUnavailable")
       : currentProvider
