@@ -864,6 +864,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('неизвестны', config['instructions'])
         self.assertIn('прямо просит Codex/Кодекс', config['instructions'])
         self.assertIn('Не отказывай', config['instructions'])
+        self.assertIn('не хватает данных для достоверного ответа', tool['description'])
         self.assertIn('прямо просит Codex', tool['description'])
         self.assertIn('выбранный executor', tool['description'])
         self.assertIn('выбранного task_executor', config['instructions'])
