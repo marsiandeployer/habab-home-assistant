@@ -35,7 +35,7 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
             capture_output=True,
         )
 
-    def make_release(self, *, wrong_serialx_hash=False, telegram_link=None):
+    def make_release(self, *, wrong_serialx_hash=False, wrong_codex_hash=False, telegram_link=None):
         site = 'usr/local/lib/python3.14/site-packages'
         init_path = f'{site}/serialx/platforms/__init__.py'
         unix_path = f'{site}/serialx/platforms/serial_unix.py'
@@ -54,6 +54,16 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
         if wrong_serialx_hash:
             attestation['files'][unix_path] = '0' * 64
 
+        codex_paths = {
+            'opt/habab-codex/codex': b'codex',
+            'opt/habab-codex/codex-code-mode-host': b'code-mode-host',
+            'opt/habab-codex/codex-exec-server': b'exec-server',
+        }
+        codex_files = {path: hashlib.sha256(data).hexdigest() for path, data in codex_paths.items()}
+        codex_sha = codex_files['opt/habab-codex/codex']
+        if wrong_codex_hash:
+            codex_files['opt/habab-codex/codex-exec-server'] = '0' * 64
+
         contents = {
             'usr/local/bin/python3': b'python',
             'usr/local/bin/habab-ha': b'habab-ha',
@@ -62,13 +72,19 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
             'usr/src/homeassistant/homeassistant/components/habab_home/__init__.py': b'',
             'usr/src/homeassistant/homeassistant/components/habab_home/frontend/setup-chat.js': b'',
             'opt/habab-opencode/opencode': b'opencode',
+            **codex_paths,
+            'opt/habab-codex/codex.sha256': (codex_sha + '\n').encode(),
             'usr/local/share/habab-android/launch.py': b'launcher',
             init_path: init_bytes,
             unix_path: unix_bytes,
             metadata_path: metadata_bytes,
-            'etc/habab-android-release.json': json.dumps(
-                {'serialxUnixTransport': attestation}, sort_keys=True
-            ).encode(),
+            'etc/habab-android-release.json': json.dumps({
+                'serialxUnixTransport': attestation,
+                'codexVersion': '0.166.0',
+                'codexFiles': codex_files,
+                'codexReleaseSha256': hashlib.sha256(b'codex-pins').hexdigest(),
+                'codexSha256': codex_sha,
+            }, sort_keys=True).encode(),
         }
         if telegram_link is not None:
             contents['opt/habab-telegram/worker.mjs'] = b'import "noxon-telegram";\n'
@@ -93,6 +109,10 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
             'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
             'unpackedBytes': sum(map(len, contents.values())),
             'opencodeSha256': hashlib.sha256(b'opencode').hexdigest(),
+            'codexVersion': '0.166.0',
+            'codexFiles': codex_files,
+            'codexReleaseSha256': hashlib.sha256(b'codex-pins').hexdigest(),
+            'codexSha256': codex_sha,
             'androidLauncherSha256': hashlib.sha256(b'launcher').hexdigest(),
             'sourceFiles': ({'telegram-agent/worker.mjs': hashlib.sha256(
                 contents['opt/habab-telegram/worker.mjs']).hexdigest()} if telegram_link is not None else {}),
@@ -144,6 +164,12 @@ class SerialxUnixReleaseVerificationTests(unittest.TestCase):
         manifest = self.make_release(wrong_serialx_hash=True)
 
         with self.assertRaisesRegex(ValueError, 'payload mismatch'):
+            verify(manifest, self.public_key, require_serialx_unix=True)
+
+    def test_signed_archive_rejects_codex_helper_hash_mismatch(self):
+        manifest = self.make_release(wrong_codex_hash=True)
+
+        with self.assertRaisesRegex(ValueError, 'Codex CLI payload mismatch'):
             verify(manifest, self.public_key, require_serialx_unix=True)
 
     def test_signed_archive_rejects_missing_required_telegram_module_link(self):

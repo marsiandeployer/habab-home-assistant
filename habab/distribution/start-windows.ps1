@@ -180,6 +180,7 @@ try {
 
     Write-Host 'Building Home Assistant. The first download can take several minutes.'
     $env:HABAB_OPENCODE_SHA256 = 'bootstrap-pending'
+    $env:HABAB_CODEX_SHA256 = 'bootstrap-pending'
     Set-SourceProvenance
     $checkoutTunnel = Join-Path (Split-Path -Parent $PSScriptRoot) 'product-tunnel\web_tunnel.py'
     $stageDirectory = Join-Path $PSScriptRoot 'product-tunnel'
@@ -221,7 +222,15 @@ try {
     $digestLine = $installation | Where-Object { $_ -match '^HABAB_OPENCODE_SHA256=[a-f0-9]{64}$' } | Select-Object -Last 1
     if (-not $digestLine) { throw 'OpenCode SHA-256 was not returned.' }
     $env:HABAB_OPENCODE_SHA256 = $digestLine.Split('=')[1]
+    Run-Docker -DockerArgs @('volume', 'create', 'habab-home-codex-bin')
+    $codexInstallation = & $Docker run --rm --entrypoint python3 -v 'habab-home-codex-bin:/opt/habab-codex' -v $mount 'habab-home:windows-test' '/bootstrap/install-codex.py' '--release-file' '/bootstrap/codex-release.json' '--output-dir' '/opt/habab-codex'
+    if ($LASTEXITCODE -ne 0) { throw 'The pinned official Codex CLI download or integrity check failed.' }
+    $codexInstallation | ForEach-Object { Write-Host $_ }
+    $codexDigestLine = $codexInstallation | Where-Object { $_ -match '^HABAB_CODEX_SHA256=[a-f0-9]{64}$' } | Select-Object -Last 1
+    if (-not $codexDigestLine) { throw 'Codex SHA-256 was not returned.' }
+    $env:HABAB_CODEX_SHA256 = $codexDigestLine.Split('=')[1]
     [IO.File]::WriteAllText((Join-Path $PSScriptRoot '.env.opencode-windows'), "$digestLine`nHABAB_HOME_PORT=$portNumber`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::AppendAllText((Join-Path $PSScriptRoot '.env.opencode-windows'), "$codexDigestLine`n", [Text.UTF8Encoding]::new($false))
     if ($XiaomiHome) {
         Write-Host 'Installing the official Xiaomi Home component for your personal Home Assistant installation.'
         Write-Host 'Source and license: https://github.com/XiaoMi/ha_xiaomi_home'

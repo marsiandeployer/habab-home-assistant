@@ -180,6 +180,15 @@ def install_opencode(rootfs, cache):
     return record['version'], sha256(destination / 'opencode')
 
 
+def install_codex(rootfs, cache):
+    spec = importlib.util.spec_from_file_location('habab_codex_installer', DIST / 'install-codex.py')
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    result = installer.install(DIST / 'codex-release.json', rootfs / 'opt/habab-codex',
+                               'arm64', archive_dir=cache)
+    return result['version'], result['files']
+
+
 def link_telegram_vendor(rootfs):
     modules = rootfs / 'opt/habab-telegram/node_modules'
     modules.mkdir(parents=True, exist_ok=True)
@@ -375,7 +384,9 @@ def require_build_space(cache, rootfs, network_tools=False, factory_release=None
     else:
         # Existing compressed input is already allocated. Reserve the extracted
         # factory tree, a new archive, and 1 GiB for wheel installation/headroom.
-        minimum = factory_release['unpackedBytes'] + factory_release['bytes'] + 1024 ** 3
+        codex = json.loads((DIST / 'codex-release.json').read_text())['arm64']['artifacts']
+        codex_bytes = sum(item['bytes'] for item in codex.values())
+        minimum = factory_release['unpackedBytes'] + factory_release['bytes'] + codex_bytes + 1024 ** 3
     available = shutil.disk_usage(cache).free
     if available < minimum:
         raise OSError(f'Runtime build needs {minimum // 1024 ** 3} GiB free; only {available // 1024 ** 2} MiB available')
@@ -395,6 +406,15 @@ def validate_factory_dependencies(release, network_tools):
     opencode = json.loads((DIST / 'opencode-release.json').read_text())['arm64']
     if release.get('opencodeVersion') != opencode['version']:
         raise ValueError('Factory runtime OpenCode version differs from source')
+    codex = json.loads((DIST / 'codex-release.json').read_text())['arm64']
+    if release.get('codexVersion') != codex['version']:
+        raise ValueError('Factory runtime Codex version differs from source')
+    if release.get('codexReleaseSha256') != sha256(DIST / 'codex-release.json'):
+        raise ValueError('Factory runtime Codex asset pins differ from source')
+    if set(release.get('codexFiles', {})) != {
+            'opt/habab-codex/codex', 'opt/habab-codex/codex-code-mode-host',
+            'opt/habab-codex/codex-exec-server'}:
+        raise ValueError('Factory runtime Codex helper set differs from source')
     lock = json.loads((ROOT / 'tools/network_tools/node-apks.lock.json').read_text())
     expected_node = {name: record['sha256'] for name, record in lock['packages'].items()
                      if not (network_tools and name.startswith('icu-data-en-'))}
@@ -523,8 +543,10 @@ def main():
     serialx_unix = install_serialx_unix(rootfs)
     if reused is None:
         version, opencode_digest = install_opencode(rootfs, cache)
+        codex_version, codex_files = install_codex(rootfs, cache)
     else:
         version, opencode_digest = reused['opencodeVersion'], reused['opencodeSha256']
+        codex_version, codex_files = reused['codexVersion'], reused['codexFiles']
     native_frontend = install_frontend(rootfs, args.frontend_candidate, args.source_revision)
     network_tools = None
     helper_image = NODE_APK_HELPER
@@ -565,6 +587,9 @@ def main():
                'hababVersion': json.loads((DIST / 'src/habab_home/manifest.json').read_text())['version'],
                'sourceRevision': args.source_revision,
                'baseImage': IMAGE, 'opencodeVersion': version, 'opencodeSha256': opencode_digest,
+               'codexVersion': codex_version, 'codexFiles': codex_files,
+               'codexReleaseSha256': sha256(DIST / 'codex-release.json'),
+               'codexSha256': codex_files['opt/habab-codex/codex'],
                'androidLauncherSha256': sha256(launcher),
                'sourceFiles': inventory, 'nodePackages': node,
                'serialxUnixTransport': serialx_unix,

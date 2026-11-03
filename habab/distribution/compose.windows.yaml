@@ -8,17 +8,24 @@ services:
         HABAB_SOURCE_REVISION: ${HABAB_SOURCE_REVISION:-unknown}
         HABAB_SOURCE_DIRTY: ${HABAB_SOURCE_DIRTY:-unknown}
         HABAB_EMBED_OPENCODE: '0'
+        HABAB_EMBED_CODEX: '0'
     restart: unless-stopped
     ports:
       - "127.0.0.1:${HABAB_HOME_PORT:-8123}:8123"
     environment:
       TZ: Europe/Moscow
       HABAB_OPENCODE_SHA256: ${HABAB_OPENCODE_SHA256:?Run start-windows.bat}
+      HABAB_CODEX_BINARY: /opt/habab-codex/codex
+      HABAB_CODEX_SHA256: ${HABAB_CODEX_SHA256:?Run start-windows.bat}
     volumes:
       - config:/config
       - opencode:/opt/habab-opencode:ro
+      - codex:/opt/habab-codex:ro
 volumes:
   config:
   opencode:
     external: true
     name: habab-home-opencode-bin
+  codex:
+    external: true
+    name: habab-home-codex-bin

@@ -34,6 +34,10 @@ from .action_outcome import (
 from .assistant_identity import ASSISTANT_IDENTITY
 from .assistant_status import get_assistant_status
 from .const import DOMAIN
+from .codex_executor import (
+    HABAB_CODEX_BASE_URL, CodexError, CodexExecutor, normalize_history, result_part, turn_prompt,
+)
+from .executor_config import selected_executor
 from .effective_provider import effective_provider_entry
 from .fast_dialog import DIALOGUE_METADATA_KEY, decode_dialogue_part
 from .tool_history import tool_calls_by_message
@@ -317,6 +321,8 @@ class SetupAgent:
         self._runtime_secrets = set()
         self.diagnostics = AgentDiagnostics()
         self.root = Path(hass.config.path(".habab-opencode"))
+        self.codex = CodexExecutor(self.root, self.clean, self._register_runtime_secret)
+        self._active_executor = None
 
     async def setup(self):
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self.close)
@@ -327,6 +333,22 @@ class SetupAgent:
         if entry is None:
             raise AgentError("provider_required")
         return entry.data
+
+    @staticmethod
+    def _history_settings():
+        # noReply history requests never invoke this placeholder provider.
+        return {"provider": "openai", "model": "gpt-6-luna", "api_key": "unused-history-store"}
+
+    def executor_settings(self):
+        provider_settings = self.settings()
+        settings = {"executor": selected_executor(provider_settings),
+                    "provider": provider_settings.get("provider"),
+                    "api_key": provider_settings.get("api_key", ""),
+                    "model": "gpt-6-luna", "service_tier": "fast"}
+        if settings["provider"] == "habab":
+            settings["base_url"] = HABAB_CODEX_BASE_URL
+        self._register_runtime_secret(settings["api_key"])
+        return settings
 
     def select_provider(self, provider):
         """Persist an explicit UI selection without removing voice connections."""
@@ -355,7 +377,8 @@ class SetupAgent:
                     raw.extend(chunk)
                     if len(raw) > response_limit:
                         raise AgentError("response_too_large")
-                return json.loads(raw) if raw else None
+                payload = json.loads(raw) if raw else None
+                return normalize_history(payload) if method == "GET" and history else payload
         except AgentError as error:
             if method == "GET" and history and error.code == "response_too_large":
                 count = int(history[1])
@@ -376,16 +399,21 @@ class SetupAgent:
             await self.close()
             raise AgentError("unsupported_runtime") from error
 
-        settings = settings or self.settings()
+        history_only = self.executor_settings().get("executor") == "codex"
+        settings = self._history_settings() if history_only else settings or self.settings()
         provider = settings["provider"]
         is_deepseek = provider == "deepseek"
         provider_id = "habab-" + provider
         key_name = "HABAB_" + provider.upper() + "_KEY"
         try:
-            contract = await resolve_provider_contract(
-                async_get_clientsession(self.hass) if provider == "habab" else None,
-                settings,
-            )
+            if history_only:
+                contract = ProviderContract(provider="openai", protocol="openai_compatible",
+                    model="gpt-6-luna", base_url=provider_api_base("openai"))
+            else:
+                contract = await resolve_provider_contract(
+                    async_get_clientsession(self.hass) if provider == "habab" else None,
+                    settings,
+                )
         except ProviderError as error:
             raise AgentError(error.code) from None
         if contract.text_ready is False:
@@ -399,7 +427,10 @@ class SetupAgent:
                     or time.monotonic() < self.external_search_retry_at):
                 return contract
         mcp = {}
-        if provider == "habab":
+        if history_only:
+            self.external_search_retry_at = None
+            self.external_search_status = {"mode": "codex", "state": "not_checked"}
+        elif provider == "habab":
             exa_available = await fetch_habab_exa_capability(
                 async_get_clientsession(self.hass), settings["api_key"])
             if exa_available:
@@ -518,6 +549,8 @@ class SetupAgent:
 
     def _register_runtime_secret(self, secret):
         if isinstance(secret, str) and secret:
+            if not hasattr(self, "_runtime_secrets"):
+                self._runtime_secrets = set()
             self._runtime_secrets.add(secret)
 
     def visible(self, messages):
@@ -614,9 +647,11 @@ class SetupAgent:
         if self.lock.locked() or self._aborting:
             raise AgentError("busy")
         async with self.lock:
+            executor_settings = self.executor_settings()
             settings = self.settings()
             contract = await self.ensure(settings)
             self.active = (owner, session_id)
+            self._active_executor = executor_settings.get("executor", "opencode")
             self._active_run_completed = False
             try:
                 status = await get_assistant_status(self.hass, owner, settings, verify_telegram=False)
@@ -630,19 +665,23 @@ class SetupAgent:
                     info = message.get("info") if isinstance(message, dict) else None
                     if isinstance(info, dict) and isinstance(info.get("id"), str):
                         prior_message_ids.add(info["id"])
-                response = await self.request("POST", f"session/{session_id}/message", {
-                    "agent": "build", "model": {
-                        "providerID": "habab-" + settings["provider"],
-                        "modelID": contract.model if isinstance(contract, ProviderContract) else settings["model"],
-                    },
-                    "system": runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT),
-                    "format": OUTCOME_FORMAT,
-                    "parts": [
-                        {"type": "text", "synthetic": True,
-                         "text": "HABAB_RUNTIME_STATUS\n" + json.dumps(status, ensure_ascii=False)},
-                        {"type": "text", "text": text},
-                    ],
-                }, timeout=180)
+                if self._active_executor == "codex":
+                    response = await self._run_codex(session_id, text, status, prior_messages,
+                                                     executor_settings)
+                else:
+                    response = await self.request("POST", f"session/{session_id}/message", {
+                        "agent": "build", "model": {
+                            "providerID": "habab-" + settings["provider"],
+                            "modelID": contract.model if isinstance(contract, ProviderContract) else settings["model"],
+                        },
+                        "system": runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT),
+                        "format": OUTCOME_FORMAT,
+                        "parts": [
+                            {"type": "text", "synthetic": True,
+                             "text": "HABAB_RUNTIME_STATUS\n" + json.dumps(status, ensure_ascii=False)},
+                            {"type": "text", "text": text},
+                        ],
+                    }, timeout=180)
                 if response.get("info", {}).get("error"):
                     self.diagnostics.record(
                         owner, session_id, response.get("info", {}).get("error"))
@@ -720,6 +759,59 @@ class SetupAgent:
                 raise
             finally:
                 self.active = None
+                self._active_executor = None
+
+    async def _run_codex(self, session_id, text, status, prior_messages, settings):
+        stored_user = await self.request("POST", f"session/{session_id}/message", {
+            "noReply": True, "format": OUTCOME_FORMAT,
+            "parts": [{"type": "text", "text": text}],
+        })
+        parent_id = stored_user.get("info", {}).get("id") if isinstance(stored_user, dict) else None
+        if not isinstance(parent_id, str):
+            raise AgentError("runtime_error")
+        system = runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT)
+        codex_outcome_prompt = OUTCOME_PROMPT.replace(
+            "через штатный инструмент StructuredOutput", "как JSON по output-schema"
+        ).replace("вне StructuredOutput", "вне JSON по output-schema")
+        system = system.replace(OUTCOME_PROMPT, codex_outcome_prompt)
+        prompt = turn_prompt(system, status, self.visible(prior_messages), text)
+
+        async def persist(outcome, parts):
+            marker = result_part(parent_id, outcome, parts, self.clean)
+            stored = await self.request("POST", f"session/{session_id}/message", {
+                "noReply": True, "parts": [marker],
+            })
+            normalized = normalize_history([stored]) if isinstance(stored, dict) else []
+            if len(normalized) != 1 or normalized[0].get("info", {}).get("role") != "assistant":
+                raise AgentError("runtime_error")
+            return normalized[0]
+
+        async def persist_failure():
+            parts = getattr(self.codex, "last_parts", [])
+            if not parts:
+                return
+            parts = [{**part, "state": {**part["state"], "status": "error",
+                     "error": "command_interrupted"}} if part["state"]["status"] == "running"
+                     else part for part in parts]
+            try:
+                await persist({"protocol": OUTCOME_PROTOCOL, "kind": "answer",
+                    "text": "Выполнение запроса прервано или завершилось ошибкой; результат не подтверждён.",
+                    "todo_additions": []}, parts)
+            except (AgentError, CodexError):
+                # Storage failure must not replace the original execution error.
+                pass
+
+        try:
+            outcome, parts = await self.codex.run(prompt, settings, self.control_token,
+                verify_binary, self.hass.async_add_executor_job)
+            return await persist(outcome, parts)
+        except CodexError as error:
+            await persist_failure()
+            self.diagnostics.record(*self.active, {"message": error.detail})
+            raise AgentError(error.code) from None
+        except asyncio.CancelledError:
+            await persist_failure()
+            raise
 
     async def abort(self, owner, session_id, *, record_context=True):
         if self.active != (owner, session_id) or self._aborting:
@@ -746,7 +838,8 @@ class SetupAgent:
 
     async def _abort_and_record(self, session_id, record_context):
         try:
-            interrupted = await self.request("POST", f"session/{session_id}/abort")
+            interrupted = (await self.codex.stop() if getattr(self, "_active_executor", None) == "codex"
+                           else await self.request("POST", f"session/{session_id}/abort"))
         except AgentError:
             await self.close()
             return False
@@ -770,6 +863,8 @@ class SetupAgent:
             return True
 
     async def close(self, _event=None):
+        if getattr(self, "codex", None) is not None:
+            await self.codex.stop()
         process, self.process = self.process, None
         if process is not None and process.returncode is None:
             try:

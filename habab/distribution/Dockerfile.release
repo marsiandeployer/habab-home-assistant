@@ -1,5 +1,5 @@
 # Published image path: same pinned Home Assistant Core base as Dockerfile,
-# with a same-source native frontend wheel and the pinned OpenCode executable
+# with a same-source native frontend wheel and pinned OpenCode/Codex executables
 # embedded for the target architecture.
 FROM ghcr.io/home-assistant/home-assistant:2026.10.2@sha256:33afb0659d786213264c2211f8d91c5fe87461c56eba6a3a546eb05fc71e89f4
 
@@ -41,12 +41,17 @@ COPY install-xiaomi-home.py /usr/local/bin/habab-install-xiaomi-home
 COPY xiaomi-home-release.json /usr/local/bin/xiaomi-home-release.json
 COPY opencode-release.json /opt/habab-opencode-bootstrap/opencode-release.json
 COPY install-opencode-image.py /opt/habab-opencode-bootstrap/install-opencode-image.py
+COPY codex-release.json /opt/habab-codex-bootstrap/codex-release.json
+COPY install-codex.py /opt/habab-codex-bootstrap/install-codex.py
 
 RUN mkdir -p /opt/habab-telegram/node_modules \
     && ln -s ../vendor/noxon-telegram /opt/habab-telegram/node_modules/noxon-telegram \
     && node --check /opt/habab-telegram/worker.mjs \
     && python3 /opt/habab-opencode-bootstrap/install-opencode-image.py \
          --arch "$TARGETARCH" --output-dir /opt/habab-opencode \
+    && python3 /opt/habab-codex-bootstrap/install-codex.py \
+         --release-file /opt/habab-codex-bootstrap/codex-release.json \
+         --arch "$TARGETARCH" --output-dir /opt/habab-codex \
     && chmod 0755 /usr/local/bin/habab-home-entrypoint \
                   /usr/local/bin/habab-home-release-entrypoint \
                   /usr/local/bin/habab-ha \
@@ -57,4 +62,5 @@ CMD ["/init"]
 
 ENV HABAB_SOURCE_REVISION="${HABAB_SOURCE_REVISION}" \
     HABAB_SOURCE_DIRTY="false" \
-    HABAB_OPENCODE_BINARY="/opt/habab-opencode/opencode"
+    HABAB_OPENCODE_BINARY="/opt/habab-opencode/opencode" \
+    HABAB_CODEX_BINARY="/opt/habab-codex/codex"

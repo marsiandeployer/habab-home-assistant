@@ -310,6 +310,11 @@ public final class ServerService extends Service {
                 env.put("HABAB_RUNTIME_KIND", "android_proot");
                 JSONObject release = new JSONObject(new String(Files.readAllBytes(new File(store.root(), "etc/habab-android-release.json").toPath()), StandardCharsets.UTF_8));
                 env.put("HABAB_OPENCODE_SHA256", release.getString("opencodeSha256"));
+                String codexDigest = release.optString("codexSha256", "");
+                if (!codexDigest.isEmpty()) {
+                    env.put("HABAB_CODEX_BINARY", "/opt/habab-codex/codex");
+                    env.put("HABAB_CODEX_SHA256", codexDigest);
+                }
                 env.put("PYTHONUNBUFFERED", "1");
                 builder.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(log));
                 Process child = builder.start(); process = child;

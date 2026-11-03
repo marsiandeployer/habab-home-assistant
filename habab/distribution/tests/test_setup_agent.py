@@ -225,6 +225,87 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         agent.hass = SimpleNamespace(data={}, config_entries=SimpleNamespace(async_entries=lambda _: [entry]))
         return agent
 
+    async def test_codex_turn_uses_canonical_no_reply_history_and_native_tool_parts(self):
+        from homeassistant.components.habab_home.codex_executor import normalize_history
+        agent = self.agent()
+        agent.hass.config_entries.async_entries = lambda _: [SimpleNamespace(data={
+            "provider": "openai", "api_key": "codex-private-key", "model": "gpt-6-luna"})]
+        agent.hass.async_add_executor_job = AsyncMock()
+        outcome = {"protocol": OUTCOME_PROTOCOL, "kind": "answer", "text": "Проверено", "todo_additions": []}
+        tool = {"id": "item_0", "callID": "item_0", "type": "tool", "tool": "bash", "state": {
+            "status": "completed", "input": {"command": "habab-ha devices"}, "output": "[]"}}
+        agent.codex = SimpleNamespace(run=AsyncMock(return_value=(outcome, [tool])), stop=AsyncMock())
+        history = [{"info": {"role": "user", "id": "old-user"},
+                    "parts": [{"type": "text", "text": "Предыдущий вопрос"}]}]
+        posted = []
+
+        async def request(method, route, body=None, **kwargs):
+            if method == "GET":
+                return normalize_history(list(history))
+            self.assertTrue(body.get("noReply"), "history storage must never invoke OpenCode provider")
+            posted.append(body)
+            stored = {"info": {"id": "new-user" if len(posted) == 1 else "codex-result",
+                               "role": "user"}, "parts": body["parts"]}
+            history.append(stored)
+            return stored
+
+        agent.request = request
+        with patch("homeassistant.components.habab_home.setup_agent.get_assistant_status",
+                   AsyncMock(return_value={})):
+            result = await agent.run("owner", "session-1", "Текущий запрос")
+        self.assertEqual(len(posted), 2)
+        self.assertEqual(posted[0]["parts"], [{"type": "text", "text": "Текущий запрос"}])
+        self.assertEqual(result["messages"][-1]["role"], "assistant")
+        self.assertEqual(result["messages"][-1]["text"], "Проверено")
+        self.assertEqual(result["messages"][-1]["tool_calls"][0]["name"], "bash")
+        prompt = agent.codex.run.call_args.args[0]
+        self.assertIn("Предыдущий вопрос", prompt)
+        self.assertEqual(prompt.count("Текущий запрос"), 1)
+        self.assertNotIn("через штатный инструмент StructuredOutput", prompt)
+        self.assertIsNone(agent.active)
+        self.assertEqual(agent.clean("codex-private-key"), "[redacted]")
+
+    async def test_codex_abort_stops_only_codex_child(self):
+        agent = self.agent()
+        agent._active_executor = "codex"
+        agent.active = ("owner", "session-1")
+        agent.codex = SimpleNamespace(stop=AsyncMock(return_value=True))
+        self.assertTrue(await agent.abort("owner", "session-1", record_context=False))
+        agent.codex.stop.assert_awaited_once()
+        agent.request.assert_not_awaited()
+
+    async def test_codex_timeout_persists_partial_trace_without_claiming_completion(self):
+        from homeassistant.components.habab_home.codex_executor import CodexError, normalize_history
+        agent = self.agent()
+        agent.hass.config_entries.async_entries = lambda _: [SimpleNamespace(data={
+            "provider": "openai", "api_key": "codex-private-key", "model": "gpt-6-luna"})]
+        agent.hass.async_add_executor_job = AsyncMock()
+        tool = {"id": "item_0", "callID": "item_0", "type": "tool", "tool": "bash", "state": {
+            "status": "running", "input": {"command": "habab-ha devices"}, "output": ""}}
+        agent.codex = SimpleNamespace(run=AsyncMock(side_effect=CodexError("runtime_timeout", "timeout")),
+                                     last_parts=[tool], stop=AsyncMock(return_value=False))
+        history = []
+
+        async def request(method, route, body=None, **kwargs):
+            if method == "GET":
+                return list(history)
+            self.assertTrue(body["noReply"])
+            stored = {"info": {"id": "stored-" + str(len(history)), "role": "user"},
+                      "parts": body["parts"]}
+            history.append(stored)
+            return stored
+
+        agent.request = request
+        with patch("homeassistant.components.habab_home.setup_agent.get_assistant_status",
+                   AsyncMock(return_value={})):
+            with self.assertRaises(AgentError) as result:
+                await agent.run("owner", "session-1", "Проверь устройства")
+        self.assertEqual(result.exception.code, "runtime_timeout")
+        normalized = normalize_history(history)
+        self.assertEqual(normalized[-1]["parts"][0]["state"]["status"], "error")
+        self.assertEqual(normalized[-1]["info"]["structured"]["todo_additions"], [])
+        self.assertIsNone(agent.active)
+
     async def test_cancel_persists_context_before_next_request_without_model_reply(self):
         agent = self.agent()
         started, stopped = asyncio.Event(), asyncio.Event()
@@ -849,30 +930,73 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_result["messages"][0]["text"], prior["parts"][0]["text"])
 
     async def test_actual_message_uses_selected_provider_instead_of_hardcoded_deepseek(self):
-        for provider in ("openai", "habab"):
-            agent = self.agent()
-            agent.settings = Mock(return_value={"provider": provider, "model": "gpt-4.1-mini", "api_key": "fixture-key"})
-            await agent.run("alice", "ses_alice", "test")
-            self.assertEqual(agent.request.await_args_list[1].args[2]["model"],
-                             {"providerID": "habab-" + provider, "modelID": "gpt-4.1-mini"})
+        with patch("homeassistant.components.habab_home.setup_agent.get_assistant_status",
+                   new=AsyncMock(return_value={})):
+            for provider in ("openai", "habab"):
+                agent, settings = self.codex_agent(provider)
+                result = await agent.run("alice", "ses_alice", "test")
+                execution = agent.codex.run.call_args.args[1]
+                self.assertEqual(execution["executor"], "codex")
+                self.assertEqual(execution["provider"], provider)
+                self.assertEqual(execution["api_key"], settings["api_key"])
+                self.assertEqual(execution["model"], "gpt-6-luna")
+                self.assertEqual(result["messages"][-1]["text"], "Codex result")
+                posts = [call.args[2] for call in agent.request.await_args_list if call.args[0] == "POST"]
+                self.assertEqual(len(posts), 2)
+                self.assertTrue(all(body.get("noReply") is True for body in posts))
+                self.assertTrue(all("model" not in body for body in posts))
 
-    async def test_run_payload_uses_the_resolved_managed_model_alias(self):
+            agent = self.agent()
+            agent.settings = Mock(return_value={"provider": "gemini", "model": "gemini-3.1-flash-lite",
+                                               "api_key": "fixture-gemini-key"})
+            await agent.run("alice", "ses_alice", "test")
+            body = agent.request.await_args_list[1].args[2]
+            self.assertEqual(body["model"], {"providerID": "habab-gemini", "modelID": "gemini-3.1-flash-lite"})
+            self.assertNotIn("noReply", body)
+
+    def codex_agent(self, provider):
+        from homeassistant.components.habab_home.codex_executor import normalize_history
         agent = self.agent()
-        settings = {
-            "provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-key",
-        }
+        settings = {"provider": provider, "model": "original-provider-model",
+                    "api_key": "fixture-" + provider + "-key"}
+        agent.settings = Mock(return_value=settings)
+        agent.hass.config_entries.async_entries = lambda _: [SimpleNamespace(data=settings)]
+        agent.hass.async_add_executor_job = AsyncMock()
+        outcome = {"protocol": OUTCOME_PROTOCOL, "kind": "answer", "text": "Codex result",
+                   "todo_additions": []}
+        agent.codex = SimpleNamespace(run=AsyncMock(return_value=(outcome, [])), stop=AsyncMock())
+        history = []
+
+        async def request(method, route, body=None, **kwargs):
+            if method == "GET":
+                return normalize_history(list(history))
+            self.assertIs(body.get("noReply"), True)
+            message = {"info": {"id": "stored-" + str(len(history)), "role": "user"},
+                       "parts": body["parts"]}
+            history.append(message)
+            return message
+
+        agent.request = AsyncMock(side_effect=request)
+        return agent, settings
+
+    async def test_habab_executor_uses_codex_luna_gateway_with_installation_key(self):
+        agent, settings = self.codex_agent("habab")
         contract = ProviderContract(
             "habab", "openai_compatible", "habab-chat", "https://habab-voice.wpmix.net/v1",
             managed_model="habab-chat", text_ready=True,
         )
-        agent.settings = Mock(return_value=settings)
         agent.ensure = AsyncMock(return_value=contract)
-
-        await agent.run("alice", "ses_alice", "test")
-
-        payload = agent.request.await_args_list[1].args[2]
-        self.assertEqual(payload["model"], {"providerID": "habab-habab", "modelID": "habab-chat"})
-        self.assertEqual(settings["model"], "gemini-3.1-flash-lite")
+        with patch("homeassistant.components.habab_home.setup_agent.get_assistant_status",
+                   new=AsyncMock(return_value={})):
+            await agent.run("alice", "ses_alice", "test")
+        execution = agent.codex.run.call_args.args[1]
+        self.assertEqual(execution["provider"], "habab")
+        self.assertEqual(execution["api_key"], "fixture-habab-key")
+        self.assertEqual(execution["model"], "gpt-6-luna")
+        self.assertEqual(execution["service_tier"], "fast")
+        self.assertEqual(execution["base_url"], "https://habab-voice.wpmix.net/codex/v1")
+        self.assertNotIn("habab-chat", str(execution))
+        self.assertEqual(settings["model"], "original-provider-model")
         agent.ensure.assert_awaited_once_with(settings)
 
     async def test_selection_changed_during_startup_applies_to_next_turn(self):
@@ -1281,13 +1405,17 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
                                 await agent.ensure()
                                 if provider == "habab":
                                     await agent.ensure()
-                        if provider == "habab":
-                            capability.assert_awaited_once()
-                        else:
-                            capability.assert_not_awaited()
+                        capability.assert_not_awaited()
             env = spawn.await_args.kwargs["env"]
             config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
             self.assertEqual(config["permission"], {"*": "allow"})
+            if provider in {"openai", "habab"}:
+                self.assertEqual(config["model"], "habab-openai/gpt-6-luna")
+                self.assertEqual(env["HABAB_OPENAI_KEY"], "unused-history-store")
+                self.assertNotIn("fixture-selected-key", str(env))
+                self.assertEqual(config["mcp"], {})
+                self.assertEqual(agent.external_search_status, {"mode": "codex", "state": "not_checked"})
+                continue
             self.assertEqual(config["enabled_providers"], ["habab-" + provider])
             self.assertEqual(config["model"], "habab-" + provider + "/" + model)
             self.assertEqual(config["provider"]["habab-" + provider]["options"]["baseURL"], expected_base)
@@ -1301,133 +1429,54 @@ class RuntimeContextTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("HABAB_DEEPSEEK_KEY", env)
             self.assertNotIn("fixture-selected-key", env["OPENCODE_CONFIG_CONTENT"])
 
-    async def test_habab_managed_contract_selects_alias_and_openai_compatible_sdk(self):
-        settings = {
-            "provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-selected-key",
-        }
-        contract = ProviderContract(
-            "habab", "openai_compatible", "habab-chat", "https://habab-voice.wpmix.net/v1",
-            managed_model="habab-chat", text_ready=True,
-        )
+    async def test_habab_codex_history_never_uses_installation_key_or_provider_discovery(self):
+        settings = {"provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-install-key"}
         agent = object.__new__(SetupAgent)
         agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
-        agent.password = "private-password"; agent.control_token = "private-control"
-        agent.hass = SimpleNamespace(data={}, async_add_executor_job=AsyncMock())
-        agent.settings = Mock(return_value=settings)
-        agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
-        with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
-                   new=AsyncMock(return_value=contract)):
-            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                       new=AsyncMock(return_value=False)):
-                with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                           return_value=object()):
-                    with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
-                               new_callable=AsyncMock,
-                               return_value=SimpleNamespace(returncode=None)) as spawn:
-                        await agent.ensure()
-
-        config = json.loads(spawn.await_args.kwargs["env"]["OPENCODE_CONFIG_CONTENT"])
-        provider = config["provider"]["habab-habab"]
-        self.assertEqual(config["model"], "habab-habab/habab-chat")
-        self.assertEqual(provider["npm"], "@ai-sdk/openai-compatible")
-        self.assertEqual(provider["options"]["baseURL"], "https://habab-voice.wpmix.net/v1")
-        self.assertIn("habab-chat", provider["models"])
-        self.assertEqual(settings["model"], "gemini-3.1-flash-lite")
-        self.assertEqual(agent.fingerprint, resolved_runtime_fingerprint(settings, contract, "docker"))
-
-    async def test_habab_exa_outage_leaves_normal_runtime_enabled_but_marks_search_unavailable(self):
-        agent = object.__new__(SetupAgent)
-        agent.process = None; agent.fingerprint = None; agent.root = Path("/private/runtime")
-        agent.password = "private-password"; agent.control_token = "private-control"
-        agent.hass = SimpleNamespace(data={}, async_add_executor_job=AsyncMock())
-        agent.settings = Mock(return_value={
-            "provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-key"})
-        agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
-        legacy = ProviderContract(
-            "habab", "google", "gemini-3.1-flash-lite",
-            "https://habab-voice.wpmix.net/gemini/v1beta")
-        with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
-                   new=AsyncMock(return_value=legacy)):
-            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                       new=AsyncMock(return_value=False)):
-                with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                           return_value=object()):
-                    with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
-                               new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
-                        await agent.ensure()
-
-        env = spawn.await_args.kwargs["env"]
-        config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
-        self.assertEqual(env["OPENCODE_ENABLE_EXA"], "0")
-        self.assertEqual(config["mcp"], {})
-        self.assertEqual(agent.external_search_status, {
-            "mode": "habab_exa_mcp_relay", "state": "unavailable",
-            "reason": "capability_check_failed"})
-
-    async def test_habab_exa_retry_is_bounded_and_restarts_only_after_verified_recovery(self):
-        settings = {"provider": "habab", "model": "gemini-3.1-flash-lite", "api_key": "fixture-key"}
-        legacy = ProviderContract(
-            "habab", "google", "gemini-3.1-flash-lite",
-            "https://habab-voice.wpmix.net/gemini/v1beta")
-        agent = object.__new__(SetupAgent)
-        agent.process = SimpleNamespace(returncode=None)
-        agent.fingerprint = resolved_runtime_fingerprint(settings, legacy, "docker")
-        agent.external_search_status = {
-            "mode": "habab_exa_mcp_relay", "state": "unavailable",
-            "reason": "capability_check_failed"}
-        agent.external_search_retry_at = 200.0
-        agent.root = Path("/private/runtime")
         agent.password = "private-password"; agent.control_token = "private-control"
         agent.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
         agent.settings = Mock(return_value=settings)
-        agent.prepare_directories = Mock()
-        agent.close = AsyncMock()
-        agent.request = AsyncMock(return_value={})
+        agent.prepare_directories = Mock(); agent.request = AsyncMock(return_value={})
+        with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
+                   new=AsyncMock(side_effect=AssertionError("history must not resolve provider"))) as resolver:
+            with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
+                       new=AsyncMock(side_effect=AssertionError("history must not call Exa"))) as capability:
+                with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
+                           new_callable=AsyncMock, return_value=SimpleNamespace(returncode=None)) as spawn:
+                    contract = await agent.ensure()
+                    self.assertEqual(await agent.ensure(), contract)
+        resolver.assert_not_awaited()
+        capability.assert_not_awaited()
+        spawn.assert_awaited_once()
+        env = spawn.await_args.kwargs["env"]
+        config = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+        self.assertNotIn("fixture-install-key", str(env))
+        self.assertEqual(config["model"], "habab-openai/gpt-6-luna")
+        self.assertEqual(config["mcp"], {})
+        self.assertEqual(agent.external_search_status, {"mode": "codex", "state": "not_checked"})
+        self.assertEqual(settings["model"], "gemini-3.1-flash-lite")
 
-        with patch("homeassistant.components.habab_home.setup_agent.time.monotonic", return_value=199.0):
-            with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
-                       new=AsyncMock(return_value=legacy)) as resolver:
-                with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                           new=AsyncMock(return_value=True)) as capability:
-                    with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                               return_value=object()):
-                        await agent.ensure()
-                    resolver.assert_awaited_once()
-                    capability.assert_not_awaited()
-        agent.close.assert_not_awaited()
-
-        with patch("homeassistant.components.habab_home.setup_agent.time.monotonic",
-                   side_effect=[200.0, 200.0]):
-            with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
-                       new=AsyncMock(return_value=legacy)):
-                with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                           new=AsyncMock(return_value=False)) as capability:
-                    with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                               return_value=object()):
-                        await agent.ensure()
-                    capability.assert_awaited_once()
-        self.assertEqual(agent.external_search_retry_at, 200.0 + EXA_CAPABILITY_RETRY_SECONDS)
-        agent.close.assert_not_awaited()
-
-        with patch("homeassistant.components.habab_home.setup_agent.time.monotonic",
-                   side_effect=[200.0 + EXA_CAPABILITY_RETRY_SECONDS] * 2):
-            with patch("homeassistant.components.habab_home.setup_agent.resolve_provider_contract",
-                       new=AsyncMock(return_value=legacy)):
-                with patch("homeassistant.components.habab_home.setup_agent.fetch_habab_exa_capability",
-                           new=AsyncMock(return_value=True)) as capability:
-                    with patch("homeassistant.components.habab_home.setup_agent.async_get_clientsession",
-                               return_value=object()):
-                        with patch("homeassistant.components.habab_home.setup_agent.asyncio.create_subprocess_exec",
-                                   new_callable=AsyncMock,
-                                   return_value=SimpleNamespace(returncode=None)) as spawn:
-                            await agent.ensure()
-                    capability.assert_awaited_once()
-
-        agent.close.assert_awaited_once()
-        self.assertEqual(agent.external_search_status["state"], "capability_verified")
-        self.assertIsNone(agent.external_search_retry_at)
-        config = json.loads(spawn.await_args.kwargs["env"]["OPENCODE_CONFIG_CONTENT"])
-        self.assertEqual(config["mcp"], {"exa": exa_mcp_config()})
+    def test_executor_automatically_tracks_selected_provider_and_reuses_its_key(self):
+        agent = AgentTests.agent(self)
+        for provider, executor in (("openai", "codex"), ("habab", "codex"),
+                                   ("deepseek", "opencode"), ("gemini", "opencode")):
+            entry = SimpleNamespace(data={"provider": provider, "model": "provider-model",
+                                          "api_key": "provider-owned-key"})
+            agent.hass.config_entries.async_entries = lambda _: [entry]
+            settings = agent.executor_settings()
+            self.assertEqual(settings["executor"], executor)
+            self.assertEqual(settings["api_key"], "provider-owned-key")
+            self.assertEqual(settings["provider"], provider)
+            self.assertEqual(settings["model"], "gpt-6-luna")
+            self.assertEqual(settings["service_tier"], "fast")
+            if provider == "habab":
+                self.assertEqual(settings["base_url"], "https://habab-voice.wpmix.net/codex/v1")
+            else:
+                self.assertNotIn("base_url", settings)
+        agent.hass.config_entries.async_entries = lambda _: []
+        with self.assertRaises(AgentError) as result:
+            agent.executor_settings()
+        self.assertEqual(result.exception.code, "provider_required")
 
     async def test_unknown_runtime_fails_before_settings_or_process_spawn(self):
         agent = object.__new__(SetupAgent)

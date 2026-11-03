@@ -1,4 +1,4 @@
-"""Authenticated, bounded Gemini API transport for the owner's Android installation.
+"""Authenticated, bounded provider transports for Habab installations.
 
 No HA access, model substitution, public demo context, or credential logging.
 Habab credentials are hashed; Operator credentials stay in the private relay configuration across restarts.
@@ -40,6 +40,10 @@ GEMINI_TEXT_MODEL = 'gemini-3.1-flash-lite'
 GEMINI_TEXT_MODELS = (GEMINI_TEXT_MODEL, 'gemini-3.8-flash')
 HABAB_TEXT_MODEL = 'habab-chat'
 DEEPSEEK_TEXT_MODEL = 'deepseek-flash'
+CODEX_RESPONSES_URL = 'https://api.openai.com/v1/responses'
+CODEX_MODEL = 'gpt-6-luna'
+CODEX_REQUEST_MAX = 2 * 1024 * 1024
+CODEX_RESPONSE_MAX = 16 * 1024 * 1024
 GEMINI_WEBSOCKET = 'wss://habab-voice.wpmix.net/gemini/ws'
 VOICE_RELAY_URL = 'http://127.0.0.1:8326'
 VOICE_RELAY_TIMEOUT = 15
@@ -88,26 +92,37 @@ async def redacted_stream(content, secret, max_bytes):
     """Stream upstream bytes while redacting a secret even across chunk boundaries."""
     pending = b''
     total = 0
-    overlap = max(1, len(secret))
+    secrets_to_redact = (secret,) if isinstance(secret, bytes) else tuple(secret)
+    overlap = max(1, *(len(value) for value in secrets_to_redact))
     async for block in content.iter_chunked(16384):
         total += len(block)
         if total > max_bytes:
             raise ValueError('relay_response_too_large')
         combined = pending + block
         cutoff = max(0, len(combined) - overlap + 1)
-        search_from = 0
-        while True:
-            index = combined.find(secret, search_from)
-            if index < 0 or index >= cutoff:
-                break
-            cutoff = max(cutoff, index + len(secret))
-            search_from = index + len(secret)
-        safe = combined[:cutoff].replace(secret, b'[redacted]')
+        previous_cutoff = None
+        while previous_cutoff != cutoff:
+            previous_cutoff = cutoff
+            for value in secrets_to_redact:
+                search_from = 0
+                while True:
+                    index = combined.find(value, search_from)
+                    if index < 0 or index >= cutoff:
+                        break
+                    if index + len(value) > cutoff:
+                        cutoff = index
+                        break
+                    search_from = index + len(value)
+        safe = combined[:cutoff]
+        for value in secrets_to_redact:
+            safe = safe.replace(value, b'[redacted]')
         pending = combined[cutoff:]
         if safe:
             yield safe
     if pending:
-        yield pending.replace(secret, b'[redacted]')
+        for value in secrets_to_redact:
+            pending = pending.replace(value, b'[redacted]')
+        yield pending
 
 
 
@@ -160,7 +175,7 @@ def trace_gemini_wire(raw, state):
 
 
 class Gateway:
-    def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, control_socket=None,
+    def __init__(self, key_hash, *, upstream_key=None, text_upstream_key=None, codex_upstream_key=None, control_socket=None,
                  browser_origins=(), demo_openai_session_limit=5, demo_openai_sessions_per_session=2,
                  demo_openai_session_window_seconds=86400, beta_codes=None, voice_service_key=None, credential_store=None, usage_journal=None):
         if len(key_hash) != 64:
@@ -184,12 +199,18 @@ class Gateway:
             raise ValueError('Invalid voice relay service credential')
         self.voice_service_key = voice_service_key
         self.provider_health = None
+        self.codex_health = None
         self.endpoint_health = None
         self.voice_diagnostics = False
         self.usage_journal = usage_journal
         self.credential_store = credential_store
         self.upstream_key = upstream_key
         self.text_upstream_key = text_upstream_key
+        if codex_upstream_key is not None and (
+                not isinstance(codex_upstream_key, str) or not 8 <= len(codex_upstream_key) <= 2048
+                or any(not 33 <= ord(char) <= 126 for char in codex_upstream_key)):
+            raise ValueError('Invalid Codex upstream credential')
+        self.codex_upstream_key = codex_upstream_key
         self.control_socket = Path(control_socket) if control_socket else None
         self.browser_origins = frozenset(browser_origins)
         self.gemini_credentials = {}
@@ -366,6 +387,7 @@ class Gateway:
                 self.control_socket.unlink(missing_ok=True)
             self.upstream_key = None
             self.text_upstream_key = None
+            self.codex_upstream_key = None
             self.gemini_credentials.clear()
             self.demo_openai_credentials.clear()
             self.openai_upstream_key = None
@@ -606,7 +628,13 @@ class Gateway:
             except Exception:
                 checks['voice'] = {'ready': False, 'reason': 'voice_relay_unavailable'}
         ready = all(value.get('ready') is True for value in checks.values())
-        return web.json_response({'service': 'habab-ai', 'ready': ready, 'checks': checks},
+        codex = (self.codex_health.snapshot() if self.codex_health is not None else
+                 {'provider': 'openai', 'model': CODEX_MODEL, 'ready': False, 'reason': 'not_checked'})
+        codex['configured'] = bool(self.codex_upstream_key)
+        codex['probe'] = 'last_inference'
+        if not self.codex_upstream_key:
+            codex.update(ready=False, reason='missing_credential')
+        return web.json_response({'service': 'habab-ai', 'ready': ready, 'checks': checks, 'codex': codex},
                                  status=200 if ready else 503, headers={'Cache-Control': 'no-store'})
 
     async def capabilities(self, request):
@@ -776,6 +804,164 @@ class Gateway:
                         elapsed_ms=int((time.monotonic() - started) * 1000), usage=usage.usage)
                 except Exception:
                     logger.error('usage_statistics_write_failed')
+
+    async def codex_responses(self, request):
+        """The managed Codex HTTP transport; never a caller-selected proxy."""
+        service_key, digest = self.authorization(request)
+        if not self.owner(digest, token=service_key):
+            return self._voice_error('relay_not_authorized', 401)
+        if request.method != 'POST':
+            return self._voice_error('relay_http_method_not_allowed', 405)
+        if request.query:
+            return self._voice_error('relay_invalid_query', 400)
+        if request.content_type != 'application/json':
+            return self._voice_error('relay_invalid_request', 400)
+        if request.content_length is not None and request.content_length > CODEX_REQUEST_MAX:
+            return self._voice_error('relay_request_too_large', 413)
+        try:
+            body = bytearray()
+            async for block in request.content.iter_chunked(65536):
+                body.extend(block)
+                if len(body) > CODEX_REQUEST_MAX:
+                    return self._voice_error('relay_request_too_large', 413)
+            payload = self._decode_voice_json(body)
+            if not isinstance(payload, dict) or 'input' not in payload:
+                raise ValueError
+            if payload.get('model') != CODEX_MODEL:
+                return self._voice_error('relay_unknown_model', 404)
+            if not isinstance(payload['input'], (str, list)):
+                raise ValueError
+            streaming = payload.get('stream', False)
+            if type(streaming) is not bool:
+                raise ValueError
+            if 'service_tier' in payload and payload['service_tier'] not in ('fast', 'priority', 'auto', 'default', 'flex'):
+                raise ValueError
+            # Keep Codex input, function schemas, reasoning and tool results intact.
+            # Fast and priority are the same API tier; Codex 0.166 uses priority.
+            payload['service_tier'] = 'priority'
+            upstream_body = json.dumps(payload, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
+        except (ValueError, UnicodeError, TypeError, RecursionError):
+            return self._voice_error('relay_invalid_request', 400)
+        upstream_key = self.codex_upstream_key
+        if not upstream_key:
+            return self._voice_error('habab_codex_upstream_not_ready', 503)
+        private_values = (upstream_key.encode(), service_key.encode())
+        if any(value in upstream_body for value in private_values):
+            return self._voice_error('relay_invalid_request', 400)
+        if self.inflight >= 6:
+            return self._voice_error('relay_busy', 429)
+        self.inflight += 1
+        result, request_id = None, None
+        usage = StreamUsage()
+        outcome = 'failed'
+        started = time.monotonic()
+        handler = asyncio.current_task()
+
+        async def cancel_on_disconnect():
+            # Also closes a stalled provider stream when there are no more writes.
+            while True:
+                await asyncio.sleep(0.1)
+                if request.transport is None or request.transport.is_closing():
+                    handler.cancel()
+                    return
+
+        disconnect = asyncio.create_task(cancel_on_disconnect())
+
+        async def stream_error(code):
+            event = {'type': 'error', 'code': code, 'message': code}
+            await result.write(('event: error\ndata: ' + json.dumps(event) + '\n\n').encode())
+            await result.write_eof()
+
+        try:
+            async with self.client.post(CODEX_RESPONSES_URL,
+                    headers={'Authorization': 'Bearer ' + upstream_key, 'Content-Type': 'application/json',
+                             'Accept': 'text/event-stream' if streaming else 'application/json'},
+                    data=upstream_body, allow_redirects=False,
+                    timeout=ClientTimeout(total=180, sock_read=60)) as response:
+                try:
+                    request_id = response.headers.get('x-request-id')
+                    if request_id and any(value.decode() in request_id for value in private_values):
+                        request_id = None
+                    if self.codex_health is not None:
+                        self.codex_health.observe_http(response.status)
+                    headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+                    if streaming and response.status == 200:
+                        if response.content_type != 'text/event-stream':
+                            outcome = 'invalid_response'
+                            return self._voice_error('relay_invalid_response', 502)
+                        headers.update({'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no'})
+                        result = web.StreamResponse(headers=headers)
+                        await result.prepare(request)
+                        async for block in redacted_stream(response.content, private_values, CODEX_RESPONSE_MAX):
+                            usage.feed(block)
+                            await result.write(block)
+                        outcome = 'ok' if usage.terminal_status == 'completed' else (usage.terminal_status or 'incomplete_stream')
+                        if outcome in ('failed', 'incomplete_stream') and self.codex_health is not None:
+                            self.codex_health.observe_http(502)
+                        await result.write_eof()
+                        return result
+                    response_body = bytearray()
+                    async for block in redacted_stream(response.content, private_values, CODEX_RESPONSE_MAX):
+                        response_body.extend(block)
+                    if 300 <= response.status < 400:
+                        return self._voice_error('relay_upstream_redirect_rejected', 502)
+                    try:
+                        decoded = json.loads(response_body)
+                        if not isinstance(decoded, dict):
+                            raise ValueError
+                    except (ValueError, UnicodeError, RecursionError):
+                        outcome = 'invalid_response'
+                        return self._voice_error('relay_invalid_response', 502)
+                    usage.observe_response(decoded)
+                    outcome = ('ok' if usage.terminal_status == 'completed' else (usage.terminal_status or 'failed')) if response.status == 200 else 'failed'
+                    return web.Response(body=response_body, status=response.status, content_type='application/json', headers=headers)
+                except BaseException:
+                    response.close()
+                    raise
+        except asyncio.CancelledError:
+            outcome = 'cancelled'
+            raise
+        except (ConnectionError, ConnectionResetError):
+            outcome = 'disconnected'
+            if result is not None and result.prepared:
+                return result
+            return self._voice_error('relay_upstream_unavailable', 502)
+        except (asyncio.TimeoutError, ValueError) as error:
+            code = 'relay_upstream_timeout' if isinstance(error, asyncio.TimeoutError) else 'relay_response_too_large'
+            outcome = 'timeout' if isinstance(error, asyncio.TimeoutError) else 'response_too_large'
+            if self.codex_health is not None:
+                self.codex_health.observe_http(504 if isinstance(error, asyncio.TimeoutError) else 502)
+            if result is not None and result.prepared:
+                try:
+                    await stream_error(code)
+                except (ConnectionError, RuntimeError):
+                    pass
+                return result
+            return self._voice_error(code, 504 if isinstance(error, asyncio.TimeoutError) else 502)
+        except Exception:
+            if self.codex_health is not None:
+                self.codex_health.observe_http(502)
+            if result is not None and result.prepared:
+                try:
+                    await stream_error('relay_upstream_unavailable')
+                except (ConnectionError, RuntimeError):
+                    pass
+                return result
+            return self._voice_error('relay_upstream_unavailable', 502)
+        finally:
+            disconnect.cancel()
+            await asyncio.gather(disconnect, return_exceptions=True)
+            self.inflight -= 1
+            if self.usage_journal is not None:
+                try:
+                    self.usage_journal.record(installation=digest, provider='openai', model=usage.model or CODEX_MODEL,
+                        channel='codex', status=outcome, elapsed_ms=int((time.monotonic() - started) * 1000),
+                        usage=usage.usage, request_id=request_id, response_id=usage.response_id,
+                        service_tier=usage.service_tier or 'priority')
+                except Exception:
+                    logger.error('usage_statistics_write_failed')
+            if self.codex_health is not None:
+                await self.codex_health.notify()
 
     async def telegram(self, request):
         auth_values = request.headers.getall('Authorization', [])
@@ -1224,6 +1410,7 @@ class Gateway:
         app.router.add_route('*', '/text/capabilities', self.text_capabilities)
         app.router.add_route('*', '/v1/models', self.text_models)
         app.router.add_route('*', '/v1/chat/completions', self.text_chat_completions)
+        app.router.add_route('*', '/codex/v1/responses', self.codex_responses)
         app.router.add_route('*', '/telegram/{method}', self.telegram)
         app.router.add_post('/v1/realtime/bootstrap', self.gemini_bootstrap)
         app.router.add_get('/gemini/ws', self.gemini_voice)
@@ -1270,7 +1457,7 @@ def load_private_config(config_path):
                 or any(not 0x21 <= ord(char) <= 0x7e for char in key)):
             raise ValueError('private_config_invalid')
     keys = config.get('upstream_keys', {})
-    if (not isinstance(keys, dict) or set(keys) - {'voice', 'text'}
+    if (not isinstance(keys, dict) or set(keys) - {'voice', 'text', 'codex'}
             or any(not isinstance(key, str) or not 8 <= len(key) <= 2048
                    or any(not 33 <= ord(c) <= 126 for c in key) for key in keys.values())):
         raise ValueError('private_config_invalid')
@@ -1304,6 +1491,7 @@ def main():
     gateway = Gateway(config['key_sha256'], control_socket=args.config.parent / 'control.sock',
                       upstream_key=config.get('upstream_keys', {}).get('voice'),
                       text_upstream_key=config.get('upstream_keys', {}).get('text'),
+                      codex_upstream_key=os.environ.get('HABAB_CODEX_OPENAI_API_KEY') or config.get('upstream_keys', {}).get('codex'),
                       credential_store=lambda purpose, key: persist_upstream(args.config, purpose, key),
                       usage_journal=UsageJournal(args.config.parent / 'usage'),
                       beta_codes=BetaCodes(config.get('beta_config') or os.environ.get('HABAB_BETA_CONFIG')),
@@ -1313,6 +1501,8 @@ def main():
                       demo_openai_session_window_seconds=config.get('demo_openai_session_window_seconds', 86400),
                       voice_service_key=config.get('voice_service_key'))
     gateway.voice_diagnostics = config.get('voice_diagnostics') is True
+    gateway.codex_health = ProviderHealth('openai', CODEX_MODEL, args.config.parent / 'codex-health-state.json',
+        notify_command=config.get('health_notify_command', []), recipient=config.get('health_notify_recipient'))
     provider = 'deepseek' if gateway.voice_service_key else 'gemini'
     model = DEEPSEEK_TEXT_MODEL if provider == 'deepseek' else GEMINI_MODEL
     gateway.provider_health = ProviderHealth(provider, model, args.config.parent / 'health-state.json',

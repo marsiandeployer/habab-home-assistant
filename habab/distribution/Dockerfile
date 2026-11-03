@@ -17,6 +17,16 @@ RUN if [ "$HABAB_EMBED_OPENCODE" = 1 ]; then \
         --arch "$TARGETARCH" --output-dir /opt/habab-opencode; \
     fi
 
+# Codex CLI is a second optional agent binary. The Windows Docker kit keeps it
+# in a binary-only volume; no host Codex HOME or credentials are mounted.
+ARG HABAB_EMBED_CODEX=1
+COPY install-codex.py codex-release.json /opt/habab-codex-bootstrap/
+RUN if [ "$HABAB_EMBED_CODEX" = 1 ]; then \
+      python3 /opt/habab-codex-bootstrap/install-codex.py \
+        --release-file /opt/habab-codex-bootstrap/codex-release.json \
+        --arch "$TARGETARCH" --output-dir /opt/habab-codex; \
+    fi
+
 # Same upstream frontend version as Core, with the downstream Assist entry and
 # native-form bridge. The installer verifies the complete public wheel first.
 COPY install-native-frontend.py native-frontend-release.json /opt/habab-frontend/
@@ -44,6 +54,7 @@ RUN mkdir -p /opt/habab-telegram/node_modules \
 
 ENTRYPOINT ["/usr/local/bin/habab-home-entrypoint"]
 CMD ["/init"]
+ENV HABAB_CODEX_BINARY="/opt/habab-codex/codex"
 
 # Keep revision metadata in the final image-config layer so normal code layers
 # remain cacheable; release builds must pass the full source commit explicitly.

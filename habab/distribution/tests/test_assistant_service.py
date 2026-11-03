@@ -11,6 +11,33 @@ from homeassistant.components.habab_home.setup_agent import AgentError
 
 
 class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_executor_requires_selected_provider_settings(self):
+        self.hass.config_entries.async_entries = lambda _domain: []
+        self.runtime.executor_settings = lambda: {"executor": "codex"}
+        with self.assertRaises(AgentError) as error:
+            await self.service._run_text("alice", "web", "s", "Проверь устройства")
+        self.assertEqual(error.exception.code, "provider_required")
+        self.runtime.run.assert_not_awaited()
+
+    async def test_codex_history_contract_cannot_route_habab_key_to_openai(self):
+        entry = SimpleNamespace(data={"provider": "habab", "api_key": "fixture-habab", "model": "managed"},
+                                options={"fast_dialog": True})
+        self.hass.config_entries.async_entries = lambda _domain: [entry]
+        self.runtime.executor_settings = lambda: {"executor": "codex"}
+        self.runtime.ensure.return_value = SimpleNamespace(provider="openai", model="gpt-6-luna")
+        self.runtime.request.return_value = []
+        self.service.web_sessions["alice"] = "s"
+        contract = SimpleNamespace(provider="habab", model="managed")
+        with patch("homeassistant.components.habab_home.assistant.async_get_clientsession", return_value=object()), \
+                patch("homeassistant.components.habab_home.assistant.resolve_provider_contract",
+                      AsyncMock(return_value=contract)) as resolve, \
+                patch("homeassistant.components.habab_home.assistant.complete_dialogue",
+                      AsyncMock(return_value=("opencode", None))) as complete:
+            result = await self.service._run_text("alice", "web", "s", "Проверь устройства")
+        self.assertIs(complete.call_args.kwargs["contract"], contract)
+        self.assertEqual(resolve.call_args.args[1], entry.data)
+        self.assertEqual(result["dialogue"]["route"], "codex")
+
     def setUp(self):
         self.stores = []
 
@@ -24,7 +51,7 @@ class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.store_patch.stop)
         self.user = SimpleNamespace(is_active=True, is_admin=True)
         # These legacy runtime/voice tests select the explicit OpenCode-only mode.
-        provider = SimpleNamespace(data={"provider": "habab"}, options={"fast_dialog": False})
+        provider = SimpleNamespace(data={"provider": "deepseek"}, options={"fast_dialog": False})
         self.hass = SimpleNamespace(
             auth=SimpleNamespace(async_get_user=AsyncMock(return_value=self.user)),
             config_entries=SimpleNamespace(async_entries=lambda _domain: [provider]),

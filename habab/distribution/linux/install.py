@@ -3,6 +3,7 @@
 import argparse
 import base64
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -144,6 +145,7 @@ WorkingDirectory=/var/lib/habab-home/config
 Environment=HOME=/var/lib/habab-home
 Environment=PATH=/opt/habab-home/current/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 Environment=HABAB_OPENCODE_BINARY=/opt/habab-home/current/bin/opencode
+Environment=HABAB_CODEX_BINARY=/opt/habab-home/current/bin/codex
 EnvironmentFile=/opt/habab-home/current/runtime.env
 BindPaths=/var/lib/habab-home/config:/config
 ExecStart=/opt/habab-home/current/venv/bin/python -m homeassistant --config /var/lib/habab-home/config
@@ -202,6 +204,8 @@ def install_release(payload, prefix=Path("/"), run_command=run, fetch_bytes=fetc
     node_pin, opencode_pin = runtime_pins["node"], runtime_pins["opencode"]
     if node_pin.get("version") != "24.22.1" or opencode_pin.get("version") != "1.14.21":
         raise ValueError("Unexpected runtime versions in package")
+    if manifest.get("codex") != "0.166.0":
+        raise ValueError("Unexpected Codex CLI version in package")
     slug = f"{manifest['product_version']}-{manifest['source_sha'][:12]}"
     opt = prefix / "opt/habab-home"
     releases = opt / "releases"
@@ -248,7 +252,18 @@ def install_release(payload, prefix=Path("/"), run_command=run, fetch_bytes=fetc
         executable = stage / "bin/opencode"
         open_code_hash = extract_opencode(fetch_bytes(opencode_pin["url"], MAX_ARCHIVE),
                                            opencode_pin["integrity"], executable)
-        (stage / "runtime.env").write_text(f"HABAB_OPENCODE_SHA256={open_code_hash}\n")
+        codex_spec = importlib.util.spec_from_file_location(
+            "habab_codex_installer", app / "install-codex.py")
+        codex_installer = importlib.util.module_from_spec(codex_spec)
+        codex_spec.loader.exec_module(codex_installer)
+        with tempfile.TemporaryDirectory(prefix="habab-codex-cache-") as codex_cache:
+            codex_release = codex_installer.install(
+                app / "codex-release.json", stage / "bin", "arm64",
+                archive_dir=Path(codex_cache),
+                opener=lambda url, timeout: io.BytesIO(fetch_bytes(url, MAX_ARCHIVE)))
+        codex_hash = codex_release["sha256"]
+        (stage / "runtime.env").write_text(
+            f"HABAB_OPENCODE_SHA256={open_code_hash}\nHABAB_CODEX_SHA256={codex_hash}\n")
         with (stage / "runtime.env").open("a") as env:
             env.write(f"HABAB_SOURCE_REVISION={manifest['source_sha']}\nHABAB_SOURCE_DIRTY=false\n")
         (stage / "runtime.env").chmod(0o644)

@@ -32,3 +32,28 @@ class UsageTests(unittest.TestCase):
         observer.feed(b'data: {"usage":{"total_tokens":9,"prompt_tokens":true,"completion_tokens":-1}}\n')
         self.assertEqual(observer.usage, {'total_tokens': 9})
         self.assertEqual(observer.pending, b'')
+
+    def test_responses_usage_metadata_and_errors_are_bounded(self):
+        observer = StreamUsage()
+        payload = {'type': 'response.completed', 'response': {'id': 'resp_fixture', 'model': 'gpt-6-luna',
+                   'service_tier': 'priority', 'status': 'completed', 'usage': {'input_tokens': 8, 'output_tokens': 2,
+                   'total_tokens': 10}, 'output': [{'text': 'PRIVATE'}]}}
+        wire = b'data: ' + json.dumps(payload).encode() + b'\n\n'
+        for offset in range(0, len(wire), 3):
+            observer.feed(wire[offset:offset + 3])
+        self.assertEqual(observer.usage, {'prompt_tokens': 8, 'completion_tokens': 2, 'total_tokens': 10})
+        self.assertEqual(observer.response_id, 'resp_fixture')
+        self.assertEqual(observer.terminal_status, 'completed')
+        with tempfile.TemporaryDirectory() as directory:
+            journal = UsageJournal(directory)
+            journal.record(installation='synthetic-id', provider='openai', model=observer.model, status='ok',
+                           elapsed_ms=12, usage=observer.usage, response_id=observer.response_id,
+                           request_id='invalid\nPRIVATE', service_tier=observer.service_tier, channel='codex')
+            row = json.loads(next(Path(directory).glob('*.jsonl')).read_text())
+            self.assertNotIn('request_id', row)
+            self.assertEqual(row['response_id'], 'resp_fixture')
+            self.assertEqual(row['service_tier'], 'priority')
+            self.assertNotIn('PRIVATE', json.dumps(row))
+            self.assertEqual(journal.summary()[0]['total_tokens'], 10)
+        observer.feed(b'data: {"type":"error","message":"PRIVATE"}\n\n')
+        self.assertEqual(observer.terminal_status, 'failed')

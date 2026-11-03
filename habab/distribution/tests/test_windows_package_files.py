@@ -32,6 +32,7 @@ class WindowsPackageFilesTests(unittest.TestCase):
             'product-tunnel/connect.ps1',
         } & names)
         self.assertTrue({'support_tunnel.bat', 'support_tunnel.ps1', 'support-relay.json'} <= names)
+        self.assertTrue({'install-codex.py', 'codex-release.json'} <= names)
         self.assertEqual(
             resolve_windows_package_source(DISTRIBUTION, canonical),
             DISTRIBUTION.parent / canonical,
@@ -96,6 +97,9 @@ class WindowsPackageFilesTests(unittest.TestCase):
         compose = (DISTRIBUTION / 'compose.windows.yaml').read_text()
         self.assertIn('context: .', compose)
         self.assertIn("HABAB_EMBED_OPENCODE: '0'", compose)
+        self.assertIn("HABAB_EMBED_CODEX: '0'", compose)
+        self.assertIn('codex:/opt/habab-codex:ro', compose)
+        self.assertIn('install-codex.py', startup)
 
 
 if __name__ == '__main__':

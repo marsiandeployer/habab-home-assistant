@@ -11,7 +11,7 @@ Object.defineProperty(globalThis, "customElements", {
   configurable: true,
   value: { get: (name) => definitions.get(name), define: (name, value) => definitions.set(name, value) },
 });
-const { assistantModelRoles, assistantProviderPresentation, assistantRoutingSummary, providerModelPresentation, strings } = await Promise.all([
+const { assistantModelRoles, assistantProviderPresentation, assistantRoutingSummary, providerModelPresentation, taskExecutorForProvider, strings } = await Promise.all([
   import("../src/habab_home/frontend/ai-panel.js?provider-selection-test"),
   import("../src/habab_home/frontend/strings.js?provider-selection-test"),
 ]).then(([panelModule, stringModule]) => ({
@@ -19,6 +19,7 @@ const { assistantModelRoles, assistantProviderPresentation, assistantRoutingSumm
   assistantProviderPresentation: panelModule.assistantProviderPresentation,
   assistantRoutingSummary: panelModule.assistantRoutingSummary,
   providerModelPresentation: panelModule.providerModelPresentation,
+  taskExecutorForProvider: panelModule.taskExecutorForProvider,
   strings: stringModule.strings,
 }));
 const HababAIPanel = definitions.get("habab-ai-panel");
@@ -175,6 +176,21 @@ test("direct OpenAI save still sends the supplied personal key and model", async
     type: "habab_home/providers/save", provider: "openai",
     model: "gpt-4.1-mini", api_key: "personal-openai-key",
   }]);
+});
+
+test("current chat summary names Codex as executor while preserving the selected AI model", () => {
+  const entry = {
+    provider: "openai", effective_model: "gpt-4.1-mini", fast_dialog: false,
+    voice_ready: false,
+  };
+  assert.match(assistantModelRoles(entry, "ru")[0], /^Агент Codex: OpenAI · gpt-6-luna · Fast$/);
+  assert.match(assistantRoutingSummary(entry, [], "ru")[0], /^Текстовый чат: Codex через подключение OpenAI, модель gpt-6-luna, уровень Fast\.$/);
+  assert.match(assistantRoutingSummary({...entry, fast_dialog: true}, [], "ru")[0], /^Текстовый чат: напрямую к OpenAI, модель gpt-4\.1-mini\.$/);
+  assert.deepEqual(taskExecutorForProvider("habab"), {
+    executor: "codex", provider: "habab", model: "gpt-6-luna", service_tier: "fast",
+  });
+  assert.equal(taskExecutorForProvider("deepseek").executor, "opencode");
+  assert.equal(taskExecutorForProvider("gemini").executor, "opencode");
 });
 
 function panelForKeyFetch(provider, entry, keyRequests) {
@@ -394,14 +410,18 @@ test("managed Habab presentation never presents a saved model as the current mod
     managed_model: "habab-chat",
     effective_model: null,
   });
-  assert.deepEqual(managedSelected, { key: "currentAssistantManaged" });
-  assert.match(strings.en[managedSelected.key], /Habab selects the model/i);
+  assert.deepEqual(managedSelected, {
+    key: "currentAssistantCodexManaged", provider: "Habab", model: "gpt-6-luna", service_tier: "fast",
+  });
+  assert.match(strings.en[managedSelected.key], /Codex.*Habab server/i);
   assert.doesNotMatch(strings.en[managedSelected.key], /habab-chat|gemini-3\.1-flash-lite/i);
 
   assert.deepEqual(assistantProviderPresentation({
     provider: "habab", managed_model: "habab-chat", text_ready: true,
     configured_upstream_provider: "deepseek", configured_upstream_model: "deepseek-flash",
-  }), { key: "currentAssistantManagedRoute", provider: "DeepSeek", model: "deepseek-flash" });
+  }), {
+    key: "currentAssistantCodexManaged", provider: "Habab", model: "gpt-6-luna", service_tier: "fast",
+  });
 
   const legacy = providerModelPresentation("habab", {
     model: "gemini-3.1-flash-lite",
@@ -417,11 +437,11 @@ test("managed Habab presentation never presents a saved model as the current mod
 
   assert.deepEqual(assistantProviderPresentation({
     provider: "openai", managed_model: null, effective_model: "gpt-4.1-mini",
-  }), { key: "currentAssistant", model: "gpt-4.1-mini" });
+  }), { key: "currentAssistantCodex", provider: "OpenAI", model: "gpt-6-luna", service_tier: "fast" });
   const fastDialog = assistantProviderPresentation({
     provider: "openai", managed_model: null, effective_model: "gpt-4.1-mini", fast_dialog: true,
   });
-  assert.deepEqual(fastDialog, { key: "currentAssistantFastDialog", model: "gpt-4.1-mini" });
+  assert.deepEqual(fastDialog, { key: "currentAssistantFastDialog", model: "gpt-4.1-mini", executor: "Codex" });
   assert.match(strings.en[fastDialog.key].replace("{provider}", "OpenAI"), /directly to OpenAI/);
   assert.doesNotMatch(strings.en[fastDialog.key], /OpenCode/);
   assert.deepEqual(providerModelPresentation("deepseek", { model: "deepseek-flash" }, "en"), {
@@ -491,7 +511,7 @@ test("routing summary separates managed text, default voice, Android wake detect
   };
   const withoutTTS = assistantRoutingSummary(entry, [{ tts_engine: null }], "en");
   assert.equal(withoutTTS.length, 5);
-  assert.match(withoutTTS[0], /Text chat: OpenCode → Habab → DeepSeek \(deepseek-flash\)/);
+  assert.match(withoutTTS[0], /Text chat: Codex → Habab server, model gpt-6-luna, tier Fast/);
   assert.doesNotMatch(withoutTTS[0], /habab-chat|gemini-3\.1-flash-lite/);
   assert.match(withoutTTS[1], /Voice conversation: Habab → Gemini Live, default model gemini-3\.8-live/);
   assert.match(withoutTTS[2], /Android wake phrase: local, Vosk/);
@@ -500,7 +520,7 @@ test("routing summary separates managed text, default voice, Android wake detect
   assert.doesNotMatch(withoutTTS.join(" "), /gemini-3\.1-flash-lite/i);
 
   const unreportedRoute = assistantRoutingSummary({ ...entry, configured_upstream_provider: null }, [], "en");
-  assert.match(unreportedRoute[0], /Habab selects the model/);
+  assert.match(unreportedRoute[0], /Codex → Habab server/);
   assert.doesNotMatch(unreportedRoute[0], /DeepSeek|habab-chat/);
 
   const withTTS = assistantRoutingSummary(entry, [{ tts_engine: "tts.google_translate_say" }], "en");
@@ -590,7 +610,7 @@ test("managed Habab API status describes the route, while direct provider status
     text_ready: true, configured_upstream_provider: "deepseek",
     configured_upstream_model: "deepseek-flash", api_check_status: "verified",
   });
-  assert.match(managed.assistantStatus, /Text chat: OpenCode → Habab → DeepSeek \(deepseek-flash\)/);
+  assert.match(managed.assistantStatus, /Text chat: Codex → Habab server, model gpt-6-luna, tier Fast/);
   assert.doesNotMatch(managed.assistantStatus, /habab-chat|gemini-3\.1-flash-lite/i);
   assert.doesNotMatch(managed.assistantStatus, /gemini-3\.1-flash-lite|model habab-chat/i);
   assert.equal(managed.apiStatus, strings.en.apiVerifiedManaged);
@@ -602,7 +622,7 @@ test("managed Habab API status describes the route, while direct provider status
     managed_model: null, effective_model: "gpt-4.1-mini", protocol: "openai_compatible",
     api_check_status: "verified",
   });
-  assert.match(direct.assistantStatus, /Text chat: OpenCode → OpenAI, model gpt-4\.1-mini/);
+  assert.match(direct.assistantStatus, /Text chat: Codex using the OpenAI connection, model gpt-6-luna, tier Fast/);
   assert.equal(direct.apiStatus, strings.en.apiVerified);
 
   nodes.clear();
@@ -617,7 +637,7 @@ test("managed Habab API status describes the route, while direct provider status
     managed_model: null, effective_model: "gpt-4.1-mini", api_check_status: "rejected",
   };
   const splitSelection = run(editOpenAI, { connections: [activeHabab, editOpenAI] });
-  assert.match(splitSelection.assistantStatus, /OpenCode → Habab → DeepSeek \(deepseek-flash\)/);
+  assert.match(splitSelection.assistantStatus, /Codex → Habab server, model gpt-6-luna, tier Fast/);
   assert.match(splitSelection.assistantStatus, /saved key and Habab route passed the API check/i);
   assert.equal(splitSelection.apiStatus, strings.en.apiRejected);
 
@@ -740,23 +760,20 @@ for (const [name, failure, expectedMessage] of [
 }
 
 
-test("model roles show the confirmed OpenCode model even with fast dialog enabled", () => {
+test("model roles show the mapped Codex model even with fast dialog enabled", () => {
   const roles = assistantModelRoles({
     provider: "habab", model: "stale-saved-model", fast_dialog: true,
     managed_model: "habab-chat", text_ready: true,
     configured_upstream_provider: "deepseek", configured_upstream_model: "deepseek-flash",
     voice_ready: true, voice_provider: "habab", default_voice_model: "gemini-3.8-live",
   }, "ru");
-  assert.equal(roles[0], "Агент OpenCode: DeepSeek · deepseek-flash");
+  assert.equal(roles[0], "Агент Codex: Habab · gpt-6-luna · Fast");
   assert.equal(roles[1], "Realtime-голос по умолчанию: Habab / Google Gemini · gemini-3.8-live");
   assert.doesNotMatch(roles.join(" "), /stale-saved-model|habab-chat/);
 });
 
 test("model roles do not invent a managed upstream or a voice route for DeepSeek", () => {
-  const unconfirmed = assistantModelRoles({
-    provider: "habab", managed_model: "habab-chat", model: "stale-model", text_ready: false,
-    voice_ready: false,
-  }, "ru");
+  const unconfirmed = assistantModelRoles({provider: "deepseek", model: "stale-model", voice_ready: false}, "ru");
   assert.match(unconfirmed[0], /модель пока не подтверждена/);
   assert.doesNotMatch(unconfirmed[0], /stale-model|habab-chat/);
   const direct = assistantModelRoles({

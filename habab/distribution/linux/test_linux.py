@@ -39,6 +39,7 @@ class LinuxInstallTests(unittest.TestCase):
         return node, oc_io.getvalue()
 
     def _payload(self, root, version, source):
+        archives = {}
         payload = root / "payload"
         app = payload / "app"
         (payload / "linux").mkdir(parents=True)
@@ -51,20 +52,39 @@ class LinuxInstallTests(unittest.TestCase):
         (app / "config/configuration.yaml").write_text("default_config:\n")
         (app / "install-xiaomi-home.py").write_text("#!/usr/bin/env python3\n")
         (app / "xiaomi-home-release.json").write_text("{}\n")
+        shutil.copy2(Path(__file__).resolve().parents[1] / "install-codex.py", app / "install-codex.py")
+        codex_release = json.loads((Path(__file__).resolve().parents[1] / "codex-release.json").read_text())
+        codex_release["arm64"]["artifacts"] = {}
+        for name in ("codex", "codex-code-mode-host", "codex-exec-server"):
+            asset = f"{name}-aarch64-unknown-linux-musl.tar.gz"
+            executable = ("fixture:" + name).encode()
+            archive_data = io.BytesIO()
+            with tarfile.open(fileobj=archive_data, mode="w:gz") as bundle:
+                member = tarfile.TarInfo(asset[:-len(".tar.gz")])
+                member.size = len(executable)
+                bundle.addfile(member, io.BytesIO(executable))
+            archive_bytes = archive_data.getvalue()
+            codex_release["arm64"]["artifacts"][name] = {
+                "asset": asset, "bytes": len(archive_bytes),
+                "sha256": hashlib.sha256(archive_bytes).hexdigest(),
+            }
+            archives["https://github.com/openai/codex/releases/download/rust-v0.166.0/" + asset] = archive_bytes
+        (app / "codex-release.json").write_text(json.dumps(codex_release))
         (app / "habab-ha.py").write_text("#!/usr/bin/env python3\n")
         for name in ("habab_home", "habab_telegram", "habab_yandex_speech", "idigital_sms"):
             (app / "src" / name).mkdir(parents=True)
         wheel = b"wheel-fixture"
         (app / "frontend/front.whl").write_bytes(wheel)
         (app / "frontend-release.json").write_text(json.dumps({"filename": "front.whl", "bytes": len(wheel), "sha256": hashlib.sha256(wheel).hexdigest()}))
-        (payload / "release.json").write_text(json.dumps({"architecture": "arm64", "product_version": version, "source_sha": source, "home_assistant": "2026.10.2", "frontend": "2026.10.2"}))
+        (payload / "release.json").write_text(json.dumps({"architecture": "arm64", "product_version": version, "source_sha": source, "home_assistant": "2026.10.2", "frontend": "2026.10.2", "codex": "0.166.0"}))
         pins = {"node": {"version": "24.22.1", "url": "node", "sha256": ""}, "opencode": {"version": "1.14.21", "url": "oc", "integrity": ""}}
         node, oc = self._archives()
         pins["node"]["sha256"] = hashlib.sha256(node).hexdigest()
         import base64
         pins["opencode"]["integrity"] = "sha512-" + base64.b64encode(hashlib.sha512(oc).digest()).decode()
         (payload / "linux/runtime-pins.json").write_text(json.dumps(pins))
-        return payload, {"node": node, "oc": oc}
+        archives.update({"node": node, "oc": oc})
+        return payload, archives
 
     def _install(self, payload, archives, prefix):
         site = None
@@ -99,6 +119,9 @@ class LinuxInstallTests(unittest.TestCase):
             self.assertEqual((opt / "previous").resolve().name, "1.0-" + "a" * 12)
             self.assertEqual(marker.read_text(), "my_existing_config: true\n")
             self.assertIn("HABAB_SOURCE_REVISION=" + "b" * 40, (opt / "current/runtime.env").read_text())
+            self.assertIn("HABAB_CODEX_BINARY=/opt/habab-home/current/bin/codex", (prefix / "etc/systemd/system/habab-home.service").read_text())
+            self.assertEqual((opt / "current/bin/codex").read_bytes(), b"fixture:codex")
+            self.assertEqual((opt / "current/bin/codex-exec-server").read_bytes(), b"fixture:codex-exec-server")
             self.assertTrue((prefix / "usr/local/bin/habab-ha").is_file())
             self.assertTrue((prefix / "usr/local/bin/habab-install-xiaomi-home").is_file())
             self.assertTrue((prefix / "usr/local/bin/xiaomi-home-release.json").is_file())

@@ -1,4 +1,4 @@
-import { strings } from "./strings.js?v=6";
+import { strings } from "./strings.js?v=8";
 import "./telemetry-panel.js";
 
 const providers = {
@@ -7,6 +7,16 @@ const providers = {
   deepseek: { name: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
   gemini: { name: "Google Gemini", model: "gemini-3.1-flash-lite", keyUrl: "https://aistudio.google.com/api-keys" },
 };
+
+export function taskExecutorForProvider(provider) {
+  const codex = provider === "openai" || provider === "habab";
+  return {
+    executor: codex ? "codex" : "opencode",
+    provider,
+    model: codex ? "gpt-6-luna" : null,
+    service_tier: codex ? "fast" : null,
+  };
+}
 
 const modelCopy = {
   ru: {
@@ -27,11 +37,22 @@ const modelCopy = {
 
 export function assistantProviderPresentation(entry) {
   const fastDialog = entry?.fast_dialog === true;
+  const executorConfig = taskExecutorForProvider(entry?.provider);
+  if (!fastDialog && executorConfig.executor === "codex") {
+    const managedHabab = entry.provider === "habab";
+    return {
+      key: managedHabab ? "currentAssistantCodexManaged" : "currentAssistantCodex",
+      provider: providers[entry.provider]?.name || "",
+      model: executorConfig.model,
+      service_tier: executorConfig.service_tier,
+    };
+  }
   if (
     entry?.provider === "habab" &&
     typeof entry.managed_model === "string" &&
     entry.managed_model
   ) {
+    const executor = executorConfig.executor === "codex" ? "Codex" : "OpenCode";
     const upstreamProvider = typeof entry.configured_upstream_provider === "string"
       ? providers[entry.configured_upstream_provider]?.name : undefined;
     const upstreamModel = typeof entry.configured_upstream_model === "string"
@@ -39,15 +60,16 @@ export function assistantProviderPresentation(entry) {
     if (entry.text_ready === true && upstreamProvider && upstreamModel) {
       return {
         key: fastDialog ? "currentAssistantFastDialogManagedRoute" : "currentAssistantManagedRoute",
-        provider: upstreamProvider, model: upstreamModel,
+        provider: upstreamProvider, model: upstreamModel, executor,
       };
     }
-    return { key: fastDialog ? "currentAssistantFastDialogManaged" : "currentAssistantManaged" };
+    return { key: fastDialog ? "currentAssistantFastDialogManaged" : "currentAssistantManaged", executor };
   }
   const model = typeof entry?.effective_model === "string" ? entry.effective_model.trim() : "";
+  const executor = executorConfig.executor === "codex" ? "Codex" : "OpenCode";
   return model
-    ? { key: fastDialog ? "currentAssistantFastDialog" : "currentAssistant", model }
-    : { key: fastDialog ? "currentAssistantFastDialogModelUnavailable" : "currentAssistantModelUnavailable" };
+    ? { key: fastDialog ? "currentAssistantFastDialog" : "currentAssistant", model, executor }
+    : { key: fastDialog ? "currentAssistantFastDialogModelUnavailable" : "currentAssistantModelUnavailable", executor };
 }
 
 function assistantCheckStatusKey(entry, isChecking) {
@@ -75,6 +97,8 @@ export function assistantRoutingSummary(entry, pipelines, language, isChecking =
     .replace("{provider}", textProvider)
     .replace("{upstreamProvider}", presentation.provider || "")
     .replace("{model}", presentation.model || "")
+    .replace("{tier}", presentation.service_tier === "fast" ? "Fast" : presentation.service_tier || "")
+    .replace("{executor}", presentation.executor || "OpenCode")
     .replace("{alias}", presentation.alias || "")];
 
   if (entry?.voice_ready === true && entry.voice_provider && entry.default_voice_model) {
@@ -104,12 +128,19 @@ export function assistantRoutingSummary(entry, pipelines, language, isChecking =
 export function assistantModelRoles(entry, language) {
   const copy = strings[language === "ru" ? "ru" : "en"];
   const agent = assistantProviderPresentation({...entry, fast_dialog: false});
-  const provider = agent.provider || providers[entry?.provider]?.name || entry?.provider || "";
-  const model = agent.model || copy.modelRoleUnconfirmed;
+  const executorConfig = taskExecutorForProvider(entry?.provider);
+  const executor = executorConfig.executor === "codex" ? "Codex" : "OpenCode";
+  const provider = executorConfig.executor === "codex"
+    ? providers[entry?.provider]?.name || entry?.provider || ""
+    : agent.provider || providers[entry?.provider]?.name || entry?.provider || "";
+  const model = executorConfig.executor === "codex"
+    ? executorConfig.model : agent.model || copy.modelRoleUnconfirmed;
   const voice = entry?.voice_ready === true && entry.voice_provider && entry.default_voice_model
     ? `${entry.voice_provider === "habab" ? "Habab / Google Gemini" : providers[entry.voice_provider]?.name || entry.voice_provider} · ${entry.default_voice_model}`
     : copy.modelRoleVoiceUnavailable;
-  return [copy.modelRoleAgent.replace("{provider}", provider).replace("{model}", model),
+  const agentCopy = executorConfig.executor === "codex" ? copy.modelRoleAgentCodex : copy.modelRoleAgent;
+  return [agentCopy.replace("{executor}", executor).replace("{provider}", provider)
+    .replace("{model}", model).replace("{tier}", executorConfig.service_tier === "fast" ? "Fast" : executorConfig.service_tier || ""),
     copy.modelRoleVoice.replace("{route}", voice)];
 }
 
@@ -208,13 +239,13 @@ class HababAIPanel extends HTMLElement {
       header{display:flex;align-items:center;gap:var(--ha-space-4,16px);height:64px;padding-inline:var(--ha-space-4,16px);border-block-end:1px solid var(--divider-color);background:var(--card-background-color)}
       h1{font-size:20px;font-weight:500;margin:0}main{max-width:940px;margin:auto;padding:var(--ha-space-8,32px) var(--ha-space-6,24px) 64px}p{margin:0 0 var(--ha-space-4,16px);max-width:72ch}
       .intro{color:var(--secondary-text-color);font-size:16px}.workspace{display:grid;grid-template-columns:200px minmax(0,1fr);gap:var(--ha-space-8,32px);margin-block:var(--ha-space-8,32px)}
-      nav{display:flex;flex-direction:column;gap:var(--ha-space-2,8px)}button,input,textarea{font:inherit}button{cursor:pointer;min-height:44px;padding:10px 16px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--card-background-color)}
+      nav{display:flex;flex-direction:column;gap:var(--ha-space-2,8px)}button,input,textarea,select{font:inherit}button{cursor:pointer;min-height:44px;padding:10px 16px;border:1px solid var(--divider-color);border-radius:8px;color:var(--primary-text-color);background:var(--card-background-color)}
       nav button{text-align:start}nav button[aria-pressed=true]{background:var(--secondary-background-color);border-color:var(--primary-color);color:var(--primary-text-color);font-weight:500}
       button:hover{background:var(--secondary-background-color)}button:active{filter:brightness(.94)}button:disabled{cursor:default;opacity:.55}
-      :is(button,input,textarea,a):focus-visible{outline:3px solid var(--ha-color-focus,var(--primary-color));outline-offset:3px}a{color:var(--primary-text-color);text-underline-offset:3px}
+      :is(button,input,textarea,select,a):focus-visible{outline:3px solid var(--ha-color-focus,var(--primary-color));outline-offset:3px}a{color:var(--primary-text-color);text-underline-offset:3px}
       h2{font-size:22px;font-weight:500;margin:0 0 var(--ha-space-2,8px)}h3{font-size:16px;font-weight:500;margin:var(--ha-space-6,24px) 0 var(--ha-space-2,8px)}
       .help,.status{color:var(--secondary-text-color);font-size:13px}.status{margin-block:var(--ha-space-2,8px)}.routing-summary{white-space:pre-line}ol{padding-inline-start:22px;margin:8px 0 16px}li{padding-inline-start:4px;margin-block:8px}
-      form{margin-block-start:var(--ha-space-6,24px)}label{display:block;font-weight:500;margin:var(--ha-space-4,16px) 0 var(--ha-space-2,8px)}input,textarea{width:100%;min-width:0;padding:12px;border:1px solid var(--secondary-text-color);border-radius:6px;background:var(--card-background-color);color:var(--primary-text-color);caret-color:var(--primary-color)}
+      form{margin-block-start:var(--ha-space-6,24px)}label{display:block;font-weight:500;margin:var(--ha-space-4,16px) 0 var(--ha-space-2,8px)}input,textarea,select{width:100%;min-width:0;padding:12px;border:1px solid var(--secondary-text-color);border-radius:6px;background:var(--card-background-color);color:var(--primary-text-color);caret-color:var(--primary-color)}
       input{height:48px}.key-row{display:flex;gap:8px}.key-row input{flex:1}.key-row button{display:inline-flex;flex:none;align-items:center;justify-content:center;min-width:48px;padding:8px}.key-row ha-icon{--mdc-icon-size:20px}textarea{resize:vertical;min-height:88px}input::placeholder,textarea::placeholder{color:var(--secondary-text-color);opacity:1}
       #feedback-delivery-enabled{width:auto;min-width:auto;height:auto;margin-inline-end:8px}label:has(#feedback-delivery-enabled){display:flex;align-items:center;gap:4px}
       .actions{display:flex;flex-wrap:wrap;gap:var(--ha-space-2,8px);margin-block:var(--ha-space-4,16px)}.primary{background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color));border-color:transparent;color:var(--ha-color-on-primary-loud,var(--text-primary-color))}.primary:hover{filter:brightness(.93);background:var(--ha-color-fill-primary-loud-hover,var(--dark-primary-color))}
@@ -431,7 +462,7 @@ class HababAIPanel extends HTMLElement {
       ? this.t("fastDialogSaving")
       : this.fastDialogSaveFailed ? this.t("fastDialogSaveFailed") : this.t("fastDialogSaved");
     this.q("#fast-dialog-status").dataset.error = String(!!this.fastDialogSaveFailed);
-    this.shadowRoot.querySelectorAll("button,input,textarea").forEach((item) => { item.disabled = !!this.busy; });
+    this.shadowRoot.querySelectorAll("button,input,textarea,select").forEach((item) => { item.disabled = !!this.busy; });
     fastDialog.disabled = !!this.busy || !!this.fastDialogBusy || !this.connectionsLoaded || !currentProvider;
     this.q("#check").disabled = !!this.busy || !this.connectionsLoaded || !entry;
     const firstHababConnection = this.provider === "habab" && this.connectionsLoaded && !entry;

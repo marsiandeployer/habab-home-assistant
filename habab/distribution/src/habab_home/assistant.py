@@ -15,8 +15,9 @@ from .agent_diagnostics import AgentDiagnostics
 from .assist_adapter import AssistAdapter
 from .const import DOMAIN
 from .effective_provider import effective_provider_entry
+from .executor_config import selected_executor
 from .fast_dialog import MAX_USER_CHARS, bounded_history, complete_dialogue, dialogue_part
-from .providers import ProviderError
+from .providers import ProviderError, resolve_provider_contract
 from .diagnostics_sessions import (
     normalize_telegram_session_index,
     normalize_web_session_index,
@@ -410,10 +411,11 @@ class AssistantService:
         entry = effective_provider_entry(self.hass.config_entries.async_entries(DOMAIN))
         if entry is None:
             raise AgentError("provider_required")
+        executor = selected_executor(entry.data)
         if executor_only or entry.options.get("fast_dialog", True) is False:
             started = time.monotonic()
             result = await self.runtime.run(owner, session_id, text)
-            result["dialogue"] = {"mode": "opencode", "route": "opencode",
+            result["dialogue"] = {"mode": executor, "route": executor,
                                   "total_ms": round((time.monotonic() - started) * 1000)}
             return result
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_USER_CHARS:
@@ -441,6 +443,11 @@ class AssistantService:
             async with self.runtime.lock:
                 await require_scope()
                 contract = await self.runtime.ensure(settings)
+                if executor == "codex":
+                    # Codex uses OpenCode only as history storage. Its history
+                    # contract must never route a different provider's key.
+                    contract = await resolve_provider_contract(
+                        async_get_clientsession(self.hass), settings)
                 await require_scope()
                 messages = await self.runtime.request(
                     "GET", f"session/{session_id}/message?limit=60")
@@ -477,6 +484,7 @@ class AssistantService:
                 await require_scope()
                 result = await self.runtime.run(owner, session_id, text)
                 await require_scope()
+                trace["route"] = executor
             trace["total_ms"] = round((time.monotonic() - started) * 1000)
             self.diagnostics.clear(owner, session_id)
             result["dialogue"] = trace

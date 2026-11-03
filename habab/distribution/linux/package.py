@@ -22,6 +22,8 @@ APP_FILES = (
     "config/configuration.yaml",
     "release.json",
     "opencode-release.json",
+    "codex-release.json",
+    "install-codex.py",
     "install-xiaomi-home.py",
     "habab-ha.py",
     "xiaomi-home-release.json",
@@ -76,7 +78,7 @@ def build(source_sha: str, wheel: Path, manifest_path: Path, output: Path,
         "product_version": release["version"],
         "home_assistant": release["home_assistant"]["version"],
         "frontend": version, "frontend_sha256": digest,
-        "opencode": "1.14.21", "node": "24.22.1",
+        "opencode": "1.14.21", "codex": "0.166.0", "node": "24.22.1",
         "architecture": "arm64", "source_sha": source_sha,
     }
     entries["payload/release.json"] = json.dumps(release_manifest, sort_keys=True, indent=2).encode() + b"\n"

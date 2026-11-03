@@ -30,10 +30,13 @@ class NativePackageTests(unittest.TestCase):
                 names = archive.getnames()
                 self.assertIn("payload/app/habab-ha.py", names)
                 self.assertIn("payload/app/xiaomi-home-release.json", names)
+                self.assertIn("payload/app/install-codex.py", names)
+                self.assertIn("payload/app/codex-release.json", names)
                 self.assertFalse(any("__pycache__" in name or name.endswith(".pyc") for name in names))
                 release = json.load(archive.extractfile("payload/release.json"))
                 self.assertEqual(release["source_sha"], "a" * 40)
                 self.assertEqual(release["frontend_sha256"], metadata["artifact_sha256"])
+                self.assertEqual(release["codex"], "0.166.0")
             metadata["source_revision"] = "b" * 40
             manifest.write_text(json.dumps(metadata))
             with self.assertRaisesRegex(ValueError, "exact clean source"):

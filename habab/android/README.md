@@ -374,8 +374,9 @@ HABAB_RUNTIME_ARCHIVE="$PWD/habab/android/dist/habab-runtime-RELEASE_ID-arm64.tg
 ```
 
 Ожидается `result: PASS` у проверяющего скрипта и успешное выполнение Java
-тестов. Проверяются подпись, размер и SHA-256 архива, наличие Core, Node и
-OpenCode, снимок исходников Habab, хэши обработчика `unix://` для serialx 1.11.0
+тестов. Проверяются подпись, размер и SHA-256 архива, наличие Core, Node,
+OpenCode и Codex CLI 0.166.0 с code-mode и exec-server helper-бинарниками,
+снимок исходников Habab, хэши обработчика `unix://` для serialx 1.11.0
 и отсутствие приватных каталогов. Java-тесты проверяют пути, ссылки, права
 файлов и распаковку реального окружения.
 

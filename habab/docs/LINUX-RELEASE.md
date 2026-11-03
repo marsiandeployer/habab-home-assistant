@@ -3,8 +3,10 @@
 Habab Home has two independent Linux deliverables:
 
 - Native ARM64 installer for Ubuntu Server 26.04, without Docker. It installs
-  Home Assistant Core into a versioned Python environment and runs systemd.
-- Docker image for linux/amd64 and linux/arm64, with OpenCode embedded. The
+  Home Assistant Core, OpenCode, and Codex CLI 0.166.0 into a versioned
+  environment and runs systemd.
+- Docker image for linux/amd64 and linux/arm64, with OpenCode and Codex CLI
+  0.166.0 embedded. The
   release Compose file uses a persistent `/config` volume.
 
 These release workflows extend issue #14. Its existing `linux` candidate target

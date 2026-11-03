@@ -4,6 +4,7 @@ import os
 
 from .const import DOMAIN, VERSION
 from .effective_provider import effective_provider_entry
+from .executor_config import executor_status
 from .gemini_live import DEFAULT_MODEL
 from .runtime_context import DOCKER_RUNTIME_KIND, RUNTIME_KIND_ENV
 from .voice_context import build_voice_context
@@ -52,6 +53,7 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
         selected_entry.options.get("fast_dialog", True) is not False
         if selected_entry is not None else True
     )
+    task_executor = executor_status(settings)
     gemini_live_provider = settings.get("provider") in {"habab", "gemini"}
     realtime_supported = voice_route["voice_supported"]
     telegram = hass.data.get("habab_telegram")
@@ -69,6 +71,7 @@ async def get_assistant_status(hass, owner, settings=None, *, verify_telegram=Tr
         "home_snapshot": home_snapshot,
         "selected_provider": settings.get("provider"),
         "selected_text_model": settings.get("model"),
+        "task_executor": task_executor,
         "fast_dialog": fast_dialog,
         "voice": {
             "realtime_api_registered": True,

@@ -148,6 +148,8 @@ def verify(manifest, public_key=None, expected_source_revision=None, require_ser
         'usr/bin/node', 'usr/src/homeassistant/homeassistant/components/habab_home/__init__.py',
         'usr/src/homeassistant/homeassistant/components/habab_home/frontend/setup-chat.js',
         'opt/habab-opencode/opencode', 'etc/habab-android-release.json',
+        'opt/habab-codex/codex', 'opt/habab-codex/codex-code-mode-host',
+        'opt/habab-codex/codex-exec-server', 'opt/habab-codex/codex.sha256',
         'usr/local/share/habab-android/launch.py',
     }
     telegram_link = 'opt/habab-telegram/node_modules/noxon-telegram'
@@ -160,6 +162,7 @@ def verify(manifest, public_key=None, expected_source_revision=None, require_ser
     embedded_release = None
     serialx_metadata_version = None
     serialx_metadata_name = None
+    codex_sidecar = None
     with tarfile.open(archive, 'r|gz') as bundle:
         for member in bundle:
             if member.name.startswith('/') or '..' in Path(member.name).parts:
@@ -197,6 +200,12 @@ def verify(manifest, public_key=None, expected_source_revision=None, require_ser
                                 serialx_metadata_name = line.split(':', 1)[1].strip()
                             if line.startswith('Version: '):
                                 serialx_metadata_version = line.split(':', 1)[1].strip()
+                    elif member.name == 'opt/habab-codex/codex.sha256':
+                        content = source.read(1024)
+                        if len(content) != member.size:
+                            raise ValueError('Truncated Codex SHA-256 sidecar')
+                        hash_file.update(content)
+                        codex_sidecar = content.decode('ascii').strip()
                     else:
                         for block in iter(lambda: source.read(1024 * 1024), b''):
                             hash_file.update(block)
@@ -226,6 +235,29 @@ def verify(manifest, public_key=None, expected_source_revision=None, require_ser
         raise ValueError('Archive exceeds declared unpacked size')
     if inventory['opt/habab-opencode/opencode'] != release['opencodeSha256']:
         raise ValueError('OpenCode digest mismatch')
+    codex_paths = {
+        'opt/habab-codex/codex',
+        'opt/habab-codex/codex-code-mode-host',
+        'opt/habab-codex/codex-exec-server',
+    }
+    codex_files = release.get('codexFiles')
+    if (not isinstance(codex_files, dict) or set(codex_files) != codex_paths
+            or release.get('codexVersion') != '0.166.0'
+            or not isinstance(release.get('codexReleaseSha256'), str)
+            or not re.fullmatch(r'[0-9a-f]{64}', release['codexReleaseSha256'])
+            or release.get('codexSha256') != codex_files.get('opt/habab-codex/codex')):
+        raise ValueError('Codex CLI release attestation is incomplete')
+    if codex_sidecar != release['codexSha256']:
+        raise ValueError('Codex SHA-256 sidecar mismatch')
+    if not isinstance(embedded_release, dict) or any(
+            embedded_release.get(field) != release.get(field)
+            for field in ('codexVersion', 'codexFiles', 'codexSha256', 'codexReleaseSha256')):
+        raise ValueError('Embedded Codex CLI attestation differs from the signed manifest')
+    for path in codex_paths:
+        expected = codex_files[path]
+        if (not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected)
+                or inventory.get(path) != expected):
+            raise ValueError('Codex CLI payload mismatch: ' + path)
     if inventory['usr/local/share/habab-android/launch.py'] != release['androidLauncherSha256']:
         raise ValueError('Android launcher digest mismatch')
     if 'configurationSha256' in release and inventory.get('usr/local/share/habab-home/configuration.yaml') != release['configurationSha256']:
