@@ -857,6 +857,17 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         native_gemini = realtime.session_config('gemini-3.8-live', client='native_v2')
         self.assertEqual(native_gemini['model'], 'gemini-3.8-live')
 
+    def test_native_v2_delegates_unknown_tools_and_explicit_codex_requests(self):
+        config = realtime.session_config('gemini-3.8-live', client='native_v2',
+                                         context={'states': []}, selected_provider='habab')
+        tool = next(item for item in config['tools'] if item['name'] == 'ask_home_assistant')
+        self.assertIn('неизвестны', config['instructions'])
+        self.assertIn('прямо просит Codex/Кодекс', config['instructions'])
+        self.assertIn('Не отказывай', config['instructions'])
+        self.assertIn('прямо просит Codex', tool['description'])
+        self.assertIn('выбранный executor', tool['description'])
+        self.assertIn('выбранного task_executor', config['instructions'])
+
     def test_native_v2_can_answer_directly_and_has_explicit_session_end(self):
         snapshot = {'assist_exposure': 'verified', 'states': [],
                     'weather': {'status': 'unavailable', 'entities': []}, 'truncated': False}
