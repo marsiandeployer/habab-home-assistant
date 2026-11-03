@@ -1432,7 +1432,14 @@ function installChat() {
           if (generation !== this.voiceGeneration || !this.isCurrentOwnerContext()) return;
           this.onBrowserVoiceEvent(voice, event);
         },
-        onTurn: (text, signal) => this.realtimeRequest("turn", "POST", {session_id: session.session_id, text}, signal),
+        onTurn: (text, signal) => {
+          if (!isCurrent()) return Promise.reject({code: "not_found"});
+          this.status(this.t.working, false, true);
+          return this.realtimeRequest("turn", "POST", {session_id: session.session_id, text}, signal)
+            .finally(() => {
+              if (isCurrent()) this.status("", false, false);
+            });
+        },
         onTranscript: (event) => this.realtimeRequest("transcript", "POST", {
           session_id: session.session_id, kind: "event", event_id: event.event_id,
           role: event.role, text: event.text,

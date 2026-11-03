@@ -685,30 +685,42 @@ class RealtimeStopView(HomeAssistantView):
         return result
 
 
-async def run_voice_task(hass, assistant, owner, session_id, text, **kwargs):
+async def run_voice_task(hass, assistant, owner, session_id, text, *, prepare_session=None, **kwargs):
     """Publish owner-scoped execution progress using the existing history channel."""
     signal = "habab_voice_history_" + owner
     observed = False
+    context_reader = getattr(assistant, "_web_context", None)
+    context = context_reader(owner) if callable(context_reader) else None
+    epoch = kwargs.get("expected_history_epoch")
+    if epoch is None and isinstance(context, dict):
+        epoch = context.get("epoch")
 
     def publish(**data):
+        current = context_reader(owner) if callable(context_reader) else None
+        if (not isinstance(session_id, str) or not isinstance(current, dict)
+                or current.get("session_id") != session_id or type(epoch) is not int
+                or current.get("epoch") != epoch):
+            return False
         async_dispatcher_send(hass, signal, {"session_id": session_id, **data})
+        return True
 
     async def observe():
         nonlocal observed
         while True:
             await asyncio.sleep(1.5)
             runtime = getattr(assistant, "runtime", None)
-            if runtime is None or runtime.active != (owner, session_id):
+            if runtime is None or getattr(runtime, "active", None) != (owner, session_id):
                 continue
+            if not publish(working=True):
+                return
             observed = True
-            publish(working=True)
             try:
                 messages = await assistant.runtime.request(
                     "GET", f"session/{session_id}/message?limit=60", timeout=3)
                 if isinstance(messages, list):
                     async with assistant.voice_journal_lock:
                         context = assistant._web_context(owner)
-                        if context["session_id"] != session_id:
+                        if context["session_id"] != session_id or context["epoch"] != epoch:
                             return
                         visible = assistant._project_pending_voice(
                             owner, session_id, assistant.runtime.visible(messages), context["epoch"])
@@ -717,8 +729,16 @@ async def run_voice_task(hass, assistant, owner, session_id, text, **kwargs):
                 # Progress is best effort; the actual execution reports its own error.
                 pass
 
+    observed = publish(working=True)
     observer = asyncio.create_task(observe())
     try:
+        if prepare_session is not None:
+            prepared_id = await prepare_session()
+            if session_id is not None and prepared_id != session_id:
+                raise AgentError("invalid_session")
+            session_id = prepared_id
+            if not observed:
+                observed = publish(working=True)
         return await assistant.run(owner, "web", session_id, text, **kwargs)
     finally:
         observer.cancel()
@@ -760,14 +780,23 @@ class RealtimeTurnView(HomeAssistantView):
                         lease = await validate_browser_lease_history(hass, assistant, owner.id, session_id)
                     else:
                         current_history = await assistant.voice_history_context(owner.id)
-                        if current_history["epoch"] != lease["history_epoch"]:
+                        if (current_history["epoch"] != lease["history_epoch"]
+                                or lease.get("history_session") is not None
+                                and current_history["session_id"] != lease["history_session"]):
                             raise AgentError("invalid_session")
-                    canonical_id = (await assistant.web_session(owner.id))["session_id"]
-                    if browser:
-                        lease = await validate_browser_lease_history(hass, assistant, owner.id, session_id)
-                        if lease.get("history_session") != canonical_id:
-                            raise AgentError("invalid_session")
+                    canonical_id = lease.get("history_session") if browser else current_history["session_id"]
+
+                    async def prepare_canonical_session():
+                        prepared_id = (await assistant.web_session(owner.id))["session_id"]
+                        if browser:
+                            current_lease = await validate_browser_lease_history(
+                                hass, assistant, owner.id, session_id)
+                            if current_lease.get("history_session") != prepared_id:
+                                raise AgentError("invalid_session")
+                        return prepared_id
+
                     result = await run_voice_task(hass, assistant, owner.id, canonical_id, text,
+                                                 prepare_session=prepare_canonical_session,
                                                  expected_history_epoch=lease["history_epoch"],
                                                  executor_only=True)
                     if browser:

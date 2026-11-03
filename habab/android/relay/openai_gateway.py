@@ -949,9 +949,10 @@ class Gateway:
                 return result
             return self._voice_error('relay_upstream_unavailable', 502)
         finally:
-            disconnect.cancel()
-            await asyncio.gather(disconnect, return_exceptions=True)
+            # A peer disconnect and aiohttp may both cancel this handler. Release
+            # accounting before cleanup can suspend and receive another cancel.
             self.inflight -= 1
+            disconnect.cancel()
             if self.usage_journal is not None:
                 try:
                     self.usage_journal.record(installation=digest, provider='openai', model=usage.model or CODEX_MODEL,
@@ -960,6 +961,7 @@ class Gateway:
                         service_tier=usage.service_tier or 'priority')
                 except Exception:
                     logger.error('usage_statistics_write_failed')
+            await asyncio.gather(disconnect, return_exceptions=True)
             if self.codex_health is not None:
                 await self.codex_health.notify()
 

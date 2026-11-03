@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, Mock, patch
 from homeassistant.components.habab_home import diagnostics
 from homeassistant.components.habab_home import setup_agent
 from homeassistant.components.habab_home.setup_agent import AgentError, SetupAgent
+from homeassistant.components.habab_home.action_outcome import OUTCOME_PROTOCOL
+from homeassistant.components.habab_home.codex_executor import normalize_history, result_part
 from homeassistant.components.habab_home.voice_history import encode_voice_event
 
 
@@ -79,6 +81,167 @@ def tool_messages():
 
 
 class DiagnosticsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_codex_detail_reads_correlated_rollout_projects_tools_and_redacts(self):
+        owner, hass, assistant, runtime = runtime_fixture()
+        thread_id = "123e4567-e89b-12d3-a456-426614174000"
+        outcome = {"protocol": OUTCOME_PROTOCOL, "kind": "answer", "text": "Проверил поиск",
+                   "todo_additions": []}
+        tool_parts = [
+            {"id": "cmd-1", "callID": "cmd-1", "type": "tool", "tool": "bash", "state": {
+                "status": "completed", "input": {"command": "git status"},
+                "output": "CLI stdout: configured-provider-secret", "metadata": {"exit": 0}}},
+            {"id": "search-1", "callID": "search-1", "type": "tool", "tool": "web_search", "state": {
+                "status": "completed", "input": {"queries": ["Habab docs"]},
+                "output": '[{"title":"Docs","url":"https://example.invalid"}]'}},
+        ]
+        marker = result_part("user-1", outcome, tool_parts, runtime.clean,
+            codex_session_id=thread_id, executor_metadata={
+                "provider": "habab", "model": "gpt-6-luna", "service_tier": "fast"})
+        runtime.request.return_value = [
+            {"info": {"role": "user", "id": "user-1",
+                      "time": {"created": "2026-11-03T11:00:00Z"}},
+             "parts": [{"type": "text", "text": "Проверь поиск"}]},
+            {"info": {"role": "user", "id": "marker-1",
+                      "time": {"created": "2026-11-03T11:00:02Z"}}, "parts": [marker]},
+        ]
+        rollout = "\n".join([
+            json.dumps({"timestamp": "2026-11-03T11:00:03Z", "type": "response_item",
+                "payload": {"type": "custom_tool_call", "call_id": "call_1", "name": "exec",
+                            "input": "await (async () => { const api_key='private-js-token'; return api_key; })()"}}),
+            json.dumps({"timestamp": "2026-11-03T11:00:03Z", "type": "response_item",
+                "payload": {"type": "custom_tool_call_output", "call_id": "call_1",
+                            "output": [{"type": "input_text",
+                                        "text": "web search result api_key=rollout-secret"}]}}),
+            json.dumps({"timestamp": "2026-11-03T11:00:04Z", "type": "event_msg",
+                "payload": {"type": "item_completed", "started_at_ms": 1793703603000,
+                    "completed_at_ms": 1793703604000,
+                    "item": {"type": "CommandExecution", "command": ["git", "status"],
+                             "aggregated_output": "stdout api_key=rollout-secret", "exit_code": 0,
+                             "status": "completed", "duration": {"secs": 1, "nanos": 500000000}}}}),
+            json.dumps({"timestamp": "2026-11-03T11:00:05Z", "type": "event_msg",
+                "payload": {"type": "item_completed", "completed_at_ms": 1793703605000,
+                    "item": {"id": "mcp-fixture-1", "type": "McpToolCall",
+                        "server": "habab_search", "tool": "web_search_exa",
+                        "arguments": {"query": "fixture query", "numResults": 3,
+                                      "api_key": "mcp-private-token"},
+                        "readOnlyHint": True, "status": "completed",
+                        "result": {"content": [{"type": "text",
+                            "text": "Fixture search result api_key=mcp-result-secret"}]},
+                        "duration": {"secs": 2, "nanos": 250000000}}}}),
+            json.dumps({"type": "response_item", "payload": {
+                "type": "reasoning", "encrypted_content": "encrypted-reasoning-fixture"}}),
+            json.dumps({"type": "event_msg", "payload": {"type": "item_completed",
+                "item": {"type": "AgentMessage", "content": [
+                    {"type": "Text", "text": "agent-message-not-exported"}]}}}),
+            json.dumps({"type": "event_msg", "payload": {"type": "item_completed",
+                "item": {"type": "CommandExecution", "command": ["git", "status"],
+                    "aggregated_output": "failed with api_key=failed-command-secret",
+                    "exit_code": 1, "status": "failed",
+                    "duration": {"secs": 0, "nanos": 250000000}}}}),
+            json.dumps({"type": "event_msg", "payload": {
+                "type": "error", "message": "provider error token=rollout-private-token"}}),
+            json.dumps({"type": "event_msg", "payload": {
+                "type": "task_complete", "error": {
+                    "message": "unexpected status 401 Unauthorized from relay_not_authorized; "
+                               "private prompt text must not be exported",
+                    "codex_error_info": {"http_connection_failed": {"http_status_code": 401}},
+                }}}),
+        ])
+        runtime.read_codex_session_trace = AsyncMock(return_value={
+            "available": True, "content": rollout, "truncated": False})
+
+        detail_response = await diagnostics.DiagnosticsSessionView().get(
+            Request(owner, hass), "web-alice")
+        detail = json.loads(detail_response.body)
+        self.assertEqual(detail_response.status, 200)
+        self.assertEqual(detail["sources"]["codex_trace"]["available"], True)
+        self.assertGreater(detail["sources"]["codex_trace"]["event_count"], 0)
+        self.assertEqual(detail["session"]["provider_models"], [
+            {"provider": "habab", "model": "gpt-6-luna"}])
+        self.assertNotIn("habab-habab", detail_response.body.decode())
+        self.assertNotIn("habab-chat", detail_response.body.decode())
+        self.assertNotIn("encrypted-reasoning-fixture", detail_response.body.decode())
+        self.assertNotIn("rollout-secret", detail_response.body.decode())
+        self.assertNotIn("rollout-private-token", detail_response.body.decode())
+        self.assertNotIn("private prompt text must not be exported", detail_response.body.decode())
+        self.assertNotIn("private-js-token", detail_response.body.decode())
+        self.assertNotIn("agent-message-not-exported", detail_response.body.decode())
+        self.assertNotIn("failed-command-secret", detail_response.body.decode())
+        self.assertNotIn("mcp-private-token", detail_response.body.decode())
+        self.assertNotIn("mcp-result-secret", detail_response.body.decode())
+        self.assertIn("[redacted]", detail_response.body.decode())
+        self.assertEqual(runtime.read_codex_session_trace.await_args.args, (thread_id,))
+        self.assertTrue(any(event.get("tool") == "web_search" for event in detail["events"]))
+        self.assertTrue(any(event.get("tool") == "codex_exec" and
+                            event.get("kind") == "tool_invocation" for event in detail["events"]))
+        self.assertTrue(any(event.get("tool") == "bash" and event.get("duration_ms") == 1500
+                            for event in detail["events"]))
+        self.assertTrue(any(event.get("tool") == "bash" and event.get("status") == "error"
+                            for event in detail["events"]))
+        self.assertTrue(any(event.get("tool") == "web_search_exa"
+                            and event.get("kind") == "tool_invocation"
+                            and event.get("input", {}).get("query") == "fixture query"
+                            for event in detail["events"]))
+        mcp_result = next(event for event in detail["events"]
+                          if event.get("tool") == "web_search_exa"
+                          and event.get("kind") == "tool_output")
+        self.assertEqual(mcp_result["duration_ms"], 2250)
+        mcp_output_text = mcp_result["output"]["content"][0]["text"]
+        self.assertIn("Fixture search result", mcp_output_text)
+        self.assertIn("[redacted]", mcp_output_text)
+        self.assertTrue(any(event.get("kind") == "assistant_text"
+                            and event.get("text") == "Проверил поиск" for event in detail["events"]))
+        auth_error = next(event for event in detail["events"]
+                          if event.get("kind") == "stage_error"
+                          and event.get("output", {}).get("code") == "relay_not_authorized")
+        self.assertEqual(auth_error["output"]["http_status"], 401)
+        self.assertEqual(auth_error["text"],
+                         "Codex task failed with HTTP 401 (relay_not_authorized).")
+
+        export_response = await diagnostics.DiagnosticsExportView().post(Request(
+            owner, hass, data={"session_id": "web-alice"}))
+        with zipfile.ZipFile(io.BytesIO(export_response.body)) as archive:
+            exported = json.loads(archive.read("history.json"))
+            exported_raw = archive.read("history.json").decode()
+        self.assertTrue(exported["sessions"][0]["session"]["codex_trace"]["available"])
+        self.assertNotIn("encrypted-reasoning-fixture", exported_raw)
+        self.assertNotIn("rollout-secret", exported_raw)
+
+    def test_codex_provider_model_survives_exhausted_event_budget(self):
+        owner, hass, assistant, runtime = runtime_fixture()
+        marker = result_part("user-1", {"protocol": OUTCOME_PROTOCOL, "kind": "answer",
+            "text": "Verified", "todo_additions": []}, [], runtime.clean,
+            executor_metadata={"provider": "habab", "model": "gpt-6-luna",
+                               "service_tier": "fast"})
+        messages = normalize_history([{"info": {"role": "user", "id": "marker-1",
+            "providerID": "habab-habab", "modelID": "habab-chat"}, "parts": [marker]}])
+        session, _events, _raw = diagnostics._project_session_messages(
+            assistant, runtime, owner.id, {"session_id": "web-alice", "channel": "web",
+                "modes": ["web"]}, messages, budget=diagnostics.ProjectionBudget(
+                    max_bytes=0, max_events=0))
+        self.assertEqual(session["provider_models"], [{"provider": "habab", "model": "gpt-6-luna"}])
+
+    async def test_codex_old_ephemeral_is_explicitly_unavailable_and_foreign_mapping_is_rejected(self):
+        owner, hass, _assistant, runtime = runtime_fixture()
+        outcome = {"protocol": OUTCOME_PROTOCOL, "kind": "answer", "text": "Старый ответ",
+                   "todo_additions": []}
+        marker = result_part("user-1", outcome, [], runtime.clean,
+            executor_metadata={"provider": "openai", "model": "gpt-6-luna", "service_tier": "fast"})
+        runtime.request.return_value = [{
+            "info": {"role": "user", "id": "marker-1"}, "parts": [marker]}]
+        runtime.read_codex_session_trace = AsyncMock()
+        own = await diagnostics.DiagnosticsSessionView().get(Request(owner, hass), "web-alice")
+        own_payload = json.loads(own.body)
+        self.assertFalse(own_payload["sources"]["codex_trace"]["available"])
+        self.assertEqual(own_payload["sources"]["codex_trace"]["reason"], "old_ephemeral_session")
+        self.assertEqual(own_payload["sources"]["codex_trace"]["max_file_bytes"],
+                         diagnostics.MAX_CODEX_TRACE_BYTES)
+        self.assertIn("Старый ответ", own.body.decode())
+        runtime.read_codex_session_trace.assert_not_awaited()
+        foreign = await diagnostics.DiagnosticsSessionView().get(Request(owner, hass), "web-bob")
+        self.assertEqual(foreign.status, 404)
+        runtime.read_codex_session_trace.assert_not_awaited()
+
     async def test_all_http_views_require_active_admin_before_runtime_access(self):
         owner, hass, assistant, runtime = runtime_fixture(tool_messages())
         for view, method, args in [

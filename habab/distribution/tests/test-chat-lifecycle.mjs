@@ -694,6 +694,68 @@ test("browser voice capability selects explicit provider realtime or HA Assist f
   ]) assert.equal(setupChatModule.selectBrowserVoiceRoute(unsupported), undefined);
 });
 
+test("browser ask-home-assistant turn shows work immediately and clears status on request failure", async () => {
+  const voiceUrl = pathToFileURL(resolve("habab/distribution/src/habab_home/frontend/voice.js"));
+  const {BrowserOpenAIVoice} = await import(`${voiceUrl}?v=2`);
+  const originalStart = BrowserOpenAIVoice.prototype.start;
+  const originalAudioContext = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  const statuses = [];
+  let onTurn;
+  let rejectTurn;
+  let turnCalls = 0;
+  class FakeAudioContext {
+    currentTime = 0;
+    destination = {};
+    createOscillator() {
+      return {frequency: {value: 0}, connect() {}, disconnect() {}, start() {}, stop() { queueMicrotask(() => this.onended?.()); }};
+    }
+    createGain() {
+      return {gain: {value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}}, connect() {}, disconnect() {}};
+    }
+    resume() { return Promise.resolve(); }
+    close() { return Promise.resolve(); }
+  }
+  Object.defineProperty(globalThis, "AudioContext", {configurable: true, value: FakeAudioContext});
+  BrowserOpenAIVoice.prototype.start = async function() { onTurn = this.onTurn; };
+  try {
+    const chat = Object.create(setupChatElementClass.prototype);
+    chat.voiceGeneration = 7;
+    chat.language = "ru";
+    chat.isCurrentOwnerContext = () => true;
+    chat.q = (selector) => selector === "dialog" ? {open: true} : undefined;
+    chat.status = (text, error = false, working = false) => statuses.push({text, error, working});
+    chat.realtimeRequest = async (action) => {
+      if (action === "session") return {
+        client: "browser_v1", provider: "openai", websocket_url: "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini",
+        session_id: "voice2_test", value: "ephemeral", lease_ttl_seconds: 60,
+        expires_at: Math.floor(Date.now() / 1000) + 60,
+      };
+      turnCalls++;
+      return new Promise((_resolve, reject) => { rejectTurn = reject; });
+    };
+    await chat.startBrowserVoice({provider: "openai", websocket_url: "wss://api.openai.com/v1/realtime?model=gpt-realtime-mini"}, 7);
+    assert.equal(typeof onTurn, "function");
+    const request = onTurn("Проверь свет", new AbortController().signal);
+    assert.deepEqual(statuses.at(-1), {text: chat.t.working, error: false, working: true},
+      "the working indicator appears synchronously before the turn request resolves");
+    assert.equal(turnCalls, 1);
+    rejectTurn({code: "network_error"});
+    await assert.rejects(request, {code: "network_error"});
+    assert.deepEqual(statuses.at(-1), {text: "", error: false, working: false},
+      "a rejected turn request clears the local spinner");
+
+    const statusCount = statuses.length;
+    chat.voiceGeneration++;
+    await assert.rejects(onTurn("Проверь свет", new AbortController().signal), {code: "not_found"});
+    assert.equal(turnCalls, 1, "a stale voice generation cannot start a turn");
+    assert.equal(statuses.length, statusCount, "a stale voice callback cannot change status");
+  } finally {
+    BrowserOpenAIVoice.prototype.start = originalStart;
+    if (originalAudioContext) Object.defineProperty(globalThis, "AudioContext", originalAudioContext);
+    else delete globalThis.AudioContext;
+  }
+});
+
 test("assistant diagnostics use only bounded safe fields and never provider response text", async () => {
   const copy = {diagnosticAuth: "Check your key.", diagnosticQuota: "Check your limits.", diagnosticCertificate: "Check certificates.", diagnosticGeneric: "Check settings."};
   assert.equal(setupChatModule.assistantDiagnosticMessage({name: "AuthenticationError", http_status: 401, response: "secret key"}, copy), "Check your key.");

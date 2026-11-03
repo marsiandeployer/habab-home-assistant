@@ -262,8 +262,55 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Предыдущий вопрос", prompt)
         self.assertEqual(prompt.count("Текущий запрос"), 1)
         self.assertNotIn("через штатный инструмент StructuredOutput", prompt)
+        self.assertIn("Этот ход выполняется Codex CLI, не OpenCode", prompt)
+        self.assertIn("используй shell, git, пакетный менеджер", prompt)
+        self.assertIn("не заявляй доступ к host или root физического Android", prompt)
+        self.assertNotIn("Ты работаешь через OpenCode от root", prompt)
+        from homeassistant.components.habab_home.codex_executor import RESULT_KEY
+        marker = posted[1]["parts"][0]["metadata"][RESULT_KEY]
+        self.assertEqual(marker["executor_metadata"], {
+            "provider": "openai", "model": "gpt-6-luna", "service_tier": "fast"})
         self.assertIsNone(agent.active)
         self.assertEqual(agent.clean("codex-private-key"), "[redacted]")
+
+    async def test_codex_trace_bridge_reads_only_exact_owned_rollout_and_caps_bytes(self):
+        from homeassistant.components.habab_home.codex_executor import MAX_TRACE_BYTES
+        thread_id = "123e4567-e89b-12d3-a456-426614174000"
+        with tempfile.TemporaryDirectory() as directory:
+            codex_root = Path(directory) / "codex"
+            sessions = codex_root / "state" / "sessions" / "2026" / "11" / "03"
+            sessions.mkdir(parents=True)
+            trace = sessions / f"rollout-2026-11-03T12-00-00-{thread_id}.jsonl"
+            trace.write_text('{"type":"event_msg","payload":{"type":"error"}}\n',
+                             encoding="utf-8")
+
+            async def executor_job(function, *args):
+                return function(*args)
+
+            agent = object.__new__(SetupAgent)
+            agent.codex = SimpleNamespace(root=codex_root)
+            agent.hass = SimpleNamespace(async_add_executor_job=executor_job)
+            result = await agent.read_codex_session_trace(thread_id)
+            self.assertTrue(result["available"])
+            self.assertIn('"type":"error"', result["content"])
+            self.assertNotIn(str(trace), json.dumps(result))
+
+            invalid = await agent.read_codex_session_trace("../../etc/passwd")
+            self.assertEqual(invalid, {"available": False, "reason": "trace_file_unavailable"})
+
+            trace.write_bytes(b"x" * (MAX_TRACE_BYTES + 1))
+            oversized = await agent.read_codex_session_trace(thread_id)
+            self.assertFalse(oversized["available"])
+            self.assertTrue(oversized["truncated"])
+            self.assertNotIn("content", oversized)
+
+            outside = Path(directory) / "outside.jsonl"
+            outside.write_text('{"private":"must-not-be-read"}', encoding="utf-8")
+            trace.unlink()
+            trace.symlink_to(outside)
+            symlink = await agent.read_codex_session_trace(thread_id)
+            self.assertFalse(symlink["available"])
+            self.assertNotIn("must-not-be-read", json.dumps(symlink))
 
     async def test_codex_abort_stops_only_codex_child(self):
         agent = self.agent()
@@ -283,7 +330,10 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         tool = {"id": "item_0", "callID": "item_0", "type": "tool", "tool": "bash", "state": {
             "status": "running", "input": {"command": "habab-ha devices"}, "output": ""}}
         agent.codex = SimpleNamespace(run=AsyncMock(side_effect=CodexError("runtime_timeout", "timeout")),
-                                     last_parts=[tool], stop=AsyncMock(return_value=False))
+                                     last_parts=[tool],
+                                     last_session_id="123e4567-e89b-12d3-a456-426614174000",
+                                     last_session_truncated=False,
+                                     stop=AsyncMock(return_value=False))
         history = []
 
         async def request(method, route, body=None, **kwargs):
@@ -304,6 +354,37 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         normalized = normalize_history(history)
         self.assertEqual(normalized[-1]["parts"][0]["state"]["status"], "error")
         self.assertEqual(normalized[-1]["info"]["structured"]["todo_additions"], [])
+        self.assertEqual(normalized[-1]["info"]["codex_session_id"],
+                         "123e4567-e89b-12d3-a456-426614174000")
+
+    async def test_codex_failure_without_tools_still_marks_retained_trace(self):
+        from homeassistant.components.habab_home.codex_executor import CodexError, normalize_history
+        agent = self.agent()
+        agent.hass.config_entries.async_entries = lambda _: [SimpleNamespace(data={
+            "provider": "openai", "api_key": "codex-private-key", "model": "gpt-6-luna"})]
+        agent.hass.async_add_executor_job = AsyncMock()
+        thread_id = "123e4567-e89b-12d3-a456-426614174000"
+        agent.codex = SimpleNamespace(run=AsyncMock(side_effect=CodexError("model_error", "provider failed")),
+            last_parts=[], last_session_id=thread_id, last_session_truncated=False,
+            stop=AsyncMock(return_value=False))
+        history = []
+
+        async def request(method, route, body=None, **kwargs):
+            if method == "GET":
+                return normalize_history(list(history))
+            stored = {"info": {"id": f"stored-{len(history)}", "role": "user"},
+                      "parts": body["parts"]}
+            history.append(stored)
+            return stored
+
+        agent.request = request
+        with patch("homeassistant.components.habab_home.setup_agent.get_assistant_status",
+                   AsyncMock(return_value={})):
+            with self.assertRaisesRegex(AgentError, "model_error"):
+                await agent.run("owner", "session-1", "Проверь поиск")
+        normalized = normalize_history(history)
+        self.assertEqual(normalized[-1]["info"]["codex_session_id"], thread_id)
+        self.assertEqual(normalized[-1]["parts"], [])
         self.assertIsNone(agent.active)
 
     async def test_cancel_persists_context_before_next_request_without_model_reply(self):

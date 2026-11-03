@@ -4,8 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import urlsplit
 
 from aiohttp import ClientSession, web
@@ -15,6 +16,58 @@ from beta_codes import BetaCodes, create_config
 from openai_gateway import CODEX_RESPONSES_URL, Gateway, load_private_config
 from provider_health import ProviderHealth
 from usage_stats import UsageJournal
+
+
+class CodexCancellationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_double_cancellation_releases_slot_and_records_usage_before_awaiting_cleanup(self):
+        owner = 'fixture-habab-installation'
+        started, cleanup_started = asyncio.Event(), asyncio.Event()
+
+        class Body:
+            async def iter_chunked(self, size):
+                yield b'{"model":"gpt-6-luna","input":"fixture task"}'
+
+        class PendingPost:
+            async def __aenter__(self):
+                started.set()
+                await asyncio.Future()
+
+            async def __aexit__(self, *args):
+                pass
+
+        journal = Mock()
+        gateway = Gateway(hashlib.sha256(owner.encode()).hexdigest(), codex_upstream_key='fixture-codex-key',
+                          usage_journal=journal)
+        gateway.client = SimpleNamespace(post=lambda *args, **kwargs: PendingPost())
+        request = SimpleNamespace(headers={'Authorization': 'Bearer ' + owner}, method='POST', query={},
+                                  content_type='application/json', content_length=None, content=Body(),
+                                  transport=SimpleNamespace(is_closing=lambda: False))
+        disconnect_tasks = []
+        gather = asyncio.gather
+
+        async def interrupted_cleanup(*tasks, **kwargs):
+            disconnect_tasks.extend(tasks)
+            cleanup_started.set()
+            # Hold the cleanup boundary so a second request cancellation lands
+            # deterministically while waiting for the disconnect watchdog.
+            await asyncio.Future()
+
+        with patch('openai_gateway.asyncio.gather', interrupted_cleanup):
+            task = asyncio.create_task(gateway.codex_responses(request))
+            try:
+                await asyncio.wait_for(started.wait(), 1)
+                self.assertEqual(gateway.inflight, 1)
+                task.cancel()
+                await asyncio.wait_for(cleanup_started.wait(), 1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            finally:
+                task.cancel()
+                await gather(task, *disconnect_tasks, return_exceptions=True)
+        self.assertEqual(gateway.inflight, 0)
+        journal.record.assert_called_once()
+        self.assertEqual(journal.record.call_args.kwargs['status'], 'cancelled')
 
 
 class CodexGatewayTests(unittest.IsolatedAsyncioTestCase):
@@ -206,14 +259,20 @@ class CodexGatewayTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stalled_provider_closes_promptly_when_client_disconnects(self):
         self.stall = True
-        response = await self.post(stream=True)
-        await response.content.read(32)
-        response.close()
-        await asyncio.sleep(0.3)
-        self.assertEqual(self.gateway.inflight, 0, self.journal())
-        await asyncio.wait_for(self.upstream_disconnected.wait(), 1.5)
+        # Six leaked slots would permanently reject the next installation call.
+        for _ in range(6):
+            self.upstream_disconnected.clear()
+            response = await self.post(stream=True)
+            await response.content.read(32)
+            response.close()
+            await asyncio.wait_for(self.upstream_disconnected.wait(), 1.5)
+            self.assertEqual(self.gateway.inflight, 0, self.journal())
+        self.assertEqual([row['status'] for row in self.journal()], ['cancelled'] * 6)
+        self.stall = False
+        response = await self.post()
+        self.assertEqual(response.status, 200)
+        await response.read()
         self.assertEqual(self.gateway.inflight, 0)
-        self.assertEqual(self.journal()[0]['status'], 'cancelled')
 
     async def test_invalid_stream_content_is_rejected(self):
         self.wrong_content_type = True

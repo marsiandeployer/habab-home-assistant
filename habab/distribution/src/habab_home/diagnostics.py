@@ -22,6 +22,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import __version__ as HA_VERSION
 
 from .agent_diagnostics import safe_error_summary
+from .codex_executor import normalize_history
 from .const import DOMAIN, VERSION
 from .diagnostics_sessions import (
     MAX_ARCHIVED_TELEGRAM_SESSIONS_PER_OWNER,
@@ -42,6 +43,11 @@ MAX_PROJECTED_EVENTS = 200
 MAX_PROJECTED_ITEMS = 5000
 MAX_PROVIDER_MODELS = 10
 MAX_RUNTIME_RESPONSE_BYTES = 16_000_000
+MAX_CODEX_TRACE_FILES = 3
+MAX_CODEX_TRACE_BYTES = 2_000_000
+MAX_CODEX_TRACE_LINES = 2000
+CODEX_MCP_SERVER = "habab_search"
+CODEX_MCP_TOOLS = frozenset({"web_search_exa", "get_code_context_exa"})
 MAX_TEXT_SCAN_CHARS = 32 * 1024
 MAX_OPENCODE_LOG_FILES = 10
 MAX_HA_LOG_FILES = 3
@@ -49,6 +55,7 @@ MAX_INSTANCE_LOG_FILE_BYTES = 8 * 1024
 MAX_INSTANCE_LOG_BYTES = 192 * 1024
 MAX_WINDOW = timedelta(days=31)
 SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+CODEX_SESSION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 CHANNELS = {"all", "web", "telegram", "voice"}
 STATUSES = {"all", "active", "error", "cancelled", "completed", "unknown"}
 _SENSITIVE_FIELD = re.compile(
@@ -125,6 +132,10 @@ def _sources(history_available: bool, reason: str | None = None,
         "backend_ack": {"available": False, "reason": "not_recorded"},
         "model_request": {"available": False, "reason": "not_recorded"},
         "opencode_files": {"available": False, "reason": "not_exposed_by_runtime"},
+        "codex_trace": {"available": False, "reason": "not_recorded",
+                        "max_files": MAX_CODEX_TRACE_FILES,
+                        "max_file_bytes": MAX_CODEX_TRACE_BYTES,
+                        "max_lines_per_file": MAX_CODEX_TRACE_LINES},
         "home_assistant_logs": {"available": False, "reason": "not_collected"},
         "voice_transport": {"available": False, "reason": "not_recorded"},
         "cancellation": {"available": False, "reason": "not_durably_recorded"},
@@ -917,8 +928,16 @@ def _message_times(message: dict) -> tuple[datetime | None, datetime | None]:
 
 
 def _provider_model(info: dict, budget: ProjectionBudget | None = None) -> dict:
-    provider = info.get("providerID")
-    model = info.get("modelID")
+    executor_metadata = info.get("executor_metadata")
+    if info.get("executor") == "codex" and isinstance(executor_metadata, dict):
+        provider = executor_metadata.get("provider")
+        model = executor_metadata.get("model")
+    elif info.get("executor") == "codex":
+        # The stored history transport is not the model that produced this turn.
+        provider = model = None
+    else:
+        provider = info.get("providerID")
+        model = info.get("modelID")
     if (not isinstance(provider, str) or len(provider) > 100
             or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", provider)):
         provider = None
@@ -1104,6 +1123,17 @@ def project_messages(runtime, raw_messages, channel: str,
                                "status": "cancelled" if cancelled else "error",
                                "confirmation": "runtime_error_recorded", "available": True,
                                "reason": None})
+        if role == "assistant" and info.get("executor") == "codex":
+            structured = info.get("structured")
+            answer = structured.get("text") if isinstance(structured, dict) else None
+            if isinstance(answer, str) and answer.strip() and budget.claim_event():
+                events.append({"id": f"{message_index}.codex-answer", "at": _iso(created),
+                               "channel": channel, **model_info,
+                               "stage": "model_text", "kind": "assistant_text",
+                               "role": "assistant", "text": _redact_text(runtime, answer, budget=budget),
+                               "tool": None, "input": None, "output": None, "exit_code": None,
+                               "duration_ms": _duration_ms(message),
+                               "confirmation": "not_applicable", "available": True, "reason": None})
         voice_turn = _voice_turn_texts(runtime, message, budget)
         if voice_turn is not None:
             for index, item in enumerate(voice_turn):
@@ -1183,9 +1213,16 @@ def _session_status(runtime, owner: str, session_id: str, messages: list) -> tup
                 parts = message.get("parts") if isinstance(message.get("parts"), list) else []
                 if len(parts) > MAX_PARTS_PER_MESSAGE:
                     return "unknown", None
+                if info.get("executor") == "codex" and error:
+                    return "error", error
                 has_text = any(isinstance(part, dict) and part.get("type") == "text"
                                and isinstance(part.get("text"), str) and part["text"].strip()
                                for part in parts[:MAX_PARTS_PER_MESSAGE])
+                if (not has_text and info.get("executor") == "codex"
+                        and isinstance(info.get("structured"), dict)
+                        and isinstance(info["structured"].get("text"), str)
+                        and info["structured"]["text"].strip()):
+                    has_text = True
                 has_pending_tool = any(isinstance(part, dict) and part.get("type") == "tool"
                                        and isinstance(part.get("state"), dict)
                                        and part["state"].get("status") == "running"
@@ -1261,15 +1298,26 @@ def _period_session_summary(
 
 
 async def _session_data(hass, owner: str, mapping: dict,
-                        budget: ProjectionBudget | None = None) -> tuple[dict, list[dict], list]:
+                        budget: ProjectionBudget | None = None, *,
+                        include_codex_trace: bool = False) -> tuple[dict, list[dict], list]:
     assistant = hass.data[DOMAIN]["assistant"]
     runtime, messages, message_limit_reached = await _load_session_messages(
         hass, owner, mapping)
-    return _project_session_messages(
+    session, events, raw_messages = _project_session_messages(
         assistant, runtime, owner, mapping, messages,
         message_limit_reached=message_limit_reached,
         budget=budget,
     )
+    if include_codex_trace:
+        trace_source, trace_events = await _codex_trace_projection(
+            assistant, runtime, owner, mapping, messages, budget or ProjectionBudget())
+        session["codex_trace"] = trace_source
+        events.extend(trace_events)
+        events.sort(key=lambda event: (event.get("at") or event.get("_sort_at") or "",
+                                       _event_order_key(event)))
+        for event in events:
+            event.pop("_sort_at", None)
+    return session, events, raw_messages
 
 
 async def _load_session_messages(hass, owner: str, mapping: dict, *,
@@ -1287,7 +1335,347 @@ async def _load_session_messages(hass, owner: str, mapping: dict, *,
         raise AgentError("not_found")
     if not isinstance(raw_messages, list):
         raise AgentError("invalid_runtime_response")
-    return runtime, raw_messages[-message_limit:], len(raw_messages) > message_limit
+    normalized = normalize_history(raw_messages)
+    if not isinstance(normalized, list):
+        raise AgentError("invalid_runtime_response")
+    return runtime, normalized[-message_limit:], len(normalized) > message_limit
+
+
+async def _codex_trace_projection(assistant, runtime, owner: str, mapping: dict, messages: list,
+                                  budget: ProjectionBudget) -> tuple[dict, list[dict]]:
+    """Read bounded rollout files referenced only by validated Codex result markers."""
+    executor_seen = False
+    trace_ids = []
+    executor_metadata = {}
+    for message in messages:
+        info = message.get("info") if isinstance(message, dict) else None
+        if not isinstance(info, dict) or info.get("executor") != "codex":
+            continue
+        executor_seen = True
+        thread_id = info.get("codex_session_id")
+        if isinstance(thread_id, str) and CODEX_SESSION_ID.fullmatch(thread_id):
+            if thread_id not in trace_ids:
+                trace_ids.append(thread_id)
+            metadata = info.get("executor_metadata")
+            if isinstance(metadata, dict):
+                executor_metadata[thread_id] = metadata
+    if not executor_seen:
+        return {"available": False, "reason": "not_codex_executor", "files": 0,
+                "event_count": 0, "truncated": False}, []
+    if not trace_ids:
+        return {"available": False, "reason": "old_ephemeral_session", "files": 0,
+                "event_count": 0, "truncated": False}, []
+    reader = getattr(runtime, "read_codex_session_trace", None)
+    if not callable(reader):
+        return {"available": False, "reason": "trace_reader_unavailable", "files": 0,
+                "event_count": 0, "truncated": False}, []
+
+    events = []
+    reasons = []
+    available_files = 0
+    truncated = len(trace_ids) > MAX_CODEX_TRACE_FILES
+    for file_index, thread_id in enumerate(trace_ids[-MAX_CODEX_TRACE_FILES:]):
+        if not _mapping_is_current(assistant, owner, mapping):
+            raise AgentError("not_found")
+        try:
+            result = reader(thread_id)
+            if hasattr(result, "__await__"):
+                result = await result
+        except Exception:
+            result = None
+        if not _mapping_is_current(assistant, owner, mapping):
+            raise AgentError("not_found")
+        if not isinstance(result, dict) or result.get("available") is not True:
+            reason = result.get("reason") if isinstance(result, dict) else None
+            allowed = {"trace_file_unavailable", "trace_too_large"}
+            reasons.append(reason if isinstance(reason, str) and reason in allowed
+                           else "trace_file_unavailable")
+            if isinstance(result, dict) and result.get("truncated") is True:
+                truncated = True
+            continue
+        content = result.get("content")
+        if not isinstance(content, str) or len(content.encode("utf-8", "replace")) > MAX_CODEX_TRACE_BYTES:
+            reasons.append("trace_too_large")
+            truncated = True
+            continue
+        available_files += 1
+        events.extend(_codex_rollout_events(runtime, content, mapping["channel"],
+                                             file_index, budget,
+                                             executor_metadata.get(thread_id)))
+    if available_files:
+        reason = "partial_trace_unavailable" if reasons or truncated else None
+        available = True
+    else:
+        available = False
+        reason = reasons[-1] if reasons else "trace_file_unavailable"
+    return {"available": available, "reason": reason, "files": available_files,
+            "event_count": len(events),
+            "truncated": truncated}, events
+
+
+def _codex_rollout_events(runtime, content: str, channel: str, file_index: int,
+                          budget: ProjectionBudget, executor_metadata: dict | None = None) -> list[dict]:
+    """Project only explicit tool and error records; never expose raw rollout JSON."""
+    events = []
+    lines = content.splitlines()
+    if len(lines) > MAX_CODEX_TRACE_LINES:
+        lines = lines[:MAX_CODEX_TRACE_LINES]
+        budget.mark_truncated()
+    for line_index, line in enumerate(lines):
+        if len(line.encode("utf-8", "replace")) > 65536:
+            budget.mark_truncated()
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, TypeError):
+            budget.mark_truncated()
+            continue
+        if not isinstance(record, dict):
+            continue
+        record_type, payload = record.get("type"), record.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        payload_type = payload.get("type")
+        item = payload.get("item") if isinstance(payload.get("item"), dict) else {}
+        item_type = item.get("type")
+        if not isinstance(payload_type, str):
+            continue
+        stamp = (payload.get("completed_at_ms") if payload.get("completed_at_ms") is not None
+                 else record.get("timestamp") or payload.get("timestamp"))
+        at = _iso(_timestamp(stamp))
+        provider, model = _provider_model({"executor": "codex",
+                                           "executor_metadata": executor_metadata}, budget)
+        base = {"at": at, "_sort_at": at, "channel": channel,
+                "provider": provider, "model": model, "duration_ms": None,
+                "confirmation": "runtime_result_recorded", "available": True,
+                "reason": None}
+        index = f"codex.{file_index}.{line_index}"
+
+        def add(event):
+            if budget.claim_event():
+                events.append({**base, **event})
+                return True
+            return False
+
+        # Saved rollout MCP calls use event_msg/item_completed and PascalCase
+        # item types, unlike the CLI stdout JSONL event stream.
+        if (record_type == "event_msg" and payload_type == "item_completed"
+                and item_type == "McpToolCall"):
+            server, tool = item.get("server"), item.get("tool")
+            call_id = item.get("id")
+            if (server != CODEX_MCP_SERVER or tool not in CODEX_MCP_TOOLS
+                    or not isinstance(call_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", call_id)):
+                continue
+            arguments = item.get("arguments")
+            if not isinstance(arguments, dict):
+                arguments = {}
+            result = item.get("result") if isinstance(item.get("result"), dict) else {}
+            raw_error = item.get("error")
+            error = _codex_mcp_error(runtime, raw_error, budget) if raw_error is not None else None
+            status = "error" if (item.get("status") in {"failed", "error"}
+                                  or error is not None or result.get("isError") is True
+                                  or bool(result.get("Error"))) else "completed"
+            duration_ms = _codex_duration_ms(item.get("duration"))
+            if not add({"id": index + ".call", "stage": "tool_call",
+                        "kind": "tool_invocation", "role": "assistant", "text": None,
+                        "tool": tool, "status": status,
+                        "input": _clean_value(runtime, arguments, budget=budget),
+                        "output": None, "exit_code": None,
+                        "confirmation": "runtime_call_recorded"}):
+                break
+            projected_result = _codex_mcp_result(runtime, result, budget)
+            if error is not None:
+                projected_result["error"] = error
+            if result or error is not None:
+                if not add({"id": index + ".result", "stage": "tool_result",
+                            "kind": "tool_output", "role": "assistant", "text": None,
+                            "tool": tool, "status": status, "input": None,
+                            "output": projected_result, "duration_ms": duration_ms,
+                            "exit_code": None,
+                            "confirmation": "runtime_error_recorded" if status == "error"
+                            else "runtime_result_recorded"}):
+                    break
+            continue
+
+        # Codex rollouts persist completed tools under PascalCase event items.
+        if record_type == "event_msg" and payload_type == "item_completed" and item_type == "CommandExecution":
+            command = item.get("command")
+            output = item.get("aggregated_output")
+            exit_code = item.get("exit_code")
+            status = ("error" if item.get("status") == "failed" or
+                      type(exit_code) is int and exit_code != 0 else "completed")
+            duration = item.get("duration")
+            duration_ms = None
+            if (isinstance(duration, dict) and type(duration.get("secs")) is int
+                    and type(duration.get("nanos")) is int):
+                duration_ms = duration["secs"] * 1000 + duration["nanos"] // 1_000_000
+            call_input = {"command": command} if isinstance(command, (list, str)) else None
+            if call_input is not None and not add({
+                "id": index + ".call", "stage": "tool_call", "kind": "tool_invocation",
+                "role": "assistant", "text": None, "tool": "bash", "status": status,
+                "input": _clean_value(runtime, call_input, budget=budget), "output": None,
+                "exit_code": exit_code if type(exit_code) is int and -255 <= exit_code <= 255 else None,
+                "confirmation": "runtime_call_recorded"}):
+                break
+            if isinstance(output, str) and not add({
+                "id": index + ".result", "stage": "tool_result", "kind": "tool_output",
+                "role": "assistant", "text": None, "tool": "bash", "status": status,
+                "input": None, "output": _clean_value(runtime, output, budget=budget),
+                "duration_ms": duration_ms if type(duration_ms) is int and 0 <= duration_ms <= 3600000 else None,
+                "exit_code": exit_code if type(exit_code) is int and -255 <= exit_code <= 255 else None,
+                "confirmation": "runtime_result_recorded"}):
+                break
+            continue
+
+        # The CLI also journals its JS exec call and textual tool result separately.
+        if record_type == "response_item" and payload_type == "custom_tool_call":
+            tool_name, call_input = payload.get("name"), payload.get("input")
+            if tool_name != "exec" or not isinstance(call_input, str):
+                continue
+            if not add({"id": index, "stage": "tool_call", "kind": "tool_invocation",
+                        "role": "assistant", "text": None, "tool": "codex_exec",
+                        "status": "running", "input": _clean_value(runtime, call_input, budget=budget),
+                        "output": None, "exit_code": None,
+                        "confirmation": "runtime_call_recorded"}):
+                break
+            continue
+        if record_type == "response_item" and payload_type == "custom_tool_call_output":
+            blocks = payload.get("output")
+            texts = [block.get("text") for block in blocks if isinstance(block, dict)
+                     and block.get("type") == "input_text" and isinstance(block.get("text"), str)] \
+                if isinstance(blocks, list) else []
+            if not texts:
+                continue
+            if not add({"id": index, "stage": "tool_result", "kind": "tool_output",
+                        "role": "assistant", "text": None, "tool": "codex_exec",
+                        "status": "completed", "input": None,
+                        "output": _clean_value(runtime, texts, budget=budget), "exit_code": None,
+                        "confirmation": "runtime_result_recorded"}):
+                break
+            continue
+
+        # Avoid AgentMessage and Reasoning; only surface explicit CLI errors.
+        # Codex reports upstream authentication failures on task_complete.error.
+        if record_type == "event_msg" and (
+                payload_type in {"error", "turn_failed", "item_failed"}
+                or payload_type == "task_complete" and payload.get("error") is not None):
+            error = payload.get("message") or payload.get("error")
+            if isinstance(item, dict) and item_type in {"Error", "TurnFailed"}:
+                error = item.get("message") or error
+            status_code, safe_code = _codex_error_summary(error)
+            if status_code is not None:
+                text = f"Codex task failed with HTTP {status_code}"
+                if safe_code:
+                    text += f" ({safe_code})"
+                text += "."
+            elif safe_code:
+                text = f"Codex task failed ({safe_code})."
+            else:
+                text = "Codex recorded an execution error."
+            output = {"name": "CodexError"}
+            if status_code is not None:
+                output["http_status"] = status_code
+            if safe_code:
+                output["code"] = safe_code
+            if not add({"id": index, "stage": "model_request", "kind": "stage_error",
+                        "role": "assistant", "text": text,
+                        "tool": None, "input": None, "output": output,
+                        "exit_code": None, "status": "error", "confirmation": "runtime_error_recorded"}):
+                break
+    return events
+
+
+def _codex_duration_ms(duration) -> int | None:
+    if (isinstance(duration, dict) and type(duration.get("secs")) is int
+            and type(duration.get("nanos")) is int):
+        value = duration["secs"] * 1000 + duration["nanos"] // 1_000_000
+        return value if 0 <= value <= 3_600_000 else None
+    return None
+
+
+def _codex_mcp_result(runtime, result: dict, budget: ProjectionBudget) -> dict:
+    """Keep MCP text results and explicit error flags, excluding opaque metadata."""
+    projected = {}
+    content = result.get("content")
+    if isinstance(content, list):
+        blocks = []
+        for block in content[:20]:
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("type")
+            if not isinstance(kind, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", kind):
+                continue
+            row = {"type": kind}
+            text = block.get("text")
+            if isinstance(text, str):
+                row["text"] = _redact_text(runtime, text, limit=MAX_TEXT_SCAN_CHARS,
+                                           budget=budget)
+            blocks.append(row)
+        projected["content"] = blocks
+    if type(result.get("isError")) is bool:
+        projected["isError"] = result["isError"]
+    if "Error" in result:
+        projected["Error"] = _clean_value(runtime, result["Error"], budget=budget)
+    return projected
+
+
+def _codex_mcp_error(runtime, error, budget: ProjectionBudget):
+    """Redact the explicit MCP error field without returning raw event metadata."""
+    if isinstance(error, dict):
+        message = error.get("message")
+        code = error.get("code")
+        projected = {}
+        if isinstance(message, str):
+            projected["message"] = _redact_text(runtime, message, limit=2000,
+                                                budget=budget)
+        if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", code):
+            projected["code"] = budget.clean_string(code)
+        return projected or {"message": "MCP tool execution failed."}
+    if isinstance(error, str):
+        return {"message": _redact_text(runtime, error, limit=2000, budget=budget)}
+    return {"message": "MCP tool execution failed."}
+
+
+def _codex_error_summary(error) -> tuple[int | None, str | None]:
+    """Extract only allowlisted error facts from a Codex task error."""
+    status_code = None
+    unauthorized = False
+    pending = [error]
+    visited = 0
+    while pending and visited < 100:
+        value = pending.pop()
+        visited += 1
+        if isinstance(value, dict):
+            for key, child in list(value.items())[:50]:
+                normalized_key = str(key).lower()
+                if (normalized_key in {"http_status_code", "http_status", "status_code",
+                                       "statuscode", "status"}
+                        and type(child) is int and 100 <= child <= 599):
+                    status_code = child
+                if isinstance(child, (dict, list)):
+                    pending.append(child)
+                elif isinstance(child, str):
+                    lowered = child.lower()
+                    if re.search(r"\brelay_not_authorized\b", lowered):
+                        unauthorized = True
+                    if status_code is None:
+                        match = re.search(r"\bhttp\s+(\d{3})\b", lowered)
+                        if match and 100 <= int(match.group(1)) <= 599:
+                            status_code = int(match.group(1))
+        elif isinstance(value, list):
+            pending.extend(value[:50])
+        elif isinstance(value, str):
+            lowered = value.lower()
+            if re.search(r"\brelay_not_authorized\b", lowered):
+                unauthorized = True
+            if status_code is None:
+                match = re.search(r"\bhttp\s+(\d{3})\b", lowered)
+                if match and 100 <= int(match.group(1)) <= 599:
+                    status_code = int(match.group(1))
+    if status_code is None and unauthorized:
+        status_code = 401
+    return status_code, "relay_not_authorized" if unauthorized else None
 
 
 def _session_time_bounds(messages: list) -> tuple[datetime | None, datetime | None]:
@@ -1365,24 +1753,22 @@ def _project_session_messages(assistant, runtime, owner: str, mapping: dict,
     truncations_before = budget.truncation_count
     if message_limit_reached:
         budget.mark_truncated()
+    # Keep the bounded provider identity even if large tool output exhausts the
+    # shared event projection budget below.
+    provider_models = []
+    for message in messages:
+        info = message.get("info") if isinstance(message, dict) and isinstance(message.get("info"), dict) else {}
+        pair = _provider_model(info)
+        if pair["provider"] is not None or pair["model"] is not None:
+            if pair not in provider_models:
+                if len(provider_models) >= MAX_PROVIDER_MODELS:
+                    break
+                provider_models.append(pair)
     events = project_messages(runtime, messages, mapping["channel"], budget)
     status, error = _session_status(runtime, owner, mapping["session_id"], messages)
     voice_present = any(event.get("channel") == "voice" for event in events)
     modes = [mapping["channel"]] + (["voice"] if mapping["channel"] == "web" and voice_present else [])
     created_at, updated_at = _session_time_bounds(messages)
-    provider_models = []
-    for message in messages:
-        if budget.remaining_bytes <= 0:
-            budget.mark_truncated()
-            break
-        info = message.get("info") if isinstance(message, dict) and isinstance(message.get("info"), dict) else {}
-        pair = _provider_model(info, budget)
-        if pair["provider"] is not None or pair["model"] is not None:
-            if pair not in provider_models:
-                if len(provider_models) >= MAX_PROVIDER_MODELS:
-                    budget.mark_truncated()
-                    break
-                provider_models.append(pair)
     session = {
         "session_id": mapping["session_id"], "channel": mapping["channel"],
         "modes": modes, "status": status,
@@ -1541,7 +1927,8 @@ class DiagnosticsSessionView(HomeAssistantView):
         if len(matches) != 1:
             return self.json_message("not_found", status_code=404)
         try:
-            session, events, raw_messages = await _session_data(hass, owner.id, matches[0])
+            session, events, raw_messages = await _session_data(
+                hass, owner.id, matches[0], include_codex_trace=True)
         except AgentError as error:
             if error.code == "not_found":
                 return self.json_message("not_found", status_code=404)
@@ -1562,9 +1949,12 @@ class DiagnosticsSessionView(HomeAssistantView):
         if start is not None and end is not None:
             events = [event for event in events
                       if _matches_window([event], start, end, raw_messages)]
+        sources = _sources(True, session_limit_reached=session_limit_reached,
+                           archive_retention=archive_retention)
+        sources["codex_trace"] = {**sources["codex_trace"], **session.get("codex_trace", {
+            "available": False, "reason": "not_recorded", "files": 0, "truncated": False})}
         response = self.json({"session": session, "events": _stage_rows(events, session["channel"]),
-                              "sources": _sources(True, session_limit_reached=session_limit_reached,
-                                                  archive_retention=archive_retention)})
+                              "sources": sources})
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -1671,6 +2061,15 @@ class DiagnosticsExportView(HomeAssistantView):
                     message_limit_reached=item["message_limit_reached"],
                     budget=projection_budget,
                 )
+                trace_source, trace_events = await _codex_trace_projection(
+                    assistant, item["runtime"], owner.id, record, item["messages"],
+                    projection_budget)
+                session["codex_trace"] = trace_source
+                events.extend(trace_events)
+                events.sort(key=lambda event: (event.get("at") or event.get("_sort_at") or "",
+                                               _event_order_key(event)))
+                for event in events:
+                    event.pop("_sort_at", None)
             except AgentError:
                 history_available = False
                 session = {"session_id": record["session_id"], "channel": record["channel"],
@@ -1794,11 +2193,16 @@ class DiagnosticsExportView(HomeAssistantView):
                        "projection_events": MAX_PROJECTED_EVENTS,
                        "projection_items": MAX_PROJECTED_ITEMS,
                        "provider_models_per_session": MAX_PROVIDER_MODELS,
+                       "codex_trace_files_per_session": MAX_CODEX_TRACE_FILES,
+                       "codex_trace_file_bytes": MAX_CODEX_TRACE_BYTES,
+                       "codex_trace_lines_per_file": MAX_CODEX_TRACE_LINES,
                        "archive_bytes": MAX_EXPORT_BYTES, "window_days": MAX_WINDOW.days},
             "redactions_applied": ["configured provider/runtime secrets", "secret-named fields",
-                                   "credential-like string patterns"],
+                                   "credential-like string patterns",
+                                   "Codex rollout events are parsed through bounded redacted projection"],
             "excluded": ["audio", "provider configuration", "Home Assistant config and secret files",
-                         "raw OpenCode server logs", "Home Assistant logs", "native Assist history"],
+                         "raw OpenCode server logs", "raw Codex rollout files",
+                         "Home Assistant logs", "native Assist history"],
             "audio_included": False,
             "message_limit_reached": any(item["session"].get("at_message_limit") for item in exported),
             "projection_truncated": projection_budget.truncation_count > 0,
@@ -1806,6 +2210,19 @@ class DiagnosticsExportView(HomeAssistantView):
                           any(item["session"].get("at_message_limit") for item in exported) or
                           bool(runtime_log_manifest and runtime_log_manifest["truncated"])),
         }
+        codex_sources = [item["session"].get("codex_trace") for item in exported
+                         if isinstance(item.get("session"), dict)
+                         and isinstance(item["session"].get("codex_trace"), dict)]
+        if codex_sources:
+            manifest["sources"]["codex_trace"] = {
+                "available": any(source.get("available") is True for source in codex_sources),
+                "sessions": codex_sources,
+                "max_files_per_session": MAX_CODEX_TRACE_FILES,
+                "max_file_bytes": MAX_CODEX_TRACE_BYTES,
+                "max_lines_per_file": MAX_CODEX_TRACE_LINES,
+                "truncated": (projection_budget.truncation_count > 0 or
+                              any(source.get("truncated") is True for source in codex_sources)),
+            }
         if runtime_log_manifest is not None:
             manifest["runtime_logs"] = runtime_log_manifest
             runtime_sources = runtime_log_manifest["sources"]

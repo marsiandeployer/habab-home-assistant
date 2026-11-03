@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import stat
 import time
 from urllib.parse import urlsplit
 
@@ -35,7 +36,8 @@ from .assistant_identity import ASSISTANT_IDENTITY
 from .assistant_status import get_assistant_status
 from .const import DOMAIN
 from .codex_executor import (
-    HABAB_CODEX_BASE_URL, CodexError, CodexExecutor, normalize_history, result_part, turn_prompt,
+    HABAB_CODEX_BASE_URL, MAX_TRACE_BYTES, CodexError, CodexExecutor,
+    find_codex_session_file, normalize_history, result_part, turn_prompt,
 )
 from .executor_config import selected_executor
 from .effective_provider import effective_provider_entry
@@ -547,6 +549,45 @@ class SetupAgent:
             text = text.replace(secret, "[redacted]")
         return text.replace(self.password, "[redacted]").replace(self.control_token, "[redacted]")[:32000]
 
+    async def read_codex_session_trace(self, thread_id):
+        """Read one marker-correlated private rollout without exposing its path."""
+        return await self.hass.async_add_executor_job(
+            self._read_codex_session_trace, thread_id)
+
+    def _read_codex_session_trace(self, thread_id):
+        codex_home = self.codex.root / "state"
+        resolved = find_codex_session_file(codex_home, thread_id)
+        if resolved is None:
+            return {"available": False, "reason": "trace_file_unavailable"}
+        path, truncated = resolved
+        if truncated:
+            return {"available": False, "reason": "trace_too_large", "truncated": True}
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = None
+        try:
+            descriptor = os.open(path, flags)
+            file_stat = os.fstat(descriptor)
+            if (not stat.S_ISREG(file_stat.st_mode) or file_stat.st_uid != os.getuid()
+                    or file_stat.st_size > MAX_TRACE_BYTES):
+                return {"available": False, "reason": "trace_file_unavailable",
+                        "truncated": file_stat.st_size > MAX_TRACE_BYTES}
+            data = bytearray()
+            while len(data) <= MAX_TRACE_BYTES:
+                chunk = os.read(descriptor, min(65536, MAX_TRACE_BYTES + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            if len(data) > MAX_TRACE_BYTES:
+                return {"available": False, "reason": "trace_too_large", "truncated": True}
+            return {"available": True,
+                    "content": data.decode("utf-8", errors="replace"),
+                    "truncated": False}
+        except (OSError, ValueError):
+            return {"available": False, "reason": "trace_file_unavailable"}
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
     def _register_runtime_secret(self, secret):
         if isinstance(secret, str) and secret:
             if not hasattr(self, "_runtime_secrets"):
@@ -780,14 +821,31 @@ class SetupAgent:
         if not isinstance(parent_id, str):
             raise AgentError("runtime_error")
         system = runtime_prompt(os.environ.get(RUNTIME_KIND_ENV, DOCKER_RUNTIME_KIND), PROMPT)
+        system = system.replace("Ты работаешь через OpenCode от root", "Ты работаешь через Codex CLI")
+        system += (
+            "\n\nИСПОЛНИТЕЛЬ. Этот ход выполняется Codex CLI, не OpenCode. Внутренние "
+            "подтверждения и sandbox Codex отключены: используй shell, git, пакетный "
+            "менеджер и доступные файлы HA внутри текущего Linux-гостя, если они "
+            "установлены и доступны с фактическими правами runtime-пользователя. "
+            "Если нужный HA-исходник доступен на запись и запрос разрешает изменение, "
+            "исправь его и проверь результат командами; отсутствие отдельного HA tool "
+            "не означает отсутствия возможности. Не обещай выполнение до результата. "
+            "Эти права ограничены текущим гостем: не заявляй доступ к host или root "
+            "физического Android.\n"
+        )
         codex_outcome_prompt = OUTCOME_PROMPT.replace(
             "через штатный инструмент StructuredOutput", "как JSON по output-schema"
         ).replace("вне StructuredOutput", "вне JSON по output-schema")
         system = system.replace(OUTCOME_PROMPT, codex_outcome_prompt)
         prompt = turn_prompt(system, status, self.visible(prior_messages), text)
 
-        async def persist(outcome, parts):
-            marker = result_part(parent_id, outcome, parts, self.clean)
+        async def persist(outcome, parts, codex_session_id=None,
+                          codex_session_truncated=False):
+            marker = result_part(parent_id, outcome, parts, self.clean,
+                                 codex_session_id=codex_session_id,
+                                 codex_session_truncated=codex_session_truncated,
+                                 executor_metadata={key: settings.get(key) for key in
+                                                    ("provider", "model", "service_tier")})
             stored = await self.request("POST", f"session/{session_id}/message", {
                 "noReply": True, "parts": [marker],
             })
@@ -798,7 +856,8 @@ class SetupAgent:
 
         async def persist_failure():
             parts = getattr(self.codex, "last_parts", [])
-            if not parts:
+            codex_session_id = getattr(self.codex, "last_session_id", None)
+            if not parts and not codex_session_id:
                 return
             parts = [{**part, "state": {**part["state"], "status": "error",
                      "error": "command_interrupted"}} if part["state"]["status"] == "running"
@@ -806,7 +865,8 @@ class SetupAgent:
             try:
                 await persist({"protocol": OUTCOME_PROTOCOL, "kind": "answer",
                     "text": "Выполнение запроса прервано или завершилось ошибкой; результат не подтверждён.",
-                    "todo_additions": []}, parts)
+                    "todo_additions": []}, parts, codex_session_id,
+                    getattr(self.codex, "last_session_truncated", False))
             except (AgentError, CodexError):
                 # Storage failure must not replace the original execution error.
                 pass
@@ -814,7 +874,9 @@ class SetupAgent:
         try:
             outcome, parts = await self.codex.run(prompt, settings, self.control_token,
                 verify_binary, self.hass.async_add_executor_job)
-            return await persist(outcome, parts)
+            return await persist(outcome, parts,
+                                 getattr(self.codex, "last_session_id", None),
+                                 getattr(self.codex, "last_session_truncated", False))
         except CodexError as error:
             await persist_failure()
             self.diagnostics.record(*self.active, {"message": error.detail})
