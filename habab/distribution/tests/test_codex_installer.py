@@ -7,7 +7,6 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
 
 
 DIST = Path(__file__).resolve().parents[1]
@@ -55,9 +54,14 @@ class CodexInstallerTests(unittest.TestCase):
         self.assertEqual((self.output / "codex.sha256").read_text().strip(), result["sha256"])
 
     def test_matching_installed_bundle_is_reused_without_network(self):
-        codex_installer.install(self.release_file, self.output, "arm64", opener=self.opener)
-        with patch.object(codex_installer.urllib.request, "urlopen", side_effect=AssertionError("unexpected download")):
-            codex_installer.install(self.release_file, self.output, "arm64")
+        initial = codex_installer.install(self.release_file, self.output, "arm64", opener=self.opener)
+
+        def fail_download(*args, **kwargs):
+            raise AssertionError("unexpected download")
+
+        reused = codex_installer.install(self.release_file, self.output, "arm64", opener=fail_download)
+        self.assertEqual(reused, initial)
+        self.assertEqual(set(reused["files"]), set(codex_installer.REQUIRED_FILES))
 
     def test_missing_execute_bit_reinstalls_binary_bundle(self):
         codex_installer.install(self.release_file, self.output, "arm64", opener=self.opener)

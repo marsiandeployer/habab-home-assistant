@@ -84,7 +84,8 @@ def install(release_file: Path, output_dir: Path, arch: str, archive_dir: Path |
             and set(current_files) == set(REQUIRED_FILES)
             and executable_files
             and sidecar_digest == current_files.get("codex")):
-        return {"arch": arch, "version": release["version"], "sha256": current_files["codex"]}
+        return {"arch": arch, "version": release["version"],
+                "sha256": current_files["codex"], "files": current_files}
 
     binaries = {}
     for name in REQUIRED_FILES:
