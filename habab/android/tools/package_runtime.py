@@ -186,7 +186,14 @@ def install_codex(rootfs, cache):
     spec.loader.exec_module(installer)
     result = installer.install(DIST / 'codex-release.json', rootfs / 'opt/habab-codex',
                                'arm64', archive_dir=cache)
-    return result['version'], result['files']
+    files = result.get('files')
+    expected = {'codex', 'codex-code-mode-host', 'codex-exec-server'}
+    if not isinstance(files, dict) or set(files) != expected:
+        raise ValueError('Codex installer returned an unexpected runtime file inventory')
+    # The installer reports names relative to its output directory. Runtime
+    # manifests attest guest-root paths, which are also consumed by the verifier.
+    runtime_files = {f'opt/habab-codex/{name}': digest for name, digest in files.items()}
+    return result['version'], runtime_files
 
 
 def link_telegram_vendor(rootfs):

@@ -173,7 +173,7 @@ jobs:
       - name: Test release preflight workflow gates
         run: PYTHONPATH=habab/scripts python3 -m unittest -v test_release_candidate.ReleasePreflightWorkflowTests
       - name: Test Android runtime source payload
-        run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_package_runtime_sources test_package_runtime_serialx test_node_inputs test_official_native_inputs
+        run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_package_runtime_sources test_package_runtime_serialx test_package_runtime_codex test_node_inputs test_official_native_inputs
       - name: Test optional private wake model pack validation
         run: PYTHONPATH=habab/android/tools python3 -m unittest -q test_prepare_wake_experiments
       - name: Set up Node 24.21.0
