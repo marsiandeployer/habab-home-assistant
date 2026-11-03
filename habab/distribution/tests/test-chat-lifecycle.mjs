@@ -3,6 +3,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { strings } from "../src/habab_home/frontend/strings.js";
+import { feedbackShareMessage, validFeedbackIssueUrl } from "../src/habab_home/frontend/feedback-receipt.js";
 
 let setupChatModule;
 let setupChatElementClass;
@@ -137,6 +138,8 @@ test("global chat launcher follows the authenticated main element across routes"
     const feedbackCopyKeys = [
       "feedbackPositive", "feedbackNegative", "feedbackPositiveLabel", "feedbackNegativeLabel",
       "feedbackSending", "feedbackSent", "feedbackSentTruncated", "feedbackSentWithoutTrace",
+      "feedbackReceiptId", "feedbackLocalReceiptId", "feedbackOpenReceipt", "feedbackOpenIssue",
+      "feedbackCopyReceipt", "feedbackCopied", "feedbackCopyFailed", "feedbackShareText",
       "feedbackNotConfigured", "feedbackPending", "feedbackFailed", "feedbackCommentLabel",
       "feedbackCommentPlaceholder", "feedbackSubmit", "feedbackCancel",
     ];
@@ -203,8 +206,12 @@ test("global chat launcher follows the authenticated main element across routes"
     await Promise.resolve();
     assert.equal(feedbackRequests.length, 2);
     assert.deepEqual(feedbackRequests[1].body, firstBody, "retry reuses the exact payload and idempotency key");
+    const localReceiptId = "123e4567-e89b-42d3-a456-426614174000";
+    const serverReceiptId = "123e4567-e89b-42d3-a456-426614174001";
+    const issueUrl = "https://github.com/habab/home-assistant/issues/42";
     feedbackRequests[1].resolve({ok: true, json: async () => ({
-      receipt_id: "receipt", state: "saved_locally", delivery_status: "saved_on_server", trace_status: "available",
+      receipt_id: localReceiptId, server_receipt_id: serverReceiptId, server_issue_number: 42, server_issue_url: issueUrl,
+      state: "saved_locally", delivery_status: "saved_on_server", trace_status: "available",
     })});
     await retry;
     const completedFeedback = launcher.renderAnswerFeedback(1);
@@ -213,6 +220,20 @@ test("global chat launcher follows the authenticated main element across routes"
     assert.equal(success.textContent, launcher.t.feedbackSent);
     assert.equal(typeof success.textContent, "string");
     assert.notEqual(success.textContent.trim(), "");
+    const receiptCard = completedFeedback.children.find((child) => child.className === "answer-feedback-receipt");
+    assert.ok(receiptCard, "successful feedback shows a receipt card");
+    const receiptActions = receiptCard.children.find((child) => child.className === "answer-feedback-receipt-actions");
+    const receiptLink = receiptActions.children.find((child) => child.localName === "a" && child.href.startsWith("/habab-diagnostics"));
+    assert.equal(receiptLink.href, `/habab-diagnostics?feedback=${localReceiptId}`);
+    const issueLink = receiptActions.children.find((child) => child.localName === "a" && child.href === issueUrl);
+    assert.ok(issueLink, "only the returned GitHub issue URL is linked");
+    assert.equal(feedbackShareMessage({receipt_id: localReceiptId, server_receipt_id: serverReceiptId, server_issue_number: 42, server_issue_url: issueUrl, state: "saved_locally"}, strings.ru),
+      `Отзыв Habab #${serverReceiptId} · /habab-diagnostics?feedback=${localReceiptId} · ${issueUrl}`);
+    assert.equal(validFeedbackIssueUrl("https://github.com.evil.example/x/y/issues/42"), undefined);
+    assert.equal(feedbackShareMessage({receipt_id: localReceiptId, state: "saved_locally", server_issue_url: "https://example.com/"}, strings.ru),
+      `Отзыв Habab #${localReceiptId} · /habab-diagnostics?feedback=${localReceiptId}`);
+    assert.equal(feedbackShareMessage({receipt_id: "not-an-id", state: "saved_locally", server_receipt_id: serverReceiptId}, strings.ru), "",
+      "malformed local receipt IDs never produce a link");
 
     const originalShadowRoot = launcher.shadowRoot;
     const focusCalls = [];

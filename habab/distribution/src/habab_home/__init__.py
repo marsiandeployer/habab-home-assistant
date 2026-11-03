@@ -143,7 +143,7 @@ async def async_setup(hass, config):
     await async_register_panel(
         hass, frontend_url_path="habab-diagnostics", webcomponent_name="habab-diagnostics-panel",
         sidebar_title="История и диагностика", sidebar_icon="mdi:clipboard-text-clock",
-        require_admin=True, module_url="/habab-home/diagnostics-panel.js?v=1",
+        require_admin=True, module_url="/habab-home/diagnostics-panel.js?v=3",
     )
     await async_register_panel(
         hass, frontend_url_path="habab-support", webcomponent_name="habab-support-panel",

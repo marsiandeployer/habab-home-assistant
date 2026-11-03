@@ -11,6 +11,38 @@ from homeassistant.components.habab_home.setup_agent import AgentError
 
 
 class AssistantServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_feedback_prepares_only_current_owner_voice_journal_without_model_turn(self):
+        await self.service.setup()
+        self.service.web_sessions = {"alice": "canonical-session"}
+        self.service.web_contexts = {"alice": {"session_id": "canonical-session", "epoch": 0}}
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "feedback-question", "user", "Question", history_epoch=0)
+        await self.service.record_voice_event(
+            "alice", "canonical-session", "feedback-answer", "assistant", "Answer", history_epoch=0)
+        raw = []
+
+        async def request(method, route, payload=None):
+            if method == "GET":
+                return list(raw)
+            self.assertTrue(payload["noReply"])
+            self.assertEqual(route, "session/canonical-session/message")
+            raw.append({"info": {"role": "user"}, "parts": payload["parts"]})
+            return {}
+
+        self.runtime.request.side_effect = request
+        await self.service.prepare_feedback_history("alice", "canonical-session")
+        self.assertEqual(len(raw), 2)
+        self.assertTrue(all(receipt["state"] == "complete" for receipt in self.service.voice_receipts.values()))
+        self.runtime.run.assert_not_awaited()
+        self.runtime.ensure.assert_awaited_once()
+        await self.service.prepare_feedback_history("alice", "canonical-session")
+        self.assertEqual(len(raw), 2)
+        with self.assertRaises(AgentError):
+            await self.service.prepare_feedback_history("alice", "foreign-session")
+        self.user.is_active = False
+        with self.assertRaises(AgentError):
+            await self.service.prepare_feedback_history("alice", "canonical-session")
+
     async def test_executor_requires_selected_provider_settings(self):
         self.hass.config_entries.async_entries = lambda _domain: []
         self.runtime.executor_settings = lambda: {"executor": "codex"}

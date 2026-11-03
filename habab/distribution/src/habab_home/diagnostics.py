@@ -1272,19 +1272,22 @@ async def _session_data(hass, owner: str, mapping: dict,
     )
 
 
-async def _load_session_messages(hass, owner: str, mapping: dict) -> tuple[object, list, bool]:
+async def _load_session_messages(hass, owner: str, mapping: dict, *,
+                                 message_limit: int = MAX_MESSAGES) -> tuple[object, list, bool]:
     """Fetch one already-mapped session once, retaining only its bounded history."""
     assistant = hass.data[DOMAIN]["assistant"]
     runtime = assistant.runtime
+    if type(message_limit) is not int or not 1 <= message_limit <= 2000:
+        raise AgentError("invalid_request")
     if not _mapping_is_current(assistant, owner, mapping):
         raise AgentError("not_found")
     raw_messages = await runtime.request(
-        "GET", f"session/{quote(mapping['session_id'], safe='')}/message?limit={MAX_MESSAGES}")
+        "GET", f"session/{quote(mapping['session_id'], safe='')}/message?limit={message_limit}")
     if not _mapping_is_current(assistant, owner, mapping):
         raise AgentError("not_found")
     if not isinstance(raw_messages, list):
         raise AgentError("invalid_runtime_response")
-    return runtime, raw_messages[-MAX_MESSAGES:], len(raw_messages) > MAX_MESSAGES
+    return runtime, raw_messages[-message_limit:], len(raw_messages) > message_limit
 
 
 def _session_time_bounds(messages: list) -> tuple[datetime | None, datetime | None]:

@@ -238,6 +238,19 @@ class AssistantService:
                 owner, result["session_id"], result["messages"], epoch)
             return result
 
+    async def prepare_feedback_history(self, owner, session_id):
+        """Materialize this owner's durable voice journal without executing a turn."""
+        await self._require_active_admin(owner)
+        async with self.web_lifecycle_lock:
+            await self._require_active_admin(owner)
+            context = dict(self._web_context(owner))
+            if context["session_id"] != session_id or self.web_sessions.get(owner) != session_id:
+                raise AgentError("not_found")
+            await self._materialize_pending_voice(owner, session_id, context["epoch"])
+            await self._require_active_admin(owner)
+            if context != self._web_context(owner):
+                raise AgentError("not_found")
+
     async def voice_history_context(self, owner, *, include_messages=False):
         """Read the owner's lease, optionally including bounded current-chat text."""
         await self._require_active_admin(owner)

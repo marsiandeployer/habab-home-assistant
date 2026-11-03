@@ -11,9 +11,9 @@ from homeassistant.components.habab_home.agent_diagnostics import AgentDiagnosti
 from homeassistant.components.habab_home.assistant import AssistantService
 from homeassistant.components.habab_home.fast_dialog import (
     DIALOGUE_METADATA_KEY, MAX_HISTORY_CHARS, bounded_history, decode_dialogue_part,
-    dialogue_part, complete_dialogue,
+    dialogue_part, complete_dialogue, fast_dialog_runtime_metadata,
 )
-from homeassistant.components.habab_home.providers import ProviderError
+from homeassistant.components.habab_home.providers import ProviderContract, ProviderError
 from homeassistant.components.habab_home.setup_agent import AgentError, SetupAgent
 
 
@@ -29,6 +29,49 @@ def direct(answer):
 
 
 class FastDialogueTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fast_dialog_metadata_identifies_selected_model_and_separate_executor(self):
+        contract = ProviderContract(
+            "deepseek", "openai_compatible", "deepseek-flash", "https://api.deepseek.com")
+        settings = {"provider": "deepseek", "api_key": "must-not-leak"}
+        provider = AsyncMock()
+        provider.complete.return_value = direct("DeepSeek")
+        with patch("homeassistant.components.habab_home.fast_dialog.build_voice_context", return_value={}), \
+                patch("homeassistant.components.habab_home.fast_dialog.task_executor_runtime_metadata",
+                      return_value={"task_executor": {"executor": "opencode", "model": None},
+                                    "codex_runtime": {"installation_state": "not_installed"}}), \
+                patch("homeassistant.components.habab_home.fast_dialog.ProviderClient", return_value=provider):
+            await complete_dialogue(None, object(), settings, [], "Какая модель?", contract=contract)
+        messages = provider.complete.call_args.args[0]
+        runtime = json.loads(messages[1]["content"].split("\n", 1)[1])
+        self.assertEqual(runtime["selected_service"], {"id": "deepseek", "name": "DeepSeek"})
+        self.assertEqual(runtime["fast_dialog_model"], "deepseek-flash")
+        self.assertEqual(runtime["task_executor"], {"executor": "opencode", "model": None})
+        self.assertNotIn("api_key", json.dumps(runtime))
+
+    def test_managed_model_uses_only_configured_upstream_and_marks_unknown(self):
+        base = {"provider": "habab", "api_key": "must-not-leak"}
+        executor = {"task_executor": {"executor": "codex", "model": "gpt-6-luna"},
+                    "codex_runtime": {"installation_state": "available"}}
+        configured = ProviderContract(
+            "habab", "google", "habab-chat", "https://gateway.invalid",
+            managed_model="habab-chat", configured_upstream_provider="deepseek",
+            configured_upstream_model="deepseek-v3")
+        unknown = ProviderContract(
+            "habab", "google", "habab-chat", "https://gateway.invalid",
+            managed_model="habab-chat")
+        with patch("homeassistant.components.habab_home.fast_dialog.task_executor_runtime_metadata",
+                   return_value=executor):
+            known_metadata = fast_dialog_runtime_metadata(base, configured)
+            unknown_metadata = fast_dialog_runtime_metadata(base, unknown)
+        self.assertEqual(known_metadata["fast_dialog_model"], "deepseek-v3")
+        self.assertEqual(known_metadata["configured_upstream_service"], "deepseek")
+        self.assertEqual(known_metadata["managed_gateway_model"], "habab-chat")
+        self.assertEqual(known_metadata["task_executor"]["model"], "gpt-6-luna")
+        self.assertIsNone(unknown_metadata["fast_dialog_model"])
+        self.assertIsNone(unknown_metadata["configured_upstream_model"])
+        self.assertEqual(unknown_metadata["selected_service"]["id"], "habab")
+        self.assertNotIn("api_key", json.dumps(known_metadata))
+
     async def test_managed_provider_uses_fresh_closed_session_direct_provider_keeps_shared(self):
         shared, fresh = object(), object()
         context = AsyncMock()
@@ -74,6 +117,15 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
             diagnostics=AgentDiagnostics(),
         )
         self.service = AssistantService(self.hass, self.runtime)
+        managed_contract = ProviderContract(
+            "habab", "google", "habab-chat", "https://gateway.invalid",
+            managed_model="habab-chat", configured_upstream_provider="deepseek",
+            configured_upstream_model="deepseek-v3")
+        self.contract_patch = patch(
+            "homeassistant.components.habab_home.assistant.resolve_provider_contract",
+            new=AsyncMock(return_value=managed_contract))
+        self.contract_patch.start()
+        self.addCleanup(self.contract_patch.stop)
         self.service.web_sessions = {"alice": "web"}
         self.service.telegram_sessions = {"alice:bot:10": "tg", "alice:bot:11": "tg2"}
         self.provider = AsyncMock(return_value=direct("Привет!"))
@@ -134,7 +186,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(model_messages[-1], {"role": "user", "content": original})
         self.assertEqual([item["text"] for item in result["messages"]],
                          ["Меня зовут Саша", "Привет!", original, "Готово"])
-        self.assertEqual(result["dialogue"]["route"], "opencode")
+        self.assertEqual(result["dialogue"]["route"], "codex")
         self.provider.return_value = direct("Саша")
         await self.service.run("alice", "web", "web", "Как меня зовут?")
         self.assertIn({"role": "assistant", "content": "Готово"}, self.provider.call_args.args[0])
@@ -159,7 +211,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(text=text):
                 result = await self.service.run("alice", "web", "web", text)
                 self.runtime.run.assert_awaited_with("alice", "web", text)
-                self.assertEqual(result["dialogue"]["route"], "opencode")
+                self.assertEqual(result["dialogue"]["route"], "codex")
                 self.assertEqual(self.provider.call_args.args[0][-1],
                                  {"role": "user", "content": text})
         self.assertFalse(any(method == "POST" for method, _route, _body in self.requests))
@@ -179,7 +231,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
                    side_effect=[{"local_time": "one"}, {"local_time": "two"}]):
             await self.service.run("alice", "web", "web", "Время?")
             await self.service.run("alice", "web", "web", "А сейчас?")
-        snapshots = [json.loads(call.args[0][1]["content"].split("\n", 1)[1])
+        snapshots = [json.loads(call.args[0][2]["content"].split("\n", 1)[1])
                      for call in self.provider.call_args_list]
         self.assertEqual(snapshots, [{"local_time": "one"}, {"local_time": "two"}])
 
@@ -189,7 +241,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         await self.service.run("alice", "telegram", "tg2", "other chat", "bot", "11")
         for call in self.provider.call_args_list:
             messages = call.args[0]
-            self.assertEqual(len(messages), 3)
+            self.assertEqual(len(messages), 4)
         self.assertEqual(len(self.histories["web"]), 1)
         with self.assertRaisesRegex(AgentError, "not_found"):
             await self.service.run("alice", "telegram", "web", "cross", "bot", "10")
@@ -200,14 +252,30 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         result = await self.service.run("alice", "web", "web", "hello")
         self.provider.assert_not_awaited()
         self.runtime.run.assert_awaited_once()
-        self.assertEqual(result["dialogue"]["mode"], "opencode")
+        self.assertEqual(result["dialogue"]["mode"], "codex")
 
     async def test_internal_executor_only_bypasses_fast_model_for_voice_tool(self):
         result = await self.service.run(
             "alice", "web", "web", "Проверь свет", executor_only=True)
         self.provider.assert_not_awaited()
         self.runtime.run.assert_awaited_once_with("alice", "web", "Проверь свет")
-        self.assertEqual(result["dialogue"]["mode"], "opencode")
+        self.assertEqual(result["dialogue"]["mode"], "codex")
+
+    async def test_uncertain_capabilities_are_delegated_without_rewriting_the_request(self):
+        requests = (
+            "Включи аудио",
+            "Проверь, установлен ли Codex",
+            "Не вижу нужного realtime tool, проверь через исполнителя",
+        )
+        self.provider.return_value = delegate()
+        for text in requests:
+            with self.subTest(text=text):
+                await self.service.run("alice", "web", "web", text)
+        self.assertEqual([call.args[2] for call in self.runtime.run.await_args_list], list(requests))
+        messages = self.provider.call_args.args[0]
+        self.assertIn("не отказывай и не считай её недоступной", messages[0]["content"])
+        self.assertIn("Откажи только после фактического результата исполнителя", messages[0]["content"])
+        self.assertEqual(self.entry.data["provider"], "habab")
 
     async def test_provider_errors_are_explicit_without_fallback_or_history_append(self):
         for code in ("quota", "timeout", "invalid_auth", "invalid_response"):
@@ -354,6 +422,9 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.runtime._aborting = False
         self.runtime._active_run_completed = False
         self.runtime.settings = lambda: self.entry.data
+        # These cancellation tests exercise the OpenCode-backed executor's abort
+        # lifecycle directly; production Habab settings select Codex instead.
+        self.runtime.executor_settings = lambda: {"executor": "opencode"}
         self.runtime.active = None
         self.runtime.external_search_status = {}
 

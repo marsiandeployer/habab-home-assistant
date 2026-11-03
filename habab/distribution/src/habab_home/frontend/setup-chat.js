@@ -1,6 +1,7 @@
 // Independent downstream extension: no dependency on compiled HA internals.
 import { AssistVoice, BrowserGeminiVoice, BrowserOpenAIVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js?v=2";
-import { strings } from "./strings.js?v=7";
+import { strings } from "./strings.js?v=8";
+import { copyFeedbackText, feedbackReceiptPresentation, feedbackShareMessage } from "./feedback-receipt.js?v=1";
 import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals } from "./chat-dismissal.js";
 import { createToolCalls } from "./chat-tools.js?v=1";
 export function visibleTextMessages(messages) {
@@ -896,6 +897,11 @@ function installChat() {
         .answer-feedback-editor textarea{display:block;inline-size:100%;min-block-size:72px;max-block-size:160px;flex:none;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;background:var(--card-background-color,#fff)}
         .answer-feedback-actions{display:flex;justify-content:flex-end;gap:8px}
         .answer-feedback-send{background:var(--primary-color,#007a9e);color:var(--text-primary-color,#fff)}
+        .answer-feedback-receipt{display:grid;gap:4px;inline-size:100%;padding:8px 10px;border:1px solid var(--divider-color,#c8cccf);border-radius:8px;overflow-wrap:anywhere}
+        .answer-feedback-receipt code{font:12px/1.45 ui-monospace,monospace;overflow-wrap:anywhere}
+        .answer-feedback-receipt-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+        .answer-feedback-receipt-actions a{color:var(--primary-color,#007a9e)}
+        .answer-feedback-copy-status{min-block-size:1em}
       </style>
       <button class="icon launcher" type="button" title="${t.open}" aria-label="${t.open}" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-3 3V11.5A7.5 7.5 0 0 1 9.5 4h3A7.5 7.5 0 0 1 20 11.5Z"/><path d="M7 10h8M7 14h5"/></svg></button>
         <dialog aria-labelledby="chat-title"><div class="layout"><header><h2 id="chat-title">${t.title}</h2><button class="mic icon" type="button" aria-label="${t.mic}" title="${t.mic}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8"/></svg></button><button class="collapse icon" type="button" aria-label="${t.collapseChat}" title="${t.collapseChat}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><button class="fresh" type="button">${t.fresh}</button><button class="icon close" type="button" aria-label="${t.close}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><div class="mic-live" role="status" aria-live="polite" hidden>${t.micActive}</div>
@@ -1778,12 +1784,66 @@ function installChat() {
         status.textContent = this.t.feedbackSending;
         controls.append(status);
       } else if (state?.status === "success" || state?.status === "error") {
+        if (state.status === "success" && state.receipt) controls.append(this.renderFeedbackReceipt(state));
         const status = document.createElement("span");
         status.setAttribute("role", "status");
         status.textContent = state.text;
         controls.append(status);
       }
       return controls;
+    }
+
+    renderFeedbackReceipt(state) {
+      const receipt = state.receipt;
+      const details = feedbackReceiptPresentation(receipt);
+      if (!details?.localId) return null;
+      const card = document.createElement("div");
+      card.className = "answer-feedback-receipt";
+      const id = details.serverId || details.localId;
+      const label = document.createElement("span");
+      label.textContent = this.t.feedbackReceiptId;
+      card.append(label);
+      const code = document.createElement("code");
+      code.textContent = id;
+      card.append(code);
+      if (details.serverId && details.serverId !== details.localId) {
+        const local = document.createElement("span");
+        local.textContent = `${this.t.feedbackLocalReceiptId}: ${details.localId}`;
+        card.append(local);
+      }
+      const actions = document.createElement("div");
+      actions.className = "answer-feedback-receipt-actions";
+      const open = document.createElement("a");
+      open.href = `/habab-diagnostics?feedback=${encodeURIComponent(details.localId)}`;
+      open.textContent = this.t.feedbackOpenReceipt;
+      actions.append(open);
+      if (details.issueUrl) {
+        const issue = document.createElement("a");
+        issue.href = details.issueUrl;
+        issue.target = "_blank";
+        issue.rel = "noopener noreferrer";
+        issue.textContent = this.t.feedbackOpenIssue.replace("{number}", String(details.issueNumber || ""));
+        actions.append(issue);
+      }
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = this.t.feedbackCopyReceipt;
+      copy.setAttribute("aria-label", this.t.feedbackCopyReceipt);
+      const copied = document.createElement("span");
+      copied.className = "answer-feedback-copy-status";
+      copied.setAttribute("role", "status");
+      copied.setAttribute("aria-live", "polite");
+      copy.onclick = async () => {
+        try {
+          await copyFeedbackText(feedbackShareMessage(receipt, this.t));
+          copied.textContent = this.t.feedbackCopied;
+        } catch (_) {
+          copied.textContent = this.t.feedbackCopyFailed;
+        }
+      };
+      actions.append(copy, copied);
+      card.append(actions);
+      return card;
     }
 
     openAnswerFeedback(messageIndex, rating) {
@@ -1861,8 +1921,17 @@ function installChat() {
           throw new Error(receipt.delivery_status === "not_configured" || receipt.delivery_status === "rejected"
             ? "feedback_not_configured" : "feedback_pending");
         }
+        const details = feedbackReceiptPresentation(receipt);
+        if (!details?.localId) throw new Error("feedback_invalid_response");
         this.feedbackStates.set(key, {
           ...this.feedbackStates.get(key), status: "success", rating, idempotencyKey: attempt,
+          receipt: {
+            receipt_id: details.localId,
+            state: "saved_locally",
+            server_receipt_id: details.serverId,
+            server_issue_number: details.issueNumber,
+            server_issue_url: details.issueUrl,
+          },
           text: receipt.trace_status === "unavailable" ? this.t.feedbackSentWithoutTrace
             : receipt.trace_status === "truncated" ? this.t.feedbackSentTruncated : this.t.feedbackSent,
         });

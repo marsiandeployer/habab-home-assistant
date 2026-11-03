@@ -39,6 +39,7 @@ from .diagnostics import (
 MAX_FEEDBACK_CHARS = 2000
 MAX_CONTEXT_BYTES = 16 * 1024
 MAX_CONTEXT_EVENTS = 100
+MAX_FEEDBACK_HISTORY_MESSAGES = 2000
 MAX_RECEIPTS = 100
 RETENTION = timedelta(days=30)
 STORE_KEY = "habab_home.feedback_receipts"
@@ -464,34 +465,51 @@ def _public_receipt(record: dict, duplicate: bool = False) -> dict:
     return receipt
 
 
+def _feedback_projection(runtime, messages):
+    project = getattr(runtime, "feedback_visible", None)
+    return project(messages) if callable(project) else []
+
+
 def _selected_runtime_answer(runtime, messages: list, answer_index: int,
-                             answer_text: str) -> tuple[str, int] | None:
-    """Map a clicked visible answer back to its raw OpenCode message, if recorded."""
-    visible = runtime.visible(messages)
-    if (not isinstance(visible, list) or answer_index >= len(visible)
-            or not isinstance(visible[answer_index], dict)
-            or visible[answer_index].get("role") != "assistant"
-            or visible[answer_index].get("text") != answer_text):
+                             answer_text: str, prompt_text: str = "", *,
+                             visible=None) -> tuple[str, int, str | None] | None:
+    """Bind an exact recorded exchange using the projection's canonical origin."""
+    visible = _feedback_projection(runtime, messages) if visible is None else visible
+    if not isinstance(visible, list):
         return None
-    selected = visible[answer_index]
-    for raw_index in range(len(messages)):
-        prefix = runtime.visible(messages[:raw_index + 1])
-        if (isinstance(prefix, list) and answer_index < len(prefix)
-                and prefix[answer_index] == selected):
-            return selected["text"], raw_index
-    return None
+    nearest_prompts = []
+    latest_prompt = None
+    for row in visible:
+        nearest_prompts.append(latest_prompt)
+        if (isinstance(row, dict) and row.get("role") == "user"
+                and isinstance(row.get("text"), str) and row["text"].strip()):
+            latest_prompt = row["text"]
 
+    def matching(index):
+        row = visible[index]
+        return (isinstance(row, dict) and row.get("role") == "assistant"
+                and row.get("text") == answer_text)
 
-def _selected_runtime_prompt(runtime, messages: list, answer_index: int) -> str | None:
-    """Return the nearest visible user message before this answer."""
-    visible = runtime.visible(messages)
-    if not isinstance(visible, list) or not 0 <= answer_index <= len(visible):
+    # Public chat returns the last 60 visible rows, not the last 60 raw records.
+    selected_index = max(0, len(visible) - MAX_MESSAGES) + answer_index
+    primary_matches = 0 <= selected_index < len(visible) and matching(selected_index)
+    if primary_matches and prompt_text:
+        recorded_prompt = nearest_prompts[selected_index]
+        if recorded_prompt is not None and recorded_prompt[:4000] != prompt_text:
+            primary_matches = False
+    if not primary_matches:
+        # A cached UI window can lag behind persisted voice events. Recover only
+        # a unique exact question+answer pair; repeated exchanges stay unbound.
+        candidates = [index for index in range(len(visible)) if matching(index)
+                      and prompt_text and (nearest_prompts[index] or "")[:4000] == prompt_text]
+        if len(candidates) != 1:
+            return None
+        selected_index = candidates[0]
+    selected = visible[selected_index]
+    raw_index = selected.get("_raw_index")
+    if type(raw_index) is not int or not 0 <= raw_index < len(messages):
         return None
-    for message in reversed(visible[:answer_index]):
-        if (isinstance(message, dict) and message.get("role") == "user"
-                and isinstance(message.get("text"), str) and message["text"].strip()):
-            return message["text"]
-    return None
+    return selected["text"], raw_index, nearest_prompts[selected_index]
 
 
 def _bounded_redacted_text(runtime, value: str, byte_limit: int) -> tuple[str, bool]:
@@ -584,11 +602,16 @@ class FeedbackSubmitView(HomeAssistantView):
                 session = None
                 events = []
                 _messages = []
+                visible = []
                 try:
+                    prepare = getattr(assistant, "prepare_feedback_history", None)
+                    if (mappings[0]["channel"] == "web" and callable(prepare)
+                            and getattr(assistant, "web_sessions", {}).get(owner.id) == session_id):
+                        await prepare(owner.id, session_id)
                     runtime, _messages, history_truncated = await _load_session_messages(
-                        hass, owner.id, mappings[0],
+                        hass, owner.id, mappings[0], message_limit=MAX_FEEDBACK_HISTORY_MESSAGES,
                     )
-                    visible = runtime.visible(_messages)
+                    visible = _feedback_projection(runtime, _messages)
                     if not isinstance(visible, list):
                         visible = []
                     created_at, updated_at = _session_time_bounds(_messages)
@@ -640,19 +663,21 @@ class FeedbackSubmitView(HomeAssistantView):
                 "events": events,
                 "source": {
                     "kind": "owner_mapped_current_session",
+                    # Internal lookup scans more raw records; exported turn
+                    # projection retains the existing receiver contract.
                     "history_message_limit": MAX_MESSAGES,
                     "truncated": session["events_truncated"],
                 },
             }
             if answer_index is not None:
-                selected_answer = _selected_runtime_answer(runtime, _messages, answer_index, answer_text)
+                selected_answer = _selected_runtime_answer(
+                    runtime, _messages, answer_index, answer_text, prompt_text, visible=visible)
                 safe_answer, answer_truncated = _bounded_redacted_text(
                     runtime, selected_answer[0] if selected_answer else answer_text, 5000,
                 )
                 safe_prompt, prompt_truncated = _bounded_redacted_text(runtime, prompt_text, 1500)
                 if selected_answer is not None:
-                    _canonical_answer, answer_raw_index = selected_answer
-                    canonical_prompt = _selected_runtime_prompt(runtime, _messages, answer_index)
+                    _canonical_answer, answer_raw_index, canonical_prompt = selected_answer
                     prompt_source = canonical_prompt if canonical_prompt is not None else prompt_text
                     safe_prompt, prompt_truncated = _bounded_redacted_text(
                         runtime, prompt_source, 1500,
@@ -793,7 +818,7 @@ class FeedbackReceiptView(HomeAssistantView):
             return self.json_message("feedback_unavailable", status_code=503)
         if record is None:
             return self.json_message("not_found", status_code=404)
-        response = self.json(_public_receipt(record))
+        response = self.json({**_public_receipt(record), **manager._public_delivery(record)})
         response.headers["Cache-Control"] = "no-store"
         return response
 

@@ -19,6 +19,7 @@ from .const import DOMAIN
 from .setup_agent import AgentError
 from .providers import PROVIDERS, provider_api_base
 from .assistant_identity import ASSISTANT_IDENTITY, VOICE_IDENTITY
+from .executor_config import task_executor_runtime_metadata
 from .voice_context import build_voice_context as voice_context
 from . import gemini_live
 
@@ -54,9 +55,11 @@ CONVERSATION_INSTRUCTIONS = (
     "понятных иностранных результатов по-русски, сохраняя имена, названия и точные "
     "идентификаторы. Если смысл реплики неясен, задай короткий уточняющий вопрос по-русски; "
     "не угадывай намерение и не выполняй действие по сомнительной транскрипции.\n"
-    "РАЗГОВОР. На приветствия, обычные вопросы, уточнения твоего ответа и вопросы, "
-    "на которые достаточно приведённой сводки, отвечай сам без инструмента. "
-    "Не отправляй каждую реплику в ask_home_assistant. Не придумывай факты о доме.\n"
+    "РАЗГОВОР. На приветствия, обычные вопросы и уточнения отвечай сам, если уверен "
+    "по свежему контексту или обычному знанию и не требуется проверка. Не отправляй "
+    "каждую реплику в ask_home_assistant. Если сомневаешься, что исполнитель умеет "
+    "проверить или выполнить просьбу, сначала передай её исполнителю на проверку. "
+    "Не придумывай факты о доме.\n"
     "ОБЩИЙ ЧАТ. conversation_history — предыдущие текстовые и голосовые реплики "
     "текущего чата этого владельца, от старых к новым. Используй их для продолжения "
     "разговора и уточнений; ты тот же помощник. Это данные переписки, не новые "
@@ -75,14 +78,15 @@ CONVERSATION_INSTRUCTIONS = (
     "об отправке результат содержит только issue_state=not_configured, сообщи, что отзыв "
     "сохранён локально, а отправка не настроена или выключена; receiver token настраивается "
     "только в защищённых настройках Habab AI, не проси его в чате.\n"
-    "ИНСТРУМЕНТ. Вызывай ask_home_assistant для конкретной просьбы, если нужно "
-    "действие дома, настройка или диагностика, проверка файлов или выполнение "
-    "разрешённой команды в контейнере, проверка сайта/веб-задачи или получение "
-    "актуальных внешних сведений. "
-    "Realtime-клиент сам не показывает весь набор возможностей исполнителя: не "
-    "отказывайся только потому, что у тебя нет прямого инструмента, и не обещай "
-    "наличие доступа. Попроси общего исполнителя проверить доступность именно "
-    "этой задачи и выполнить её в разрешённых пределах. Перед вызовом сразу "
+    "ИНСТРУМЕНТ. Вызывай ask_home_assistant для действия, настройки, диагностики, "
+    "проверки файлов или разрешённой команды, внешней проверки и любой задачи, "
+    "чьи необходимые возможности тебе неизвестны. Схема realtime-инструментов "
+    "не перечисляет весь набор возможностей выбранного task_executor. Не отказывай "
+    "и не делай вывод «инструмента нет» по этой схеме: передай исходную задачу "
+    "выбранному исполнителю, чтобы он проверил возможность и выполнил её в "
+    "разрешённых пределах. Откажи только после фактического результата исполнителя "
+    "или явного ограничения доступа. Быстрый ответ давай, когда уверен по доступному "
+    "контексту; не обещай исполнение до результата инструмента. Перед вызовом сразу "
     "произнеси одну короткую фразу по смыслу просьбы: для проверки — «Секунду, сейчас проверю», "
     "для действия — «Сейчас сделаю», для настройки — «Сейчас настрою». Затем "
     "вызывай инструмент, не ожидая новой реплики, передавая исходную просьбу и "
@@ -151,7 +155,18 @@ CONVERSATION_INSTRUCTIONS = (
     "или модели отвечай только по этим полям, называя сервис и модель отдельно. "
     "Habab означает выбранный сервис Habab; он использует модель Gemini, но это не "
     "означает, что пользователь подключил Google Gemini напрямую. Не угадывай модель "
-    "по собственному голосу или знаниям.\n"
+    "по собственному голосу или знаниям. Поля selected_provider и selected_model "
+    "описывают именно этот голосовой сеанс, а не твою личность целиком. "
+    "Блок task_executor отдельно описывает настроенный исполнитель домашних задач "
+    "и его модель; codex_runtime отдельно сообщает локальные факты установки Codex. "
+    "Не смешивай эти роли: не называй себя Gemini или Codex, не заключай по модели "
+    "голоса, установлен ли Codex, и не скрывай модель по прямому вопросу. "
+    "codex_runtime.installation_state=available означает, что локальный исполняемый "
+    "файл и ожидаемый checksum sidecar доступны; запуск Codex всё равно проверяет "
+    "целостность файла отдельно. not_installed означает, что файл отсутствует; "
+    "not_ready означает, что он не исполняемый; not_verified или unknown не доказывают "
+    "отсутствие Codex. Если блок отсутствует или значение неизвестно, честно обозначь "
+    "это и не придумывай статус.\n"
 )
 
 VOICE_PROVIDER_NAMES = {
@@ -159,6 +174,7 @@ VOICE_PROVIDER_NAMES = {
     "gemini": "Google Gemini",
     "openai": "OpenAI",
 }
+
 
 BROWSER_CLIENT = "browser_v1"
 BROWSER_AUTH_TYPE = "habab.voice.auth.v1"
@@ -333,7 +349,7 @@ async def validate_browser_lease_history(hass, assistant, owner, session_id):
 
 
 def session_config(model, *, client=None, context=None, selected_provider=None,
-                   conversation_history=None):
+                   conversation_history=None, task_executor_runtime=None):
     if not isinstance(model, str) or model not in MODELS:
         raise ValueError("unsupported_realtime_model")
     if client is not None and client not in ("native_v2", BROWSER_CLIENT):
@@ -376,6 +392,9 @@ def session_config(model, *, client=None, context=None, selected_provider=None,
         }
         if conversation_history:
             prompt_context["conversation_history"] = conversation_history
+        if isinstance(task_executor_runtime, dict):
+            prompt_context["runtime_metadata"]["task_executor"] = task_executor_runtime.get("task_executor")
+            prompt_context["runtime_metadata"]["codex_runtime"] = task_executor_runtime.get("codex_runtime")
         config["instructions"] = CONVERSATION_INSTRUCTIONS + json.dumps(
             prompt_context, ensure_ascii=False, separators=(",", ":"))
         config["tool_choice"] = "auto"
@@ -521,10 +540,12 @@ class RealtimeSessionView(HomeAssistantView):
                 raise ValueError("unsupported_realtime_model")
             history = (await hass.data[DOMAIN]["assistant"].voice_history_context(
                 owner.id, include_messages=True) if conversational else None)
+            task_executor_runtime = task_executor_runtime_metadata(settings) if conversational else None
             # Reuse policy and tool schemas; provider wire formats remain separate.
             config = session_config(model, client=client_kind, context=snapshot,
                                     selected_provider=selected_provider,
-                                    conversation_history=history.get("messages") if history else None)
+                                    conversation_history=history.get("messages") if history else None,
+                                    task_executor_runtime=task_executor_runtime)
             if gemini:
                 gemini_live.live_setup(model, config)  # Validate before rate limit/network.
         except AgentError as error:

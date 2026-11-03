@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import tempfile
 import time
 import uuid
 from types import SimpleNamespace
@@ -416,8 +417,15 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         request.app['hass'].data['habab_home']['setup_agent'] = SimpleNamespace(settings=lambda: {
             'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
         snapshot = {'time_zone': 'UTC', 'states': []}
+        executor_runtime = {
+            'task_executor': {'executor': 'codex', 'model': 'gpt-6-luna', 'service_tier': 'fast'},
+            'codex_runtime': {'installation_state': 'available', 'binary_present': True,
+                              'executable': True, 'integrity_digest_configured': True,
+                              'content_hash_verified': False},
+        }
         config = realtime.session_config('gemini-3.8-live', client='native_v2', context=snapshot,
-                                         selected_provider='habab')
+                                         selected_provider='habab',
+                                         task_executor_runtime=executor_runtime)
         setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
         relay_payload = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
                          'value': 'synthetic-relay-credential', 'expires_at': 12345,
@@ -428,6 +436,7 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, *args): pass
         client = SimpleNamespace(post=Mock(return_value=Context()))
         with patch.object(realtime, 'voice_context', return_value=snapshot), \
+                patch.object(realtime, 'task_executor_runtime_metadata', return_value=executor_runtime) as executor_metadata, \
                 patch.object(realtime, 'async_get_clientsession', return_value=client):
             result = await realtime.RealtimeSessionView().post(request)
         self.assertEqual(result.status, 200)
@@ -446,7 +455,9 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(instructions.split('\n')[-1])['runtime_metadata'], {
             'selected_provider': {'id': 'habab', 'name': 'Habab'},
             'selected_model': 'gemini-3.8-live',
+            **executor_runtime,
         })
+        executor_metadata.assert_called_once_with({'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
         self.assertEqual(payload['provider'], 'gemini')
         self.assertEqual(payload['transport'], 'habab')
         self.assertEqual(payload['model'], 'gemini-3.8-live')
@@ -483,7 +494,9 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             'provider': 'habab', 'api_key': 'synthetic-selected-habab', 'model': 'gemini-3.1-flash-lite'})
         snapshot = {'time_zone': 'UTC', 'states': []}
         config = realtime.session_config('gemini-3.8-live', client='browser_v1', context=snapshot,
-                                         selected_provider='habab')
+                                         selected_provider='habab',
+                                         task_executor_runtime=realtime.task_executor_runtime_metadata(
+                                             request.app['hass'].data['habab_home']['setup_agent'].settings()))
         setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
         capability = relay_browser_capability()
         relay = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
@@ -533,7 +546,9 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
             'provider': 'habab', 'api_key': 'synthetic-selected-habab'})
         snapshot = {'time_zone': 'UTC'}
         config = realtime.session_config('gemini-3.8-live', client='browser_v1', context=snapshot,
-                                         selected_provider='habab')
+                                         selected_provider='habab',
+                                         task_executor_runtime=realtime.task_executor_runtime_metadata(
+                                             request.app['hass'].data['habab_home']['setup_agent'].settings()))
         setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
         capability_response = SimpleNamespace(status=200, json=AsyncMock(return_value=relay_browser_capability()))
         bootstrap_response = SimpleNamespace(status=200, json=AsyncMock(return_value={
@@ -778,7 +793,9 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
                 if provider == 'habab':
                     snapshot = {'time_zone': 'UTC'}
                     config = realtime.session_config('gemini-3.8-live', client='native_v2', context=snapshot,
-                                                     selected_provider='habab')
+                                                     selected_provider='habab',
+                                                     task_executor_runtime=realtime.task_executor_runtime_metadata(
+                                                         request.app['hass'].data['habab_home']['setup_agent'].settings()))
                     setup = realtime.gemini_live.live_setup('gemini-3.8-live', config)
                     remote = {'provider': 'gemini', 'transport': 'habab', 'model': 'gemini-3.8-live',
                               'value': 'synthetic-relay', 'expires_at': 12345,
@@ -925,6 +942,75 @@ class RealtimeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, 'unsupported_voice_provider'):
             realtime.session_config('gpt-realtime-mini', client='native_v2',
                                     selected_provider='deepseek')
+
+    def test_voice_metadata_separates_habab_gemini_voice_from_codex_executor(self):
+        runtime = realtime.task_executor_runtime_metadata(
+            {'provider': 'habab'}, binary_path='/missing/codex', digest='a' * 64)
+        config = realtime.session_config('gemini-3.8-live', client='native_v2',
+            selected_provider='habab', task_executor_runtime=runtime)
+        metadata = json.loads(config['instructions'].split('\n')[-1])['runtime_metadata']
+        self.assertEqual(metadata['selected_provider'], {'id': 'habab', 'name': 'Habab'})
+        self.assertEqual(metadata['selected_model'], 'gemini-3.8-live')
+        self.assertEqual(metadata['task_executor'], {
+            'executor': 'codex', 'model': 'gpt-6-luna', 'service_tier': 'fast'})
+        self.assertEqual(metadata['codex_runtime']['installation_state'], 'not_installed')
+        self.assertIn('selected_provider и selected_model', config['instructions'])
+        self.assertIn('не называй себя Gemini или Codex', config['instructions'])
+        self.assertIn('Схема realtime-инструментов не перечисляет весь набор возможностей',
+                      config['instructions'])
+        self.assertIn('Откажи только после фактического результата исполнителя',
+                      config['instructions'])
+        self.assertNotIn('a' * 64, config['instructions'])
+
+    def test_codex_installation_metadata_checks_small_sidecar_without_hashing_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = os.path.join(directory, 'codex')
+            with open(binary, 'wb') as output:
+                output.write(b'large-binary-fixture')
+            os.chmod(binary, 0o700)
+            with open(binary + '.sha256', 'w', encoding='ascii') as output:
+                output.write('b' * 64 + '  codex\n')
+
+            result = realtime.task_executor_runtime_metadata(
+                {'provider': 'openai'}, binary_path=binary)
+
+        self.assertEqual(result['task_executor']['executor'], 'codex')
+        self.assertEqual(result['codex_runtime']['installation_state'], 'available')
+        self.assertTrue(result['codex_runtime']['binary_present'])
+        self.assertTrue(result['codex_runtime']['executable'])
+        self.assertTrue(result['codex_runtime']['integrity_digest_configured'])
+        self.assertFalse(result['codex_runtime']['content_hash_verified'])
+        self.assertNotIn('b' * 64, json.dumps(result))
+
+    def test_direct_gemini_voice_does_not_imply_codex_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = os.path.join(directory, 'codex')
+            with open(binary, 'wb') as output:
+                output.write(b'codex-fixture')
+            os.chmod(binary, 0o700)
+            result = realtime.task_executor_runtime_metadata(
+                {'provider': 'deepseek'}, binary_path=binary, digest='c' * 64)
+
+        config = realtime.session_config('gemini-3.8-live', client='native_v2',
+            selected_provider='gemini', task_executor_runtime=result)
+        metadata = json.loads(config['instructions'].split('\n')[-1])['runtime_metadata']
+        self.assertEqual(metadata['selected_provider'], {'id': 'gemini', 'name': 'Google Gemini'})
+        self.assertEqual(metadata['task_executor']['executor'], 'opencode')
+        self.assertIsNone(metadata['task_executor']['model'])
+        self.assertEqual(metadata['codex_runtime']['installation_state'], 'available')
+        self.assertIn('task_executor отдельно описывает настроенный исполнитель', config['instructions'])
+
+    def test_missing_codex_digest_is_unverified_not_not_installed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = os.path.join(directory, 'codex')
+            with open(binary, 'wb') as output:
+                output.write(b'codex-fixture')
+            os.chmod(binary, 0o700)
+            result = realtime.task_executor_runtime_metadata(
+                {'provider': 'habab'}, binary_path=binary, digest='invalid')
+        self.assertEqual(result['codex_runtime']['installation_state'], 'not_verified')
+        self.assertTrue(result['codex_runtime']['binary_present'])
+        self.assertFalse(result['codex_runtime']['integrity_digest_configured'])
 
     def test_unknown_home_snapshot_does_not_imply_tool_denial(self):
         context = {'assist_exposure': 'unknown', 'states': [],

@@ -50,6 +50,11 @@ def make_runtime(text="Проверяю результат", output="Ок"):
         visible=Mock(return_value=[]), active=None,
         diagnostics=SimpleNamespace(get=Mock(return_value=None)),
     )
+    # This fake models one projected row per raw message; the single-message
+    # fixture also supplies a mocked user row alongside its assistant record.
+    runtime.feedback_visible = lambda messages: [
+        {**row, "_raw_index": min(index, len(messages) - 1)}
+        for index, row in enumerate(runtime.visible(messages))]
     assistant = SimpleNamespace(
         runtime=runtime, web_sessions={"alice": "web-alice", "bob": "web-bob"},
         telegram_sessions={"alice:entry:1": "tg-alice", "bob:entry:2": "tg-bob"},
@@ -230,6 +235,133 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(secret, rendered)
         self.assertIn("trace_not_recorded_by_runtime", rendered)
         self.assertIn("Native answer", rendered)
+
+    async def test_voice_answer_trace_survives_different_raw_and_visible_history_windows(self):
+        from homeassistant.components.habab_home.setup_agent import SetupAgent
+        from homeassistant.components.habab_home.voice_history import encode_voice_event
+        hass, _assistant, runtime = make_runtime()
+        projector = object.__new__(SetupAgent)
+        projector.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: []))
+        projector._runtime_secrets = set()
+        projector.password = "runtime-password"
+        projector.control_token = "runtime-control"
+        raw = [{"info": {"role": "user", "id": "hidden-" + str(index)}, "parts": [{
+            "type": "text", "synthetic": True, "text": "runtime context"}]} for index in range(8)]
+        dialogue = [("user" if index % 2 == 0 else "assistant", "Recorded " + str(index))
+                    for index in range(50)] + [("user", "Selected voice question"),
+                                               ("assistant", "Selected voice answer")]
+        for index, (role, text) in enumerate(dialogue):
+            encoded, _digest, metadata = encode_voice_event("voice-" + str(index), role, text)
+            raw.append({"info": {"id": "voice-raw-" + str(index), "role": "user"}, "parts": [{
+                "type": "text", "synthetic": True, "text": encoded, "metadata": metadata}]})
+        self.assertEqual(len(raw), 60)
+        self.assertEqual(len(projector.visible(raw)), 52)
+        runtime.request.return_value = raw
+        runtime.visible = projector.visible
+        runtime.feedback_visible = projector.feedback_visible
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="Please improve this recorded voice answer")
+        request_body.update(answer_index=59, answer_text="Selected voice answer",
+                            prompt_text="Selected voice question")
+        response = await feedback.FeedbackSubmitView().post(Request(
+            SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.body)["trace_status"], "available")
+        events = next(iter(manager.records.values()))["context"]["events"]
+        self.assertEqual(events[0]["text"], "Selected voice question")
+        self.assertEqual(events[-1]["text"], "Selected voice answer")
+        self.assertEqual(events[-1]["confirmation"], "runtime_answer_recorded")
+        self.assertFalse(any(event.get("stage") == "trace_unavailable" for event in events))
+
+    def test_shifted_answer_binding_requires_unique_exact_recorded_question_and_answer(self):
+        runtime = SimpleNamespace(feedback_visible=lambda messages: [
+            {**row, "_raw_index": index} for index, row in enumerate(messages)])
+        first = [{"role": "user", "text": "Question one"},
+                 {"role": "assistant", "text": "Same answer"}]
+        second = [{"role": "user", "text": "Question two"},
+                  {"role": "assistant", "text": "Same answer"}]
+        self.assertEqual(feedback._selected_runtime_answer(
+            runtime, first + second, 59, "Same answer", "Question two"), ("Same answer", 3, "Question two"))
+        for prompt in ("Missing question", "", "question two"):
+            self.assertIsNone(feedback._selected_runtime_answer(
+                runtime, first + second, 59, "Same answer", prompt))
+        self.assertIsNone(feedback._selected_runtime_answer(
+            runtime, first + first, 59, "Same answer", "Question one"))
+        self.assertIsNone(feedback._selected_runtime_answer(
+            runtime, first + second, 1, "Same answer", "Missing question"))
+
+    async def test_first_visible_answer_uses_one_projection_and_its_origin_in_2000_raw_records(self):
+        from homeassistant.components.habab_home.setup_agent import SetupAgent
+        from homeassistant.components.habab_home.voice_history import encode_voice_event
+        hass, _assistant, runtime = make_runtime()
+        projector = object.__new__(SetupAgent)
+        projector.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: []))
+        projector._runtime_secrets = set()
+        projector.password = "runtime-password"
+        projector.control_token = "runtime-control"
+        raw = [{"info": {"role": "user", "id": "raw-" + str(index),
+                         "time": {"created": 1792933200000 + index}}, "parts": [{
+                    "type": "text", "synthetic": True, "text": "runtime context"}]}
+               for index in range(2000)]
+        for index in range(301):
+            role = "user" if index % 2 == 0 else "assistant"
+            text = ("Question " if role == "user" else "Answer ") + str(index // 2)
+            encoded, _digest, metadata = encode_voice_event("event-" + str(index), role, text)
+            raw[index * 5]["parts"] = [{"type": "text", "synthetic": True,
+                                       "text": encoded, "metadata": metadata}]
+        public = projector.visible(raw)
+        self.assertEqual(len(public), 60)
+        self.assertEqual(public[0], {"role": "assistant", "text": "Answer 120"})
+        self.assertTrue(all("_raw_index" not in row for row in public))
+        self.assertNotIn(public[0], projector.visible(raw[-60:] ))
+        runtime.feedback_visible = Mock(wraps=projector.feedback_visible)
+        runtime.visible = Mock(side_effect=AssertionError("feedback must not reproject raw prefixes"))
+        runtime.request.return_value = raw
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="Please check the first displayed answer")
+        request_body.update(answer_index=0, answer_text="Answer 120", prompt_text="")
+        response = await feedback.FeedbackSubmitView().post(Request(
+            SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(json.loads(response.body)["trace_status"], "available")
+        runtime.feedback_visible.assert_called_once_with(raw)
+        runtime.request.assert_awaited_once_with("GET", "session/web-alice/message?limit=2000")
+        context = next(iter(manager.records.values()))["context"]
+        self.assertEqual(context["events"][0]["text"], "Question 120")
+        self.assertEqual(context["events"][-1]["text"], "Answer 120")
+        self.assertEqual(context["source"]["history_message_limit"], feedback.MAX_MESSAGES)
+        self.assertLessEqual(len(json.dumps(context).encode()), feedback.MAX_CONTEXT_BYTES)
+        self.assertIsNotNone(feedback_transport._context_bytes(context))
+        self.assertNotIn("Answer 149", json.dumps(context))
+
+    async def test_feedback_materializes_current_owner_pending_voice_before_history_lookup(self):
+        hass, assistant, runtime = make_runtime()
+        raw = [
+            {"info": {"role": "user"}, "parts": [{"type": "text", "text": "Voice question"}]},
+            {"info": {"role": "assistant"}, "parts": [{"type": "text", "text": "Voice answer"}]},
+        ]
+        order = []
+
+        async def prepare(owner, session_id):
+            self.assertEqual((owner, session_id), ("alice", "web-alice"))
+            order.append("materialized")
+
+        async def read(*args):
+            self.assertEqual(order, ["materialized"])
+            return raw
+
+        assistant.prepare_feedback_history = AsyncMock(side_effect=prepare)
+        runtime.request = AsyncMock(side_effect=read)
+        runtime.visible.side_effect = lambda messages: [
+            {"role": row["info"]["role"], "text": row["parts"][0]["text"]} for row in messages]
+        manager, _store = self.make_manager(hass)
+        request_body = body(feedback_text="Please check this voice response")
+        request_body.update(answer_index=1, answer_text="Voice answer", prompt_text="Voice question")
+        response = await feedback.FeedbackSubmitView().post(Request(
+            SimpleNamespace(id="alice", is_active=True, is_admin=True), hass, request_body))
+        self.assertEqual(json.loads(response.body)["trace_status"], "available")
+        assistant.prepare_feedback_history.assert_awaited_once_with("alice", "web-alice")
+        self.assertEqual(next(iter(manager.records.values()))["context"]["events"][-1]["text"], "Voice answer")
 
     async def test_native_answer_feedback_still_saves_when_opencode_history_is_unavailable(self):
         hass, _assistant, _runtime = make_runtime()
@@ -441,6 +573,37 @@ class FeedbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(own_payload["state"], "saved_locally")
         self.assertNotIn("feedback", own_payload)
         self.assertNotIn("context", own_payload)
+
+    async def test_owner_receipt_returns_only_safe_delivery_fields_and_validated_issue_link(self):
+        hass, _assistant, _runtime = make_runtime()
+        manager, _store = self.make_manager(hass)
+        owner = SimpleNamespace(id="alice", is_active=True, is_admin=True)
+        accepted = await feedback.FeedbackSubmitView().post(Request(owner, hass, body()))
+        receipt_id = json.loads(accepted.body)["receipt_id"]
+        record = manager.records[receipt_id]
+        server_receipt_id = str(uuid.uuid4())
+        issue_url = "https://github.com/example/project/issues/123"
+        record.update(delivery_status="saved_on_server", server_receipt_id=server_receipt_id,
+                      server_issue_state="created", server_issue_number=123, server_issue_url=issue_url,
+                      api_key="private-provider-key", delivery_token="private-delivery-token")
+        response = await feedback.FeedbackReceiptView().get(Request(owner, hass), receipt_id)
+        payload = json.loads(response.body)
+        self.assertEqual(payload["server_receipt_id"], server_receipt_id)
+        self.assertEqual(payload["server_issue_url"], issue_url)
+        self.assertEqual(payload["server_issue_number"], 123)
+        self.assertEqual(payload["delivery_status"], "saved_on_server")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertTrue(set(payload) <= {"receipt_id", "state", "issue_state", "created_at", "duplicate",
+            "trace_status", "delivery_status", "delivery_error", "server_receipt_id", "server_issue_state",
+            "server_issue_number", "server_issue_url", "server_duplicate"})
+        for value in ("private-provider-key", "private-delivery-token", record["feedback"]):
+            self.assertNotIn(value, response.text)
+        record["server_issue_url"] = "https://github.com/example/project/issues/123?token=secret"
+        invalid = await feedback.FeedbackReceiptView().get(Request(owner, hass), receipt_id)
+        invalid_payload = json.loads(invalid.body)
+        self.assertEqual(invalid_payload["server_issue_state"], "unknown")
+        self.assertNotIn("server_issue_url", invalid_payload)
+        self.assertNotIn("server_issue_number", invalid_payload)
 
     async def test_store_failure_does_not_return_receipt_or_report_saved(self):
         hass, _assistant, runtime = make_runtime()

@@ -553,8 +553,14 @@ class SetupAgent:
                 self._runtime_secrets = set()
             self._runtime_secrets.add(secret)
 
-    def visible(self, messages):
+    def visible(self, messages, *, limit=60, include_origin=False):
         result = []
+
+        def append(row):
+            if include_origin:
+                row = {**row, "_raw_index": message_index}
+            result.append(row)
+
         tool_history = tool_calls_by_message(self, messages)
         protocol_turns = {
             message.get("info", {}).get("id") for message in messages
@@ -578,17 +584,17 @@ class SetupAgent:
                 try:
                     outcome = parse_outcome(info["structured"])
                 except OutcomeError:
-                    result.append({"role": role, "text": "Не удалось проверить формат ответа помощника."})
+                    append({"role": role, "text": "Не удалось проверить формат ответа помощника."})
                 else:
                     text = outcome["text"] if todo_claims_verified(outcome, message, messages) else UNVERIFIED_TODO_TEXT
-                    result.append({"role": role, "text": self.clean(text)})
+                    append({"role": role, "text": self.clean(text)})
                 if tools:
                     result[-1]["tool_calls"] = tools
                 continue
             if role == "assistant" and info.get("parentID") in protocol_turns:
                 # Intermediate prose is not the final StructuredOutput response.
                 if tools:
-                    result.append({"role": role, "text": "", "tool_calls": tools})
+                    append({"role": role, "text": "", "tool_calls": tools})
                 continue
             visible_parts = []
             for part in message.get("parts", []):
@@ -597,12 +603,12 @@ class SetupAgent:
                 metadata = part.get("metadata")
                 if isinstance(metadata, dict) and DIALOGUE_METADATA_KEY in metadata:
                     for turn in decode_dialogue_part(part) or []:
-                        result.append({"role": turn["role"], "text": self.clean(turn["text"])})
+                        append({"role": turn["role"], "text": self.clean(turn["text"])})
                     continue
                 if isinstance(metadata, dict) and VOICE_EVENT_PROTOCOL_KEY in metadata:
                     event = decode_voice_event_part(part)
                     if event is not None:
-                        result.append({"role": event["role"],
+                        append({"role": event["role"],
                                        "text": self.clean(event["text"])})
                     # Invalid or untrusted event markers must never expose JSON.
                     continue
@@ -629,8 +635,8 @@ class SetupAgent:
                                 and 0 < len(payload["assistant"].strip()) <= 12000
                                 and hashlib.sha256(raw.encode("utf-8")).hexdigest()
                                 == payload_hash):
-                            result.append({"role": "user", "text": self.clean(payload["user"])})
-                            result.append({"role": "assistant", "text": self.clean(payload["assistant"])})
+                            append({"role": "user", "text": self.clean(payload["user"])})
+                            append({"role": "assistant", "text": self.clean(payload["assistant"])})
                     # Synthetic marked parts are never exposed as raw JSON.
                     continue
                 if not part.get("synthetic"):
@@ -640,8 +646,12 @@ class SetupAgent:
                 row = {"role": role, "text": self.clean(text)}
                 if tools:
                     row["tool_calls"] = tools
-                result.append(row)
-        return result[-60:]
+                append(row)
+        return result if limit is None else result[-limit:]
+
+    def feedback_visible(self, messages):
+        """Internal bounded-history projection with canonical source positions."""
+        return self.visible(messages, limit=None, include_origin=True)
 
     async def run(self, owner, session_id, text):
         if self.lock.locked() or self._aborting:

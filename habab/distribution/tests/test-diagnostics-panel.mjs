@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  feedbackReceiptIdFromSearch,
+  feedbackReceiptPresentation,
+  feedbackShareMessage,
+} from "../src/habab_home/frontend/feedback-receipt.js";
 
 const originalHTMLElement = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
 const originalCustomElements = Object.getOwnPropertyDescriptor(globalThis, "customElements");
@@ -34,6 +39,45 @@ test("diagnostics filters serialize local time as explicit UTC and reject invali
   assert.throws(() => diagnostics.normalizeDiagnosticsFilters({ from: "not-a-date" }), /invalid_time/);
   assert.throws(() => diagnostics.normalizeDiagnosticsFilters({ from: localTo, to: localFrom }), /invalid_time_range/);
   assert.throws(() => diagnostics.normalizeDiagnosticsFilters({ session_id: "../other" }), /invalid_session_id/);
+});
+
+test("feedback deep links and receipts expose only validated IDs and delivery metadata", () => {
+  const localId = "123e4567-e89b-42d3-a456-426614174000";
+  const serverId = "223e4567-e89b-42d3-a456-426614174001";
+  assert.equal(feedbackReceiptIdFromSearch(`?feedback=${localId}`), localId);
+  assert.equal(feedbackReceiptIdFromSearch("?feedback=not-an-id"), undefined);
+  const receipt = {
+    receipt_id: localId,
+    state: "saved_locally",
+    server_receipt_id: serverId,
+    server_issue_number: 42,
+    server_issue_url: "https://github.com/habab/home-assistant/issues/42",
+    delivery_status: "saved_on_server",
+    trace_status: "truncated",
+    feedback: "must not be returned by the presentation helper",
+    context: {answer_text: "private"},
+  };
+  assert.deepEqual(feedbackReceiptPresentation(receipt, localId), {
+    localId,
+    serverId,
+    issueUrl: "https://github.com/habab/home-assistant/issues/42",
+    issueNumber: 42,
+    deliveryStatus: "saved_on_server",
+    traceStatus: "truncated",
+  });
+  assert.equal(feedbackReceiptPresentation(receipt, "123e4567-e89b-42d3-a456-426614174002"), undefined);
+  assert.equal(feedbackShareMessage(receipt, {
+    feedbackShareText: "Отзыв Habab #{id} · {url}{issue}",
+  }), `Отзыв Habab #${serverId} · /habab-diagnostics?feedback=${localId} · https://github.com/habab/home-assistant/issues/42`);
+  const unsafe = feedbackReceiptPresentation({
+    ...receipt, server_issue_url: "https://github.com.attacker.example/habab/home-assistant/issues/42",
+  }, localId);
+  assert.equal(unsafe.issueUrl, undefined);
+  assert.equal(unsafe.issueNumber, undefined);
+  assert.equal(feedbackReceiptPresentation({...receipt, server_receipt_id: "feedback-2026-42"}, localId)?.serverId, undefined,
+    "server receipt IDs must use the backend canonical UUID format");
+  assert.equal(feedbackReceiptPresentation({...receipt, state: "invalid"}, localId), undefined);
+  assert.equal(feedbackReceiptPresentation({...receipt, receipt_id: "malformed"}, localId), undefined);
 });
 
 test("diagnostic labels separate assistant language from recorded tool events", () => {

@@ -1,4 +1,11 @@
-import { strings } from "./strings.js";
+import { strings } from "./strings.js?v=8";
+import {
+  copyFeedbackText,
+  feedbackReceiptIdFromSearch,
+  feedbackReceiptPresentation,
+  feedbackShareMessage,
+  isCanonicalFeedbackUuid,
+} from "./feedback-receipt.js?v=1";
 
 const CHANNELS = new Set(["all", "web", "telegram", "voice"]);
 const STATUSES = new Set(["all", "active", "error", "completed", "cancelled", "unknown"]);
@@ -115,6 +122,20 @@ const copy = {
     sourceVoice: "Voice transport",
     sourceNativeAssist: "Native Assist history",
     running: "Running",
+    feedbackReceiptTitle: "Feedback receipt",
+    feedbackReceiptLoading: "Loading feedback receipt…",
+    feedbackReceiptNotFound: "This feedback receipt is unavailable.",
+    feedbackReceiptSaved: "Saved in this Home Assistant installation",
+    feedbackReceiptDelivery: "Delivery",
+    feedbackReceiptPending: "Delivery is not confirmed",
+    feedbackReceiptDelivered: "Delivered to Habab",
+    feedbackReceiptDeliveryFailed: "Delivery failed",
+    feedbackReceiptTrace: "Answer trace",
+    feedbackReceiptCopy: "Copy feedback ID and link",
+    feedbackReceiptCopied: "Copied",
+    feedbackReceiptCopyFailed: "Could not copy",
+    feedbackReceiptIssue: "Open GitHub issue #{number}",
+    feedbackShareText: "Habab feedback #{id} · {url}{issue}",
   },
   ru: {
     title: "История и диагностика",
@@ -218,6 +239,20 @@ const copy = {
     sourceVoice: "Голосовой транспорт",
     sourceNativeAssist: "История нативного Assist",
     running: "Выполняется",
+    feedbackReceiptTitle: "Квитанция об отзыве",
+    feedbackReceiptLoading: "Загружаем квитанцию…",
+    feedbackReceiptNotFound: "Квитанция недоступна. Проверьте ссылку или войдите как владелец Home Assistant.",
+    feedbackReceiptSaved: "Сохранён в этом Home Assistant",
+    feedbackReceiptDelivery: "Доставка",
+    feedbackReceiptPending: "Доставка не подтверждена",
+    feedbackReceiptDelivered: "Передан Habab",
+    feedbackReceiptDeliveryFailed: "Не удалось передать отзыв",
+    feedbackReceiptTrace: "Трасса ответа",
+    feedbackReceiptCopy: "Скопировать ID и ссылку",
+    feedbackReceiptCopied: "Скопировано",
+    feedbackReceiptCopyFailed: "Не удалось скопировать",
+    feedbackReceiptIssue: "Открыть задачу на GitHub #{number}",
+    feedbackShareText: "Отзыв Habab #{id} · {url}{issue}",
   },
 };
 
@@ -340,10 +375,6 @@ export function selectedSessionExportScope(sessionId, channel, includeRuntimeLog
   return {session_id: sessionId, channel, include_runtime_logs: includeRuntimeLogs === true};
 }
 
-function feedbackUuid(value) {
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
 function createFeedbackUuid() {
   if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
   const bytes = new Uint8Array(16);
@@ -357,7 +388,7 @@ function createFeedbackUuid() {
 
 export function feedbackAttemptFor(sessionId, feedback, previousAttempt) {
   const normalized = typeof feedback === "string" ? feedback.trim() : "";
-  if (previousAttempt?.session_id === sessionId && previousAttempt.feedback === normalized && feedbackUuid(previousAttempt.idempotency_key)) {
+  if (previousAttempt?.session_id === sessionId && previousAttempt.feedback === normalized && isCanonicalFeedbackUuid(previousAttempt.idempotency_key)) {
     return previousAttempt;
   }
   return {session_id: sessionId, feedback: normalized, idempotency_key: createFeedbackUuid()};
@@ -378,7 +409,7 @@ export async function postConversationFeedback(fetchWithAuth, attempt) {
   let receipt;
   try { receipt = await response.json(); }
   catch (_) { throw new Error("feedback_invalid_response"); }
-  if (!feedbackUuid(receipt?.receipt_id) || receipt.state !== "saved_locally" || receipt.issue_state !== "not_configured") {
+  if (!isCanonicalFeedbackUuid(receipt?.receipt_id) || receipt.state !== "saved_locally" || receipt.issue_state !== "not_configured") {
     throw new Error("feedback_invalid_response");
   }
   return receipt;
@@ -417,6 +448,12 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.detailVersion = 0;
     this.loadedOwner = undefined;
     this.exportTimer = undefined;
+    this.feedbackReceiptId = undefined;
+    this.feedbackReceipt = undefined;
+    this.feedbackReceiptLoading = false;
+    this.feedbackReceiptError = false;
+    this.feedbackReceiptVersion = 0;
+    this.onLocationChanged = () => this.syncFeedbackReceipt();
   }
 
   set hass(value) {
@@ -426,6 +463,10 @@ class HababDiagnosticsPanel extends HTMLElement {
     if (previousOwner !== undefined && ownerId !== previousOwner) {
       this.abortRequests();
       this.clearPrivateData();
+      this.feedbackReceiptAbort?.abort();
+      this.feedbackReceiptAbort = undefined;
+      this.feedbackReceipt = undefined;
+      this.feedbackReceiptId = undefined;
       this.loadedOwner = undefined;
     }
     const language = value?.locale?.language?.startsWith("ru") ? "ru" : "en";
@@ -436,6 +477,10 @@ class HababDiagnosticsPanel extends HTMLElement {
     if (value?.user?.is_admin !== true) {
       this.abortRequests();
       this.clearPrivateData();
+      this.feedbackReceiptAbort?.abort();
+      this.feedbackReceiptAbort = undefined;
+      this.feedbackReceipt = undefined;
+      this.feedbackReceiptId = undefined;
       this.loadedOwner = undefined;
       this.renderStatus(this.t("accessDenied"), true);
       this.updateControls();
@@ -443,7 +488,10 @@ class HababDiagnosticsPanel extends HTMLElement {
     }
     if (ownerId !== this.loadedOwner) {
       this.loadedOwner = ownerId;
-      if (this.isConnected) void this.loadSessions(false);
+      if (this.isConnected) {
+        void this.loadSessions(false);
+        void this.syncFeedbackReceipt();
+      }
     }
     const menu = this.q("ha-menu-button");
     if (menu) menu.hass = value;
@@ -458,10 +506,15 @@ class HababDiagnosticsPanel extends HTMLElement {
       this.needsReload = false;
       void this.loadSessions(false);
     }
+    if (this._hass?.user?.is_admin === true) void this.syncFeedbackReceipt();
+    globalThis.addEventListener?.("location-changed", this.onLocationChanged);
+    globalThis.addEventListener?.("popstate", this.onLocationChanged);
   }
 
   disconnectedCallback() {
     this.needsReload = this.loading || this.loadingDetail;
+    globalThis.removeEventListener?.("location-changed", this.onLocationChanged);
+    globalThis.removeEventListener?.("popstate", this.onLocationChanged);
     this.abortRequests();
     this.loading = false;
     this.loadingDetail = false;
@@ -473,6 +526,97 @@ class HababDiagnosticsPanel extends HTMLElement {
   get words() { return copy[this.language || "en"]; }
   t(key) { return this.words[key] || strings[this.language || "en"][key] || this.words.unknown; }
   q(selector) { return this.shadowRoot.querySelector(selector); }
+
+  async syncFeedbackReceipt() {
+    const nextId = feedbackReceiptIdFromSearch(globalThis.location?.search);
+    if (nextId === this.feedbackReceiptId && (this.feedbackReceipt || this.feedbackReceiptLoading || this.feedbackReceiptError)) return;
+    this.feedbackReceiptId = nextId;
+    this.feedbackReceipt = undefined;
+    this.feedbackReceiptError = false;
+    this.feedbackReceiptAbort?.abort();
+    this.feedbackReceiptAbort = undefined;
+    const version = ++this.feedbackReceiptVersion;
+    if (!nextId || this._hass?.user?.is_admin !== true) {
+      this.renderFeedbackReceiptCard();
+      return;
+    }
+    const controller = new AbortController();
+    this.feedbackReceiptAbort = controller;
+    this.feedbackReceiptLoading = true;
+    this.renderFeedbackReceiptCard();
+    try {
+      const receipt = await this.fetchJson(`/api/habab_home/feedback/${encodeURIComponent(nextId)}`, {
+        method: "GET", cache: "no-store", signal: controller.signal,
+      });
+      if (version !== this.feedbackReceiptVersion || controller.signal.aborted) return;
+      if (!feedbackReceiptPresentation(receipt, nextId)) throw new Error("feedback_receipt_invalid");
+      this.feedbackReceipt = receipt;
+    } catch (_) {
+      if (controller.signal.aborted || version !== this.feedbackReceiptVersion) return;
+      this.feedbackReceiptError = true;
+    } finally {
+      if (version === this.feedbackReceiptVersion) {
+        this.feedbackReceiptLoading = false;
+        this.feedbackReceiptAbort = undefined;
+        this.renderFeedbackReceiptCard();
+      }
+    }
+  }
+
+  renderFeedbackReceiptCard() {
+    const host = this.q("#feedback-receipt");
+    if (!host) return;
+    host.replaceChildren();
+    if (!this.feedbackReceiptId || this._hass?.user?.is_admin !== true) {
+      host.hidden = true;
+      return;
+    }
+    host.hidden = false;
+    const heading = el("h2", "", this.t("feedbackReceiptTitle"));
+    host.append(heading);
+    if (this.feedbackReceiptLoading) {
+      host.append(el("p", "feedback-receipt-status", this.t("feedbackReceiptLoading")));
+      return;
+    }
+    const details = feedbackReceiptPresentation(this.feedbackReceipt, this.feedbackReceiptId);
+    if (!details || this.feedbackReceiptError) {
+      host.append(el("p", "feedback-receipt-status", this.t("feedbackReceiptNotFound")));
+      return;
+    }
+    host.append(el("p", "feedback-receipt-status", this.t("feedbackReceiptSaved")));
+    const list = el("dl", "summary");
+    const addRow = (label, value) => {
+      const row = el("div"); row.append(el("dt", "", label), el("dd", "", value)); list.append(row);
+    };
+    if (details.serverId) addRow(this.t("feedbackReceiptId"), details.serverId);
+    if (!details.serverId || details.serverId !== details.localId) addRow(this.t("feedbackLocalReceiptId"), details.localId);
+    const deliveryLabels = {
+      saved_on_server: this.t("feedbackReceiptDelivered"),
+      pending: this.t("feedbackReceiptPending"),
+      not_configured: this.t("feedbackNotConfigured"),
+      rejected: this.t("feedbackReceiptDeliveryFailed"),
+    };
+    addRow(this.t("feedbackReceiptDelivery"), deliveryLabels[details.deliveryStatus]);
+    if (details.traceStatus) addRow(this.t("feedbackReceiptTrace"), this.t(`feedbackTrace${details.traceStatus[0].toUpperCase()}${details.traceStatus.slice(1)}`));
+    host.append(list);
+    const actions = el("div", "actions");
+    if (details.issueUrl) {
+      const issue = el("a", "", this.t("feedbackReceiptIssue").replace("{number}", String(details.issueNumber)));
+      issue.href = details.issueUrl; issue.target = "_blank"; issue.rel = "noopener noreferrer";
+      actions.append(issue);
+    }
+    const copy = el("button", "", this.t("feedbackReceiptCopy"));
+    copy.type = "button";
+    const status = el("span", "status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+    copy.addEventListener("click", async () => {
+      try {
+        await copyFeedbackText(feedbackShareMessage(this.feedbackReceipt, this.words));
+        status.textContent = this.t("feedbackReceiptCopied");
+      } catch (_) { status.textContent = this.t("feedbackReceiptCopyFailed"); }
+    });
+    actions.append(copy, status);
+    host.append(actions);
+  }
 
   render() {
     const t = (key) => this.t(key);
@@ -495,6 +639,7 @@ class HababDiagnosticsPanel extends HTMLElement {
       .runtime-logs{margin-block:20px;padding-block-start:16px;border-block-start:1px solid var(--divider-color)}.runtime-logs h2{font-size:16px;font-weight:500;margin:0 0 6px}
       .runtime-log-option{display:flex;align-items:flex-start;gap:10px;font-weight:400;margin-block:10px}.runtime-log-option input{width:22px;min-height:22px;flex:none;margin:1px 0 0;accent-color:var(--primary-color)}
       .feedback{margin-block:18px;padding-block:14px;border-block-start:1px solid var(--divider-color)}.feedback h3{font-size:16px;font-weight:500;margin:0 0 6px}.feedback label{display:grid;gap:6px;margin-block:10px}.feedback textarea{width:100%;min-height:88px;padding:10px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--secondary-text-color);border-radius:6px;resize:vertical}.feedback .consent{display:flex;align-items:flex-start;gap:10px;font-weight:400}.feedback input[type=checkbox]{width:22px;height:22px;min-height:22px;flex:none;margin:1px 0 0;accent-color:var(--primary-color)}.feedback button{margin-block:4px}.feedback-status{margin-block:8px}.feedback-status[data-error=true]{color:var(--error-color)}
+      #feedback-receipt{margin-block:14px;padding:14px 16px;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:10px;overflow-wrap:anywhere}#feedback-receipt h2{font-size:18px;font-weight:500;margin:0 0 8px}#feedback-receipt .summary{margin-block:12px}#feedback-receipt .actions{align-items:center}#feedback-receipt .status{min-height:auto}
       [hidden]{display:none!important}a{color:var(--primary-color)}
       @media(max-width:900px){main{padding:16px}#filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filters-actions{grid-column:span 2}.workspace{grid-template-columns:minmax(0,1fr)}.source-list{grid-template-columns:minmax(0,1fr)}}
       @media(max-width:520px){main{padding:12px 12px 24px}header{min-height:52px}#filters{grid-template-columns:minmax(0,1fr);padding:12px}.filters-actions{grid-column:auto;display:grid;grid-template-columns:1fr}.summary{grid-template-columns:minmax(0,1fr)}.panel h2{padding:12px}.panel-body{padding:12px}.session{padding:12px}.notice{margin-block:10px 14px}}
@@ -504,6 +649,7 @@ class HababDiagnosticsPanel extends HTMLElement {
       <p class="intro">${t("intro")}</p>
       <p class="notice" id="evidence-note">${t("evidenceNote")}</p>
       <p class="help" id="native-assist-note">${t("nativeAssist")}</p>
+      <section id="feedback-receipt" class="panel" aria-live="polite" hidden></section>
       <form id="filters" aria-label="${t("filters")}">
         <label>${t("from")}<input id="from" name="from" type="datetime-local"></label>
         <label>${t("to")}<input id="to" name="to" type="datetime-local"></label>
@@ -553,6 +699,7 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.renderSessions();
     this.renderDetail();
     this.renderSources();
+    this.renderFeedbackReceiptCard();
   }
 
   abortRequests() {
@@ -562,6 +709,10 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.detailAbort = undefined;
     this.exportAbort?.abort();
     this.exportAbort = undefined;
+    this.feedbackReceiptAbort?.abort();
+    this.feedbackReceiptAbort = undefined;
+    this.feedbackReceiptLoading = false;
+    this.feedbackReceiptVersion++;
     this.requestVersion++;
     this.detailVersion++;
   }
@@ -574,9 +725,13 @@ class HababDiagnosticsPanel extends HTMLElement {
     this.cursor = undefined;
     this.loading = false;
     this.loadingDetail = false;
+    this.feedbackReceipt = undefined;
+    this.feedbackReceiptLoading = false;
+    this.feedbackReceiptError = false;
     this.renderSessions();
     this.renderDetail();
     this.renderSources();
+    this.renderFeedbackReceiptCard();
   }
 
   async fetchJson(url, options) {

@@ -3,10 +3,12 @@
 import asyncio
 import hashlib
 import json
+from collections.abc import Mapping
 
 import aiohttp
 
 from .assistant_identity import ASSISTANT_CORE_IDENTITY
+from .executor_config import task_executor_runtime_metadata
 from .providers import ProviderClient, ProviderContract, ProviderError
 from .voice_context import build_voice_context
 
@@ -77,8 +79,54 @@ PROMPT = ASSISTANT_CORE_IDENTITY + (
     "текст и историю этой сессии. Сам не выполняй действия и не утверждай, что "
     "действие выполнено. Не имитируй результат инструмента обычным текстом. "
     "Не делай второй вызов инструмента. Если исполнитель не нужен, выбери "
-    "reply_to_user и передай готовый ответ пользователю в поле answer."
+    "reply_to_user и передай готовый ответ пользователю в поле answer. Если "
+    "необходимая возможность не показана в этом диалоге или ты не уверен, умеет ли "
+    "её выбранный исполнитель, не отказывай и не считай её недоступной: выбери "
+    "ask_home_assistant, чтобы исполнитель проверил именно эту исходную задачу. "
+    "Передавай исходный запрос без выдуманных действий. Откажи только после фактического "
+    "результата исполнителя или явного ограничения доступа; не обещай выполнение до "
+    "ответа исполнителя. В FAST_DIALOG_RUNTIME_METADATA указаны выбранный сервис и "
+    "факты о модели, которой отвечает этот быстрый диалог, если они известны. Для "
+    "прямого сервиса fast_dialog_model — фактическая модель контракта. Для управляемого "
+    "Habab-сервиса upstream-провайдер и модель показываются отдельно и только если "
+    "переданы runtime; не угадывай неизвестную upstream-модель по alias шлюза. "
+    "task_executor и codex_runtime относятся к отдельному исполнителю задач, а не к "
+    "модели быстрого диалога или голоса. При вопросе о модели различай эти роли и "
+    "сообщай неизвестное как неизвестное. Секреты подключения в runtime metadata "
+    "не передаются."
 )
+
+_PROVIDER_NAMES = {
+    "habab": "Habab",
+    "openai": "OpenAI",
+    "deepseek": "DeepSeek",
+    "gemini": "Google Gemini",
+}
+
+
+def fast_dialog_runtime_metadata(settings, contract):
+    """Build prompt-safe facts about this model turn and its separate executor."""
+    provider = settings.get("provider") if isinstance(settings, Mapping) else None
+    metadata = {
+        "selected_service": {
+            "id": provider if isinstance(provider, str) else None,
+            "name": _PROVIDER_NAMES.get(provider, "unknown"),
+        },
+        "fast_dialog_model": None,
+        "managed_gateway_model": None,
+        "configured_upstream_service": None,
+        "configured_upstream_model": None,
+    }
+    if isinstance(contract, ProviderContract):
+        metadata["managed_gateway_model"] = contract.managed_model
+        if contract.managed_model:
+            metadata["configured_upstream_service"] = contract.configured_upstream_provider
+            metadata["configured_upstream_model"] = contract.configured_upstream_model
+            metadata["fast_dialog_model"] = contract.configured_upstream_model
+        else:
+            metadata["fast_dialog_model"] = contract.model
+    metadata.update(task_executor_runtime_metadata(settings))
+    return metadata
 
 
 def bounded_history(messages):
@@ -103,6 +151,9 @@ async def complete_dialogue(hass, session, settings, history, text, *, contract=
     """Return (route, answer); malformed/failed responses never call the executor."""
     messages = [
         {"role": "system", "content": PROMPT},
+        {"role": "system", "content": "FAST_DIALOG_RUNTIME_METADATA\n" + json.dumps(
+            fast_dialog_runtime_metadata(settings, contract), ensure_ascii=False,
+            separators=(",", ":"))},
         {"role": "system", "content": "HABAB_HOME_SNAPSHOT\n" + json.dumps(
             build_voice_context(hass), ensure_ascii=False, separators=(",", ":"))},
         *bounded_history(history),
