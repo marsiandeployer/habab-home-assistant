@@ -183,9 +183,9 @@ test("current chat summary names Codex as executor while preserving the selected
     provider: "openai", effective_model: "gpt-4.1-mini", fast_dialog: false,
     voice_ready: false,
   };
-  assert.match(assistantModelRoles(entry, "ru")[0], /^Агент Codex: OpenAI · gpt-6-luna · Fast$/);
+  assert.match(assistantModelRoles(entry, "ru")[0], /^Задачи и инструменты: Codex · OpenAI · gpt-6-luna · Fast$/);
   assert.match(assistantRoutingSummary(entry, [], "ru")[0], /^Текстовый чат: Codex через подключение OpenAI, модель gpt-6-luna, уровень Fast\.$/);
-  assert.match(assistantRoutingSummary({...entry, fast_dialog: true}, [], "ru")[0], /^Текстовый чат: напрямую к OpenAI, модель gpt-4\.1-mini\.$/);
+  assert.match(assistantRoutingSummary({...entry, fast_dialog: true}, [], "ru")[0], /^Быстрый текстовый диалог: напрямую к OpenAI, модель gpt-4\.1-mini\.$/);
   assert.deepEqual(taskExecutorForProvider("habab"), {
     executor: "codex", provider: "habab", model: "gpt-6-luna", service_tier: "fast",
   });
@@ -528,7 +528,7 @@ test("routing summary separates managed text, default voice, Android wake detect
   assert.match(withTTS[5], /Separate TTS in Assist: tts\.google_translate_say/);
 
   const fastDialog = assistantRoutingSummary({ ...entry, fast_dialog: true }, [], "en");
-  assert.match(fastDialog[0], /Text chat: directly to Habab/);
+  assert.match(fastDialog[0], /Fast text dialog: directly to Habab/);
   assert.doesNotMatch(fastDialog[0], /OpenCode/);
 });
 
@@ -767,7 +767,7 @@ test("model roles show the mapped Codex model even with fast dialog enabled", ()
     configured_upstream_provider: "deepseek", configured_upstream_model: "deepseek-flash",
     voice_ready: true, voice_provider: "habab", default_voice_model: "gemini-3.8-live",
   }, "ru");
-  assert.equal(roles[0], "Агент Codex: Habab · gpt-6-luna · Fast");
+  assert.equal(roles[0], "Задачи и инструменты: Codex · Habab · gpt-6-luna · Fast");
   assert.equal(roles[1], "Realtime-голос по умолчанию: Habab / Google Gemini · gemini-3.8-live");
   assert.doesNotMatch(roles.join(" "), /stale-saved-model|habab-chat/);
 });
@@ -779,6 +779,6 @@ test("model roles do not invent a managed upstream or a voice route for DeepSeek
   const direct = assistantModelRoles({
     provider: "deepseek", effective_model: "deepseek-flash", voice_ready: false,
   }, "en");
-  assert.equal(direct[0], "OpenCode agent: DeepSeek · deepseek-flash");
+  assert.equal(direct[0], "Tasks and tools: OpenCode · DeepSeek · deepseek-flash");
   assert.equal(direct[1], "Default Realtime voice: not configured for the selected connection");
 });
