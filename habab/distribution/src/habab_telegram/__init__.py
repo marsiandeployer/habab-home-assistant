@@ -1311,17 +1311,18 @@ class TelegramManager:
             return False
         if not isinstance(msg.get("text"), str):
             return False
-        # Group voice processing requires an explicit product policy.
-        if msg.get("voice") is not None and msg.get("chat_type") != "private":
-            return False
         chat_type = msg.get("chat_type")
         is_group_message = chat_type in ("group", "supergroup")
         if is_group_message:
             if await self._claim_group_start(entry, msg):
                 return False
             addressed_text = self._incoming_text(entry, msg)
+            # Voice addressing can only be checked after speech recognition.
+            # Still authorize the exact home group/member before downloading.
             if addressed_text is None:
-                return False
+                if msg.get("voice") is None:
+                    return False
+                addressed_text = ""
             # Shared controls need an invocation too. Pairing remains on the
             # separate authenticated /start nonce handshake above.
             if addressed_text not in ("/help", "/new", "/cancel") and addressed_text.startswith("/"):
@@ -1594,7 +1595,7 @@ class TelegramManager:
                         self.entries.get(entry.entry_id, {}), voice)
                 except (VoiceError, TransportError) as error:
                     logging.getLogger(__name__).warning("Telegram voice failed: %s", str(error))
-                    if await self._turn_can_send(entry, chat_id, user_id, group_binding,
+                    if not group_chat and await self._turn_can_send(entry, chat_id, user_id, group_binding,
                             assistant, session_id, cancel_epoch, group_chat=group_chat):
                         await self.send(entry.entry_id, chat_id,
                             "Не удалось распознать голосовое сообщение. Отправьте текст или повторите запись (до 2 минут и 5 МБ).")
@@ -1602,6 +1603,13 @@ class TelegramManager:
                 if not await self._turn_can_send(entry, chat_id, user_id, group_binding,
                         assistant, session_id, cancel_epoch, group_chat=group_chat):
                     return
+                if group_chat:
+                    # Apply the same literal invocation policy to the transcript.
+                    # Ordinary family voice messages must never reach the agent.
+                    state = self.entries.get(entry.entry_id, {})
+                    text = group_request(text, state.get("username") or entry.data.get("bot_username"))
+                    if text is None:
+                        return
             result = await assistant.run(entry.data["owner_id"], "telegram", session_id,
                                          text, entry.entry_id, chat_id)
             # Runtime completion does not preserve authority: verify the exact

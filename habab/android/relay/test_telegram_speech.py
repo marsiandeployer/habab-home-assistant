@@ -58,6 +58,8 @@ class SpeechTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Authorization', headers)
         body = json.loads(raw)
         self.assertEqual(body['contents'][0]['parts'][1]['inlineData']['mimeType'], 'audio/ogg')
+        self.assertIn('Russian', body['contents'][0]['parts'][0]['text'])
+        self.assertIn('Ко', body['contents'][0]['parts'][0]['text'])
         self.assertEqual(self.gateway.inflight, 0)
 
     async def test_owner_auth_required_before_audio_or_download_upstream(self):

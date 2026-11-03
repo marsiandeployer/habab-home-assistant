@@ -9,6 +9,7 @@ from homeassistant.components.habab_telegram.voice import (
     MAX_VOICE_BYTES, VoiceError, transcribe_voice, validate_voice, valid_file_path,
 )
 import test_telegram_backend as _backend
+import test_telegram_group_invocation as _group
 
 VOICE = {'file_id': 'test_voice', 'duration': 3, 'file_size': 80, 'mime_type': 'audio/ogg'}
 
@@ -46,7 +47,7 @@ class VoiceACLTests(unittest.IsolatedAsyncioTestCase):
         stt.assert_not_awaited()
         manager.hass.data['habab_home']['assistant'].run.assert_not_awaited()
 
-    async def test_group_voice_is_ignored_before_membership_or_transcription(self):
+    async def test_unbound_group_voice_is_ignored_before_transcription(self):
         manager = self.manager()
         with patch('homeassistant.components.habab_telegram.transcribe_voice', new=AsyncMock()) as stt:
             await self.voice_message(manager, chat_id=-100, chat_type='supergroup')
@@ -197,3 +198,52 @@ class VoiceBoundsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 2)
         self.assertTrue(all(call[1]['proxy'] == 'http://proxy.invalid:8080' for call in calls))
         self.assertTrue(all(call[0].startswith('https://api.telegram.org/') for call in calls))
+
+
+class GroupVoiceTests(unittest.IsolatedAsyncioTestCase):
+    bound_manager = _group.GroupInvocationACLTests.bound_manager
+    manager = _group.GroupInvocationACLTests.manager
+    group_entry = _group.GroupInvocationACLTests.group_entry
+    bind_owner = _group.GroupInvocationACLTests.bind_owner
+    bind_group = _group.GroupInvocationACLTests.bind_group
+
+    async def dispatch(self, manager, entry, **changes):
+        message = {'chat_type': 'supergroup', 'chat_id': -200, 'user_id': 50,
+                   'message_id': 44, 'text': '', 'voice': dict(VOICE), **changes}
+        await manager.handle_one(entry, message)
+        await asyncio.gather(*manager.turn_tasks.values(), return_exceptions=True)
+
+    async def test_addressed_voice_uses_group_session_and_existing_assistant(self):
+        for transcript in ('Ко покажи устройства', 'Эй дом, покажи устройства', '@testbot покажи устройства'):
+            with self.subTest(transcript=transcript):
+                manager, entry, assistant = self.bound_manager()
+                with patch('homeassistant.components.habab_telegram.transcribe_voice', new=AsyncMock(return_value=transcript)) as stt, patch('homeassistant.components.habab_telegram.async_get_clientsession', return_value=object()):
+                    await self.dispatch(manager, entry)
+                stt.assert_awaited_once()
+                assistant.run.assert_awaited_once_with('alice', 'telegram', 'shared', 'покажи устройства', 'entry', '-200')
+                manager.send.assert_awaited_once_with('entry', '-200', 'Ответ')
+
+    async def test_ordinary_family_voice_never_runs_agent_or_replies(self):
+        for transcript in ('Что на ужин?', 'Коля покажи свет', 'Ко', '@otherbot включи свет'):
+            with self.subTest(transcript=transcript):
+                manager, entry, assistant = self.bound_manager()
+                with patch('homeassistant.components.habab_telegram.transcribe_voice', new=AsyncMock(return_value=transcript)), patch('homeassistant.components.habab_telegram.async_get_clientsession', return_value=object()):
+                    await self.dispatch(manager, entry)
+                assistant.run.assert_not_awaited()
+                manager.send.assert_not_awaited()
+
+    async def test_wrong_group_or_departed_member_is_not_transcribed(self):
+        for member, chat_id in ((True, -201), (False, -200)):
+            with self.subTest(member=member, chat_id=chat_id):
+                manager, entry, assistant = self.bound_manager(member=member)
+                with patch('homeassistant.components.habab_telegram.transcribe_voice', new=AsyncMock()) as stt:
+                    await self.dispatch(manager, entry, chat_id=chat_id)
+                stt.assert_not_awaited()
+                assistant.run.assert_not_awaited()
+
+    async def test_group_transcription_failure_is_silent(self):
+        manager, entry, assistant = self.bound_manager()
+        with patch('homeassistant.components.habab_telegram.transcribe_voice', new=AsyncMock(side_effect=VoiceError('voice_empty_transcript'))), patch('homeassistant.components.habab_telegram.async_get_clientsession', return_value=object()):
+            await self.dispatch(manager, entry)
+        assistant.run.assert_not_awaited()
+        manager.send.assert_not_awaited()
