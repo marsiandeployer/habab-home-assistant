@@ -24,6 +24,8 @@ class SpeechTests(unittest.IsolatedAsyncioTestCase):
             self.calls.append((request.path, dict(request.headers), await request.read()))
             if request.path.startswith('/file/'):
                 return web.Response(body=self.audio, status=self.status)
+            if request.path == '/v1/audio/transcriptions':
+                return web.json_response({'text': self.transcript}, status=self.status)
             return web.json_response({'candidates': [{'content': {'parts': [{'text': self.transcript}]}}]}, status=self.status)
         app = web.Application(client_max_size=8 * 1024 * 1024)
         app.router.add_route('*', '/{tail:.*}', upstream)
@@ -106,4 +108,30 @@ class SpeechTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post('/v1/audio/transcriptions', headers=self.auth, data=self.form())
         self.assertEqual(response.status, 422)
         self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.gateway.inflight, 0)
+
+    async def test_installation_key_is_validated_locally_and_never_forwarded(self):
+        self.gateway.upstream_key = None
+        self.gateway.voice_service_key = 'unit-private-voice-route-key'
+        with patch('openai_gateway.VOICE_RELAY_URL', str(self.upstream.make_url('')).rstrip('/')):
+            response = await self.client.post('/v1/audio/transcriptions', headers=self.auth, data=self.form())
+        self.assertEqual(response.status, 200)
+        self.assertEqual(await response.json(), {'text': self.transcript})
+        path, headers, raw = self.calls[0]
+        self.assertEqual(path, '/v1/audio/transcriptions')
+        self.assertEqual(headers['Authorization'], 'Bearer unit-private-voice-route-key')
+        self.assertNotIn(self.key.encode(), raw)
+        self.assertTrue(headers['Content-Type'].startswith('multipart/form-data;'))
+        self.assertIn(self.audio, raw)
+        self.assertEqual(self.gateway.inflight, 0)
+
+    async def test_managed_recognition_failure_never_uses_another_provider(self):
+        self.gateway.upstream_key = None
+        self.gateway.voice_service_key = 'unit-private-voice-route-key'
+        self.status = 503
+        with patch('openai_gateway.VOICE_RELAY_URL', str(self.upstream.make_url('')).rstrip('/')):
+            response = await self.client.post('/v1/audio/transcriptions', headers=self.auth, data=self.form())
+        self.assertEqual(response.status, 503)
+        self.assertEqual((await response.json())['error']['code'], 'habab_upstream_not_ready')
+        self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.gateway.inflight, 0)

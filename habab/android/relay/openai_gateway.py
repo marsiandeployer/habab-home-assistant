@@ -273,18 +273,20 @@ class Gateway:
         return web.json_response({'error': {'code': code}}, status=status,
                                  headers={'Cache-Control': 'no-store'})
 
-    async def _voice_relay_request(self, method, path, *, body=None):
+    async def _voice_relay_request(self, method, path, *, body=None,
+                                   content_type="application/json", timeout_seconds=None):
         """Call only the fixed local voice relay with its private client credential."""
         if self.voice_service_key is None:
             return None
         headers = {'Authorization': 'Bearer ' + self.voice_service_key}
-        if body is not None:
-            headers['Content-Type'] = 'application/json'
+        if body is not None and content_type is not None:
+            headers['Content-Type'] = content_type
+        deadline = VOICE_RELAY_TIMEOUT if timeout_seconds is None else timeout_seconds
         try:
             async with self.client.request(
                     method, VOICE_RELAY_URL + path, headers=headers, data=body,
-                    timeout=ClientTimeout(total=VOICE_RELAY_TIMEOUT, connect=3, sock_connect=3,
-                                          sock_read=VOICE_RELAY_TIMEOUT),
+                    timeout=ClientTimeout(total=deadline, connect=3, sock_connect=3,
+                                          sock_read=deadline),
                     allow_redirects=False) as response:
                 if response.status != 200:
                     if response.status == 429:
