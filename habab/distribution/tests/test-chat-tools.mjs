@@ -16,7 +16,7 @@ test("actual tool result is collapsed and rendered as literal text", () => {
   const value = '<img src=x onerror="alert(1)">';
   const group = createToolCalls(document, [{name: "bash", status: "completed", input: "habab-ha states", output: value}], strings.ru);
   assert.equal(group.open, false);
-  assert.equal(group.children[0].textContent, "Инструменты OpenCode: 1");
+  assert.equal(group.children[0].textContent, "Инструменты: 1");
   assert.equal(find(group, "details")[1].open, false);
   assert.deepEqual(find(group, "pre").map((node) => node.textContent), ["habab-ha states", value]);
 });
