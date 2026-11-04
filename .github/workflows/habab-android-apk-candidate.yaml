@@ -118,6 +118,33 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
           "$JAVA_HOME_17_X64/bin/java" -version
+      - name: Locate and configure Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$sdk_root" || { echo '::error::The runner Android SDK root is missing'; exit 1; }
+          sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager" || { echo '::error::The runner SDK manager is missing'; exit 1; }
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_SDKMANAGER=$sdkmanager" >> "$GITHUB_ENV"
+          "$sdkmanager" --version
+      - name: Install pinned Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            'platforms;android-34' 'build-tools;34.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
+      - name: Restore pinned Android package and voice inputs
+        id: android-inputs-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: |
+            habab/android/build/native/*.deb
+            habab/android/build/voice/*.zip
+          key: habab-android-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('habab/android/native-packages.json', 'habab/android/voice-model.json') }}
       - name: Prepare pinned Android native tools and voice assets
         shell: bash
         run: |
@@ -126,7 +153,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends patchelf
           python3 habab/android/tools/prepare_native.py
           python3 habab/android/tools/prepare_voice.py
-          sdkmanager 'ndk;27.2.12479018' 'cmake;3.22.1'
+      - name: Save verified Android package and voice inputs
+        if: ${{ success() && steps.android-inputs-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: |
+            habab/android/build/native/*.deb
+            habab/android/build/voice/*.zip
+          key: habab-android-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('habab/android/native-packages.json', 'habab/android/voice-model.json') }}
       - uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
         with:
           gradle-version: '8.5'
@@ -135,7 +170,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon -p habab/android \
+          gradle --no-daemon --build-cache -p habab/android \
             "-PappVersionCode=$ANDROID_VERSION_CODE" "-PappVersionName=$ANDROID_VERSION_NAME" \
             :app:testDebugUnitTest :app:lintDebug :app:assembleRelease
       - name: Align, optionally sign, and verify candidate APK

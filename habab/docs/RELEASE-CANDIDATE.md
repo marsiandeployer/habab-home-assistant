@@ -186,6 +186,29 @@ the runtime source, not just the latest commit. A version label alone is not
 proof of compatibility. The existing full workflow remains the conservative
 path when runtime/frontend inputs change.
 
+### Android CI caches
+
+The native frontend candidate caches the compiled wheel only for an exact input
+key: runner OS/architecture, pinned Node/Python/pnpm/build versions, Home
+Assistant frontend revision, patch and translation hashes, wheel version, and
+the complete native-frontend plus font-asset input tree. It deliberately has no
+prefix restore key. A hit must pass the saved input-key, wheel SHA-256/size,
+ZIP integrity, and wheel-version checks. The workflow then writes a fresh
+candidate manifest for the selected source SHA and records the cache key and
+origin build SHA. A miss or invalid cache runs the complete frontend builder;
+the cache never supplies the release manifest or APK provenance. If cache-key
+inputs or compiler behavior change outside those pinned values, bump the
+`habab-native-frontend-v1` schema in the workflow key.
+
+The full Android and APK-only workflows also cache the SHA-pinned Termux `.deb`
+packages and Vosk archive. Their preparation scripts re-check each file against
+`native-packages.json` and `voice-model.json` on every run. Keys include runner
+OS/architecture and both manifests; there are no partial restore keys.
+`setup-gradle` caches Gradle dependencies, and Android Gradle invocations use
+`--build-cache` so Gradle can reuse task outputs when its declared inputs match.
+These caches save downloads and repeated compilation, while runtime and APK
+candidate verification still checks their source, signatures, and hashes.
+
 Run the changed component's fast checks before a large build. The full workflow's
 preflight now runs the relay tests (including concurrent HTTP with an open
 WebSocket) and the real Core API acceptance runner inside its existing bounded

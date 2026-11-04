@@ -868,6 +868,17 @@ jobs:
           Path('habab/android/app/src/main/assets/release/build-provenance.json').write_text(
               json.dumps(provenance, indent=2, sort_keys=True) + '\n')
           PY
+      - name: Restore pinned Android package and voice inputs
+        if: ${{ needs.android-inputs.outputs.state == 'built' }}
+        id: android-inputs-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: |
+            habab/android/build/native/*.deb
+            habab/android/build/voice/*.zip
+          key: habab-android-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('habab/android/native-packages.json', 'habab/android/voice-model.json') }}
+
       - name: Prepare pinned APK native tools and voice model
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         run: |
@@ -879,24 +890,33 @@ jobs:
           if find habab/android/app/src/main/assets -type f \( -path '*/voice/experiments/*' -o -iname '*.wav' -o -iname '*.tflite' -o -iname '*.onnx' \) -print -quit | grep -q .; then
             echo '::error::Private experimental models or audio are forbidden in a public APK'; exit 1
           fi
+      - name: Save verified Android package and voice inputs
+        if: ${{ success() && needs.android-inputs.outputs.state == 'built' && steps.android-inputs-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: |
+            habab/android/build/native/*.deb
+            habab/android/build/voice/*.zip
+          key: habab-android-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('habab/android/native-packages.json', 'habab/android/voice-model.json') }}
+
       - uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb590a105619dca3c3 # v4.4.2
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         with:
           gradle-version: '8.5'
-          cache-disabled: true
           dependency-graph: disabled
       - name: Run Android unit tests before APK packaging
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         run: |
           set -euo pipefail
-          gradle --no-daemon -p habab/android \
+          gradle --no-daemon --build-cache -p habab/android \
             "-PappVersionCode=$ANDROID_VERSION_CODE" "-PappVersionName=$ANDROID_VERSION_NAME" \
             :app:testDebugUnitTest
       - name: Lint and assemble Android APK
         if: ${{ needs.android-inputs.outputs.state == 'built' }}
         run: |
           set -euo pipefail
-          gradle --no-daemon -p habab/android \
+          gradle --no-daemon --build-cache -p habab/android \
             "-PappVersionCode=$ANDROID_VERSION_CODE" "-PappVersionName=$ANDROID_VERSION_NAME" \
             :app:lintDebug :app:assembleRelease
       - name: Sign APK with release keystore

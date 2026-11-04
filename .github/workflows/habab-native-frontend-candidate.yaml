@@ -132,18 +132,109 @@ jobs:
           cp -a producer/habab/native-frontend "$snapshot/habab/"
           cp -a producer/habab/qa/native-font-assets "$snapshot/habab/qa/"
 
+      - name: Fingerprint exact frontend compiler inputs
+        id: frontend-cache-key
+        env:
+          PRODUCER_INPUTS_SHA256: ${{ hashFiles('producer/habab/native-frontend/**', 'producer/habab/qa/native-font-assets/**') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PRODUCER_INPUTS_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+            echo '::error::Could not fingerprint the native frontend source and font inputs'; exit 1;
+          }
+          key="habab-native-frontend-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24.21.0-nodeheap4096-python3.14-pnpm11.28.0-build1.6.1-terser1-ha26690e06-patch132c595-stockcatalog05c207fb-catalog154cc8ea-wheel${WHEEL_VERSION}-inputs${PRODUCER_INPUTS_SHA256}"
+          printf 'key=%s\n' "$key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore exact native frontend wheel cache
+        id: frontend-cache-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/native-frontend-cache
+          key: ${{ steps.frontend-cache-key.outputs.key }}
+
+      - name: Validate restored frontend wheel and reuse it
+        id: frontend-cache-validation
+        if: ${{ steps.frontend-cache-restore.outputs.cache-hit == 'true' }}
+        env:
+          CACHE_DIR: ${{ runner.temp }}/native-frontend-cache
+          ARTIFACT_ROOT: ${{ runner.temp }}/native-frontend-artifacts
+          CACHE_KEY: ${{ steps.frontend-cache-key.outputs.key }}
+          WHEEL_VERSION: ${{ needs.resolve-source.outputs.wheel_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import shutil
+          import zipfile
+
+          cache = Path(os.environ['CACHE_DIR'])
+          artifact_root = Path(os.environ['ARTIFACT_ROOT'])
+          expected_key = os.environ['CACHE_KEY']
+          version = os.environ['WHEEL_VERSION']
+          metadata_path = cache / 'cache-manifest.json'
+          wheel_name = f'home_assistant_frontend-{version}-py3-none-any.whl'
+          wheel_path = cache / 'wheel.whl'
+          reason = 'cache manifest or wheel is missing'
+          try:
+              metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+              if (metadata.get('schema') != 1 or metadata.get('cache_key') != expected_key
+                      or metadata.get('wheel_name') != wheel_name
+                      or metadata.get('wheel_version') != version
+                      or metadata.get('builder_checks') != 'passed'
+                      or not re.fullmatch(r'[0-9a-f]{40}', metadata.get('origin_source_revision', ''))
+                      or not wheel_path.is_file() or wheel_path.is_symlink()):
+                  raise ValueError(reason)
+              digest = hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+              if (digest != metadata.get('wheel_sha256')
+                      or wheel_path.stat().st_size != metadata.get('wheel_bytes')):
+                  raise ValueError('cached wheel hash or size mismatch')
+              with zipfile.ZipFile(wheel_path) as archive:
+                  if archive.testzip() is not None:
+                      raise ValueError('cached wheel ZIP integrity check failed')
+                  metadata_files = [
+                      item for item in archive.namelist()
+                      if item.endswith('.dist-info/METADATA')
+                  ]
+                  if len(metadata_files) != 1:
+                      raise ValueError('cached wheel metadata inventory is invalid')
+                  text = archive.read(metadata_files[0]).decode('utf-8', errors='strict')
+              if f'Version: {version}\n' not in text:
+                  raise ValueError('cached wheel version does not match the requested version')
+              destination = artifact_root / digest / wheel_name
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(wheel_path, destination)
+              with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+                  output.write('hit=true\n')
+                  output.write('origin_source_revision=' + metadata['origin_source_revision'] + '\n')
+              print('Reused verified wheel from an exact input-key cache.')
+          except Exception as err:
+              with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+                  output.write('hit=false\n')
+                  output.write('origin_source_revision=\n')
+              print('::warning::Ignoring invalid frontend cache; running the full builder: ' + str(err))
+          PY
+
       - name: Set up Node 24.21.0
+        if: ${{ steps.frontend-cache-validation.outputs.hit != 'true' }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.21.0
           check-latest: false
 
       - name: Set up Python 3.14
+        if: ${{ steps.frontend-cache-validation.outputs.hit != 'true' }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
 
       - name: Prepare isolated Python wheel builder
+        if: ${{ steps.frontend-cache-validation.outputs.hit != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -152,6 +243,7 @@ jobs:
             --only-binary=:all: --disable-pip-version-check 'build==1.6.1'
 
       - name: Prepare pinned upstream source and ordered patch bundle
+        if: ${{ steps.frontend-cache-validation.outputs.hit != 'true' }}
         env:
           UPSTREAM_REVISION: 26690e06b0bf64a1487929245c32842ef92c62b5
           PATCH_BUNDLE_SHA256: 132c595da997fd86f8694d28a55719628cb51aea77bf5e68025639aa8b4106b9
@@ -185,6 +277,7 @@ jobs:
           [[ -z "$(git -C "$upstream" status --porcelain --untracked-files=all)" ]]
 
       - name: Fetch and safely extract the pinned stock translation catalog
+        if: ${{ steps.frontend-cache-validation.outputs.hit != 'true' }}
         env:
           WHEEL_SHA256: 05c207fb6ce6720d1782766b54a67acdf4bab83f133a562204b972d062862fc8
           WHEEL_URL: https://files.pythonhosted.org/packages/b4/ea/2074829fb00d53061804eae66303e2900319c348b4a92f239de7a537d6dc/home_assistant_frontend-20260930.4-py3-none-any.whl
@@ -229,6 +322,7 @@ jobs:
           PY
 
       - name: Run the existing frozen native frontend builder
+        if: ${{ steps.frontend-cache-validation.outputs.hit != 'true' }}
         env:
           NVM_DIR: ${{ runner.temp }}/no-nvm
           COREPACK_HOME: ${{ runner.temp }}/corepack
@@ -265,6 +359,9 @@ jobs:
           INSPECTOR_PATCH_SHA256: 05accce46eb2aeafbdfdb64157a07a7ce89af9b01224fa0ae4249a1e4df047b1
           YANDEX_PATCH_SHA256: e574cc7b67e35c15895ed7c5a6b1331a69378bfab04e9ba52e3514c5c6f11eb9
           HABAB_NATIVE_FRONTEND_ARTIFACT_ROOT: ${{ runner.temp }}/native-frontend-artifacts
+          FRONTEND_CACHE_KEY: ${{ steps.frontend-cache-key.outputs.key }}
+          FRONTEND_CACHE_REUSED: ${{ steps.frontend-cache-validation.outputs.hit == 'true' && 'true' || 'false' }}
+          FRONTEND_CACHE_ORIGIN_SOURCE_REVISION: ${{ steps.frontend-cache-validation.outputs.origin_source_revision }}
         shell: bash
         run: |
           set -euo pipefail
@@ -279,13 +376,14 @@ jobs:
           [[ "$(basename "$(dirname "$wheel")")" == "$wheel_sha" ]]
           wheel_bytes="$(wc -c < "$wheel" | tr -d '[:space:]')"
           cp "$wheel" "$candidate/$wheel_name"
-          python - "$candidate/manifest.json" "$wheel_name" "$wheel_sha" \
+          python3 - "$candidate/manifest.json" "$wheel_name" "$wheel_sha" \
             "$wheel_bytes" "$SOURCE_REVISION" "$WHEEL_VERSION" \
             "$UPSTREAM_REVISION" "$PATCH_BUNDLE_SHA256" "$CATALOG_SHA256" \
             "$BRIDGE_PATCH_SHA256" "$TEST_PATCH_SHA256" \
             "$BRANDING_PATCH_SHA256" "$INSPECTOR_PATCH_SHA256" \
             "$YANDEX_PATCH_SHA256" <<'PY'
           import json
+          import os
           import sys
           from pathlib import Path
 
@@ -299,6 +397,11 @@ jobs:
               "builder_checks": "passed",
               "source_clean_before_build": True,
               "source_revision": source_revision,
+              "cache": {
+                  "reused": os.environ['FRONTEND_CACHE_REUSED'] == 'true',
+                  "key": os.environ['FRONTEND_CACHE_KEY'],
+                  "origin_source_revision": os.environ.get('FRONTEND_CACHE_ORIGIN_SOURCE_REVISION') or source_revision,
+              },
               "upstream_revision": upstream_revision,
               "wheel_version": wheel_version,
               "patches": {
@@ -320,6 +423,60 @@ jobs:
           }
           Path(path).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
           PY
+
+      - name: Prepare verified frontend cache entry
+        if: ${{ steps.frontend-cache-validation.outputs.hit != 'true' }}
+        env:
+          CACHE_DIR: ${{ runner.temp }}/native-frontend-cache
+          ARTIFACT_ROOT: ${{ runner.temp }}/native-frontend-artifacts
+          CACHE_KEY: ${{ steps.frontend-cache-key.outputs.key }}
+          SOURCE_REVISION: ${{ needs.resolve-source.outputs.source_revision }}
+          WHEEL_VERSION: ${{ needs.resolve-source.outputs.wheel_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          artifact_root = Path(os.environ['ARTIFACT_ROOT'])
+          version = os.environ['WHEEL_VERSION']
+          wheel_name = f'home_assistant_frontend-{version}-py3-none-any.whl'
+          matches = list(artifact_root.glob(f'*/{wheel_name}'))
+          if len(matches) != 1 or matches[0].is_symlink() or not matches[0].is_file():
+              raise SystemExit('Expected one regular verified wheel to cache')
+          wheel = matches[0]
+          digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+          if wheel.parent.name != digest:
+              raise SystemExit('Wheel directory is not content addressed by its SHA-256')
+          cache = Path(os.environ['CACHE_DIR'])
+          if cache.exists():
+              shutil.rmtree(cache)
+          cache.mkdir(parents=True)
+          shutil.copyfile(wheel, cache / 'wheel.whl')
+          record = {
+              'schema': 1,
+              'cache_key': os.environ['CACHE_KEY'],
+              'wheel_name': wheel_name,
+              'wheel_version': version,
+              'wheel_sha256': digest,
+              'wheel_bytes': wheel.stat().st_size,
+              'origin_source_revision': os.environ['SOURCE_REVISION'],
+              'builder_checks': 'passed',
+          }
+          (cache / 'cache-manifest.json').write_text(json.dumps(record, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Save verified frontend wheel cache
+        if: ${{ success() && steps.frontend-cache-validation.outputs.hit != 'true' && steps.frontend-cache-restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/native-frontend-cache
+          key: ${{ steps.frontend-cache-key.outputs.key }}
 
       - name: Record artifact name
         id: artifact
