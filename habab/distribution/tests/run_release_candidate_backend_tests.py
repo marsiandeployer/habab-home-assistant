@@ -27,6 +27,7 @@ def main() -> int:
         "test_executor_config",
         "test_codex_installer",
         "test_setup_actions",
+        "test_native_api",
         "test_automation_setup",
         "test_diagnostics",
         "test_telegram_backend",

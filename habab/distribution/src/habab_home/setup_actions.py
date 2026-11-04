@@ -17,6 +17,7 @@ from homeassistant.loader import (
     async_get_integration,
     async_get_integration_descriptions,
 )
+from .native_api import MAX_NATIVE_BYTES, native_api
 from .const import DOMAIN
 from .assistant_status import get_assistant_status
 from .feedback_action import save_feedback_action
@@ -289,6 +290,8 @@ def discovered_flows(hass, manager):
 
 async def execute(hass, manager, owner, body, trusted_origin=None):
     action = body.get("action")
+    if action == "native_api":
+        return await native_api(hass, manager, owner, body)
     if action in {"automation_draft", "automation_helper_draft", "automation_status"}:
         # Scope comes only from the active model turn and current server mapping.
         # No model action can prepare, confirm, save, cancel, or delete a draft.
@@ -483,7 +486,7 @@ class SetupActionsView(HomeAssistantView):
             raw = bytearray()
             async for chunk in request.content.iter_chunked(4096):
                 raw.extend(chunk)
-                if len(raw) > 16384:
+                if len(raw) > MAX_NATIVE_BYTES:
                     return self.json({"error": "too_large"}, status_code=413)
             body = json.loads(raw)
             if not isinstance(body, dict):
