@@ -440,6 +440,7 @@ class GeminiProviderTests(unittest.IsolatedAsyncioTestCase):
 
         process = SimpleNamespace(returncode=None)
         agent = object.__new__(SetupAgent)
+        agent.instruction_prompt = AsyncMock(return_value="runtime fixture instructions")
         agent.process = None
         agent.fingerprint = None
         agent.root = Path("/private/runtime")

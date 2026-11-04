@@ -43,6 +43,7 @@ def assistant(identifier="a1", parent="u1", *, parts=None, text=None, final=Fals
 class ToolHistoryTests(unittest.TestCase):
     def setUp(self):
         self.agent = object.__new__(SetupAgent)
+        self.agent.instruction_prompt = AsyncMock(return_value="runtime fixture instructions")
         self.agent.password = "runtime-password-fixture"
         self.agent.control_token = "control-token-fixture"
         self.agent._runtime_secrets = {"runtime-private-key-fixture"}

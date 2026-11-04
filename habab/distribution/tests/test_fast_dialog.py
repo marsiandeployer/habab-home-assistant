@@ -245,7 +245,9 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.histories["web"]), 1)
         with self.assertRaisesRegex(AgentError, "not_found"):
             await self.service.run("alice", "telegram", "web", "cross", "bot", "10")
-        self.assertEqual(self.provider.await_count, 3)
+        self.assertEqual(self.provider.await_count, 1)
+        self.assertEqual(self.runtime.run.await_count, 2)
+        self.assertEqual([call.args[1] for call in self.runtime.run.await_args_list], ["tg", "tg2"])
 
     async def test_explicit_disabled_uses_only_old_path(self):
         self.entry.options["fast_dialog"] = False
@@ -331,14 +333,14 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_session_reset_during_provider_cannot_append_or_delegate(self):
         async def reset(*args, **kwargs):
-            self.service.telegram_sessions.clear()
+            self.service.web_sessions.clear()
             return direct("answer")
 
         self.provider.side_effect = reset
         with self.assertRaisesRegex(AgentError, "not_found"):
-            await self.service.run("alice", "telegram", "tg", "hello", "bot", "10")
+            await self.service.run("alice", "web", "web", "hello")
         self.runtime.run.assert_not_awaited()
-        self.assertEqual(self.histories["tg"], [])
+        self.assertEqual(self.histories["web"], [])
 
     async def test_provider_timeout_is_bounded_and_does_not_delegate(self):
         async def slow(*args, **kwargs):
@@ -406,7 +408,7 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
             entered.set()
             await asyncio.Event().wait()
 
-        self.provider.side_effect = slow
+        self.runtime.run.side_effect = slow
         running = asyncio.create_task(self.service.run(
             "alice", "telegram", "tg", "hello", "bot", "10"))
         await asyncio.wait_for(entered.wait(), 1)
@@ -415,9 +417,10 @@ class FastDialogueTests(unittest.IsolatedAsyncioTestCase):
             await running
         self.assertEqual(self.histories["tg"], [])
         self.assertEqual(self.service.dialogue_tasks, {})
-        self.runtime.run.assert_not_awaited()
+        self.provider.assert_not_awaited()
 
     def use_real_executor(self):
+        self.runtime.instruction_prompt = AsyncMock(return_value="runtime fixture instructions")
         self.runtime.hass = self.hass
         self.runtime._aborting = False
         self.runtime._active_run_completed = False
