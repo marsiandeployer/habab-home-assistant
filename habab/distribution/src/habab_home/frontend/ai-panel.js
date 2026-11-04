@@ -160,6 +160,29 @@ export function providerModelPresentation(provider, entry, language) {
 }
 
 class HababAIPanel extends HTMLElement {
+  async editAgentInstructions(save) {
+    if (this.agentInstructionsBusy) return;
+    this.agentInstructionsBusy = true;
+    const field = this.q("#agent-instructions-text");
+    const button = this.q("#agent-instructions-save");
+    const status = this.q("#agent-instructions-status");
+    field.disabled = button.disabled = true;
+    status.textContent = "";
+    try {
+      const result = await this._hass.callWS({type: "habab_home/agent_instructions",
+        ...(save ? {text: field.value} : {})});
+      field.value = result.text;
+      this.agentInstructionsLoaded = true;
+      status.textContent = this.t(save ? "agentInstructionsSaved" : "agentInstructionsLoaded");
+    } catch (_error) {
+      status.textContent = this.t("agentInstructionsFailed");
+    } finally {
+      field.disabled = button.disabled = !this.agentInstructionsLoaded;
+      this.agentInstructionsBusy = false;
+    }
+  }
+
+
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -268,6 +291,14 @@ class HababAIPanel extends HTMLElement {
       <p class="status routing-summary" id="assistant-provider-status" role="status" aria-live="polite"></p>
       <label><input id="fast-dialog" type="checkbox"> ${this.t("fastDialogLabel")}</label>
       <p class="help" id="fast-dialog-help">${this.t("fastDialogHelp")}</p>
+      <details class="disclosure"><summary>${this.t("agentInstructionsTitle")}</summary>
+        <p>${this.t("agentInstructionsHelp")}</p>
+        <button type="button" id="agent-instructions-load">${this.t("agentInstructionsLoad")}</button>
+        <label for="agent-instructions-text">AGENTS.md</label>
+        <textarea id="agent-instructions-text" rows="12" disabled></textarea>
+        <button type="button" id="agent-instructions-save" disabled>${this.t("save")}</button>
+        <p id="agent-instructions-status" role="status"></p>
+      </details>
       <p class="help status" id="fast-dialog-status" role="status" aria-live="polite"></p>
       <div class="actions"><button type="button" id="open-assistant" class="primary">${this.t("openAssistant")}</button></div><p class="help status" id="assistant-status" role="status" aria-live="polite"></p>
       <div class="links"><a href="/config/voice-assistants/expose">${this.t("expose")}</a><a href="/config/voice-assistants/assistants">${this.t("pipelineSettings")}</a></div>
@@ -314,6 +345,8 @@ class HababAIPanel extends HTMLElement {
       this.applyKeyVisibility();
     });
     this.q("#check").addEventListener("click", () => this.check());
+    this.q("#agent-instructions-load").addEventListener("click", () => this.editAgentInstructions(false));
+    this.q("#agent-instructions-save").addEventListener("click", () => this.editAgentInstructions(true));
     this.q("#open-assistant").addEventListener("click", () => this.openAssistant());
     this.q("#fast-dialog").addEventListener("change", (event) => this.setFastDialog(event.target.checked));
     this.q("#feedback-delivery-token").addEventListener("input", (event) => {

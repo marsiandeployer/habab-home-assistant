@@ -12,6 +12,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .agent_instructions import MAX_BYTES, read_instructions, write_instructions
 from .assistant_status import voice_route_metadata
 from .beta import BetaError, async_activate
 from .const import DOMAIN
@@ -74,6 +75,7 @@ def _record_api_check(hass, entry, fingerprint, status, reason=None):
 
 @callback
 def async_register_commands(hass):
+    websocket_api.async_register_command(hass, agent_instructions)
     websocket_api.async_register_command(hass, activate_beta)
     websocket_api.async_register_command(hass, list_connections)
     websocket_api.async_register_command(hass, set_fast_dialog)
@@ -420,3 +422,25 @@ async def check_connection(hass, connection, msg):
     connection.send_result(msg["id"], {
         "tool_call_verified": True, **_api_check_readback(current),
     })
+
+
+@websocket_api.websocket_command({
+    probatio.Required("type"): "habab_home/agent_instructions",
+    probatio.Optional("text"): probatio.All(str, probatio.Length(max=MAX_BYTES)),
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def agent_instructions(hass, connection, msg):
+    """Read or save the local agent's AGENTS.md without exposing arbitrary paths."""
+    agent = hass.data[DOMAIN]["setup_agent"]
+    workspace = agent.root / "workspace"
+    async with hass.data[DOMAIN]["settings_lock"]:
+        try:
+            if "text" in msg:
+                await hass.async_add_executor_job(write_instructions, workspace, msg["text"])
+            text = await hass.async_add_executor_job(read_instructions, workspace)
+        except (OSError, ValueError, UnicodeError):
+            connection.send_error(msg["id"], "agent_instructions_failed",
+                                  "Could not read or save AGENTS.md")
+            return
+    connection.send_result(msg["id"], {"text": text})

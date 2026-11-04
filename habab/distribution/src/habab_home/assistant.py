@@ -425,7 +425,7 @@ class AssistantService:
         if entry is None:
             raise AgentError("provider_required")
         executor = selected_executor(entry.data)
-        if executor_only or entry.options.get("fast_dialog", True) is False:
+        if channel == "telegram" or executor_only or entry.options.get("fast_dialog", True) is False:
             started = time.monotonic()
             result = await self.runtime.run(owner, session_id, text)
             result["dialogue"] = {"mode": executor, "route": executor,

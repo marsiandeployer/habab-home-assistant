@@ -1,5 +1,11 @@
 export const strings = {
   ru: {
+    agentInstructionsTitle: "Инструкции помощника",
+    agentInstructionsHelp: "Редактируйте AGENTS.md для чата и Telegram. Изменения применятся к следующей задаче.",
+    agentInstructionsLoad: "Загрузить инструкции",
+    agentInstructionsSaved: "Сохранено. Инструкции применятся к следующей задаче.",
+    agentInstructionsLoaded: "Инструкции загружены.",
+    agentInstructionsFailed: "Не удалось загрузить или сохранить инструкции. Ваш текст оставлен в редакторе.",
     automationDraft: "Черновик автоматизации",
     automationHelperDraft: "Виртуальный переключатель",
     automationReview: "Проверьте описание и настройки. Автоматизация будет сохранена выключенной и не запустит действия.",
@@ -315,6 +321,12 @@ export const strings = {
     geminiGuide: ["Откройте Google AI Studio и раздел API keys.", "Выберите или создайте проект, получите ключ Gemini API. Проверьте ограничения ключа и квоты проекта.", "Вставьте ключ и имя модели, затем нажмите «Проверить и сохранить»."],
   },
   en: {
+    agentInstructionsTitle: "Assistant instructions",
+    agentInstructionsHelp: "Edit AGENTS.md for chat and Telegram. Changes apply to the next task.",
+    agentInstructionsLoad: "Load instructions",
+    agentInstructionsSaved: "Saved. Instructions apply to the next task.",
+    agentInstructionsLoaded: "Instructions loaded.",
+    agentInstructionsFailed: "Could not load or save instructions. Your text remains in the editor.",
     automationDraft: "Automation draft",
     automationHelperDraft: "Virtual toggle",
     automationReview: "Review the description and settings. The automation will be saved disabled and will not run actions.",
