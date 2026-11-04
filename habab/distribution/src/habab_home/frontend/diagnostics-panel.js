@@ -1,4 +1,4 @@
-import { strings } from "./strings.js?v=8";
+import { strings } from "./strings.js?v=9";
 import {
   copyFeedbackText,
   feedbackReceiptIdFromSearch,

@@ -1,4 +1,4 @@
-import {strings} from "./strings.js?v=3";
+import {strings} from "./strings.js?v=9";
 import {automationDismissalStorageKey, readAutomationDismissals, writeAutomationDismissals} from "./automation-dismissal.js";
 
 // A protected web card owns native configuration writes. The model's local CLI

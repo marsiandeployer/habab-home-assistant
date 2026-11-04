@@ -1,6 +1,6 @@
 // Independent downstream extension: no dependency on compiled HA internals.
 import { AssistVoice, BrowserGeminiVoice, BrowserOpenAIVoice, bootstrapAfterStartCue, playVoiceCue } from "./voice.js?v=2";
-import { strings } from "./strings.js?v=8";
+import { strings } from "./strings.js?v=9";
 import { copyFeedbackText, feedbackReceiptPresentation, feedbackShareMessage } from "./feedback-receipt.js?v=1";
 import { chatDismissalStorageKey, decorateChatDetails, readChatDismissals } from "./chat-dismissal.js";
 import { createToolCalls } from "./chat-tools.js?v=1";
